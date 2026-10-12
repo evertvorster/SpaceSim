@@ -13,8 +13,10 @@ extends Node3D
 
 const PlayerShip := preload("res://game/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
+const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
+const Session := preload("res://addons/spacesim/save/session.gd")
 
 const WORLD_PATH := "res://worlds/playground.json"
 
@@ -27,6 +29,7 @@ const THROTTLE_RATE := 0.7 ## per second
 const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), Vector2i(256, 128)]
 
 var _world: SpacesimWorld
+var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
 var _markers: SpacesimMarkers
@@ -64,13 +67,22 @@ func _ready() -> void:
 	_set_detail(_detail)
 	_build_hud()
 
-	_player = SpacesimPlayer.new()
+	# The session comes up after the world has real frames, because restoring where the player was
+	# means putting the ship into one of them.
+	_session = Session.for_world(_world.name)
+	var brought_up := _session.start(_world)
+	if not brought_up["ok"]:
+		push_error("cannot open the world's repository: %s" % brought_up["reason"])
+	_player = _session.player
+	if _player.location.is_set() and not _world.place_observer(_player.location):
+		push_warning("the saved location's frame is gone; placed at the nearest frame that remains")
+
 	_settings_screen = SpacesimSettingsPanel.new()
 	_settings_screen.configure(SpacesimSettings)
 	_settings_screen.exit_requested.connect(_on_exit_requested)
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
-	_player_screen.configure(_player)
+	_player_screen.configure(_player, _session, _world)
 	_register_screen(_player_screen, "Player")
 
 	_capture_mouse()
@@ -265,10 +277,20 @@ func _physics_process(delta: float) -> void:
 
 	_ship.step(delta, input)
 	_world.frame_tree.evaluate()
+	_sync_player_location()
 	_world.aim_sun_at(_ship.global_position)
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_update_hud()
+
+
+## The player is *inside* the ship while flying, so their location follows it. They are separate
+## entities — containment is frame membership, which is what makes "which ship am I in" readable
+## from the player's own location. Nothing can be entered yet, so the two currently coincide.
+func _sync_player_location() -> void:
+	var frame := _ship.get_parent() as Frame
+	if frame != null:
+		_session.player.location = Location.new(frame.frame_id, _ship.position)
 
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and
@@ -353,7 +375,8 @@ func _update_hud() -> void:
 		PackedStringArray(
 			[
 				"world       %s" % _world.name,
-				"player      %s" % _player.display_name(),
+				"player      %s   in %s" % [_player.display_name(), _session.repo.current_history()],
+				"date        %s" % _world.format_time(_session.world_time),
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),

@@ -4,7 +4,15 @@ extends RefCounted
 const Player := preload("res://addons/spacesim/player/player.gd")
 const PlayerPanel := preload("res://addons/spacesim/player/player_panel.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
+const Session := preload("res://addons/spacesim/save/session.gd")
+const Repo := preload("res://addons/spacesim/save/world_repo.gd")
 const Fixture := preload("res://tests/settings_fixture.gd")
+
+const WORLD_PATH := "res://worlds/playground.json"
+
+## The personal-data screen hosts saving, so building it needs a session and a world. Neither
+## touches anything here: the screen only reads their names, so no repository is disturbed.
+const TEST_ROOT := "/tmp/spacesim-player-test"
 
 var _fixture := Fixture.new()
 
@@ -70,9 +78,9 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	h.check(settings_panel.has_signal("closed"), "and the close signal it inherits")
 
 	var player_panel := PlayerPanel.new()
-	player_panel.configure(Player.new())
+	player_panel.configure(Player.new(), Session.new(Repo.new(TEST_ROOT)), _world(root))
 	layer.add_child(player_panel)
-	h.check(player_panel.actions.get_child_count() == 1, "the player screen has one button")
+	h.check(player_panel.actions.get_child_count() == 2, "the player screen has Save and Close")
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
 
 	layer.free()
@@ -83,7 +91,7 @@ func _test_player_screen_shows_the_player(h, root: Node) -> void:
 	root.add_child(layer)
 	var player := Player.new()
 	var panel := PlayerPanel.new()
-	panel.configure(player)
+	panel.configure(player, Session.new(Repo.new(TEST_ROOT)), _world(root))
 	layer.add_child(panel)
 
 	panel.opened()
@@ -99,6 +107,13 @@ func _test_player_screen_shows_the_player(h, root: Node) -> void:
 	h.check(_shows(panel.content, "999"), "and shows the value that changed while it was hidden")
 
 	layer.free()
+
+
+## A built playground, for the screen to read names out of.
+static func _world(root: Node) -> SpacesimWorld:
+	var world := SpacesimWorld.from_file(WORLD_PATH)
+	world.build(root)
+	return world
 
 
 ## Whether anything under `node` displays exactly this text.

@@ -18,6 +18,11 @@ extends RefCounted
 const TRUNK := "main"
 const PLAYER_DIR := "player"
 const STATE_FILE := "player/state.json"
+
+## The player's tombstones, in their own file **so that deleting a save is not itself a save in the
+## list**. The list is built from commits that touched [constant STATE_FILE].
+const DELETED_FILE := "player/deleted.json"
+
 const REFERENCE_FILE := "world.json"
 const DEFAULT_REPO_NAME := "playground"
 
@@ -26,6 +31,7 @@ const DEFAULT_REPO_NAME := "playground"
 const STATE_FORMAT_VERSION := 1
 const FIELD_VERSION := "save_format_version"
 const FIELD_WORLD_TIME := "world_time"
+const FIELD_SAVED_REALTIME := "saved_realtime"
 
 var root: String
 
@@ -83,10 +89,14 @@ func read_text(path: String) -> String:
 
 
 ## A state file: the player's own dictionary, wrapped in the envelope every save carries.
-static func state_text(player_data: Dictionary, world_time: float) -> String:
+##
+## `saved_realtime` is the machine's clock at the moment of saving. It is how long the player has
+## been away is worked out on load, which is what advances the world's clock between sessions.
+static func state_text(player_data: Dictionary, world_time: float, saved_realtime: float) -> String:
 	var state := player_data.duplicate(true)
 	state[FIELD_VERSION] = STATE_FORMAT_VERSION
 	state[FIELD_WORLD_TIME] = world_time
+	state[FIELD_SAVED_REALTIME] = saved_realtime
 	return JSON.stringify(state, "\t") + "\n"
 
 
@@ -129,12 +139,12 @@ func discard_working_tree() -> bool:
 
 ## The saves on the current history, newest first. `{"hash", "time", "subject"}`.
 func saves() -> Array:
-	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", "--", PLAYER_DIR]))
+	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", "--", STATE_FILE]))
 
 
 ## The saves that loading `hash` would remove.
 func affected_saves(hash: String) -> Array:
-	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", "%s..HEAD" % hash, "--", PLAYER_DIR]))
+	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", "%s..HEAD" % hash, "--", STATE_FILE]))
 
 
 ## A file as it stands in a save — read without touching the working tree, which is what makes
@@ -231,9 +241,13 @@ func delete_history(name: String) -> Dictionary:
 	return {"ok": true, "reason": ""}
 
 
+## The trunk is the shared world rather than a playthrough, so it is not somewhere to stand: it has
+## no player state of its own, and playing there would leave the next startup with nothing to load.
 func switch_history(name: String) -> Dictionary:
 	if name == current_history():
 		return {"ok": true, "reason": ""}
+	if name == TRUNK:
+		return {"ok": false, "reason": "the trunk is the world itself, not a playthrough"}
 	_git.run(["reset", "--hard"])
 	var switched := _git.run(["checkout", "-q", name])
 	if not switched["ok"]:

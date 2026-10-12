@@ -480,6 +480,34 @@ envelope.
 trunk, and git refuses a worktree's own branch anyway. Creating a history or switching first drops
 anything uncommitted, because a dirty tree makes git refuse the switch.
 
+### `SpacesimSession` — `RefCounted`
+
+One playthrough: the player, the world clock, and the repository that holds them. The repository
+knows git and nothing about what a save contains; the player knows what a player is — **this is the
+only place that knows a save is the player, the clock and the world.**
+
+| Member | |
+|---|---|
+| `static for_world(name) -> SpacesimSession` | under `$XDG_DATA_HOME/spacesim/worlds/` |
+| `start(world) -> Dictionary` | brings the repository up, loads the last save, or starts the first story |
+| `load_last() -> bool` | the state at HEAD; no git operation, because HEAD already *is* the last save |
+| `load(hash) -> Dictionary` | the do-over |
+| `save(world) -> Dictionary`, `label(world) -> String` | |
+| `new_story(name, world, player_name)` | branches from the trunk; history and player named separately |
+| `saves()`, `affected_saves(hash)`, `preview(hash)`, `delete_save(hash)` | deletions are tombstones |
+| `world_time: float`, `message: String`, `player`, `repo` | |
+
+**A save with nothing changed is refused, and the real-time stamp is deliberately not part of that
+comparison** — otherwise the file would differ from the last one by a few seconds every time and
+nothing would ever be "nothing changed".
+
+`player/deleted.json` is the single record of deletions, and **its own commit**: writing the player's
+state on a delete would make deleting a save *be* a save, appearing in the very list it was just
+removed from. The list is built from commits that touched `player/state.json`.
+
+On load the clock advances by how long the player was really away (`now − saved_realtime`), and never
+runs backwards — a machine clock that is ahead does not take the world back with it.
+
 ### `SpacesimLocation` — `RefCounted`
 
 Where something is: a frame, and a position in it. Turned into words by `SpacesimWorld.describe()`,
@@ -493,9 +521,11 @@ should depend on neither.
 | `to_dictionary()`, `static from_dictionary(data)` | unreadable data gives an *unset* location, not an error |
 
 `SpacesimFrame` gains `frame_id` (and `SYSTEM_ID` for the one frame every world has).
-`SpacesimFrameTree` gains `register(frame)`, `frame_by_id(id)` and `resolve_frame(id)` — the last
-resolving the **longest existing prefix**, so a save naming a frame the world no longer has is
-placed at the frame that remains, at its origin, rather than refused.
+`SpacesimFrameTree` gains `register(frame)`, `frame_by_id(id)`, `place_in_frame(subject, frame,
+position)` — which *sets* the transform rather than preserving it, because a save says where
+something is — and `resolve_frame(id)` — resolving the **longest existing prefix**, so a save naming
+a frame the world no longer has is placed at the frame that remains, at its origin, rather than
+refused.
 
 ### `SpacesimWorld` additions
 
@@ -503,8 +533,16 @@ placed at the frame that remains, at its origin, rather than refused.
 |---|---|
 | `frame_phrase(frame_id) -> String` | "landed on Nix", "above Nix", empty for a frame it does not have |
 | `nearest_body_name(position) -> String` | |
-| `format_time(seconds) -> String` | the world clock as a date, e.g. "Year 512, day 121" |
+| `format_time(seconds) -> String` | the world clock as a Terran date and time, e.g. "512-05-02 14:33" |
 | `describe(location, assets) -> String` | the location chain as prose, innermost first |
+| `place_observer(location) -> bool` | puts the observer back where a save says it was; false when the frame had to fall back |
+| `start_time: float` | the clock a story begins at, from the world file's `start.world_time` |
+
+**A surface location restores the distance from the surface and the frame, not the tangential
+offset** — and that is not a shortfall. A surface frame's placement is *derived*: the locale moves
+under you as you land, so its origin is not saved and the saved position says where you were within
+your locale, not where on a globe. On a featureless sphere the locale is anonymous. Terrain is what
+makes the tangential part mean something, and then a surface will need a placement of its own.
 
 `SECONDS_PER_DAY` and `DAYS_PER_YEAR` are placeholder calendar constants — a world that needs its own
 calendar is a thing to build when a story does.
@@ -517,6 +555,7 @@ calendar is a thing to build when a story does.
 | assets carry `id`, `name`, `type`, `value`, `location` | the id is generated once and never edited, because a location refers to it |
 | `add_asset(name, type, value, at) -> Dictionary` | |
 | `asset_by_id(id) -> Dictionary` | |
+| `deleted: Array` | the saves this player has deleted, by hash; recorded in `player/deleted.json` |
 | `to_dictionary()` / `from_dictionary(data)` | unknown keys are ignored, so a newer save may carry more than this build knows |
 
 ## The game

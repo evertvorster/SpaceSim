@@ -33,6 +33,9 @@ var frame_tree: SpacesimFrameTree
 var start_body_id: String
 var start_altitude: float
 
+## The world's clock at the beginning of a story that has not been played yet.
+var start_time: float = 0.0
+
 var _framing: Dictionary = {}
 var _sun_light: DirectionalLight3D
 
@@ -59,6 +62,8 @@ static func from_dictionary(data: Dictionary) -> SpacesimWorld:
 	var start: Dictionary = data.get("start", {})
 	world.start_body_id = String(start.get("body", ""))
 	world.start_altitude = float(start.get("altitude", 1.0e7))
+	# A story may begin at any point in the world's time; a world with none begins at its epoch.
+	world.start_time = float(start.get("world_time", 0.0))
 	return world
 
 
@@ -192,12 +197,38 @@ func place_landing_zone(body: SpacesimWorldBody, point: Vector3) -> void:
 func _on_frame_changed(observer: Node3D, _from: SpacesimFrame, to: SpacesimFrame) -> void:
 	if observer == null or to == null or to.kind != SpacesimFrame.Kind.SURFACE:
 		return
-	var body := body_for_surface_frame(to)
+	_aim_zone_under(observer, to)
+
+
+## Put the landing zone under whatever is standing on it, without moving that thing.
+func _aim_zone_under(subject: Node3D, frame: SpacesimFrame) -> void:
+	var body := body_for_surface_frame(frame)
 	if body == null:
 		return
-	var keep := observer.global_transform
+	var keep := subject.global_transform
 	place_landing_zone(body, keep.origin)
-	observer.global_transform = keep
+	subject.global_transform = keep
+
+
+## Put the observer where a save says it was, and answer whether the world still had the frame that
+## save named. A frame that is gone means the thing stands at the frame that remains, at its origin
+## — the stored position would mean something else there.
+##
+## Note what is *not* restored: a surface frame's placement is the world's business (the zone moves
+## under you as you land), so the saved position is where you were **in your locale**, not a point on
+## a globe. Nothing here changes when terrain arrives; a surface will need its own placement.
+func place_observer(location: SpacesimLocation) -> bool:
+	if frame_tree.observer == null or location == null or not location.is_set():
+		return false
+	var exact := frame_tree.frame_by_id(location.frame_id) != null
+	var frame := frame_tree.resolve_frame(location.frame_id)
+	if frame == null:
+		return false
+	frame_tree.place_in_frame(frame_tree.observer, frame, location.position if exact else Vector3.ZERO)
+	frame_tree.enter_frame(frame)
+	if frame.kind == Frame.Kind.SURFACE:
+		_aim_zone_under(frame_tree.observer, frame)
+	return exact
 
 
 func _build_body(body: SpacesimWorldBody) -> void:

@@ -57,6 +57,20 @@ func add_rule(rule: SpacesimTransitionRule) -> void:
 	_rules.append(rule)
 
 
+## Put a node into a frame at a position in that frame. Continuity is not wanted here: a save says
+## where something is, so the transform is set from it rather than preserved — which is what
+## [method enter_frame] does for the observer when it crosses a threshold.
+func place_in_frame(subject: Node3D, frame: SpacesimFrame, position: Vector3) -> void:
+	if subject == null or frame == null:
+		return
+	if subject.get_parent() != frame:
+		if subject.get_parent() == null:
+			frame.add_child(subject)
+		else:
+			subject.reparent(frame, false)
+	subject.position = position
+
+
 ## Move the observer into `frame` without consulting any rule. Used for the initial placement.
 func enter_frame(frame: SpacesimFrame) -> void:
 	var previous := active_frame

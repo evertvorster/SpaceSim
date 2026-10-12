@@ -41,6 +41,11 @@ var attributes: Dictionary = {}
 var location: SpacesimLocation
 var assets: Array = []
 
+## The saves this player has deleted, by hash. A tombstone rather than a rewrite: the list stops
+## showing them, and the commits stay in the repository. Recorded in `player/deleted.json`, which is
+## the single record of it — the state file carries the player, not their bookkeeping.
+var deleted: Array = []
+
 
 func _init(player_name := DEFAULT_NAME) -> void:
 	reset(player_name)
@@ -53,6 +58,7 @@ func reset(player_name := DEFAULT_NAME) -> void:
 	attributes["Name"] = player_name
 	location = SpacesimLocation.new(SpacesimFrame.SYSTEM_ID, Vector3.ZERO)
 	assets = []
+	deleted = []
 	for record in DEFAULT_ASSETS:
 		assets.append(_make_asset(record))
 

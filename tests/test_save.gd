@@ -121,21 +121,21 @@ func _test_save_and_list(h) -> void:
 	h.check(repo.create_history("Evert")["ok"], "a history")
 
 	h.check(
-		repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0)}, "first")["ok"],
+		repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "first")["ok"],
 		"a save is a commit"
 	)
-	var again := repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0)}, "again")
+	var again := repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "again")
 	h.check(
 		not again["ok"] and again["reason"].contains("nothing has changed"),
 		"saving with nothing changed is refused rather than faked: %s" % again["reason"]
 	)
 
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0)}, "second")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 0.0)}, "second")
 	var third := repo.save(
-		{Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0)}, "third"
+		{Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0, 0.0)}, "third"
 	)
 	h.check(third["ok"], "and a third")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 40}}, 400.0)}, "fourth")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 40}}, 400.0, 0.0)}, "fourth")
 
 	var saves := repo.saves()
 	h.check(saves.size() == 4, "four saves are listed (%d)" % saves.size())
@@ -150,8 +150,8 @@ func _test_preview_does_not_touch_the_tree(h) -> void:
 	var repo := _fresh_repo(h)
 	repo.create({"world": "playground"})
 	repo.create_history("Evert")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0)}, "first")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0)}, "second")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "first")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 0.0)}, "second")
 
 	var before := repo.read_text(Repo.STATE_FILE)
 	var saves := repo.saves()
@@ -165,15 +165,15 @@ func _test_do_over(h) -> void:
 	var repo := _fresh_repo(h)
 	repo.create({"world": "playground"})
 	repo.create_history("Evert")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0)}, "first")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "first")
 	repo.save(
 		{
-			Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0),
+			Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 0.0),
 			"world/delta.jsonl": "{\"village\":\"burnt\"}\n",
 		},
 		"second"
 	)
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0)}, "third")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0, 0.0)}, "third")
 
 	var target: String = repo.saves()[2]["hash"]  # the first save
 	h.check(repo.affected_saves(target).size() == 2, "two saves are affected")
@@ -196,7 +196,8 @@ func _test_state_round_trip(h) -> void:
 	)
 	h.check(not String(ship.get("id", "")).is_empty(), "an asset gets an id")
 
-	var text := Repo.state_text(player.to_dictionary(), 16156800000.0)	var state := Repo.read_state(text)
+	var text := Repo.state_text(player.to_dictionary(), 16156800000.0, 0.0)
+	var state := Repo.read_state(text)
 	h.check(state.get(Repo.FIELD_VERSION) == Repo.STATE_FORMAT_VERSION, "the state carries a format version")
 	h.check(state.get(Repo.FIELD_WORLD_TIME) == 16156800000.0, "and the world clock")
 	h.check(text.contains("\n\t\"attributes\""), "and is written one key per line, to diff well")
