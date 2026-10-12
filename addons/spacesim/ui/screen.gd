@@ -10,11 +10,18 @@ signal closed
 
 const PANEL_SIZE := Vector2(860.0, 640.0)
 
+## How big this screen's panel is. A dialog overrides it before [method build_screen]; the full-screen
+## chrome is 860x640 and a question does not need that much.
+var panel_size := PANEL_SIZE
+
 ## Where a subclass puts its rows.
 var content: VBoxContainer
 
 ## Where a subclass puts its buttons.
 var actions: HBoxContainer
+
+## The heading, kept so a reused screen can change what it is asking.
+var title_label: Label
 
 
 func build_screen(title: String) -> void:
@@ -34,10 +41,10 @@ func build_screen(title: String) -> void:
 	panel.anchor_top = 0.5
 	panel.anchor_right = 0.5
 	panel.anchor_bottom = 0.5
-	panel.offset_left = -PANEL_SIZE.x * 0.5
-	panel.offset_top = -PANEL_SIZE.y * 0.5
-	panel.offset_right = PANEL_SIZE.x * 0.5
-	panel.offset_bottom = PANEL_SIZE.y * 0.5
+	panel.offset_left = -panel_size.x * 0.5
+	panel.offset_top = -panel_size.y * 0.5
+	panel.offset_right = panel_size.x * 0.5
+	panel.offset_bottom = panel_size.y * 0.5
 	add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -54,6 +61,7 @@ func build_screen(title: String) -> void:
 	heading.text = title
 	heading.add_theme_font_size_override("font_size", 22)
 	column.add_child(heading)
+	title_label = heading
 
 	var scroll := ScrollContainer.new()
 	scroll.name = "Scroll"

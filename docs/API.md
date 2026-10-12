@@ -390,9 +390,11 @@ same chrome would drift apart, so there is one.
 | Member | |
 |---|---|
 | `PANEL_SIZE` | how big the panel is |
+| `panel_size: Vector2` | …and a dialog overrides it before `build_screen` |
 | `build_screen(title)` | build the chrome; a subclass then fills `content` and `actions` |
 | `content: VBoxContainer` | where a subclass puts its rows |
 | `actions: HBoxContainer` | where it puts its buttons |
+| `title_label: Label` | the heading, so a reused dialog can change what it is asking |
 | `add_button(label, on_pressed) -> Button` | add and connect a button in one line |
 | `opened()` | called just before the screen is shown; rebuild anything stale here |
 | `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed |
@@ -401,7 +403,46 @@ same chrome would drift apart, so there is one.
 `SpacesimSettingsPanel` and `SpacesimPlayerPanel` are the two subclasses. The settings panel uses
 `dismissed()` to throw staged edits away, which is what its amber Close button warns about.
 
-## Player
+### `SpacesimDialog` — a `SpacesimScreen`
+
+`addons/spacesim/ui/dialog.gd` — a modal *inside* another screen: the same chrome, smaller and
+generic, because the save browser needs three shapes of it and they are all "a title, some words,
+maybe a field, and a row of answers" — a confirmation that names what it will destroy, a name
+prompt, and a save's details.
+
+| Member | |
+|---|---|
+| `ask(title, message, buttons, inputs = [])` | show a question; `inputs` are field labels to collect |
+| `answered(action: String)` | which button was pressed |
+| `input_changed` | any field edited, so a caller can say what a typed name will become |
+| `value(label) -> String` | what was typed, trimmed |
+| `hint: Label` | a line under the fields |
+
+It is a **child of the screen that uses it**, not a screen of its own, so the pause handling and the
+screen hotkeys stay where they are: one thing open is what being paused means, and a dialog over a
+screen is still one thing.
+
+### `SpacesimPlayerPanel`
+
+The personal-data screen, on Tab, and **the only way a save happens** — there is no save key, because
+a save is a deliberate act. Save, New Story, and Close; the attributes, the assets and where each of
+them is; and the browser:
+
+| Member | |
+|---|---|
+| `configure(player, session, world)` | it hosts saving, so it needs all three |
+| `session_reloaded` | signal: a load, a switch or a new story moved the player, so whoever is flying the ship has to be told |
+| `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
+
+**Histories** and **Saves** are two scrolling `ItemList`s side by side — a long list gets a scrollbar
+of its own rather than pushing everything below it off the panel. Selecting a history shows its
+saves; **Switch** is disabled for the one you are playing and **Delete** for that one and the trunk.
+Selecting a save opens one dialog with its details and its actions — Inspect (the details *are* the
+inspection), Load and Delete — and the load's confirmation **names exactly which saves it discards**
+and says that the world is not rewound. A save in another history says so instead of offering to
+load it: you switch history, then pick a save.
+
+## `SpacesimPlayer`
 
 `addons/spacesim/player/` — the player's own state: what they are and what they carry.
 Player-owned per the world/player boundary; a save will hold it, and nothing persists it yet.
@@ -468,7 +509,7 @@ envelope.
 | `exists() -> bool`, `create(world_reference) -> Dictionary` | |
 | `save(files, label) -> Dictionary`, `commit(label) -> Dictionary` | `{"ok", "reason"}`; a save with nothing changed is refused rather than faked |
 | `discard_working_tree() -> bool` | a save is a commit, so uncommitted writes were never a save |
-| `saves() -> Array`, `affected_saves(hash) -> Array` | `{"hash", "time", "subject"}` |
+| `saves(history) -> Array`, `affected_saves(hash, history) -> Array` | `{"hash", "time", "subject"}`; the history is explicit because the browser shows the saves of the history you have *selected*, which is not necessarily the one being played |
 | `preview(hash, path) -> String` | read out of the commit; the working tree is untouched |
 | `restore(hash) -> Dictionary` | the do-over: `reset --soft`, then a path-scoped checkout |
 | `histories() -> Array`, `current_history()`, `has_history(name)` | |

@@ -80,8 +80,9 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	var player_panel := PlayerPanel.new()
 	player_panel.configure(Player.new(), Session.new(Repo.new(TEST_ROOT)), _world(root))
 	layer.add_child(player_panel)
-	h.check(player_panel.actions.get_child_count() == 2, "the player screen has Save and Close")
+	h.check(player_panel.actions.get_child_count() == 3, "the player screen has Save, New Story and Close")
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
+	h.check(player_panel.has_signal("session_reloaded"), "and tells whoever is flying that a load moved the player")
 
 	layer.free()
 

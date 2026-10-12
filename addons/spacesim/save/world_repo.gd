@@ -137,14 +137,19 @@ func discard_working_tree() -> bool:
 
 # --- saves ---------------------------------------------------------------------------------------
 
-## The saves on the current history, newest first. `{"hash", "time", "subject"}`.
-func saves() -> Array:
-	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", "--", STATE_FILE]))
+## The saves on a history, newest first. `{"hash", "time", "subject"}`.
+##
+## Takes the history rather than always using the current one, because the browser shows the saves
+## of the history you have *selected* — which is not necessarily the one being played.
+func saves(history := "HEAD") -> Array:
+	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", history, "--", STATE_FILE]))
 
 
-## The saves that loading `hash` would remove.
-func affected_saves(hash: String) -> Array:
-	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", "%s..HEAD" % hash, "--", STATE_FILE]))
+## The saves that loading `hash` would remove from that history.
+func affected_saves(hash: String, history := "HEAD") -> Array:
+	return _parse_log(
+		_git.run(["log", "--format=%h|%ct|%s", "%s..%s" % [hash, history], "--", STATE_FILE])
+	)
 
 
 ## A file as it stands in a save — read without touching the working tree, which is what makes

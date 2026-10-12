@@ -7,6 +7,8 @@ extends RefCounted
 const Session := preload("res://addons/spacesim/save/session.gd")
 const Repo := preload("res://addons/spacesim/save/world_repo.gd")
 const Player := preload("res://addons/spacesim/player/player.gd")
+const PlayerPanel := preload("res://addons/spacesim/player/player_panel.gd")
+const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const PlayerShip := preload("res://game/player_ship.gd")
 
@@ -30,6 +32,8 @@ func run(h, root: Node) -> void:
 	_test_deleting_a_save(h, world)
 	_test_the_clock_moves_on(h, world)
 	_test_putting_the_ship_back(h, world, ship)
+	_test_the_browser(h, root, world)
+	_test_the_dialog(h, root)
 
 	world.container.free()
 	_clean()
@@ -154,6 +158,70 @@ func _test_putting_the_ship_back(h, world: SpacesimWorld, ship: Node3D) -> void:
 		"to that frame's origin, because the stored position would mean something else there"
 	)
 	h.check(ship != null, "and the ship is still the observer")
+
+
+## The two lists, with something in them — a browser that cannot be opened proves nothing.
+func _test_the_browser(h, root: Node, world: SpacesimWorld) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var session := _session()
+	session.start(world)
+
+	var panel := PlayerPanel.new()
+	panel.configure(session.player, session, world)
+	layer.add_child(panel)
+	panel.opened()
+
+	h.check(panel.actions.get_child_count() == 3, "the screen has Save, New Story and Close")
+	h.check(_shows(panel, "Histories") and _shows(panel, "Saves"), "and both lists")
+	h.check(_shows(panel, "Switch") and _shows(panel, "Rename") and _shows(panel, "Delete"), "with what can be done to a history")
+	h.check(_shows(panel, Session.FIRST_HISTORY), "the history being played is listed")
+	h.check(_shows(panel, "(playing)"), "and marked as the one being played")
+	h.check(_shows(panel, "in space"), "and the save in it is listed by its label")
+
+	var sections := panel.content.get_child_count()
+	panel.opened()
+	h.check(panel.content.get_child_count() == sections, "opening again rebuilds rather than stacking")
+	layer.free()
+
+
+## The dialog is generic on purpose — a confirmation, a name prompt, a details view — so what is
+## worth checking is that it asks, collects and answers.
+func _test_the_dialog(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var dialog := Dialog.new()
+	layer.add_child(dialog)
+
+	var answers: Array = []
+	dialog.answered.connect(func(action: String) -> void: answers.append(action))
+	dialog.ask("Rename a history", "What should it be called?", ["Rename", "Cancel"], ["History name"])
+
+	h.check(dialog.content != null and dialog.actions.get_child_count() == 2, "a dialog opens with its answers")
+	h.check(dialog.value("History name") == "", "and its field starts empty")
+	h.check(_shows(dialog, "What should it be called?"), "and shows what it is asking")
+
+	# Answering hides it and reports which button was pressed, which is the whole contract.
+	dialog.actions.get_child(0).pressed.emit()
+	h.check(answers == ["Rename"], "pressing an answer reports which one (%s)" % str(answers))
+	h.check(not dialog.visible, "and closes it")
+	layer.free()
+
+
+## Whether anything under `node` shows this text, as part of a longer line.
+static func _shows(node: Node, fragment: String) -> bool:
+	if node is Label and node.text.contains(fragment):
+		return true
+	if node is Button and node.text.contains(fragment):
+		return true
+	if node is ItemList:
+		for index in node.item_count:
+			if node.get_item_text(index).contains(fragment):
+				return true
+	for child in node.get_children():
+		if _shows(child, fragment):
+			return true
+	return false
 
 
 func _session() -> SpacesimSession:

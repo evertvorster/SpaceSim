@@ -74,8 +74,7 @@ func _ready() -> void:
 	if not brought_up["ok"]:
 		push_error("cannot open the world's repository: %s" % brought_up["reason"])
 	_player = _session.player
-	if _player.location.is_set() and not _world.place_observer(_player.location):
-		push_warning("the saved location's frame is gone; placed at the nearest frame that remains")
+	_place_observer_from_session()
 
 	_settings_screen = SpacesimSettingsPanel.new()
 	_settings_screen.configure(SpacesimSettings)
@@ -83,6 +82,8 @@ func _ready() -> void:
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
 	_player_screen.configure(_player, _session, _world)
+	# A load, a switch or a new story all move the player, and the ship is where the player is.
+	_player_screen.session_reloaded.connect(_place_observer_from_session)
 	_register_screen(_player_screen, "Player")
 
 	_capture_mouse()
@@ -291,6 +292,15 @@ func _sync_player_location() -> void:
 	var frame := _ship.get_parent() as Frame
 	if frame != null:
 		_session.player.location = Location.new(frame.frame_id, _ship.position)
+
+
+## Put the ship where the session says the player is. Said out loud when the world no longer has the
+## frame a save named, because the ship has then been placed somewhere the save did not choose.
+func _place_observer_from_session() -> void:
+	if not _player.location.is_set():
+		return
+	if not _world.place_observer(_player.location):
+		push_warning("the saved location's frame is gone; placed at the nearest frame that remains")
 
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and
