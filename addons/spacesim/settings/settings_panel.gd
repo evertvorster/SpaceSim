@@ -36,20 +36,6 @@ func configure(settings: Node) -> void:
 	_refresh()
 
 
-## Commit the staged edits and write the file.
-func apply() -> int:
-	return _edit.apply()
-
-
-## Discard the staged edits.
-func discard() -> void:
-	_edit.discard()
-
-
-func has_changes() -> bool:
-	return _edit.has_changes()
-
-
 func _build() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP

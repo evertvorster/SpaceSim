@@ -35,16 +35,8 @@ func value(key: String) -> Variant:
 	return _settings.get_value(key)
 
 
-func is_staged(key: String) -> bool:
-	return _staged.has(key)
-
-
 func has_changes() -> bool:
 	return not _staged.is_empty()
-
-
-func staged_keys() -> Array:
-	return _staged.keys()
 
 
 ## Record an edit. Staging a value that is already in force un-stages it, so fiddling a control

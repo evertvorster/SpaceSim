@@ -108,48 +108,53 @@ func refresh(camera: Camera3D) -> void:
 	if camera == null or _labels.is_empty():
 		return
 
-	var eye := camera.global_position
-	var entries := choose(_candidates(eye), pool_size)
+	var entries := choose(_candidates(camera.global_position), pool_size)
 	var viewport_size := camera.get_viewport().get_visible_rect().size
 
 	for index in _labels.size():
 		var label := _labels[index]
 		var pointer := _pointers[index]
-
 		if index >= entries.size():
 			label.visible = false
 			pointer.visible = false
 			continue
+		_place(entries[index], label, pointer, camera, viewport_size)
 
-		var entry: Dictionary = entries[index]
-		var target: Node3D = entry["node"]
-		var at: Vector3 = target.global_position
-		var text := "%s  %s" % [target.name, format_distance(entry["distance"])]
 
-		# unproject_position mirrors for anything behind the camera, so that case is computed
-		# from the camera's own transform instead.
-		if camera.is_position_behind(at):
-			label.visible = false
-			var behind := viewport_size * 0.5 + screen_direction(camera, at) * 1.0e6
-			_show_pointer(pointer, text, clamp_to_edge(behind, viewport_size, margin))
-			continue
+## One marker: at the object when it is on screen, on the viewport edge when it is not.
+func _place(
+	entry: Dictionary, label: Label3D, pointer: Label, camera: Camera3D, viewport_size: Vector2
+) -> void:
+	var target: Node3D = entry["node"]
+	var at: Vector3 = target.global_position
+	var text := "%s  %s" % [target.name, format_distance(entry["distance"])]
 
-		var projected := camera.unproject_position(at)
-		var inside := (
-			projected.x >= margin
-			and projected.x <= viewport_size.x - margin
-			and projected.y >= margin
-			and projected.y <= viewport_size.y - margin
-		)
+	# unproject_position mirrors for anything behind the camera, so that case is computed from
+	# the camera's own transform instead.
+	if camera.is_position_behind(at):
+		label.visible = false
+		var behind := viewport_size * 0.5 + screen_direction(camera, at) * 1.0e6
+		_show_pointer(pointer, text, clamp_to_edge(behind, viewport_size, margin))
+		return
 
-		if inside:
-			label.text = text
-			label.global_position = at
-			label.visible = true
-			pointer.visible = false
-		else:
-			label.visible = false
-			_show_pointer(pointer, text, clamp_to_edge(projected, viewport_size, margin))
+	var projected := camera.unproject_position(at)
+	if _inside_margin(projected, viewport_size):
+		label.text = text
+		label.global_position = at
+		label.visible = true
+		pointer.visible = false
+	else:
+		label.visible = false
+		_show_pointer(pointer, text, clamp_to_edge(projected, viewport_size, margin))
+
+
+func _inside_margin(projected: Vector2, viewport_size: Vector2) -> bool:
+	return (
+		projected.x >= margin
+		and projected.x <= viewport_size.x - margin
+		and projected.y >= margin
+		and projected.y <= viewport_size.y - margin
+	)
 
 
 func _show_pointer(pointer: Label, text: String, at: Vector2) -> void:

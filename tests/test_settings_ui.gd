@@ -5,22 +5,22 @@ const Settings := preload("res://addons/spacesim/settings/settings.gd")
 const Edit := preload("res://addons/spacesim/settings/settings_edit.gd")
 const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
 
-const TEST_PATH := "user://test-settings-ui.cfg"
+const Fixture := preload("res://tests/settings_fixture.gd")
 
-var _instances: Array[Node] = []
+var _fixture := Fixture.new()
 
 
 func run(h, root: Node) -> void:
 	print("  bindings and the settings screen")
-	_clean()
+	Fixture.clean()
 	_test_binding_text(h)
 	_test_binding_matching(h)
 	_test_registry_is_sound(h)
 	_test_edits_are_staged_not_applied(h)
 	_test_reset_and_discard(h)
 	_test_bad_values_are_not_staged(h)
-	_clean()
-	_release()
+	Fixture.clean()
+	_fixture.release()
 
 
 func _test_binding_text(h) -> void:
@@ -70,9 +70,9 @@ func _test_registry_is_sound(h) -> void:
 			unknown.append(key)
 		if row.get("validator", "") == "key_binding" and not Bindings.is_valid(String(row["default"])):
 			bad_defaults.append(key)
-	h.check(unknown.is_empty(), "every declared validator exists%s" % _detail(unknown))
-	h.check(bad_defaults.is_empty(), "every binding default is a valid binding%s" % _detail(bad_defaults))
-	h.check(undotted.is_empty(), "every key is sectioned%s" % _detail(undotted))
+	h.check(unknown.is_empty(), "every declared validator exists%s" % Fixture.detail(unknown))
+	h.check(bad_defaults.is_empty(), "every binding default is a valid binding%s" % Fixture.detail(bad_defaults))
+	h.check(undotted.is_empty(), "every key is sectioned%s" % Fixture.detail(undotted))
 	h.check(
 		Settings.is_acceptable("bindings.throttle_up", "Alt+W"),
 		"a valid binding is acceptable"
@@ -84,7 +84,7 @@ func _test_registry_is_sound(h) -> void:
 
 
 func _test_edits_are_staged_not_applied(h) -> void:
-	var settings := _open()
+	var settings := _fixture.open()
 	var edit = Edit.new(settings)
 
 	h.check(not edit.has_changes(), "nothing to apply to begin with")
@@ -107,12 +107,12 @@ func _test_edits_are_staged_not_applied(h) -> void:
 	h.check(settings.get_value("camera.fov") == 90.0, "and the live setting now has the value")
 	h.check(not edit.has_changes(), "with nothing left to apply")
 	h.check(
-		FileAccess.get_file_as_string(TEST_PATH).contains("fov=90.0"), "and the file has it"
+		FileAccess.get_file_as_string(Fixture.TEST_PATH).contains("fov=90.0"), "and the file has it"
 	)
 
 
 func _test_reset_and_discard(h) -> void:
-	var settings := _open()
+	var settings := _fixture.open()
 	var edit = Edit.new(settings)
 
 	settings.set_value("camera.fov", 95.0)
@@ -126,7 +126,7 @@ func _test_reset_and_discard(h) -> void:
 		"and applying takes it back to the default"
 	)
 	h.check(
-		not FileAccess.get_file_as_string(TEST_PATH).contains("fov"),
+		not FileAccess.get_file_as_string(Fixture.TEST_PATH).contains("fov"),
 		"which also removes it from the file"
 	)
 
@@ -137,31 +137,9 @@ func _test_reset_and_discard(h) -> void:
 
 
 func _test_bad_values_are_not_staged(h) -> void:
-	var settings := _open()
+	var settings := _fixture.open()
 	var edit = Edit.new(settings)
 	h.check(not edit.stage("camera.fov", 10000.0), "an out-of-range edit is not staged")
 	h.check(not edit.stage("frames.pad_size", 1.0), "a world setting is not staged")
 	h.check(not edit.stage("bindings.throttle_up", "Nonsense"), "an unparseable binding is not staged")
 	h.check(not edit.has_changes(), "so there is nothing to apply")
-
-
-func _open() -> Node:
-	var settings := Settings.new()
-	settings.open(TEST_PATH)
-	_instances.append(settings)
-	return settings
-
-
-func _release() -> void:
-	for instance in _instances:
-		instance.free()
-	_instances.clear()
-
-
-func _detail(problems: Array[String]) -> String:
-	return "" if problems.is_empty() else ": " + ", ".join(problems)
-
-
-func _clean() -> void:
-	if FileAccess.file_exists(TEST_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_PATH))

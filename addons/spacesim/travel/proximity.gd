@@ -17,13 +17,11 @@ static func nearest_body(position: Vector3, bodies: Array[SpacesimScaleBody]) ->
 	return nearest
 
 
-## Distance to the nearest significant surface, or INF when nothing is near enough to
-## matter — deep space, which must read as "no limit" rather than "zero" or "infinite
-## loop".
+## Distance to the nearest significant surface, or INF when nothing is near enough to matter —
+## deep space, which must read as "no limit" rather than "zero".
+##
+## Delegates rather than scanning again: two loops computing the same minimum is two places to
+## drift.
 static func nearest_surface_distance(position: Vector3, bodies: Array[SpacesimScaleBody]) -> float:
-	var nearest_distance := INF
-	for body in bodies:
-		if body == null:
-			continue
-		nearest_distance = minf(nearest_distance, body.surface_distance_to(position))
-	return nearest_distance
+	var body := nearest_body(position, bodies)
+	return INF if body == null else body.surface_distance_to(position)

@@ -343,12 +343,12 @@ Bindings are edited as text for now; capturing a key press is the next step.
 | `stage(key, value) -> bool` | false when the store would refuse it |
 | `reset_to_default(key) -> bool` | staged, like any other edit |
 | `discard() -> void`, `apply() -> int` | |
-| `has_changes() -> bool`, `is_staged(key) -> bool` | |
+| `has_changes() -> bool` | |
 | `changed` | emitted on any staging change |
 
 `SpacesimSettingsPanel` — `Control` — is built in code, since the project has no editor-authored
-scenes: `configure(settings)`, `apply()`, `discard()`, `has_changes()`, and `closed` /
-`exit_requested` signals.
+scenes: `configure(settings)`, and the `closed` / `exit_requested` signals. The buttons drive the
+edit directly.
 
 ### `SpacesimXdg` — `RefCounted` (static)
 

@@ -12,15 +12,19 @@ extends Node3D
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 
-## The frame tree whose active frame supplies the travel band. Set by the world builder.
-var frame_tree: Node3D
+## The frame tree whose active frame supplies the travel band. Required: a ship without one has
+## nowhere to fly, so its absence is a programming error rather than a state to handle.
+var frame_tree: SpacesimFrameTree
 
 ## Significant bodies: what sets the local unit.
 var bodies: Array[SpacesimScaleBody] = []
 
-## Band used if no frame is active.
-var fallback_length_min := 100.0
-var fallback_length_max := 1.0e11
+## The nearest body as of this step, so one scan serves the readout and the surface constraint
+## both.
+##
+## ponytail: cached for the step rather than queried twice. Re-query if bodies ever move fast
+## enough to change which one is nearest inside a single step.
+var _nearest_body: SpacesimScaleBody
 
 # Readouts, for the HUD and for tests.
 var throttle := 0.0
@@ -34,11 +38,9 @@ var nearest_name := ""
 var landed := false
 
 
-## The band the active frame spans, or the fallback when there is no frame.
+## The band the active frame spans.
 func travel_band() -> Vector2:
-	var frame = frame_tree.active_frame if frame_tree != null else null
-	if frame == null:
-		return Vector2(fallback_length_min, fallback_length_max)
+	var frame := frame_tree.active_frame
 	return Vector2(frame.travel_length_min, frame.travel_length_max)
 
 
@@ -86,9 +88,9 @@ func _apply_attitude(input: Dictionary) -> void:
 
 
 func _update_proximity() -> void:
-	nearest_distance = Proximity.nearest_surface_distance(global_position, bodies)
-	var body := Proximity.nearest_body(global_position, bodies)
-	nearest_name = body.node.name if body != null and body.node != null else "—"
+	_nearest_body = Proximity.nearest_body(global_position, bodies)
+	nearest_distance = INF if _nearest_body == null else _nearest_body.surface_distance_to(global_position)
+	nearest_name = _nearest_body.node.name if _nearest_body != null and _nearest_body.node != null else "—"
 
 
 ## Altitude above the nearest significant surface, in metres.
@@ -101,20 +103,16 @@ func altitude() -> float:
 ## Motion into the surface is absorbed by putting the ship back on it; motion along or away
 ## from it is left alone, so the ship can slide and can take off. Latching here instead is
 ## what made landing a one-way trip.
-##
-## The query is repeated rather than reused from `_update_proximity`, because the ship has
-## moved since then. TODO: cache it properly once there is more than one body.
 func _constrain_to_surface() -> void:
-	var body := Proximity.nearest_body(global_position, bodies)
-	if body == null or body.node == null:
+	if _nearest_body == null or _nearest_body.node == null:
 		return
-	var offset := global_position - body.node.global_position
+	var offset := global_position - _nearest_body.node.global_position
 	var distance := offset.length()
-	if distance >= body.radius:
+	if distance >= _nearest_body.radius:
 		return
 
 	var outward := Vector3.UP
 	if distance > 0.0:
 		outward = offset / distance
-	global_position = body.node.global_position + outward * body.radius
+	global_position = _nearest_body.node.global_position + outward * _nearest_body.radius
 	landed = true

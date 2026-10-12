@@ -102,11 +102,6 @@ func path() -> String:
 	return _path
 
 
-## Whether anything has changed since the last write.
-func is_dirty() -> bool:
-	return _dirty
-
-
 static func declared_keys() -> Array:
 	return REGISTRY.keys()
 
