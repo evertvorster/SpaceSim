@@ -9,17 +9,18 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 ## Status
 
 **Early, but real.** The playground world and the player are the game now, not a demo: coordinate
-frames, the travel unit, a data-driven world, navigation markers, settings, a personal data screen,
-and saves working against a real git repository. The saves are not yet reachable from the screen
-(P2), there is no terrain, no physics and no simulation.
+frames, the travel unit, a data-driven world, navigation markers, settings, and a player who can be
+saved, loaded and browsed. There is no terrain, no physics and no simulation.
 
 ## Saves
 
 A save is a commit: **a world per repository, a history per playthrough, a save per commit**, in
 `$XDG_DATA_HOME/spacesim/worlds/<world>/`. Loading an older save moves the history back and restores
-only the player's own state — the world's state is left alone, so the world has moved on.
+only the player's own state — the world's state is left alone, so the world has moved on. The game
+loads the last save on startup and puts you back in the frame it names.
 
-Not yet wired to a screen, and there is no autosave: a save is a deliberate act.
+**There is no autosave: a save is a deliberate act.** The button on the personal data screen (Tab)
+is the only way one happens, and the same screen browses the histories and their saves.
 
 ## Layout
 
@@ -28,11 +29,11 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   coordinate/      compartmentalised coordinate spaces and threshold transitions
   travel/          the local unit of travel (speed scales with distance to the nearest body)
   world/           a world loaded from data, and the scene it builds
-  player/          the player's own state: attributes and assets
+  player/          the player's own state (attributes and assets) and the screen for it
   navigation/      navigation markers (targets, off-screen pointers)
   settings/        declared defaults in code, one machine-written file for what differs
-  save/            git-backed saves: the repository, the histories, the do-over
-  ui/              chrome shared by the full-screen screens
+  save/            git-backed saves: the repository, the histories, the session, the do-over
+  ui/              chrome shared by the full-screen screens, and the dialogs over them
 worlds/            world files (content)
 game/              the game: fly the playground system and land on planets
 tests/             headless test scripts
@@ -59,7 +60,10 @@ It starts in `game/main.tscn`, flying the **playground** system from
 the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
 **`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
 than guessed at. **Tab** opens the personal data screen and **Alt+C** the settings screen; both
-pause the game.
+pause the game. On the personal data screen the player's own values and each thing they hold are
+edited there, **Save** and **New Story** act on the world, and **right-clicking a row** offers what
+can be done with it — playing, renaming or deleting a history, loading or deleting a save, renaming
+something you hold. Loading always says first which saves it discards.
 
 Movement keys and the screen hotkeys are **bindings** in the settings file, so they can be changed
 there without a rebuild.
@@ -84,12 +88,19 @@ from data. See [`docs/API.md`](docs/API.md) for the keys and the file format.
 tests/run.sh
 ```
 
-Runs the suite headless and smoke-loads the demo scene, and fails if Godot reported any error. Two
+Runs the suite headless and smoke-loads the game scene, and fails if Godot reported any error. Two
 reasons that matters: a GDScript error aborts the function it happens in without failing the run, so
-a broken check can silently skip; and the test scene never loads the demo scene, so a parse error in
-a demo script would otherwise stay quiet until somebody launched the game.
+a broken check can silently skip; and the test scene never loads the game scene, so a parse error in
+a game script would otherwise stay quiet until somebody launched the game.
 
 `GODOT=/usr/bin/godot-mono tests/run.sh` runs it on another build.
+
+```
+SPACESIM_TESTS=save,session tests/run.sh
+```
+
+Runs only the suites whose path contains one of those words. The whole run takes minutes, because
+the playground flight test drives ~120000 steps.
 
 ## Documentation
 

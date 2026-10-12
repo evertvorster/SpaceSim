@@ -4,6 +4,12 @@
 > here. Design, planning and bug-hunting notes live in the project notes (Obsidian,
 > `Notes/Projects/SpaceSim/`) — not in this repo.
 
+## The addon
+
+`addons/spacesim/plugin.cfg` and `plugin.gd` are the Godot plugin entry point, so Godot can enable
+the addon in the editor. The engine's classes are global by `class_name`, so nothing in the game
+depends on the plugin being switched on.
+
 ## Update rule
 
 When a public interface is added or changed, update this file in the same commit. On-disk data
@@ -122,7 +128,7 @@ the public interface, so the format is versioned (`format_version`).
 | Field | |
 |---|---|
 | `format_version` | int |
-| `name` | world name, shown in the demo readout |
+| `name` | world name, shown in the game's readout |
 | `frames` | `system_band`, `atmosphere_band`, `surface_band` ([min, max] metres), `atmosphere_altitude`, `surface_altitude` (metres), `pad_size` |
 | `start` | `body` (an id) and `altitude` (metres above that body's surface) |
 | `bodies[]` | `id`, `name`, `kind`, `radius`, `position` (system frame, metres), `color`, `landable`, `significant` |
@@ -436,21 +442,33 @@ them is; and the browser:
 
 **Histories** and **Saves** are two scrolling `ItemList`s side by side, and **Assets** is a third —
 a long list gets a scrollbar of its own rather than pushing everything below it off the panel.
-Selecting a history shows its saves; **Switch** is disabled for the one you are playing and **Delete**
-for that one and the trunk. **Load** and **Delete** sit under the saves as buttons of their own rather
-than something you have to open a save to find, with Load disabled for a history you are not playing;
-clicking a save opens a dialog with its details and the same two actions. **Load is never one click
-away from a surprise** — what it discards is named first, and the dialog says the world is not
-rewound. A save in another history says so instead of offering to load it: you switch history, then
-pick a save.
+Selecting a history shows its saves; clicking a save shows what it holds.
 
-**The player's own values are editable here.** *Change values* opens a field for each attribute — the
-name among them — and keeps each one the type it had, refusing a number that is not one rather than
-quietly reading it as zero. *Rename* renames the selected thing the player holds. **An asset is
-referred to by its id, which is why renaming one is safe**: nothing points at a name, so a location
-survives a rename — the whole reason the id exists. **And an edit is not a save**: saving stays a
-deliberate act, so the screen says `changed — press Save` rather than writing one behind the
-player's back.
+**What you can do to a row lives on the row, as a right-click menu**, and the rows say so because a
+hidden affordance is not an affordance. A menu is opened *on* something, so there is no separate
+selection that can be empty and leave an action doing nothing at all:
+
+| Row | Right-click |
+|---|---|
+| History | Play this history · Rename history… · Delete history… |
+| Save | Show this save · Load this save… · Delete this save |
+| Asset | Rename this… |
+
+Entries that do not apply are disabled rather than absent — the current history cannot be played or
+deleted, the trunk can be neither, and a save in another history cannot be loaded from here.
+**Load is never one click from a surprise**: what it discards is named first, and the dialog says
+the world is not rewound.
+
+**The player's own values are editable here.** *Change my values* opens a field for each attribute —
+the name among them — and keeps each one the type it had, refusing a number that is not one rather
+than quietly reading it as zero. **An asset is referred to by its id, which is why renaming one is
+safe**: nothing points at a name, so a location survives a rename — the whole reason the id exists.
+And **an edit is not a save**: saving stays a deliberate act, so the screen says
+`changed — press Save` rather than writing one behind the player's back.
+
+**The two renames are different things and are named as such.** A *history* is a label on a line of
+time, renamed on its own row; the player's name is a value of theirs, changed with *Change my
+values*. Neither dialog will do the other's job.
 
 ## `SpacesimPlayer`
 
@@ -466,17 +484,6 @@ Player-owned per the world/player boundary; a save will hold it, and nothing per
 | `assets: Array` | things held, each `{name, type, value}` — the shape leaves room for the rest of an asset |
 | `display_name() -> String` | |
 | `reset(player_name) -> void` | back to the starting state, as copies rather than the consts |
-
-Both sets are placeholder content: one line each to change, and the screen reads whatever is there
-rather than naming anything itself.
-
-### `SpacesimPlayerPanel` — `SpacesimScreen`
-
-The personal-data screen, on **Tab**. Sections are built from the player's own dictionaries —
-attributes as a two-column table, assets as name / type / value — so adding an attribute needs no
-change here. Rebuilt on `opened()`, so a value that changed while it was hidden cannot be stale.
-
-**Save and load will live here.**
 
 ## Save and load
 
@@ -630,6 +637,11 @@ world and ship.
 Every one of those except Esc is a binding in the settings file and can be changed there. The two
 screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab is also the UI's
 focus key and the UI system would consume it first.
+
+**The personal data screen is where the world is saved and browsed**: Save and New Story act on the
+world, the player's own values and what they hold are editable there, and **right-clicking a row** —
+a history, a save, a thing you hold — offers what can be done with it. There is deliberately no save
+key: a save is a deliberate act, and loading one always says first which saves it discards.
 
 ## Tests
 
