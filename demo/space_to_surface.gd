@@ -21,19 +21,47 @@ const THROTTLE_RATE := 0.7 ## per second
 var _world := {}
 var _look := Vector2.ZERO
 var _hud: Label
+var _fps: Label
+var _skip_next_motion := false
 
 
 func _ready() -> void:
 	_world = ScaleWorld.new().build(self)
 	_build_hud()
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	_capture_mouse()
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion:
+		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			return
+		# Capturing warps the cursor, and the first motion after that reports the warp as a
+		# huge relative delta. Drop it, or the ship spins on every recapture.
+		if _skip_next_motion:
+			_skip_next_motion = false
+			return
 		_look += event.relative
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_capture_mouse()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+## Click to take the mouse back after Esc released it.
+func _capture_mouse() -> void:
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		return
+	_look = Vector2.ZERO
+	_skip_next_motion = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+
+func _process(_delta: float) -> void:
+	var frames := Engine.get_frames_per_second()
+	if frames <= 0:
+		_fps.text = "-- fps"
+		return
+	_fps.text = "%d fps    %.1f ms" % [frames, 1000.0 / float(frames)]
 
 
 func _physics_process(delta: float) -> void:
@@ -94,12 +122,27 @@ func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HUD"
 	add_child(layer)
+
 	var label := Label.new()
 	label.name = "Readout"
 	label.position = Vector2(24.0, 18.0)
 	label.add_theme_font_size_override("font_size", 17)
 	layer.add_child(label)
 	_hud = label
+
+	# Top right, so a frame-rate change while tuning something else is visible at a glance.
+	var fps := Label.new()
+	fps.name = "FrameRate"
+	fps.anchor_left = 1.0
+	fps.anchor_right = 1.0
+	fps.offset_left = -220.0
+	fps.offset_right = -24.0
+	fps.offset_top = 18.0
+	fps.offset_bottom = 46.0
+	fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	fps.add_theme_font_size_override("font_size", 17)
+	layer.add_child(fps)
+	_fps = fps
 
 
 ## The limit is shown alongside the speed, not instead of it: a limit the player cannot
@@ -121,7 +164,7 @@ func _update_hud() -> void:
 				"nearest     %s at %s" % [ship.nearest_name, _distance(ship.nearest_distance)],
 				"local unit  %s" % _distance(length),
 				"",
-				"W/S throttle    mouse look    A/D roll    Esc release mouse",
+				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
 			]
 		)
 	)
