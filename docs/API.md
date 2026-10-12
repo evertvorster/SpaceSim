@@ -434,13 +434,23 @@ them is; and the browser:
 | `session_reloaded` | signal: a load, a switch or a new story moved the player, so whoever is flying the ship has to be told |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
-**Histories** and **Saves** are two scrolling `ItemList`s side by side — a long list gets a scrollbar
-of its own rather than pushing everything below it off the panel. Selecting a history shows its
-saves; **Switch** is disabled for the one you are playing and **Delete** for that one and the trunk.
-Selecting a save opens one dialog with its details and its actions — Inspect (the details *are* the
-inspection), Load and Delete — and the load's confirmation **names exactly which saves it discards**
-and says that the world is not rewound. A save in another history says so instead of offering to
-load it: you switch history, then pick a save.
+**Histories** and **Saves** are two scrolling `ItemList`s side by side, and **Assets** is a third —
+a long list gets a scrollbar of its own rather than pushing everything below it off the panel.
+Selecting a history shows its saves; **Switch** is disabled for the one you are playing and **Delete**
+for that one and the trunk. **Load** and **Delete** sit under the saves as buttons of their own rather
+than something you have to open a save to find, with Load disabled for a history you are not playing;
+clicking a save opens a dialog with its details and the same two actions. **Load is never one click
+away from a surprise** — what it discards is named first, and the dialog says the world is not
+rewound. A save in another history says so instead of offering to load it: you switch history, then
+pick a save.
+
+**The player's own values are editable here.** *Change values* opens a field for each attribute — the
+name among them — and keeps each one the type it had, refusing a number that is not one rather than
+quietly reading it as zero. *Rename* renames the selected thing the player holds. **An asset is
+referred to by its id, which is why renaming one is safe**: nothing points at a name, so a location
+survives a rename — the whole reason the id exists. **And an edit is not a save**: saving stays a
+deliberate act, so the screen says `changed — press Save` rather than writing one behind the
+player's back.
 
 ## `SpacesimPlayer`
 

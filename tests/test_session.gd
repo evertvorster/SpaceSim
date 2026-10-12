@@ -166,6 +166,10 @@ func _test_the_browser(h, root: Node, world: SpacesimWorld) -> void:
 	root.add_child(layer)
 	var session := _session()
 	session.start(world)
+	# Save something, so the lists have something in them: a browser that cannot be opened proves
+	# nothing, and by this point in the suite the earlier saves have been loaded over and deleted.
+	session.player.attributes["Credits"] = 7
+	session.save(world)
 
 	var panel := PlayerPanel.new()
 	panel.configure(session.player, session, world)
@@ -174,10 +178,21 @@ func _test_the_browser(h, root: Node, world: SpacesimWorld) -> void:
 
 	h.check(panel.actions.get_child_count() == 3, "the screen has Save, New Story and Close")
 	h.check(_shows(panel, "Histories") and _shows(panel, "Saves"), "and both lists")
-	h.check(_shows(panel, "Switch") and _shows(panel, "Rename") and _shows(panel, "Delete"), "with what can be done to a history")
+	h.check(
+		_shows(panel, "Switch") and _shows(panel, "Rename") and _shows(panel, "Delete"),
+		"with what can be done to a history"
+	)
+	h.check(_shows(panel, "Load"), "and a Load button that is not hidden behind anything")
+	h.check(_shows(panel, "Change values"), "and a way to change the player's own values")
+	h.check(
+		_shows(panel, "Assets") and _shows(panel, "Playground Lander"),
+		"and what the player holds, by name"
+	)
 	h.check(_shows(panel, Session.FIRST_HISTORY), "the history being played is listed")
 	h.check(_shows(panel, "(playing)"), "and marked as the one being played")
-	h.check(_shows(panel, "in space"), "and the save in it is listed by its label")
+	# The whole label, not a fragment of it — "in space" also appears in the header and the date on
+	# its own appears twice, so a fragment would pass without the save row existing at all.
+	h.check(_shows(panel, session.label(world)), "and the save in it is listed by its whole label")
 
 	var sections := panel.content.get_child_count()
 	panel.opened()

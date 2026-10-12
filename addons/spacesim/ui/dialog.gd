@@ -74,6 +74,13 @@ func value(label: String) -> String:
 	return field.text.strip_edges() if field != null else ""
 
 
+## Put something in a field, for a dialog that edits what is already there.
+func set_value(label: String, text: String) -> void:
+	var field: LineEdit = _fields.get(label)
+	if field != null:
+		field.text = text
+
+
 func focus_first_field() -> void:
 	for field in _fields.values():
 		field.grab_focus()
