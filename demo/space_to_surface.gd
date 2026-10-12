@@ -1,40 +1,49 @@
 extends Node3D
-## Fly from space to a planet's surface.
+## Fly around the playground system and land on planets.
 ##
 ##   W / S      throttle (a fraction of the local travel unit)
 ##   mouse      pitch and yaw
 ##   A / D      roll
-##   Esc        release the mouse
+##   Esc        release the mouse    (click to take it back)
+##   P          hide/show the bodies
+##   [ / ]      body tessellation, for attributing frame cost
 ##
-## The world is built in code by [code]scale_world.gd[/code] so the headless test can fly
-## the identical world; this script only adds input, the camera's render range and a
-## readout.
+## The world comes from `worlds/playground.json`; this script only adds input, the camera's
+## render range and a readout. A different world file should not need this script changed.
 
-const ScaleWorld := preload("res://demo/scale_world.gd")
+const PlayerShip := preload("res://demo/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
+
+const WORLD_PATH := "res://worlds/playground.json"
 
 const MOUSE_SENSITIVITY := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
 const THROTTLE_RATE := 0.7 ## per second
 
-## Planet detail levels for cost attribution: if the frame rate tracks screen coverage it
-## stays flat across these, and if it tracks triangle count it moves with them.
+## Body detail levels for cost attribution: if the frame rate tracks screen coverage it stays
+## flat across these, and if it tracks triangle count it moves with them.
 const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), Vector2i(256, 128)]
 
-var _world := {}
+var _world: SpacesimWorld
+var _ship: Node3D
 var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
 var _skip_next_motion := false
-var _planet_mesh: MeshInstance3D
-var _detail := 2 ## index into DETAIL_LEVELS, 128 x 64 by default
+var _detail := 2 ## index into DETAIL_LEVELS
 var _triangles := 0
+var _bodies_visible := true
 
 
 func _ready() -> void:
-	_world = ScaleWorld.new().build(self)
-	_planet_mesh = _world["planet_mesh"]
+	_world = SpacesimWorld.from_file(WORLD_PATH)
+	if _world == null:
+		push_error("cannot load %s" % WORLD_PATH)
+		return
+	_world.build(self)
+	_ship = PlayerShip.create()
+	PlayerShip.place(_world, _ship)
 	_set_detail(_detail)
 	_build_hud()
 	_capture_mouse()
@@ -57,23 +66,27 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 			KEY_P:
-				_planet_mesh.visible = not _planet_mesh.visible
+				_bodies_visible = not _bodies_visible
+				for body_mesh in _world.meshes():
+					body_mesh.visible = _bodies_visible
 			KEY_BRACKETLEFT:
 				_set_detail(_detail - 1)
 			KEY_BRACKETRIGHT:
 				_set_detail(_detail + 1)
 
 
-## Change the planet's tessellation. Cheap to call: the count is measured once here rather
-## than per frame, because get_faces() allocates.
+## Change every body's tessellation. The count is measured here rather than per frame, because
+## get_faces() allocates.
 func _set_detail(index: int) -> void:
 	_detail = clampi(index, 0, DETAIL_LEVELS.size() - 1)
 	var level: Vector2i = DETAIL_LEVELS[_detail]
-	var sphere: SphereMesh = _planet_mesh.mesh
-	sphere.radial_segments = level.x
-	sphere.rings = level.y
-	@warning_ignore("integer_division")
-	_triangles = sphere.get_faces().size() / 3
+	_triangles = 0
+	for body_mesh in _world.meshes():
+		var sphere: SphereMesh = body_mesh.mesh
+		sphere.radial_segments = level.x
+		sphere.rings = level.y
+		var faces := sphere.get_faces().size()
+		_triangles += floori(float(faces) / 3.0)
 
 
 ## Click to take the mouse back after Esc released it.
@@ -94,9 +107,7 @@ func _process(_delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	var ship = _world["ship"]
-
-	var throttle: float = ship.throttle
+	var throttle: float = _ship.throttle
 	if Input.is_key_pressed(KEY_W):
 		throttle += THROTTLE_RATE * delta
 	if Input.is_key_pressed(KEY_S):
@@ -116,18 +127,19 @@ func _physics_process(delta: float) -> void:
 	}
 	_look = Vector2.ZERO
 
-	ship.step(delta, input)
-	_world["frame_tree"].evaluate()
+	_ship.step(delta, input)
+	_world.frame_tree.evaluate()
+	_world.aim_sun_at(_ship.global_position)
 	_update_camera()
 	_update_hud()
 
 
-## Render range tracks the scale you are operating at. Only the ratio costs depth
-## precision, and reverse-Z (Godot 4.3+) absorbs a lot — but this is a "measure it for
-## artefacts" item, not a settled number.
+## Render range tracks the scale you are operating at. Only the ratio costs depth precision, and
+## reverse-Z (Godot 4.3+) absorbs a lot — but this is a "measure it for artefacts" item, not a
+## settled number.
 func _update_camera() -> void:
-	var camera: Camera3D = _world["ship"].get_node("Camera")
-	var frame = _world["frame_tree"].active_frame
+	var camera: Camera3D = _ship.get_node("Camera")
+	var frame = _world.frame_tree.active_frame
 	var range_for_frame := _camera_range(frame.kind)
 	camera.near = range_for_frame.x
 	camera.far = range_for_frame.y
@@ -174,30 +186,32 @@ func _build_hud() -> void:
 	_fps = fps
 
 
-## The limit is shown alongside the speed, not instead of it: a limit the player cannot
-## see reads as a bug.
+## The limit is shown alongside the speed, not instead of it: a limit the player cannot see
+## reads as a bug.
 func _update_hud() -> void:
-	var ship = _world["ship"]
-	var frame = _world["frame_tree"].active_frame
-	var length: float = ship.travel_length
+	var frame = _world.frame_tree.active_frame
+	var length: float = _ship.travel_length
 	var fraction := 0.0
 	if length > 0.0:
-		fraction = ship.speed * TravelScale.TRAVERSE_SECONDS / length
+		fraction = _ship.speed * TravelScale.TRAVERSE_SECONDS / length
+	var contact := "on the surface" if _ship.landed else "free flight"
+	var bodies := "visible" if _bodies_visible else "hidden"
 
-	var planet_state := "visible" if _planet_mesh.visible else "hidden"
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
+				"world       %s" % _world.name,
 				"frame       %s" % frame.name,
-				"altitude    %s" % _distance(ship.altitude()),
-				"speed       %s   (%.0f%% of local)" % [_speed(ship.speed), fraction * 100.0],
-				"nearest     %s at %s" % [ship.nearest_name, _distance(ship.nearest_distance)],
+				"altitude    %s" % _distance(_ship.altitude()),
+				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
+				"nearest     %s at %s" % [_ship.nearest_name, _distance(_ship.nearest_distance)],
 				"local unit  %s" % _distance(length),
+				"state       %s" % contact,
 				"",
-				"planet      %s, %d triangles" % [planet_state, _triangles],
+				"bodies      %s, %d triangles" % [bodies, _triangles],
 				"",
 				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
-				"P planet on/off    [ ] planet detail",
+				"P bodies on/off    [ ] body detail",
 			]
 		)
 	)

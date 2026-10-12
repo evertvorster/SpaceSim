@@ -108,11 +108,86 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 Speed is *derived*, never integrated: there is no speed to desync and no way to arrive too
 fast, because the limit falls with the remaining distance by construction.
 
+## World
+
+`addons/spacesim/world/` — a world loaded from data, and the scene it builds. **Content, not
+engine:** the file says what exists; the engine builds the frames, geometry, scale bodies and
+transition rules from it. A different world file should not require engine changes.
+
+### World file
+
+JSON, in `worlds/`. `worlds/playground.json` is the placeholder system. On-disk formats are part of
+the public interface, so the format is versioned (`format_version`).
+
+| Field | |
+|---|---|
+| `format_version` | int |
+| `name` | world name, shown in the demo readout |
+| `frames` | `system_band`, `atmosphere_band`, `surface_band` ([min, max] metres), `atmosphere_altitude`, `surface_altitude` (metres), `pad_size` |
+| `start` | `body` (an id) and `altitude` (metres above that body's surface) |
+| `bodies[]` | `id`, `name`, `kind`, `radius`, `position` (system frame, metres), `color`, `landable` |
+
+A body that is not `landable` gets geometry and a scale body but no frames — something to fly past
+or into, not somewhere to go. A generated universe will add `seed` and `generator_version` here;
+the playground is hand-authored and has neither.
+
+### `SpacesimWorldBody` — `RefCounted`
+
+The data half comes from the file; the node half is filled in by `build()`.
+
+| Member | |
+|---|---|
+| `id`, `name`, `kind: String` | |
+| `radius: float` | metres |
+| `position: Vector3` | in the system frame |
+| `color: Color`, `landable: bool` | |
+| `node: Node3D`, `mesh: MeshInstance3D` | built |
+| `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
+| `scale_body: SpacesimScaleBody` | built |
+| `static from_dictionary(data) -> SpacesimWorldBody` | |
+
+### `SpacesimWorld` — `RefCounted`
+
+| Member | |
+|---|---|
+| `static from_file(path) -> SpacesimWorld` | null on a read or parse failure |
+| `static from_dictionary(data) -> SpacesimWorld` | |
+| `build(parent) -> SpacesimWorld` | builds the scene; the observer is the caller's business |
+| `name`, `bodies: Array[SpacesimWorldBody]` | |
+| `container: Node3D`, `system_frame: SpacesimFrame`, `frame_tree: SpacesimFrameTree` | built |
+| `body_by_id(id) -> SpacesimWorldBody` | |
+| `scale_bodies() -> Array[SpacesimScaleBody]` | every body, for the travel unit |
+| `meshes() -> Array[MeshInstance3D]` | every body's mesh, for the hide/detail debug keys |
+| `ship_start() -> Vector3` | the world's start position |
+| `star() -> SpacesimWorldBody` | |
+| `aim_sun_at(position) -> void` | aims the star's light at a position |
+| `body_for_surface_frame(frame) -> SpacesimWorldBody` | |
+| `place_landing_zone(body, point) -> void` | puts a body's landing zone on the surface under `point` |
+
+**Landing zone.** A surface frame's origin is wherever the ship came down, not one fixed site —
+otherwise landing anywhere else would leave the ship millions of metres from its own frame's
+origin, which defeats the frame. On entering a surface frame the world moves that body's zone
+under the observer and then puts the observer back where it was: the frame moves, the world does
+not.
+
+**Lighting.** A single directional light cannot light a whole system from its star, so
+`aim_sun_at()` re-aims it at wherever the player is. The planet you are at is lit correctly; the
+one on the far side of the star is lit from its own side rather than the near one.
+
 ## Demo
 
-`demo/space_to_surface.*` — fly from space to a planet's surface. The world is built in
-code (`demo/scale_world.gd`) so `tests/test_space_to_surface.gd` can fly the identical
-world headless.
+`demo/space_to_surface.*` — fly around the playground system and land on planets. The world comes
+from a world file; the demo adds input, the camera's render range and a readout.
+`demo/player_ship.gd` builds and places the player's ship, so the headless tests fly the identical
+world and ship.
+
+| Key | |
+|---|---|
+| W / S | throttle |
+| mouse | pitch and yaw (click to recapture after Esc) |
+| A / D | roll |
+| P | hide/show the bodies |
+| `[` `]` | body tessellation, for attributing frame cost |
 
 ## Tests
 
