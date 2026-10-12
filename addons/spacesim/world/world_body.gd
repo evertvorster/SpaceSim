@@ -13,6 +13,9 @@ var radius: float ## metres
 var position: Vector3 ## in the system frame, metres
 var color: Color
 var landable: bool ## whether it gets atmosphere and surface frames
+## Whether it is worth marking on screen. A body can be worth flying to without being worth a
+## label — every rock in a belt is the latter.
+var significant: bool
 
 # Built by SpacesimWorld.
 var node: Node3D
@@ -30,6 +33,7 @@ static func from_dictionary(data: Dictionary) -> SpacesimWorldBody:
 	body.radius = float(data.get("radius", 0.0))
 	body.position = _vector_from(data.get("position", [0.0, 0.0, 0.0]))
 	body.landable = bool(data.get("landable", false))
+	body.significant = bool(data.get("significant", true))
 	var channels: Array = data.get("color", [0.8, 0.8, 0.8])
 	body.color = Color(float(channels[0]), float(channels[1]), float(channels[2]))
 	return body

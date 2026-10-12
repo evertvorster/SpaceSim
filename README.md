@@ -19,6 +19,7 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   coordinate/      compartmentalised coordinate spaces and threshold transitions
   travel/          the local unit of travel (speed scales with distance to the nearest body)
   world/           a world loaded from data, and the scene it builds
+  navigation/      navigation markers (targets, off-screen pointers)
 worlds/            world files (content)
 demo/              fly the playground system and land on planets
 tests/             headless test scripts
@@ -41,19 +42,23 @@ godot-double-mono --path .
 ```
 
 It starts in `demo/space_to_surface.tscn`, flying the **playground** system from
-`worlds/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **Esc**
-releases the mouse (click to take it back). **P** hides the bodies and **`[` `]`** change their
-tessellation, which is how the frame-cost questions get answered rather than guessed at.
+`worlds/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **T** to cycle
+the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
+**`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
+than guessed at.
 
 ## Tests
 
 ```
-timeout 120 godot-double-mono --headless --path . res://tests/run_tests.tscn
+tests/run.sh
 ```
 
-Exits non-zero on a failed check. Run it under `timeout`: a suite that fails to compile cannot
-reach its own `quit()`, and a hung test process is worse than a failed one. The suite includes
-flying the playground world headless: down to Terra's surface, back up, then across to Borealis.
+Runs the suite headless and smoke-loads the demo scene, and fails if Godot reported any error. Two
+reasons that matters: a GDScript error aborts the function it happens in without failing the run, so
+a broken check can silently skip; and the test scene never loads the demo scene, so a parse error in
+a demo script would otherwise stay quiet until somebody launched the game.
+
+`GODOT=/usr/bin/godot-mono tests/run.sh` runs it on another build.
 
 ## Documentation
 

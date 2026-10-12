@@ -22,7 +22,8 @@
       "radius": 6.9634e8,
       "position": [0.0, 0.0, 0.0],
       "color": [1.0, 0.86, 0.55],
-      "landable": false
+      "landable": false,
+      "significant": true
     },
     {
       "id": "planet:cinder",
@@ -31,7 +32,8 @@
       "radius": 2.44e6,
       "position": [1.5e10, 0.0, 0.0],
       "color": [0.55, 0.48, 0.42],
-      "landable": true
+      "landable": true,
+      "significant": true
     },
     {
       "id": "planet:terra",
@@ -40,7 +42,8 @@
       "radius": 6.371e6,
       "position": [3.0e10, 0.0, 0.0],
       "color": [0.32, 0.44, 0.5],
-      "landable": true
+      "landable": true,
+      "significant": true
     },
     {
       "id": "planet:borealis",
@@ -49,7 +52,8 @@
       "radius": 3.39e6,
       "position": [5.2e10, 0.0, 0.0],
       "color": [0.5, 0.36, 0.3],
-      "landable": true
+      "landable": true,
+      "significant": true
     },
     {
       "id": "planet:nix",
@@ -58,7 +62,8 @@
       "radius": 2.46e7,
       "position": [8.2e10, 0.0, 0.0],
       "color": [0.36, 0.42, 0.62],
-      "landable": true
+      "landable": true,
+      "significant": true
     }
   ]
 }

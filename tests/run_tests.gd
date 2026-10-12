@@ -15,6 +15,7 @@ var suites: Array = [
 	preload("res://tests/test_frame_transition.gd"),
 	preload("res://tests/test_world.gd"),
 	preload("res://tests/test_travel_scale.gd"),
+	preload("res://tests/test_markers.gd"),
 	preload("res://tests/test_space_to_surface.gd"),
 ]
 

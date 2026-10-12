@@ -125,11 +125,13 @@ the public interface, so the format is versioned (`format_version`).
 | `name` | world name, shown in the demo readout |
 | `frames` | `system_band`, `atmosphere_band`, `surface_band` ([min, max] metres), `atmosphere_altitude`, `surface_altitude` (metres), `pad_size` |
 | `start` | `body` (an id) and `altitude` (metres above that body's surface) |
-| `bodies[]` | `id`, `name`, `kind`, `radius`, `position` (system frame, metres), `color`, `landable` |
+| `bodies[]` | `id`, `name`, `kind`, `radius`, `position` (system frame, metres), `color`, `landable`, `significant` |
 
 A body that is not `landable` gets geometry and a scale body but no frames — something to fly past
-or into, not somewhere to go. A generated universe will add `seed` and `generator_version` here;
-the playground is hand-authored and has neither.
+or into, not somewhere to go. `significant` is whether it is worth marking on screen: a body can be
+worth flying to without being worth a label, and every rock in a belt is the latter. A generated
+universe will add `seed` and `generator_version` here; the playground is hand-authored and has
+neither.
 
 ### `SpacesimWorldBody` — `RefCounted`
 
@@ -174,6 +176,45 @@ not.
 `aim_sun_at()` re-aims it at wherever the player is. The planet you are at is lit correctly; the
 one on the far side of the star is lit from its own side rather than the near one.
 
+## Navigation
+
+`addons/spacesim/navigation/` — navigation markers: a name and distance for the objects that
+matter right now.
+
+Two presentations, one projection. **On screen:** a `Label3D` at the object's position,
+billboarded and at a constant screen size, depth tested — because it sits at the object's *centre*,
+the object's own projected area eats it, so it needs no distance or size test and no fade.
+**Off screen:** a `Label` in a `CanvasLayer`, clamped to the viewport edge in the direction that
+would bring the object into view.
+
+The set is rebuilt every frame and the nodes are **pooled, not allocated**; the pool size is the
+screen-space budget in one place.
+
+### `SpacesimMarkers` — `Node3D`
+
+| Member | |
+|---|---|
+| `Priority` | `CONTEXT`, `MISSION`, `SELECTED` |
+| `pool_size: int` | the cap, and the screen-space budget |
+| `context_targets`, `mission_targets: Array[Node3D]` | ambient group, then mission objectives |
+| `selected: Node3D` | the selected target, or null |
+| `refresh(camera) -> void` | rebuild the set and draw it; call once a frame |
+| `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame |
+| `static clamp_to_edge(point, size, margin) -> Vector2` | the smallest turn that brings a point into view |
+| `static screen_direction(camera, target) -> Vector2` | viewport direction, valid behind the camera |
+| `static format_distance(metres) -> String` | `1.50 Gm`, `2.5 km`, `12 m` |
+
+**The set is keyed, prioritised and capped.** One marker per object — a body that is both a
+mission target and in the ambient group gets one label, not two stacked on it. Priority decides
+what survives the cap: selected target, then mission targets, then the ambient group, nearest
+first within a group. Capping by distance instead would cut off precisely the off-screen objects
+the pointers exist for.
+
+**`unproject_position()` is wrong behind the camera** (it mirrors, so a pointer would send you the
+opposite way). `screen_direction()` exists for that case and is tested for it.
+
+Which objects are marked is the caller's business; this decides only how they are drawn.
+
 ## Demo
 
 `demo/space_to_surface.*` — fly around the playground system and land on planets. The world comes
@@ -186,6 +227,7 @@ world and ship.
 | W / S | throttle |
 | mouse | pitch and yaw (click to recapture after Esc) |
 | A / D | roll |
+| T | cycle the selected target |
 | P | hide/show the bodies |
 | `[` `]` | body tessellation, for attributing frame cost |
 

@@ -35,3 +35,13 @@ func check_vector_near(actual: Vector3, expected: Vector3, what: String, epsilon
 	else:
 		failures += 1
 		print("    FAIL  %s (off by %.9f m)" % [what, error])
+
+
+func check_vector2_near(actual: Vector2, expected: Vector2, what: String, epsilon: float) -> void:
+	checks += 1
+	var error := actual.distance_to(expected)
+	if error <= epsilon:
+		print("    ok    ", what)
+	else:
+		failures += 1
+		print("    FAIL  %s (off by %.6f)" % [what, error])

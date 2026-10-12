@@ -108,6 +108,15 @@ func meshes() -> Array[MeshInstance3D]:
 	return list
 
 
+## The bodies worth marking, in file order. Content decides which those are.
+func significant_nodes() -> Array[Node3D]:
+	var list: Array[Node3D] = []
+	for body in bodies:
+		if body.significant and body.node != null:
+			list.append(body.node)
+	return list
+
+
 func ship_start() -> Vector3:
 	var body := body_by_id(start_body_id)
 	if body == null:

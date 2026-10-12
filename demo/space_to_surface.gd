@@ -27,6 +27,8 @@ const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), V
 
 var _world: SpacesimWorld
 var _ship: Node3D
+var _markers: SpacesimMarkers
+var _selected_index := -1
 var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
@@ -44,6 +46,9 @@ func _ready() -> void:
 	_world.build(self)
 	_ship = PlayerShip.create()
 	PlayerShip.place(_world, _ship)
+	_markers = SpacesimMarkers.new()
+	_markers.name = "Markers"
+	add_child(_markers)
 	_set_detail(_detail)
 	_build_hud()
 	_capture_mouse()
@@ -73,6 +78,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_detail(_detail - 1)
 			KEY_BRACKETRIGHT:
 				_set_detail(_detail + 1)
+			KEY_T:
+				_cycle_target()
 
 
 ## Change every body's tessellation. The count is measured here rather than per frame, because
@@ -87,6 +94,16 @@ func _set_detail(index: int) -> void:
 		sphere.rings = level.y
 		var faces := sphere.get_faces().size()
 		_triangles += floori(float(faces) / 3.0)
+
+
+## Selection is the input half of targeting, and the smallest stand-in for the navigation we
+## have not designed yet: cycle the significant bodies and hold the choice.
+func _cycle_target() -> void:
+	var targets := _world.significant_nodes()
+	if targets.is_empty():
+		return
+	_selected_index = (_selected_index + 1) % targets.size()
+	_markers.selected = targets[_selected_index]
 
 
 ## Click to take the mouse back after Esc released it.
@@ -130,16 +147,29 @@ func _physics_process(delta: float) -> void:
 	_ship.step(delta, input)
 	_world.frame_tree.evaluate()
 	_world.aim_sun_at(_ship.global_position)
-	_update_camera()
+	var camera: Camera3D = _ship.get_node("Camera")
+	_update_markers(camera)
+	_update_camera(camera)
 	_update_hud()
+
+
+## The ambient group is the frame's business: other bodies matter while you are out in space, and
+## stop mattering once you are busy landing on one of them.
+func _update_markers(camera: Camera3D) -> void:
+	var frame: Frame = _world.frame_tree.active_frame
+	var in_space: bool = frame.kind == Frame.Kind.SPACE or frame.kind == Frame.Kind.ORBITAL
+	var context: Array[Node3D] = []
+	if in_space:
+		context = _world.significant_nodes()
+	_markers.context_targets = context
+	_markers.refresh(camera)
 
 
 ## Render range tracks the scale you are operating at. Only the ratio costs depth precision, and
 ## reverse-Z (Godot 4.3+) absorbs a lot — but this is a "measure it for artefacts" item, not a
 ## settled number.
-func _update_camera() -> void:
-	var camera: Camera3D = _ship.get_node("Camera")
-	var frame = _world.frame_tree.active_frame
+func _update_camera(camera: Camera3D) -> void:
+	var frame: Frame = _world.frame_tree.active_frame
 	var range_for_frame := _camera_range(frame.kind)
 	camera.near = range_for_frame.x
 	camera.far = range_for_frame.y
@@ -189,45 +219,36 @@ func _build_hud() -> void:
 ## The limit is shown alongside the speed, not instead of it: a limit the player cannot see
 ## reads as a bug.
 func _update_hud() -> void:
-	var frame = _world.frame_tree.active_frame
+	var frame: Frame = _world.frame_tree.active_frame
 	var length: float = _ship.travel_length
 	var fraction := 0.0
 	if length > 0.0:
 		fraction = _ship.speed * TravelScale.TRAVERSE_SECONDS / length
 	var contact := "on the surface" if _ship.landed else "free flight"
 	var bodies := "visible" if _bodies_visible else "hidden"
+	var target := "none"
+	if _markers.selected != null:
+		target = _markers.selected.name
 
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
 				"world       %s" % _world.name,
 				"frame       %s" % frame.name,
-				"altitude    %s" % _distance(_ship.altitude()),
+				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
 				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
-				"nearest     %s at %s" % [_ship.nearest_name, _distance(_ship.nearest_distance)],
-				"local unit  %s" % _distance(length),
+				"nearest     %s at %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.nearest_distance)],
+				"local unit  %s" % SpacesimMarkers.format_distance(length),
 				"state       %s" % contact,
+				"target      %s" % target,
 				"",
 				"bodies      %s, %d triangles" % [bodies, _triangles],
 				"",
 				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
-				"P bodies on/off    [ ] body detail",
+				"T cycle target    P bodies on/off    [ ] body detail",
 			]
 		)
 	)
-
-
-static func _distance(metres: float) -> String:
-	if is_inf(metres) or is_nan(metres):
-		return "--"
-	var magnitude := absf(metres)
-	if magnitude >= 1.0e9:
-		return "%.3f Gm" % (metres / 1.0e9)
-	if magnitude >= 1.0e6:
-		return "%.3f Mm" % (metres / 1.0e6)
-	if magnitude >= 1.0e3:
-		return "%.3f km" % (metres / 1.0e3)
-	return "%.2f m" % metres
 
 
 static func _speed(metres_per_second: float) -> String:
