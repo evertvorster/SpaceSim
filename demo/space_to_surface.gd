@@ -18,15 +18,24 @@ const MOUSE_SENSITIVITY := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
 const THROTTLE_RATE := 0.7 ## per second
 
+## Planet detail levels for cost attribution: if the frame rate tracks screen coverage it
+## stays flat across these, and if it tracks triangle count it moves with them.
+const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), Vector2i(256, 128)]
+
 var _world := {}
 var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
 var _skip_next_motion := false
+var _planet_mesh: MeshInstance3D
+var _detail := 2 ## index into DETAIL_LEVELS, 128 x 64 by default
+var _triangles := 0
 
 
 func _ready() -> void:
 	_world = ScaleWorld.new().build(self)
+	_planet_mesh = _world["planet_mesh"]
+	_set_detail(_detail)
 	_build_hud()
 	_capture_mouse()
 
@@ -43,8 +52,28 @@ func _unhandled_input(event: InputEvent) -> void:
 		_look += event.relative
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_capture_mouse()
-	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	elif event is InputEventKey and event.pressed and not event.echo:
+		match event.keycode:
+			KEY_ESCAPE:
+				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+			KEY_P:
+				_planet_mesh.visible = not _planet_mesh.visible
+			KEY_BRACKETLEFT:
+				_set_detail(_detail - 1)
+			KEY_BRACKETRIGHT:
+				_set_detail(_detail + 1)
+
+
+## Change the planet's tessellation. Cheap to call: the count is measured once here rather
+## than per frame, because get_faces() allocates.
+func _set_detail(index: int) -> void:
+	_detail = clampi(index, 0, DETAIL_LEVELS.size() - 1)
+	var level: Vector2i = DETAIL_LEVELS[_detail]
+	var sphere: SphereMesh = _planet_mesh.mesh
+	sphere.radial_segments = level.x
+	sphere.rings = level.y
+	@warning_ignore("integer_division")
+	_triangles = sphere.get_faces().size() / 3
 
 
 ## Click to take the mouse back after Esc released it.
@@ -155,6 +184,7 @@ func _update_hud() -> void:
 	if length > 0.0:
 		fraction = ship.speed * TravelScale.TRAVERSE_SECONDS / length
 
+	var planet_state := "visible" if _planet_mesh.visible else "hidden"
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
@@ -164,7 +194,10 @@ func _update_hud() -> void:
 				"nearest     %s at %s" % [ship.nearest_name, _distance(ship.nearest_distance)],
 				"local unit  %s" % _distance(length),
 				"",
+				"planet      %s, %d triangles" % [planet_state, _triangles],
+				"",
 				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
+				"P planet on/off    [ ] planet detail",
 			]
 		)
 	)

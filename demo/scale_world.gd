@@ -111,6 +111,7 @@ func build(root: Node) -> Dictionary:
 		"frame_tree": tree,
 		"system": system,
 		"planet": planet,
+		"planet_mesh": _planet_mesh,
 		"atmosphere": atmosphere,
 		"surface": surface,
 		"ship": ship,
@@ -156,6 +157,11 @@ func _add_planet_surface(planet: Node3D) -> void:
 	mesh.material_override = material
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	planet.add_child(mesh)
+	_planet_mesh = mesh
+
+
+## The planet's mesh, so a debug key can hide it or change its detail.
+var _planet_mesh: MeshInstance3D
 
 
 func _add_landing_site(surface: Node3D) -> void:

@@ -12,9 +12,6 @@ extends Node3D
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 
-## Distance at which the ship is considered down.
-const LANDING_CLEARANCE := 1.0
-
 ## The frame tree whose active frame supplies the travel band. Set by the world builder.
 var frame_tree: Node3D
 
@@ -31,6 +28,9 @@ var speed := 0.0
 var travel_length := 0.0
 var nearest_distance := INF
 var nearest_name := ""
+
+## True while the ship is in contact with a surface this step. Recomputed every step: this
+## is contact, not a latch.
 var landed := false
 
 
@@ -53,10 +53,11 @@ func step(delta: float, input: Dictionary) -> void:
 	speed = TravelScale.speed_for(throttle, nearest_distance, band.x, band.y)
 
 	# Forward is -Z, as everywhere in Godot.
+	landed = false
 	if speed > 0.0:
 		global_position -= global_transform.basis.z * speed * delta
 
-	_clamp_to_surface()
+	_constrain_to_surface()
 
 
 func _apply_attitude(input: Dictionary) -> void:
@@ -95,20 +96,25 @@ func altitude() -> float:
 	return nearest_distance
 
 
-func _clamp_to_surface() -> void:
+## The surface is a constraint, not a latch.
+##
+## Motion into the surface is absorbed by putting the ship back on it; motion along or away
+## from it is left alone, so the ship can slide and can take off. Latching here instead is
+## what made landing a one-way trip.
+##
+## The query is repeated rather than reused from `_update_proximity`, because the ship has
+## moved since then. TODO: cache it properly once there is more than one body.
+func _constrain_to_surface() -> void:
 	var body := Proximity.nearest_body(global_position, bodies)
 	if body == null or body.node == null:
 		return
 	var offset := global_position - body.node.global_position
 	var distance := offset.length()
-	if distance >= body.radius + LANDING_CLEARANCE:
+	if distance >= body.radius:
 		return
 
-	# Touchdown. TODO: real collision and terrain come with physics; for now the ship
-	# sits on the surface and stops.
-	var direction := Vector3.UP
+	var outward := Vector3.UP
 	if distance > 0.0:
-		direction = offset / distance
-	global_position = body.node.global_position + direction * body.radius
-	speed = 0.0
+		outward = offset / distance
+	global_position = body.node.global_position + outward * body.radius
 	landed = true

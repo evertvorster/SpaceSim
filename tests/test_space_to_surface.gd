@@ -60,4 +60,25 @@ func run(h, root: Node) -> void:
 			% [highest_speed / 1.0e3, lowest_speed]
 		)
 	)
+
+	# Take off again. Landing used to latch the ship: the surface clamp re-seated it and
+	# zeroed its speed on every step, so it could never leave. This is the regression test
+	# for that.
+	var outward: Vector3 = (ship.global_position - planet.global_position).normalized()
+	var climb_to: Vector3 = ship.global_position + outward * 1.0e7
+	var takeoff_steps := 0
+	var airborne := false
+	while takeoff_steps < 20000:
+		ship.step(STEP, {"throttle": 1.0, "aim": climb_to})
+		tree.evaluate()
+		takeoff_steps += 1
+		if ship.altitude() > 10_000.0:
+			airborne = true
+			break
+
+	h.check(
+		airborne, "and it can take off again (%d steps, %.0f s of climb)" % [takeoff_steps, takeoff_steps * STEP]
+	)
+	h.check(not ship.landed, "and is no longer in contact with the surface")
+	h.check(tree.active_frame == world["atmosphere"], "and has climbed back out of the surface frame")
 	world["container"].free()
