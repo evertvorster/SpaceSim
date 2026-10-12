@@ -58,6 +58,7 @@ const REGISTRY := {
 	"frames.surface_altitude": {"default": 2000.0, "scope": Scope.WORLD, "min": 0.0},
 	"frames.pad_size": {"default": 4000.0, "scope": Scope.WORLD, "min": 1.0},
 	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.throttle_up": {"default": "W", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.throttle_down": {"default": "S", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.roll_left": {"default": "A", "scope": Scope.PLAYER, "validator": "key_binding"},

@@ -1,5 +1,5 @@
 class_name SpacesimSettingsPanel
-extends Control
+extends SpacesimScreen
 ## The settings screen: staged edits, Apply to commit, Close to discard.
 ##
 ## Modelled on the vegastrike config screen. A control edits a staging area rather than the live
@@ -17,7 +17,6 @@ const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
 const INVALID_COLOR := Color(1.0, 0.35, 0.3)
 
-signal closed
 signal exit_requested
 
 var _settings: Node
@@ -37,57 +36,22 @@ func configure(settings: Node) -> void:
 
 
 func _build() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_STOP
-
-	var dim := ColorRect.new()
-	dim.color = Color(0.0, 0.0, 0.0, 0.65)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(dim)
-
-	var panel := PanelContainer.new()
-	panel.name = "Panel"
-	panel.anchor_left = 0.5
-	panel.anchor_top = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_bottom = 0.5
-	panel.offset_left = -430.0
-	panel.offset_top = -320.0
-	panel.offset_right = 430.0
-	panel.offset_bottom = 320.0
-	add_child(panel)
-
-	var margin := MarginContainer.new()
-	for side in ["left", "top", "right", "bottom"]:
-		margin.add_theme_constant_override("margin_%s" % side, 16)
-	panel.add_child(margin)
-
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
-	margin.add_child(column)
-
-	var title := Label.new()
-	title.text = "Settings"
-	title.add_theme_font_size_override("font_size", 22)
-	column.add_child(title)
-
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	column.add_child(scroll)
+	build_screen("Settings")
 
 	var grid := GridContainer.new()
+	grid.name = "Settings"
 	grid.columns = 3
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 6)
-	scroll.add_child(grid)
+	content.add_child(grid)
 
 	for key in EditScript.editable_keys():
 		_add_row(grid, key)
 
-	column.add_child(_build_buttons())
+	_apply_button = add_button("Apply", func() -> void: _edit.apply())
+	_close_button = add_button("Close", _on_close)
+	add_button("Exit Game", func() -> void: exit_requested.emit())
 
 
 func _add_row(grid: GridContainer, key: String) -> void:
@@ -181,36 +145,14 @@ func _stage_text(key: String, field: LineEdit, new_text: String) -> void:
 		_edit.stage(key, new_text)
 
 
-func _build_buttons() -> Control:
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 8)
-
-	_apply_button = Button.new()
-	_apply_button.name = "Apply"
-	_apply_button.text = "Apply"
-	_apply_button.pressed.connect(func() -> void: _edit.apply())
-	row.add_child(_apply_button)
-
-	_close_button = Button.new()
-	_close_button.name = "Close"
-	_close_button.text = "Close"
-	_close_button.tooltip_text = "Discards anything you have not applied."
-	_close_button.pressed.connect(_on_close)
-	row.add_child(_close_button)
-
-	var exit_button := Button.new()
-	exit_button.name = "ExitGame"
-	exit_button.text = "Exit Game"
-	exit_button.pressed.connect(func() -> void: exit_requested.emit())
-	row.add_child(exit_button)
-
-	return row
-
-
 func _on_close() -> void:
-	_edit.discard()
 	closed.emit()
+
+
+## Leaving without applying throws the staged edits away — which is what the amber Close button
+## warns about. It holds whichever route the screen is left by, not only the Close button.
+func dismissed() -> void:
+	_edit.discard()
 
 
 ## Pull every control back to what the staging area holds — which is how a Reset shows up, and how

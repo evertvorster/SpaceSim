@@ -379,11 +379,59 @@ edit directly.
 `get_value` never touches the disk. Tests use their own instance with their own path, so the suite
 never writes to the real file.
 
-## Demo
+## Screens
 
-`demo/space_to_surface.*` — fly around the playground system and land on planets. The world comes
-from a world file; the demo adds input, the camera's render range and a readout.
-`demo/player_ship.gd` builds and places the player's ship, so the headless tests fly the identical
+`addons/spacesim/ui/screen.gd` — the chrome every full-screen modal shares: a dimmed backdrop, a
+centred panel with a title, a scrollable content column and a button bar. Two screens with the
+same chrome would drift apart, so there is one.
+
+### `SpacesimScreen` — `Control`
+
+| Member | |
+|---|---|
+| `PANEL_SIZE` | how big the panel is |
+| `build_screen(title)` | build the chrome; a subclass then fills `content` and `actions` |
+| `content: VBoxContainer` | where a subclass puts its rows |
+| `actions: HBoxContainer` | where it puts its buttons |
+| `add_button(label, on_pressed) -> Button` | add and connect a button in one line |
+| `opened()` | called just before the screen is shown; rebuild anything stale here |
+| `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed |
+| `closed` | signal, emitted to ask the scene to hide the screen |
+
+`SpacesimSettingsPanel` and `SpacesimPlayerPanel` are the two subclasses. The settings panel uses
+`dismissed()` to throw staged edits away, which is what its amber Close button warns about.
+
+## Player
+
+`addons/spacesim/player/` — the player's own state: what they are and what they carry.
+Player-owned per the world/player boundary; a save will hold it, and nothing persists it yet.
+
+### `SpacesimPlayer` — `RefCounted`
+
+| Member | |
+|---|---|
+| `DEFAULT_NAME`, `DEFAULT_ATTRIBUTES`, `DEFAULT_ASSETS` | the placeholder starting state |
+| `attributes: Dictionary` | named values, starting with `Name`. Currency lives here too, being a quantity rather than a thing |
+| `assets: Array` | things held, each `{name, type, value}` — the shape leaves room for the rest of an asset |
+| `display_name() -> String` | |
+| `reset(player_name) -> void` | back to the starting state, as copies rather than the consts |
+
+Both sets are placeholder content: one line each to change, and the screen reads whatever is there
+rather than naming anything itself.
+
+### `SpacesimPlayerPanel` — `SpacesimScreen`
+
+The personal-data screen, on **Tab**. Sections are built from the player's own dictionaries —
+attributes as a two-column table, assets as name / type / value — so adding an attribute needs no
+change here. Rebuilt on `opened()`, so a value that changed while it was hidden cannot be stale.
+
+**Save and load will live here.**
+
+## The game
+
+`game/main.*` — fly around the playground system and land on planets. The world comes from a world
+file; the scene adds input, the camera's render range, the two screens and a readout.
+`game/player_ship.gd` builds and places the player's ship, so the headless tests fly the identical
 world and ship.
 
 | Key | |
@@ -394,9 +442,12 @@ world and ship.
 | T | cycle the selected target |
 | P | hide/show the bodies |
 | `[` `]` | body tessellation, for attributing frame cost |
+| Tab | pause and open the personal data screen |
 | Alt+C | pause and open the settings screen |
 
-Every one of those except Esc is a binding in the settings file and can be changed there.
+Every one of those except Esc is a binding in the settings file and can be changed there. The two
+screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab is also the UI's
+focus key and the UI system would consume it first.
 
 ## Tests
 

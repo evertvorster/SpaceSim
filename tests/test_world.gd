@@ -1,7 +1,7 @@
 extends RefCounted
 ## Loading a world from data and building it.
 
-const PlayerShip := preload("res://demo/player_ship.gd")
+const PlayerShip := preload("res://game/player_ship.gd")
 
 const WORLD_PATH := "res://worlds/playground.json"
 

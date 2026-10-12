@@ -5,7 +5,7 @@ extends RefCounted
 ## the controller applies. Shared by the demo scene and the headless tests so both fly the
 ## same ship.
 
-const FlightController := preload("res://demo/flight_controller.gd")
+const FlightController := preload("res://game/flight_controller.gd")
 
 const HULL_SIZE := Vector3(6.0, 3.0, 18.0)
 const CAMERA_OFFSET := Vector3(0.0, 5.0, 32.0)

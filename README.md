@@ -8,9 +8,9 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 
 ## Status
 
-**Early.** Coordinate frames, the travel unit and a data-driven world exist, with tests, and a demo
-flies around a small solar system landing on planets. No terrain, no physics, no simulation, no
-persistence yet.
+**Early, but real.** The playground world and the player are the game now, not a demo: coordinate
+frames, the travel unit, a data-driven world, navigation markers, settings and a personal data
+screen, all with tests. No terrain, no physics, no simulation, no persistence yet.
 
 ## Layout
 
@@ -19,10 +19,12 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   coordinate/      compartmentalised coordinate spaces and threshold transitions
   travel/          the local unit of travel (speed scales with distance to the nearest body)
   world/           a world loaded from data, and the scene it builds
+  player/          the player's own state: attributes and assets
   navigation/      navigation markers (targets, off-screen pointers)
   settings/        declared defaults in code, one machine-written file for what differs
+  ui/              chrome shared by the full-screen screens
 worlds/            world files (content)
-demo/              fly the playground system and land on planets
+game/              the game: fly the playground system and land on planets
 tests/             headless test scripts
 docs/API.md        what the engine exposes, as it is implemented
 ```
@@ -42,13 +44,14 @@ Open the project:
 godot-double-mono --path .
 ```
 
-It starts in `demo/space_to_surface.tscn`, flying the **playground** system from
+It starts in `game/main.tscn`, flying the **playground** system from
 `worlds/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **T** to cycle
 the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
 **`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
-than guessed at. **Alt+C** pauses and opens the settings screen.
+than guessed at. **Tab** opens the personal data screen and **Alt+C** the settings screen; both
+pause the game.
 
-Movement keys and the settings hotkey are **bindings** in the settings file, so they can be changed
+Movement keys and the screen hotkeys are **bindings** in the settings file, so they can be changed
 there without a rebuild.
 
 ## Settings

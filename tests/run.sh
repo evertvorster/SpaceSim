@@ -5,7 +5,7 @@
 #
 #  1. A GDScript error aborts the function it happens in without failing the run, so a broken
 #     check can silently skip while the suite still reports success.
-#  2. The test scene never loads the demo scene, so a parse error in a demo/ script would go
+#  2. The test scene never loads the game scene, so a parse error in a game/ script would go
 #     unnoticed until somebody launched the game.
 #
 #   tests/run.sh

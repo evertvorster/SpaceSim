@@ -5,7 +5,7 @@ extends RefCounted
 ## landing is the one that matters for a solar system: it crosses the gap between two bodies, so
 ## it exercises the travel unit following whichever body is nearest.
 
-const PlayerShip := preload("res://demo/player_ship.gd")
+const PlayerShip := preload("res://game/player_ship.gd")
 
 const WORLD_PATH := "res://worlds/playground.json"
 const STEP := 1.0 / 60.0

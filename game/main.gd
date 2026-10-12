@@ -11,7 +11,7 @@ extends Node3D
 ## The world comes from `worlds/playground.json`; this script only adds input, the camera's
 ## render range and a readout. A different world file should not need this script changed.
 
-const PlayerShip := preload("res://demo/player_ship.gd")
+const PlayerShip := preload("res://game/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
@@ -31,8 +31,12 @@ var _ship: Node3D
 var _camera: Camera3D
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
-var _panel: SpacesimSettingsPanel
-var _paused := false
+var _player: SpacesimPlayer
+var _settings_screen: SpacesimSettingsPanel
+var _player_screen: SpacesimPlayerPanel
+
+## The screen that is open, or null. Having one open *is* being paused.
+var _screen: SpacesimScreen
 var _selected_index := -1
 var _look := Vector2.ZERO
 var _hud: Label
@@ -59,21 +63,38 @@ func _ready() -> void:
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_set_detail(_detail)
 	_build_hud()
-	_panel = SpacesimSettingsPanel.new()
-	_panel.name = "Settings"
-	_panel.configure(SpacesimSettings)
-	_panel.visible = false
-	_ui_layer.add_child(_panel)
-	_panel.closed.connect(_close_settings)
-	_panel.exit_requested.connect(_on_exit_requested)
+
+	_player = SpacesimPlayer.new()
+	_settings_screen = SpacesimSettingsPanel.new()
+	_settings_screen.configure(SpacesimSettings)
+	_settings_screen.exit_requested.connect(_on_exit_requested)
+	_register_screen(_settings_screen, "Settings")
+	_player_screen = SpacesimPlayerPanel.new()
+	_player_screen.configure(_player)
+	_register_screen(_player_screen, "Player")
+
 	_capture_mouse()
+
+
+## The screen hotkeys are handled here rather than in _unhandled_input, because Tab is also the
+## UI's focus key and the UI system would consume it first. Handled here, Tab always toggles, and
+## keyboard focus navigation still works for everything else.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.settings_screen"))):
+		_toggle(_settings_screen)
+		get_viewport().set_input_as_handled()
+	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.player_screen"))):
+		_toggle(_player_screen)
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		_handle_key(event)
 		return
-	if _paused:
+	if _screen != null:
 		return
 	if event is InputEventMouseMotion:
 		_ship_mouse_look(event)
@@ -82,13 +103,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_key(event: InputEventKey) -> void:
-	# The settings hotkey first, and regardless of whether the screen is already open, so it
-	# toggles.
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.settings_screen"))):
-		_toggle_settings()
-		get_viewport().set_input_as_handled()
-		return
-	if _paused:
+	if _screen != null:
 		return
 
 	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.bodies_toggle"))):
@@ -117,24 +132,39 @@ func _ship_mouse_look(event: InputEventMouseMotion) -> void:
 
 
 ## Pausing the game is the scene's business rather than the tree's: only the simulation needs to
-## stop, and the settings screen has to keep running inside it.
-func _toggle_settings() -> void:
-	if _paused:
-		_close_settings()
+## stop, and a screen has to keep running inside it.
+func _toggle(screen: SpacesimScreen) -> void:
+	if _screen == screen:
+		_close_screen()
 	else:
-		_open_settings()
+		_open_screen(screen)
 
 
-func _open_settings() -> void:
-	_paused = true
-	_panel.visible = true
+func _open_screen(screen: SpacesimScreen) -> void:
+	if _screen != null:
+		_screen.visible = false
+		_screen.dismissed()
+	_screen = screen
+	screen.opened()
+	screen.visible = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
-func _close_settings() -> void:
-	_paused = false
-	_panel.visible = false
+func _close_screen() -> void:
+	if _screen == null:
+		return
+	_screen.visible = false
+	_screen.dismissed()
+	_screen = null
 	_capture_mouse()
+
+
+## Put a screen in the UI layer, hidden, with its close wired.
+func _register_screen(screen: SpacesimScreen, screen_name: String) -> void:
+	screen.name = screen_name
+	screen.visible = false
+	_ui_layer.add_child(screen)
+	screen.closed.connect(_close_screen)
 
 
 func _on_exit_requested() -> void:
@@ -208,7 +238,7 @@ func _process(_delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if _paused:
+	if _screen != null:
 		return
 
 	var throttle: float = _ship.throttle
@@ -323,6 +353,7 @@ func _update_hud() -> void:
 		PackedStringArray(
 			[
 				"world       %s" % _world.name,
+				"player      %s" % _player.display_name(),
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
@@ -335,7 +366,7 @@ func _update_hud() -> void:
 				"bodies      %s, %d triangles" % [bodies, _triangles],
 				"",
 				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
-				"T cycle target    P bodies on/off    [ ] body detail    Alt+C settings",
+				"Tab personal data    Alt+C settings    T cycle target    P bodies on/off    [ ] body detail",
 			]
 		)
 	)
