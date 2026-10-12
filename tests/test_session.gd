@@ -178,12 +178,19 @@ func _test_the_browser(h, root: Node, world: SpacesimWorld) -> void:
 
 	h.check(panel.actions.get_child_count() == 3, "the screen has Save, New Story and Close")
 	h.check(_shows(panel, "Histories") and _shows(panel, "Saves"), "and both lists")
+	# What can be done to a row lives on the row.
 	h.check(
-		_shows(panel, "Switch") and _shows(panel, "Rename") and _shows(panel, "Delete"),
-		"with what can be done to a history"
+		_shows(panel, "Play this history") and _shows(panel, "Delete history"),
+		"with a menu on a history row"
 	)
-	h.check(_shows(panel, "Load"), "and a Load button that is not hidden behind anything")
-	h.check(_shows(panel, "Change values"), "and a way to change the player's own values")
+	h.check(
+		_shows(panel, "Show this save") and _shows(panel, "Load this save"),
+		"and one on a save row, which is where Load lives"
+	)
+	h.check(_shows(panel, "Rename this"), "and one on a thing the player holds")
+	# The two renames are different things, so they are named differently.
+	h.check(_shows(panel, "Rename history"), "renaming a history says so")
+	h.check(_shows(panel, "Change my values"), "and the player's own name is a value of theirs, not a history")
 	h.check(
 		_shows(panel, "Assets") and _shows(panel, "Playground Lander"),
 		"and what the player holds, by name"
@@ -223,13 +230,18 @@ func _test_the_dialog(h, root: Node) -> void:
 	layer.free()
 
 
-## Whether anything under `node` shows this text, as part of a longer line.
+## Whether anything under `node` shows this text, as part of a longer line. Menus count: what you
+## can do to a row lives in them, so a test that cannot see them cannot see the affordances.
 static func _shows(node: Node, fragment: String) -> bool:
 	if node is Label and node.text.contains(fragment):
 		return true
 	if node is Button and node.text.contains(fragment):
 		return true
 	if node is ItemList:
+		for index in node.item_count:
+			if node.get_item_text(index).contains(fragment):
+				return true
+	if node is PopupMenu:
 		for index in node.item_count:
 			if node.get_item_text(index).contains(fragment):
 				return true

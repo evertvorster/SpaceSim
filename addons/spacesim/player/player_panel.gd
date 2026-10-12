@@ -5,9 +5,12 @@ extends SpacesimScreen
 ## The personal-data screen, on Tab. **This is where saving lives**, because a save is a deliberate
 ## act: there is no autosave and no save key, so the button here is the only way one happens.
 ##
-## The name and what the player holds are variables, and variables are editable here — the player's
-## own name, and what each of their things is called. An asset is *referred to* by its id, which is
-## why renaming one is safe: nothing points at a name.
+## **What you can do to a row lives on the row**, as a right-click menu. That is not only tidier: a
+## menu is opened *on* something, so there is no separate selection that can be empty and leave an
+## action doing nothing at all.
+##
+## The two renames are different things and are named differently: **Rename history** is on a history
+## row, and the player's own name is a value of theirs, changed with *Change my values*.
 ##
 ## The lists are a browser, and **the file path is the ownership** — the world's own state is never
 ## among the paths a load touches, whatever is clicked here.
@@ -22,6 +25,11 @@ const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const LIST_HEIGHT := 140.0
 const FIELD_HISTORY := "History name"
 const FIELD_PLAYER := "Your name"
+const FIELD_ASSET := "Name"
+
+enum HistoryAction { PLAY, RENAME, DELETE }
+enum SaveAction { DETAILS, LOAD, DELETE }
+enum AssetAction { RENAME }
 
 var _player: SpacesimPlayer
 var _session: SpacesimSession
@@ -31,12 +39,9 @@ var _dialog: SpacesimDialog
 var _assets: ItemList
 var _histories: ItemList
 var _saves: ItemList
-var _switch_button: Button
-var _rename_button: Button
-var _delete_button: Button
-var _load_button: Button
-var _delete_save_button: Button
-var _rename_asset_button: Button
+var _history_menu: PopupMenu
+var _save_menu: PopupMenu
+var _asset_menu: PopupMenu
 
 ## The history whose saves are being shown, and each list's rows. Kept because a row index means
 ## nothing on its own: it has to stay in step with the thing it stands for.
@@ -51,6 +56,11 @@ var _pending_history: String = ""
 var _pending_hash: String = ""
 var _pending_asset: String = ""
 
+## The row a menu was opened on, so an answer knows what it was about.
+var _menu_history: String = ""
+var _menu_hash: String = ""
+var _menu_asset: String = ""
+
 
 func configure(player: SpacesimPlayer, session: SpacesimSession, world: SpacesimWorld) -> void:
 	_player = player
@@ -60,6 +70,10 @@ func configure(player: SpacesimPlayer, session: SpacesimSession, world: Spacesim
 	add_button("Save", _on_save)
 	add_button("New Story", _on_new_story)
 	add_button("Close", func() -> void: closed.emit())
+
+	_history_menu = _build_history_menu()
+	_save_menu = _build_save_menu()
+	_asset_menu = _build_asset_menu()
 
 	_dialog = Dialog.new()
 	_dialog.visible = false
@@ -80,19 +94,22 @@ func opened() -> void:
 		_add_heading(_session.message)
 
 	_add_section("Attributes", ["Attribute", "Value"], _attribute_rows(_player.attributes))
-	_button_under("Change values", _on_change_attributes)
+	_button_under("Change my values", _on_change_attributes)
 	_add_assets()
 	_add_browser()
 
 
-# --- what the player is, and what they hold -------------------------------------------------------
+# --- the player's own values ----------------------------------------------------------------------
 
+## Every value of the player's, the name among them. Not the history's name: that is a label on a
+## timeline, and it is renamed on its own row.
 func _on_change_attributes() -> void:
 	var keys: Array = _player.attributes.keys()
 	_pending = "change_attributes"
 	_dialog.ask(
-		"Change values",
-		"Everything except the history's own name. A number stays a number.",
+		"Change my values",
+		"Everything of your own. A number stays a number.\n\nThe history's name is separate — rename "
+		+ "that on its own row.",
 		["Apply", "Cancel"],
 		keys
 	)
@@ -101,15 +118,31 @@ func _on_change_attributes() -> void:
 	_dialog.focus_first_field()
 
 
+func _apply_attributes() -> void:
+	for key in _player.attributes.keys():
+		var original: Variant = _player.attributes[key]
+		var typed: String = _dialog.value(String(key))
+		_player.attributes[key] = _coerce(original, typed)
+	_session.message = "changed — press Save"
+
+
+## An attribute keeps the type it had: a name stays a name, and credits stay a number — refusing
+## something that is not one rather than quietly reading it as zero.
+static func _coerce(original: Variant, typed: String) -> Variant:
+	match typeof(original):
+		TYPE_INT:
+			return int(typed) if typed.is_valid_int() else original
+		TYPE_FLOAT:
+			return float(typed) if typed.is_valid_float() else original
+		_:
+			return typed
+
+
 func _add_assets() -> void:
-	_add_heading("Assets")
+	_add_heading("Assets — right-click one for what you can do with it")
 	_assets = _new_list()
 	content.add_child(_assets)
-	_assets.item_clicked.connect(_on_asset_chosen)
-	_assets.item_selected.connect(func(_index: int) -> void: _refresh_buttons())
-	var row := HBoxContainer.new()
-	content.add_child(row)
-	_rename_asset_button = _new_button(row, "Rename", _on_rename_asset)
+	_assets.item_clicked.connect(_on_asset_clicked)
 
 	_assets.clear()
 	_asset_ids.clear()
@@ -118,35 +151,42 @@ func _add_assets() -> void:
 		_asset_ids.append(String(asset.get("id", "")))
 
 
-func _on_asset_chosen(index: int, _at: Vector2, _button: int) -> void:
-	_assets.select(index)
-	_refresh_buttons()
-
-
-func _on_rename_asset() -> void:
-	var asset := _selected_asset()
-	if asset.is_empty():
+func _on_asset_clicked(index: int, at: Vector2, button: int) -> void:
+	if index < 0 or index >= _asset_ids.size():
 		return
-	_pending = "rename_asset"
-	_pending_asset = String(asset.get("id", ""))
-	_dialog.ask("Rename", "What should it be called?", ["Rename", "Cancel"], ["Name"])
-	_dialog.set_value("Name", String(asset.get("name", "")))
-	_dialog.focus_first_field()
+	_assets.select(index)
+	_menu_asset = String(_asset_ids[index])
+	if button == MOUSE_BUTTON_RIGHT:
+		_refresh_menu_state()
+		_popup(_asset_menu, at)
 
 
 ## The id is what locations point at, so a rename cannot break one — which is the whole reason an
 ## asset has an id at all.
-func _selected_asset() -> Dictionary:
-	var chosen := _assets.get_selected_items()
-	if chosen.is_empty():
-		return {}
-	var index: int = chosen[0]
-	if index >= _asset_ids.size():
-		return {}
-	return _player.asset_by_id(String(_asset_ids[index]))
+func _asset_of(id: String) -> Dictionary:
+	return _player.asset_by_id(id)
 
 
-# --- the browser ---------------------------------------------------------------------------------
+func _rename_asset() -> void:
+	var asset := _asset_of(_menu_asset)
+	if asset.is_empty():
+		return
+	_pending = "rename_asset"
+	_pending_asset = _menu_asset
+	_dialog.ask("Rename this", "What should it be called?", ["Rename", "Cancel"], [FIELD_ASSET])
+	_dialog.set_value(FIELD_ASSET, String(asset.get("name", "")))
+	_dialog.focus_first_field()
+
+
+func _apply_asset_name() -> void:
+	var asset := _asset_of(_pending_asset)
+	if asset.is_empty():
+		return
+	asset["name"] = _dialog.value(FIELD_ASSET)
+	_session.message = "changed — press Save"
+
+
+# --- the browser -----------------------------------------------------------------------------------
 
 func _add_browser() -> void:
 	var row := HBoxContainer.new()
@@ -158,39 +198,27 @@ func _add_browser() -> void:
 	_fill_browser()
 
 
-## The histories, and what can be done to the selected one.
 func _add_histories(row: HBoxContainer) -> void:
 	var left := VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(left)
-	left.add_child(_title_label("Histories"))
+	left.add_child(_title_label("Histories — right-click one"))
 	_histories = _new_list()
 	left.add_child(_histories)
 	_histories.item_selected.connect(_on_history_chosen)
-	var history_buttons := HBoxContainer.new()
-	left.add_child(history_buttons)
-	_switch_button = _new_button(history_buttons, "Switch", _on_switch)
-	_rename_button = _new_button(history_buttons, "Rename", _on_rename)
-	_delete_button = _new_button(history_buttons, "Delete", _on_delete_history)
+	_histories.item_clicked.connect(_on_history_clicked)
 
 
-## The saves, and what can be done to the selected one. Load is a button of its own rather than
-## something you have to open a save to find.
 func _add_saves(row: HBoxContainer) -> void:
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(right)
-	right.add_child(_title_label("Saves"))
+	right.add_child(_title_label("Saves — click one to see it, right-click for more"))
 	_saves = _new_list()
 	right.add_child(_saves)
 	# item_clicked, not item_selected: clicking the same save twice should open it twice, and a
 	# selection that has not changed emits nothing.
 	_saves.item_clicked.connect(_on_save_clicked)
-	_saves.item_selected.connect(func(_index: int) -> void: _refresh_buttons())
-	var save_buttons := HBoxContainer.new()
-	right.add_child(save_buttons)
-	_load_button = _new_button(save_buttons, "Load", _on_load)
-	_delete_save_button = _new_button(save_buttons, "Delete", _on_delete_save)
 
 
 func _fill_browser() -> void:
@@ -216,21 +244,21 @@ func _fill_browser() -> void:
 		_saves.add_item("%s" % entry["subject"])
 		_save_entries.append(entry)
 
-	_refresh_buttons()
+	_refresh_menu_state()
 
 
-func _refresh_buttons() -> void:
+## Which of the menu entries apply to the row it was opened on.
+func _refresh_menu_state() -> void:
 	var playing := _browsing == _session.repo.current_history()
 	var trunk := _browsing == Repo.TRUNK
 	# Switching to where you already are is what you are doing, and the trunk is the world rather
 	# than a playthrough, so neither is offered.
-	_switch_button.disabled = playing
-	_rename_button.disabled = trunk
-	_delete_button.disabled = playing or trunk
+	_history_menu.set_item_disabled(HistoryAction.PLAY, playing)
+	_history_menu.set_item_disabled(HistoryAction.DELETE, playing or trunk)
+	_asset_menu.set_item_disabled(AssetAction.RENAME, _menu_asset.is_empty())
 	# A save in another history cannot be loaded from here — you switch history, then pick a save.
-	_load_button.disabled = not playing or _save_entries.is_empty()
-	_delete_save_button.disabled = not playing or _save_entries.is_empty()
-	_rename_asset_button.disabled = _assets.get_selected_items().is_empty()
+	_save_menu.set_item_disabled(SaveAction.LOAD, not playing)
+	_save_menu.set_item_disabled(SaveAction.DELETE, not playing)
 
 
 ## The saves of a history, less the ones it has deleted. Only the history being played has
@@ -248,72 +276,148 @@ func _on_history_chosen(index: int) -> void:
 		_fill_browser()
 
 
-func _on_switch() -> void:
-	var switched := _session.repo.switch_history(_browsing)
-	_session.message = switched["reason"] if not switched["ok"] else "switched to %s" % _browsing
-	if switched["ok"]:
-		_session.load_last()
-		session_reloaded.emit()
-	opened()
+func _on_history_clicked(index: int, at: Vector2, button: int) -> void:
+	if index < 0 or index >= _history_names.size():
+		return
+	_on_history_chosen(index)
+	_menu_history = String(_history_names[index])
+	if button == MOUSE_BUTTON_RIGHT:
+		_refresh_menu_state()
+		_popup(_history_menu, at)
 
 
-func _on_rename() -> void:
-	_pending = "rename"
-	_pending_history = _browsing
-	_dialog.ask(
-		"Rename a history",
-		"What should '%s' be called?\n\nThe player's own name is separate, and is not changed here."
-		% _browsing,
-		["Rename", "Cancel"],
-		[FIELD_HISTORY]
-	)
-	_dialog.set_value(FIELD_HISTORY, _browsing)
-	_dialog.focus_first_field()
-
-
-func _on_delete_history() -> void:
-	_pending = "delete_history"
-	_pending_history = _browsing
-	_dialog.ask(
-		"Delete a history",
-		"Delete '%s' and every save in it?\n\nThe history goes from the list. Its commits stay in "
-		% _browsing + "the repository, but nothing in the game will reach them again.",
-		["Delete", "Cancel"]
-	)
-
-
-func _on_save_clicked(index: int, _at: Vector2, _button: int) -> void:
+func _on_save_clicked(index: int, at: Vector2, button: int) -> void:
 	if index < 0 or index >= _save_entries.size():
 		return
 	_saves.select(index)
-	_show_save(index)
+	_menu_hash = String(_save_entries[index]["hash"])
+	if button == MOUSE_BUTTON_RIGHT:
+		_refresh_menu_state()
+		_popup(_save_menu, at)
+	else:
+		_show_save(index)
+
+
+func _popup(menu: PopupMenu, at: Vector2) -> void:
+	menu.position = Vector2i(get_screen_position() + at)
+	menu.popup()
+
+
+# --- the menus -------------------------------------------------------------------------------------
+
+func _build_history_menu() -> PopupMenu:
+	var menu := PopupMenu.new()
+	menu.add_item("Play this history", HistoryAction.PLAY)
+	menu.add_item("Rename history…", HistoryAction.RENAME)
+	menu.add_item("Delete history…", HistoryAction.DELETE)
+	menu.id_pressed.connect(_on_history_action)
+	add_child(menu)
+	return menu
+
+
+func _build_save_menu() -> PopupMenu:
+	var menu := PopupMenu.new()
+	menu.add_item("Show this save", SaveAction.DETAILS)
+	menu.add_item("Load this save…", SaveAction.LOAD)
+	menu.add_item("Delete this save", SaveAction.DELETE)
+	menu.id_pressed.connect(_on_save_action)
+	add_child(menu)
+	return menu
+
+
+func _build_asset_menu() -> PopupMenu:
+	var menu := PopupMenu.new()
+	menu.add_item("Rename this…", AssetAction.RENAME)
+	menu.id_pressed.connect(_on_asset_action)
+	add_child(menu)
+	return menu
+
+
+func _on_history_action(action: int) -> void:
+	match action:
+		HistoryAction.PLAY:
+			_switch_to(_menu_history)
+		HistoryAction.RENAME:
+			_rename_history(_menu_history)
+		HistoryAction.DELETE:
+			_delete_history(_menu_history)
+
+
+func _on_save_action(action: int) -> void:
+	match action:
+		SaveAction.DETAILS:
+			_show_save_row()
+		SaveAction.LOAD:
+			_confirm_load(_menu_hash)
+		SaveAction.DELETE:
+			_pending = "confirm_delete_save"
+			_pending_hash = _menu_hash
+			_dialog.ask(
+				"Delete this save?",
+				"Take it out of the list?\n\nIts commit stays in the repository.",
+				["Delete", "Cancel"]
+			)
+
+
+func _on_asset_action(action: int) -> void:
+	if action == AssetAction.RENAME:
+		_rename_asset()
+
+
+func _show_save_row() -> void:
+	for index in _save_entries.size():
+		if String(_save_entries[index]["hash"]) == _menu_hash:
+			_show_save(index)
+			return
 
 
 ## One dialog per save, holding what it is and what loading it would cost. **Load is never one
 ## click away from a surprise** — what it discards is named before it happens.
 func _show_save(index: int) -> void:
 	var entry: Dictionary = _save_entries[index]
-	var hash := String(entry["hash"])
 	_pending = "save_details"
-	_pending_hash = hash
+	_pending_hash = String(entry["hash"])
 	var playing := _browsing == _session.repo.current_history()
 	var buttons := ["Close"] if not playing else ["Delete", "Load", "Close"]
-	_dialog.ask("Save   %s" % entry["subject"], _save_details(hash, playing), buttons)
+	_dialog.ask("Save   %s" % entry["subject"], _save_details(_pending_hash, playing), buttons)
 
 
-func _on_load() -> void:
-	var hash := _selected_hash()
-	if not hash.is_empty():
-		_confirm_load(hash)
+func _switch_to(name: String) -> void:
+	var switched := _session.repo.switch_history(name)
+	_session.message = switched["reason"] if not switched["ok"] else "switched to %s" % name
+	if switched["ok"]:
+		_browsing = name
+		_session.load_last()
+		session_reloaded.emit()
+	_fill_browser()
+	opened()
 
 
-func _on_delete_save() -> void:
-	var hash := _selected_hash()
-	if hash.is_empty():
-		return
-	_pending = "confirm_delete_save"
-	_pending_hash = hash
-	_dialog.ask("Delete this save?", "Take it out of the list?\n\nIts commit stays in the repository.", ["Delete", "Cancel"])
+## Renames the **history** — a label on a timeline. The player's own name is a value of theirs and is
+## changed under Attributes, which is a different thing entirely.
+func _rename_history(name: String) -> void:
+	_pending = "rename"
+	_pending_history = name
+	_dialog.ask(
+		"Rename history",
+		"What should the history '%s' be called?\n\nThis is the label on this line of time. Your own "
+		% name + "name is not changed here — it lives under Attributes.",
+		["Rename history", "Cancel"],
+		[FIELD_HISTORY]
+	)
+	_dialog.set_value(FIELD_HISTORY, name)
+	_dialog.focus_first_field()
+
+
+func _delete_history(name: String) -> void:
+	_pending = "delete_history"
+	_pending_history = name
+	_dialog.ask(
+		"Delete history",
+		"Delete '%s' and every save in it?\n\nThe history goes from the list. Its commits stay in "
+		% name + "the repository, but nothing in the game will reach them again.",
+		["Delete history", "Cancel"]
+	)
 
 
 func _confirm_load(hash: String) -> void:
@@ -333,10 +437,7 @@ func _save_details(hash: String, playing: bool) -> String:
 		"Where        %s" % _world.describe(Location.from_dictionary(state.get("location", {})), assets)
 	)
 	lines.append("")
-	if not playing:
-		lines.append("This is another history. Switch to it to load from it.")
-	else:
-		lines.append(_load_cost(hash))
+	lines.append("This is another history. Switch to it to load from it." if not playing else _load_cost(hash))
 	return "\n".join(lines)
 
 
@@ -367,7 +468,7 @@ func _on_new_story() -> void:
 # --- what the dialogs were asked ------------------------------------------------------------------
 
 func _on_dialog_input() -> void:
-	if _pending == "new_story" or _pending == "rename":
+	if _pending == "new_story":
 		var typed: String = _dialog.value(FIELD_HISTORY)
 		_dialog.hint.text = "will be called '%s'" % SpacesimGit.slug(typed) if not typed.is_empty() else ""
 
@@ -390,14 +491,14 @@ func _on_dialog_answered(action: String) -> void:
 			var renamed := _session.repo.rename_history(_pending_history, _dialog.value(FIELD_HISTORY))
 			if renamed["ok"]:
 				_browsing = String(renamed["name"])
-				_session.message = "renamed to %s" % _browsing
+				_session.message = "renamed the history to %s" % _browsing
 			else:
 				_session.message = renamed["reason"]
 		"delete_history":
 			var deleted := _session.repo.delete_history(_pending_history)
 			if deleted["ok"]:
 				_browsing = _session.repo.current_history()
-				_session.message = "deleted %s" % _pending_history
+				_session.message = "deleted the history %s" % _pending_history
 			else:
 				_session.message = deleted["reason"]
 		"change_attributes":
@@ -429,44 +530,6 @@ func _load(hash: String) -> void:
 		_session.message = loaded["reason"]
 
 
-## An edit is not a save: saving stays a deliberate act, so the screen says so rather than writing
-## one behind the player's back.
-func _apply_attributes() -> void:
-	for key in _player.attributes.keys():
-		var original: Variant = _player.attributes[key]
-		var typed: String = _dialog.value(String(key))
-		_player.attributes[key] = _coerce(original, typed)
-	_session.message = "changed — press Save"
-
-
-func _apply_asset_name() -> void:
-	var asset := _player.asset_by_id(_pending_asset)
-	if asset.is_empty():
-		return
-	asset["name"] = _dialog.value("Name")
-	_session.message = "changed — press Save"
-
-
-## An attribute keeps the type it had: a name stays a name, and credits stay a number — refusing
-## something that is not one rather than quietly reading it as zero.
-static func _coerce(original: Variant, typed: String) -> Variant:
-	match typeof(original):
-		TYPE_INT:
-			return int(typed) if typed.is_valid_int() else original
-		TYPE_FLOAT:
-			return float(typed) if typed.is_valid_float() else original
-		_:
-			return typed
-
-
-func _selected_hash() -> String:
-	var chosen := _saves.get_selected_items()
-	if chosen.is_empty():
-		return ""
-	var index: int = chosen[0]
-	return String(_save_entries[index]["hash"]) if index < _save_entries.size() else ""
-
-
 ## The player's name is optional at New Story: left empty they keep the default, and can change it
 ## here whenever they like, because it is only a value of theirs.
 func _player_name_from_dialog() -> String:
@@ -495,7 +558,11 @@ func _title_label(text: String) -> Label:
 func _button_under(label: String, on_pressed: Callable) -> Button:
 	var row := HBoxContainer.new()
 	content.add_child(row)
-	return _new_button(row, label, on_pressed)
+	var button := Button.new()
+	button.text = label
+	button.pressed.connect(on_pressed)
+	row.add_child(button)
+	return button
 
 
 func _new_list() -> ItemList:
@@ -503,14 +570,6 @@ func _new_list() -> ItemList:
 	list.custom_minimum_size = Vector2(0.0, LIST_HEIGHT)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return list
-
-
-static func _new_button(row: HBoxContainer, text: String, on_pressed: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.pressed.connect(on_pressed)
-	row.add_child(button)
-	return button
 
 
 ## A heading, then a table of the rows under it. The headers say what the columns are, so a
