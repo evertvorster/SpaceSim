@@ -427,6 +427,98 @@ change here. Rebuilt on `opened()`, so a value that changed while it was hidden 
 
 **Save and load will live here.**
 
+## Save and load
+
+`addons/spacesim/save/` — a world per repository, a history per playthrough, a save per commit. The
+design and the measured feasibility are in the vault (`Save and Load Plan`); this is what exists.
+
+### `SpacesimGit` — `RefCounted`
+
+The git command line, and nothing else. **Git decides what a valid branch name is**, so
+`is_valid_branch_name` asks it rather than reimplementing the rules; `slug` only gets close, and a
+test feeds it a corpus of awkward names and asserts git accepts every result.
+
+Every call passes `-c user.name`, `-c user.email` and `-c commit.gpgsign=false`, so nothing depends
+on the machine's git config.
+
+| Member | |
+|---|---|
+| `REFUSED` | what `slug` replaces: space, `~ ^ : ? * [ ] \ / @` |
+| `run(arguments) -> Dictionary` | `{"ok", "code", "lines"}` — blocking, and only ever for a deliberate act |
+| `text(result) -> String` | |
+| `is_clean() -> bool` | |
+| `is_valid_branch_name(name) -> bool` | asked of git |
+| `static slug(text) -> String` | a branch name a typed name can become; total, so it always yields something |
+
+### `SpacesimWorldRepo` — `RefCounted`
+
+```
+world.json    which world this is
+world/        the world's durable state, written only when something changes it
+player/       the player's state
+```
+
+The repo knows git and **nothing about what a save contains** — `save()` is handed the files to
+write, so the format stays the caller's business, and `state_text`/`read_state` are only the
+envelope.
+
+| Member | |
+|---|---|
+| `static for_world(name) -> SpacesimWorldRepo` | under `$XDG_DATA_HOME/spacesim/worlds/` |
+| `exists() -> bool`, `create(world_reference) -> Dictionary` | |
+| `save(files, label) -> Dictionary`, `commit(label) -> Dictionary` | `{"ok", "reason"}`; a save with nothing changed is refused rather than faked |
+| `discard_working_tree() -> bool` | a save is a commit, so uncommitted writes were never a save |
+| `saves() -> Array`, `affected_saves(hash) -> Array` | `{"hash", "time", "subject"}` |
+| `preview(hash, path) -> String` | read out of the commit; the working tree is untouched |
+| `restore(hash) -> Dictionary` | the do-over: `reset --soft`, then a path-scoped checkout |
+| `histories() -> Array`, `current_history()`, `has_history(name)` | |
+| `create_history(name)`, `rename_history(from, to)`, `delete_history(name)`, `switch_history(name)` | all `{"ok", "reason"}` |
+| `TRUNK`, `PLAYER_DIR`, `STATE_FILE`, `STATE_FORMAT_VERSION` | |
+| `static state_text(player_data, world_time)`, `static read_state(text)` | |
+
+**The trunk and the history you are playing cannot be deleted** — a new story branches from the
+trunk, and git refuses a worktree's own branch anyway. Creating a history or switching first drops
+anything uncommitted, because a dirty tree makes git refuse the switch.
+
+### `SpacesimLocation` — `RefCounted`
+
+Where something is: a frame, and a position in it. Turned into words by `SpacesimWorld.describe()`,
+because saying "landed on Nix" needs the world's names and the player's assets — and `coordinate/`
+should depend on neither.
+
+| Member | |
+|---|---|
+| `frame_id: String`, `position: Vector3` | |
+| `is_set() -> bool` | |
+| `to_dictionary()`, `static from_dictionary(data)` | unreadable data gives an *unset* location, not an error |
+
+`SpacesimFrame` gains `frame_id` (and `SYSTEM_ID` for the one frame every world has).
+`SpacesimFrameTree` gains `register(frame)`, `frame_by_id(id)` and `resolve_frame(id)` — the last
+resolving the **longest existing prefix**, so a save naming a frame the world no longer has is
+placed at the frame that remains, at its origin, rather than refused.
+
+### `SpacesimWorld` additions
+
+| Member | |
+|---|---|
+| `frame_phrase(frame_id) -> String` | "landed on Nix", "above Nix", empty for a frame it does not have |
+| `nearest_body_name(position) -> String` | |
+| `format_time(seconds) -> String` | the world clock as a date, e.g. "Year 512, day 121" |
+| `describe(location, assets) -> String` | the location chain as prose, innermost first |
+
+`SECONDS_PER_DAY` and `DAYS_PER_YEAR` are placeholder calendar constants — a world that needs its own
+calendar is a thing to build when a story does.
+
+### `SpacesimPlayer` additions
+
+| Member | |
+|---|---|
+| `location: SpacesimLocation` | the player and their ships are separate; they coincide when the player is inside one, which is containment |
+| assets carry `id`, `name`, `type`, `value`, `location` | the id is generated once and never edited, because a location refers to it |
+| `add_asset(name, type, value, at) -> Dictionary` | |
+| `asset_by_id(id) -> Dictionary` | |
+| `to_dictionary()` / `from_dictionary(data)` | unknown keys are ignored, so a newer save may carry more than this build knows |
+
 ## The game
 
 `game/main.*` — fly around the playground system and land on planets. The world comes from a world

@@ -20,7 +20,14 @@ enum Kind {
 	INTERIOR, ## origin at a room or ship
 }
 
+## The one frame every world has, and the id a thing flying in open space is in.
+const SYSTEM_ID := "system"
+
 @export var kind: Kind = Kind.SPACE
+
+## Stable identity, so a save can name this space and the loader can find it again. Assigned by
+## whoever creates the frame; see [constant SYSTEM_ID] for the one every world has.
+@export var frame_id: String = ""
 
 ## The band of local lengths this frame spans, in metres. The travel unit
 ## ([code]SpacesimTravelScale[/code]) holds the distance to the nearest significant thing

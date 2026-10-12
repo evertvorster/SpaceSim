@@ -19,6 +19,7 @@ var suites: Array = [
 	preload("res://tests/test_settings.gd"),
 	preload("res://tests/test_settings_ui.gd"),
 	preload("res://tests/test_player.gd"),
+	preload("res://tests/test_save.gd"),
 	preload("res://tests/test_space_to_surface.gd"),
 ]
 

@@ -9,8 +9,17 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 ## Status
 
 **Early, but real.** The playground world and the player are the game now, not a demo: coordinate
-frames, the travel unit, a data-driven world, navigation markers, settings and a personal data
-screen, all with tests. No terrain, no physics, no simulation, no persistence yet.
+frames, the travel unit, a data-driven world, navigation markers, settings, a personal data screen,
+and saves working against a real git repository. The saves are not yet reachable from the screen
+(P2), there is no terrain, no physics and no simulation.
+
+## Saves
+
+A save is a commit: **a world per repository, a history per playthrough, a save per commit**, in
+`$XDG_DATA_HOME/spacesim/worlds/<world>/`. Loading an older save moves the history back and restores
+only the player's own state — the world's state is left alone, so the world has moved on.
+
+Not yet wired to a screen, and there is no autosave: a save is a deliberate act.
 
 ## Layout
 
@@ -22,6 +31,7 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   player/          the player's own state: attributes and assets
   navigation/      navigation markers (targets, off-screen pointers)
   settings/        declared defaults in code, one machine-written file for what differs
+  save/            git-backed saves: the repository, the histories, the do-over
   ui/              chrome shared by the full-screen screens
 worlds/            world files (content)
 game/              the game: fly the playground system and land on planets

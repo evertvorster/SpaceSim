@@ -14,6 +14,17 @@ const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const FrameTree := preload("res://addons/spacesim/coordinate/frame_tree.gd")
 const TransitionRule := preload("res://addons/spacesim/coordinate/transition_rule.gd")
 const ScaleBody := preload("res://addons/spacesim/travel/scale_body.gd")
+const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
+
+## Frame ids an asset owns, so the player can be *inside* something they own. Nothing can be entered
+## yet; the ids exist so a location can name one when it can.
+const ASSET_FRAME_PREFIX := "asset:"
+const INTERIOR_SUFFIX := "/interior"
+
+## The world's calendar, for reading its clock as a date. Placeholder for an alien world: a story
+## that needs its own is the thing to build when one needs it.
+const SECONDS_PER_DAY := 86400.0
+const DAYS_PER_YEAR := 365.0
 
 var format_version: int
 var name: String
@@ -68,6 +79,7 @@ func build(parent: Node) -> SpacesimWorld:
 	system_frame = Frame.new()
 	system_frame.name = "System"
 	system_frame.kind = Frame.Kind.SPACE
+	system_frame.frame_id = Frame.SYSTEM_ID
 	system_frame.travel_length_min = _band("system_band").x
 	system_frame.travel_length_max = _band("system_band").y
 	container.add_child(system_frame)
@@ -76,6 +88,7 @@ func build(parent: Node) -> SpacesimWorld:
 	frame_tree.name = "FrameTree"
 	frame_tree.automatic = false # stepped explicitly, so the order with the observer's own step
 	container.add_child(frame_tree)
+	frame_tree.register(system_frame)
 
 	for body in bodies:
 		_build_body(body)
@@ -211,16 +224,20 @@ func _build_body(body: SpacesimWorldBody) -> void:
 	body.atmosphere = Frame.new()
 	body.atmosphere.name = "Atmosphere"
 	body.atmosphere.kind = Frame.Kind.ATMOSPHERE
+	body.atmosphere.frame_id = "%s/atmosphere" % body.id
 	body.atmosphere.travel_length_min = _band("atmosphere_band").x
 	body.atmosphere.travel_length_max = _band("atmosphere_band").y
 	body.node.add_child(body.atmosphere)
+	frame_tree.register(body.atmosphere)
 
 	body.surface = Frame.new()
 	body.surface.name = "Surface"
 	body.surface.kind = Frame.Kind.SURFACE
+	body.surface.frame_id = "%s/surface" % body.id
 	body.surface.travel_length_min = _band("surface_band").x
 	body.surface.travel_length_max = _band("surface_band").y
 	body.node.add_child(body.surface)
+	frame_tree.register(body.surface)
 	place_landing_zone(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
 	_add_landing_site(body.surface)
 
@@ -325,6 +342,70 @@ func _add_landing_site(surface: SpacesimFrame) -> void:
 		var angle := TAU * float(i) / 5.0
 		marker.position = Vector3(cos(angle) * 600.0, 20.5, sin(angle) * 600.0)
 		surface.add_child(marker)
+
+
+## The world clock as a date. Seconds since the world's epoch, in placeholder years and days.
+func format_time(seconds: float) -> String:
+	var days := int(seconds / SECONDS_PER_DAY)
+	return "Year %d, day %d" % [int(days / DAYS_PER_YEAR), days % int(DAYS_PER_YEAR) + 1]
+
+
+## How a world frame reads: "landed on Nix", "above Nix". Empty for a frame this world does not
+## have — and empty for open space, which reads by what is nearby instead.
+func frame_phrase(frame_id: String) -> String:
+	var parts := frame_id.split("/", false)
+	if parts.size() != 2:
+		return ""
+	var body := body_by_id(parts[0])
+	if body == null:
+		return ""
+	match parts[1]:
+		"surface":
+			return "landed on %s" % body.name
+		"atmosphere":
+			return "above %s" % body.name
+	return ""
+
+
+func nearest_body_name(position: Vector3) -> String:
+	var body := Proximity.nearest_body(position, scale_bodies())
+	return body.node.name if body != null and body.node != null else ""
+
+
+## How a location reads to a player: "in space, near Terra", "landed on Nix", "in Base Foo, landed
+## on Bar". No coordinate numbers — see `Save and Load Plan` §3.
+##
+## Containment is frame membership, so this walks outward: an asset frame recurses into where that
+## asset is, and a world frame reads from its own id. **The whole chain is named, innermost first** —
+## being in a vehicle is worth saying, because it is where the player left it.
+func describe(location: SpacesimLocation, assets: Array) -> String:
+	if location == null or not location.is_set():
+		return "somewhere"
+
+	if location.frame_id.begins_with(ASSET_FRAME_PREFIX):
+		var asset := _asset_at(assets, location.frame_id)
+		if asset.is_empty():
+			return "somewhere"
+		var inner := describe(SpacesimLocation.from_dictionary(asset.get("location", {})), assets)
+		return "in %s, %s" % [String(asset.get("name", "?")), inner]
+
+	if location.frame_id == Frame.SYSTEM_ID:
+		var near := nearest_body_name(location.position)
+		return "in space, near %s" % near if not near.is_empty() else "in space"
+
+	var phrase := frame_phrase(location.frame_id)
+	return phrase if not phrase.is_empty() else "somewhere"
+
+
+static func _asset_at(assets: Array, frame_id: String) -> Dictionary:
+	var parts := frame_id.split("/", false)
+	if parts.is_empty():
+		return {}
+	var id := parts[0].substr(ASSET_FRAME_PREFIX.length())
+	for asset in assets:
+		if String(asset.get("id", "")) == id:
+			return asset
+	return {}
 
 
 func _band(key: String) -> Vector2:
