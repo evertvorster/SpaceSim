@@ -8,13 +8,13 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 
 ## Status
 
-**Pre-code.** Design and planning are in progress; there is no engine code yet.
+**Early.** The coordinate frame system exists, with tests. Everything else is planned.
 
 ## Layout
 
 ```
 addons/spacesim/   the engine library (idiomatic Godot addon layout)
-demo/              validation scenes
+  coordinate/      compartmentalised coordinate spaces and threshold transitions
 tests/             headless test scripts
 docs/API.md        what the engine exposes, as it is implemented
 ```
@@ -33,6 +33,15 @@ Open the project:
 ```
 godot-double-mono --path .
 ```
+
+## Tests
+
+```
+timeout 60 godot-double-mono --headless --path . res://tests/run_tests.tscn
+```
+
+Exits non-zero on a failed check. Run it under `timeout`: a suite that fails to compile cannot
+reach its own `quit()`, and a hung test process is worse than a failed one.
 
 ## Documentation
 
