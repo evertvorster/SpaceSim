@@ -10,6 +10,10 @@ extends RefCounted
 ## stable `id` (a location refers to it, and a name can change), a name, a type, a value and a
 ## location of its own.
 ##
+## **The name is the player's own, independent of the history's** — the history is a label on a
+## timeline ("mankind") and the player is a person ("Adam") — and it is changeable, since it is
+## just an attribute.
+##
 ## The player and their ships are **separate** — they coincide when the player is inside a ship,
 ## which is expressed by the player's frame being the ship's interior frame, and the ship is
 ## elsewhere when they do not.

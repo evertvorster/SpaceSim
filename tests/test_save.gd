@@ -196,8 +196,7 @@ func _test_state_round_trip(h) -> void:
 	)
 	h.check(not String(ship.get("id", "")).is_empty(), "an asset gets an id")
 
-	var text := Repo.state_text(player.to_dictionary(), 16156800000.0)
-	var state := Repo.read_state(text)
+	var text := Repo.state_text(player.to_dictionary(), 16156800000.0)	var state := Repo.read_state(text)
 	h.check(state.get(Repo.FIELD_VERSION) == Repo.STATE_FORMAT_VERSION, "the state carries a format version")
 	h.check(state.get(Repo.FIELD_WORLD_TIME) == 16156800000.0, "and the world clock")
 	h.check(text.contains("\n\t\"attributes\""), "and is written one key per line, to diff well")
@@ -249,8 +248,12 @@ func _test_reading_a_location(h, root: Node) -> void:
 		"and something inside a base names the base and where the base is"
 	)
 
-	h.check(world.format_time(0.0) == "Year 0, day 1", "the clock reads as a date")
-	h.check(world.format_time(16156800000.0).begins_with("Year 512"), "and a big one reads as a year")
+	h.check(world.format_time(0.0) == "0-01-01 00:00", "the world's epoch reads as year 0")
+	h.check(world.format_time(86400.0) == "0-01-02 00:00", "and a day later is a day later")
+	# Not an exact year: the Terran year is 365.2425 days, so half a millennium of seconds lands on or
+	# beside 500-01-01. What matters is that it is there at all, and that it grows.
+	var later := world.format_time(31556952.0 * 500.0)
+	h.check(int(later.split("-")[0]) >= 499, "and half a millennium later reads as a year near 500 ('%s')" % later)
 	world.container.free()
 
 

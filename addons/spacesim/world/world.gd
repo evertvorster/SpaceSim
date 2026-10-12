@@ -21,11 +21,6 @@ const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 const ASSET_FRAME_PREFIX := "asset:"
 const INTERIOR_SUFFIX := "/interior"
 
-## The world's calendar, for reading its clock as a date. Placeholder for an alien world: a story
-## that needs its own is the thing to build when one needs it.
-const SECONDS_PER_DAY := 86400.0
-const DAYS_PER_YEAR := 365.0
-
 var format_version: int
 var name: String
 var bodies: Array[SpacesimWorldBody] = []
@@ -344,10 +339,14 @@ func _add_landing_site(surface: SpacesimFrame) -> void:
 		surface.add_child(marker)
 
 
-## The world clock as a date. Seconds since the world's epoch, in placeholder years and days.
+## The world clock as a **Terran** date and time — the calendar players already know, and Godot's own
+## (proleptic Gregorian) date arithmetic rather than a table of months of ours. Seconds are counted
+## from the world's epoch, which reads as year 0.
+const EPOCH_AT_YEAR_ZERO := -62167219200 ## the unix time of 0000-01-01
+
 func format_time(seconds: float) -> String:
-	var days := int(seconds / SECONDS_PER_DAY)
-	return "Year %d, day %d" % [int(days / DAYS_PER_YEAR), days % int(DAYS_PER_YEAR) + 1]
+	var when := Time.get_datetime_dict_from_unix_time(int(seconds) + EPOCH_AT_YEAR_ZERO)
+	return "%d-%02d-%02d %02d:%02d" % [when["year"], when["month"], when["day"], when["hour"], when["minute"]]
 
 
 ## How a world frame reads: "landed on Nix", "above Nix". Empty for a frame this world does not
