@@ -22,6 +22,16 @@ enum Kind {
 
 @export var kind: Kind = Kind.SPACE
 
+## The band of local lengths this frame spans, in metres. The travel unit
+## ([code]SpacesimTravelScale[/code]) holds the distance to the nearest significant thing
+## within this band, so the frame declares its own scale rather than the travel code
+## hard-coding one per frame kind.
+##
+## These should agree with the frame's transition thresholds: a lurch in speed at a frame
+## boundary means the band and the thresholds have drifted apart.
+@export var travel_length_min: float = 1_000.0
+@export var travel_length_max: float = 1.0e11
+
 
 ## Position expressed in this frame, given a position in the outermost coordinate space.
 func to_frame_position(outer_position: Vector3) -> Vector3:

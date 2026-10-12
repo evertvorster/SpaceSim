@@ -26,6 +26,7 @@ and a frame's children are what lives in that space.
 | Member | |
 |---|---|
 | `kind: Kind` | `SPACE`, `ORBITAL`, `ATMOSPHERE`, `SURFACE`, `INTERIOR` |
+| `travel_length_min`, `travel_length_max: float` | the band of local lengths this frame spans, in metres — see the travel unit below |
 | `to_frame_position(outer_position) -> Vector3` | a position in the outermost space, expressed in this frame |
 | `to_outer_position(frame_position) -> Vector3` | the inverse |
 
@@ -66,6 +67,52 @@ Owns the rules and moves an observer between frames as it crosses thresholds.
 
 A switch is a `reparent()` that preserves the observer's pose, so the observer does not move when
 its coordinate space changes.
+
+## Travel unit
+
+`addons/spacesim/travel/` — how fast you move, given how close the nearest significant
+thing is. Speed is never stored on the ship; motion is expressed in units of the local
+neighbourhood, so travelling fast in the void and slowly near a planet or a base falls out
+of the unit rather than being imposed on top of a flight model.
+
+### `SpacesimScaleBody` — `RefCounted`
+
+Something whose proximity sets the travel unit. Which bodies count as significant is
+content's decision.
+
+```gdscript
+SpacesimScaleBody.new(node: Node3D, radius: float)
+```
+
+| Member | |
+|---|---|
+| `node: Node3D` | the body's origin |
+| `radius: float` | metres |
+| `surface_distance_to(position) -> float` | distance to the *surface*, never negative |
+
+### `SpacesimProximity` — `RefCounted` (static)
+
+| Member | |
+|---|---|
+| `nearest_body(position, bodies) -> SpacesimScaleBody` | nearest, or `null` |
+| `nearest_surface_distance(position, bodies) -> float` | or `INF` when nothing is near enough to matter |
+
+### `SpacesimTravelScale` — `RefCounted` (static)
+
+| Member | |
+|---|---|
+| `TRAVERSE_SECONDS: float` | seconds to cross the local neighbourhood at full throttle |
+| `local_length(distance, length_min, length_max) -> float` | the local neighbourhood, in metres, held within the frame's band; `INF` reads as the largest scale, never zero |
+| `speed_for(throttle, distance, length_min, length_max, traverse_seconds) -> float` | m/s for a throttle in [0, 1] |
+
+Speed is *derived*, never integrated: there is no speed to desync and no way to arrive too
+fast, because the limit falls with the remaining distance by construction.
+
+## Demo
+
+`demo/space_to_surface.*` — fly from space to a planet's surface. The world is built in
+code (`demo/scale_world.gd`) so `tests/test_space_to_surface.gd` can fly the identical
+world headless.
 
 ## Tests
 

@@ -13,6 +13,8 @@ const Harness := preload("res://tests/harness.gd")
 
 var suites: Array = [
 	preload("res://tests/test_frame_transition.gd"),
+	preload("res://tests/test_travel_scale.gd"),
+	preload("res://tests/test_space_to_surface.gd"),
 ]
 
 
