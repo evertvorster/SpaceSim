@@ -20,6 +20,7 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   travel/          the local unit of travel (speed scales with distance to the nearest body)
   world/           a world loaded from data, and the scene it builds
   navigation/      navigation markers (targets, off-screen pointers)
+  settings/        declared defaults in code, one machine-written file for what differs
 worlds/            world files (content)
 demo/              fly the playground system and land on planets
 tests/             headless test scripts
@@ -45,7 +46,24 @@ It starts in `demo/space_to_surface.tscn`, flying the **playground** system from
 `worlds/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **T** to cycle
 the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
 **`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
-than guessed at.
+than guessed at. **Alt+C** pauses and opens the settings screen.
+
+Movement keys and the settings hotkey are **bindings** in the settings file, so they can be changed
+there without a rebuild.
+
+## Settings
+
+Defaults live in code (the registry in `addons/spacesim/settings/settings.gd`); the player's file
+holds only what differs from them, so a default that improves reaches anyone who never changed it.
+It is machine read and written:
+
+```
+$XDG_CONFIG_HOME/spacesim/settings.cfg      player settings          (fallback ~/.config/...)
+$XDG_DATA_HOME/spacesim/                    worlds and save branches (fallback ~/.local/share/...)
+```
+
+Not Godot's `user://`, which is one directory under the data home and cannot separate configuration
+from data. See [`docs/API.md`](docs/API.md) for the keys and the file format.
 
 ## Tests
 

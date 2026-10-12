@@ -215,6 +215,170 @@ opposite way). `screen_direction()` exists for that case and is tested for it.
 
 Which objects are marked is the caller's business; this decides only how they are drawn.
 
+## Settings
+
+`addons/spacesim/settings/` — declared defaults in code, and **one machine-written file** for what
+differs.
+
+This is the shape Godot recommends and the shape Godot itself uses: `project.godot` carries only
+values that differ from the engine defaults, and `override.cfg` layers a sparse per-install file
+over it. `ConfigFile.get_value(section, key, default)` is built around the same idea — the default
+argument exists because the key is expected to be absent.
+
+### Where it lives
+
+```
+$XDG_CONFIG_HOME/spacesim/settings.cfg      player settings          (fallback ~/.config/...)
+$XDG_DATA_HOME/spacesim/                    worlds and save branches (fallback ~/.local/share/...)
+```
+
+Not Godot's `user://`: that is a single writable directory, under the *data* home and nested
+through `godot/app_userdata`, so it cannot separate configuration from data and it is not
+`~/.config`. `SpacesimXdg` resolves the paths properly, and per the specification a variable that
+is unset, empty, or **not an absolute path** is ignored.
+
+### The file
+
+INI via `ConfigFile`, machine read and written. Keys are `section.key`, which is how they appear:
+
+```
+[camera]
+fov=85.0
+range_space=Vector2(50, 50000000000)
+[markers]
+pool_size=8
+```
+
+**Sparse and self-cleaning.** A value equal to its declared default is erased rather than written,
+so the file only ever holds what was changed, and returning a value to its default removes it. An
+unknown key is preserved — a newer build may have written it.
+
+**Reading is as careful as writing.** The file is the player's to edit, so every value is
+sanitised on the way in: coerced when it is merely a whole number stored as an int, and replaced
+by the declared default when it is the wrong type or out of range. A wrong camera range is a black
+screen, so the `camera.range_*` keys carry component-wise bounds. Relational guards (a near plane
+staying below a far plane) are not expressible in the registry; whichever code consumes the value
+holds that end.
+
+### Scope
+
+A setting is either the player's business or the world's. World settings (`frames.*`) are read
+from the world's own file, travel with the world as content, and **are never written to the
+player's file** — a world value cannot be set by the player, and a player value cannot come from
+the world.
+
+### Hot by construction
+
+> **Read through `get_value` and listen to `changed`. Never cache a setting in a variable at
+> startup.**
+
+That is the one thing that turns a hot setting cold, and retrofitting it means hunting down every
+cached copy. A cheap setting is read at the point of use (`mouse.sensitivity`, the camera ranges);
+an expensive one is pushed into an object by an `_apply_settings()` that runs at startup and again
+on change (`camera.fov`, the marker pool and font size).
+
+### The registry
+
+| Key | Scope | Default |
+|---|---|---|
+| `mouse.sensitivity` | player | 0.0015 |
+| `camera.fov` | player | 70.0 |
+| `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on |
+| `markers.pool_size` | player | 12 |
+| `markers.font_size` | player | 20 |
+| `markers.margin` | player | 100.0 |
+| `frames.system_band` / `_atmosphere_band` / `_surface_band` | world | `Vector2(1e4, 1e11)` and so on |
+| `frames.atmosphere_altitude` / `_surface_altitude` / `_pad_size` | world | 100000.0 / 2000.0 / 4000.0 |
+
+### Bindings
+
+Input bindings live in the same file, under `[bindings]`, declared in the registry like any other
+setting — a string with the `key_binding` validator:
+
+```
+[bindings]
+settings_screen=Alt+C
+throttle_up=W
+detail_down=BracketLeft
+```
+
+Text rather than a raw keycode, so the file stays readable and hand-editable: the key name is
+whatever `OS.get_keycode_string` produces, which `OS.find_keycode_from_string` parses back, so the
+two agree by construction. Modifiers are prefixes and are **normalised** on write — `Alt+Shift+X`
+comes back as `Shift+Alt+X`.
+
+Matching uses the **physical** key, so WASD stays under the same fingers on a layout that puts A
+somewhere else — which is why a binding stores a key rather than a character. Modifiers must match
+exactly, so `W` does not fire while Alt is held.
+
+| `SpacesimBindings` (static) | |
+|---|---|
+| `parse(text) -> Dictionary` | parts, or empty when the text is not a binding |
+| `is_valid(text) -> bool` | |
+| `keycode_of(text) -> int` | or `KEY_NONE`; for asking whether it is held |
+| `matches(event, text) -> bool` | |
+| `from_event(event) -> String` | for capturing a key press |
+| `format(binding) -> String` | |
+
+### The settings screen
+
+**Alt+C** pauses the game and opens it — a binding, so it is rebindable. Modelled on the vegastrike
+config screen:
+
+- a control edits a **staging area**, not the live settings;
+- **Reset** puts a setting back to its engine default, also staged;
+- **Apply** commits everything staged and writes the file;
+- **Close** discards the staged edits;
+- **both Apply and Close change colour while something is staged** — since Close throws the work
+  away, the colour is the warning rather than decoration;
+- **Exit Game** leaves.
+
+Rows come from the registry, so a newly declared setting appears without the panel changing.
+Bindings are edited as text for now; capturing a key press is the next step.
+
+| `SpacesimSettingsEdit` — `RefCounted` | |
+|---|---|
+| `static editable_keys() -> Array` | the player-scope keys, in registry order |
+| `value(key) -> Variant` | staged if edited, otherwise what stands |
+| `stage(key, value) -> bool` | false when the store would refuse it |
+| `reset_to_default(key) -> bool` | staged, like any other edit |
+| `discard() -> void`, `apply() -> int` | |
+| `has_changes() -> bool`, `is_staged(key) -> bool` | |
+| `changed` | emitted on any staging change |
+
+`SpacesimSettingsPanel` — `Control` — is built in code, since the project has no editor-authored
+scenes: `configure(settings)`, `apply()`, `discard()`, `has_changes()`, and `closed` /
+`exit_requested` signals.
+
+### `SpacesimXdg` — `RefCounted` (static)
+
+| Member | |
+|---|---|
+| `config_home()`, `data_home()`, `state_home()` | XDG base directories, with fallbacks applied |
+| `config_dir()`, `data_dir()` | those, plus `spacesim` |
+| `settings_path()` | `config_dir()/settings.cfg` |
+| `ensure_directory(path)` | create it, recursively |
+
+### `SpacesimSettings` — `Node`, registered as the `SpacesimSettings` autoload
+
+| Member | |
+|---|---|
+| `Scope` | `PLAYER`, `WORLD` |
+| `REGISTRY` | every declared setting, with the single declaration of its default |
+| `changed(key, value)` | emitted after a value changes |
+| `open(path := "")` | load; an empty path means the XDG location |
+| `get_value(key) -> Variant` | the value that stands |
+| `set_value(key, value, save_now := false) -> bool` | player settings only; false if refused |
+| `reset_value(key, save_now := false) -> bool` | back to the default, erasing the key |
+| `set_world_values(values)` | adopt the world's settings; never written to the player's file |
+| `save(force := false) -> bool` | write, if there is anything to write |
+| `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
+| `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |
+| `KNOWN_VALIDATORS` | the named checks; a row naming anything else is a registry mistake |
+
+`get_value` never touches the disk. Tests use their own instance with their own path, so the suite
+never writes to the real file.
+
 ## Demo
 
 `demo/space_to_surface.*` — fly around the playground system and land on planets. The world comes
@@ -230,6 +394,9 @@ world and ship.
 | T | cycle the selected target |
 | P | hide/show the bodies |
 | `[` `]` | body tessellation, for attributing frame cost |
+| Alt+C | pause and open the settings screen |
+
+Every one of those except Esc is a binding in the settings file and can be changed there.
 
 ## Tests
 

@@ -26,11 +26,20 @@ extends Node3D
 enum Priority { CONTEXT = 0, MISSION = 1, SELECTED = 2 }
 
 const DEFAULT_POOL_SIZE := 12
-## Kept clear of the edge so a pointer's own width does not fall off the screen.
-const POINTER_MARGIN := 100.0
 
 @export var pool_size := DEFAULT_POOL_SIZE
-@export var font_size := 20
+
+## Hot: a setter rather than a value read once, so changing it re-applies to the live pool.
+@export var font_size := 20:
+	set(value):
+		font_size = value
+		for label in _labels:
+			label.font_size = value
+		for pointer in _pointers:
+			pointer.add_theme_font_size_override("font_size", value - 3)
+
+## Inset from the viewport edge, kept clear so a pointer's own width does not fall off the screen.
+var margin := 100.0
 
 ## Rebuilt every frame by the caller. Later entries outrank earlier ones.
 var context_targets: Array[Node3D] = []
@@ -43,6 +52,23 @@ var _pointers_layer: CanvasLayer
 
 
 func _ready() -> void:
+	_build_pool()
+
+
+## Changing how many markers there is room for is the one setting that cannot be applied in
+## place: the pool has to be built again.
+func rebuild_pool(new_size: int) -> void:
+	var wanted := maxi(new_size, 1)
+	if wanted == pool_size and not _labels.is_empty():
+		return
+	pool_size = wanted
+	for label in _labels:
+		label.free()
+	_labels.clear()
+	if _pointers_layer != null:
+		_pointers_layer.free()
+		_pointers_layer = null
+	_pointers.clear()
 	_build_pool()
 
 
@@ -105,15 +131,15 @@ func refresh(camera: Camera3D) -> void:
 		if camera.is_position_behind(at):
 			label.visible = false
 			var behind := viewport_size * 0.5 + screen_direction(camera, at) * 1.0e6
-			_show_pointer(pointer, text, clamp_to_edge(behind, viewport_size, POINTER_MARGIN))
+			_show_pointer(pointer, text, clamp_to_edge(behind, viewport_size, margin))
 			continue
 
 		var projected := camera.unproject_position(at)
 		var inside := (
-			projected.x >= POINTER_MARGIN
-			and projected.x <= viewport_size.x - POINTER_MARGIN
-			and projected.y >= POINTER_MARGIN
-			and projected.y <= viewport_size.y - POINTER_MARGIN
+			projected.x >= margin
+			and projected.x <= viewport_size.x - margin
+			and projected.y >= margin
+			and projected.y <= viewport_size.y - margin
 		)
 
 		if inside:
@@ -123,7 +149,7 @@ func refresh(camera: Camera3D) -> void:
 			pointer.visible = false
 		else:
 			label.visible = false
-			_show_pointer(pointer, text, clamp_to_edge(projected, viewport_size, POINTER_MARGIN))
+			_show_pointer(pointer, text, clamp_to_edge(projected, viewport_size, margin))
 
 
 func _show_pointer(pointer: Label, text: String, at: Vector2) -> void:

@@ -14,10 +14,11 @@ extends Node3D
 const PlayerShip := preload("res://demo/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
+const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
 
 const WORLD_PATH := "res://worlds/playground.json"
 
-const MOUSE_SENSITIVITY := 0.0015
+const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
 const THROTTLE_RATE := 0.7 ## per second
 
@@ -27,7 +28,11 @@ const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), V
 
 var _world: SpacesimWorld
 var _ship: Node3D
+var _camera: Camera3D
 var _markers: SpacesimMarkers
+var _ui_layer: CanvasLayer
+var _panel: SpacesimSettingsPanel
+var _paused := false
 var _selected_index := -1
 var _look := Vector2.ZERO
 var _hud: Label
@@ -49,37 +54,101 @@ func _ready() -> void:
 	_markers = SpacesimMarkers.new()
 	_markers.name = "Markers"
 	add_child(_markers)
+	_camera = _ship.get_node("Camera")
+	_apply_settings()
+	SpacesimSettings.changed.connect(_on_setting_changed)
 	_set_detail(_detail)
 	_build_hud()
+	_panel = SpacesimSettingsPanel.new()
+	_panel.name = "Settings"
+	_panel.configure(SpacesimSettings)
+	_panel.visible = false
+	_ui_layer.add_child(_panel)
+	_panel.closed.connect(_close_settings)
+	_panel.exit_requested.connect(_on_exit_requested)
 	_capture_mouse()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		_handle_key(event)
+		return
+	if _paused:
+		return
 	if event is InputEventMouseMotion:
-		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-			return
-		# Capturing warps the cursor, and the first motion after that reports the warp as a
-		# huge relative delta. Drop it, or the ship spins on every recapture.
-		if _skip_next_motion:
-			_skip_next_motion = false
-			return
-		_look += event.relative
+		_ship_mouse_look(event)
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_capture_mouse()
-	elif event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_ESCAPE:
-				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-			KEY_P:
-				_bodies_visible = not _bodies_visible
-				for body_mesh in _world.meshes():
-					body_mesh.visible = _bodies_visible
-			KEY_BRACKETLEFT:
-				_set_detail(_detail - 1)
-			KEY_BRACKETRIGHT:
-				_set_detail(_detail + 1)
-			KEY_T:
-				_cycle_target()
+
+
+func _handle_key(event: InputEventKey) -> void:
+	# The settings hotkey first, and regardless of whether the screen is already open, so it
+	# toggles.
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.settings_screen"))):
+		_toggle_settings()
+		get_viewport().set_input_as_handled()
+		return
+	if _paused:
+		return
+
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.bodies_toggle"))):
+		_bodies_visible = not _bodies_visible
+		for body_mesh in _world.meshes():
+			body_mesh.visible = _bodies_visible
+	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
+		_cycle_target()
+	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_down"))):
+		_set_detail(_detail - 1)
+	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_up"))):
+		_set_detail(_detail + 1)
+	elif event.keycode == KEY_ESCAPE:
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+func _ship_mouse_look(event: InputEventMouseMotion) -> void:
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		return
+	# Capturing warps the cursor, and the first motion after that reports the warp as a huge
+	# relative delta. Drop it, or the ship spins on every recapture.
+	if _skip_next_motion:
+		_skip_next_motion = false
+		return
+	_look += event.relative
+
+
+## Pausing the game is the scene's business rather than the tree's: only the simulation needs to
+## stop, and the settings screen has to keep running inside it.
+func _toggle_settings() -> void:
+	if _paused:
+		_close_settings()
+	else:
+		_open_settings()
+
+
+func _open_settings() -> void:
+	_paused = true
+	_panel.visible = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+func _close_settings() -> void:
+	_paused = false
+	_panel.visible = false
+	_capture_mouse()
+
+
+func _on_exit_requested() -> void:
+	# Unapplied edits are discarded, not applied: the Close button's colour said so. The file is
+	# written for anything already applied.
+	SpacesimSettings.save()
+	get_tree().quit()
+
+
+## Whether a binding's key is held. Read per frame rather than cached, so rebinding one takes
+## effect without anything having to notice.
+func _held(binding_key: String) -> bool:
+	var code := Bindings.keycode_of(String(SpacesimSettings.get_value(binding_key)))
+	return code != KEY_NONE and Input.is_physical_key_pressed(code)
 
 
 ## Change every body's tessellation. The count is measured here rather than per frame, because
@@ -106,6 +175,21 @@ func _cycle_target() -> void:
 	_markers.selected = targets[_selected_index]
 
 
+## Everything this scene takes from settings, applied now. Called at startup and again on any
+## change, so nothing here is read once at startup and then forgotten.
+func _apply_settings() -> void:
+	_camera.fov = SpacesimSettings.get_value("camera.fov")
+	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
+	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
+	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))
+
+
+func _on_setting_changed(key: String, _value: Variant) -> void:
+	match key:
+		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin":
+			_apply_settings()
+
+
 ## Click to take the mouse back after Esc released it.
 func _capture_mouse() -> void:
 	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -124,22 +208,27 @@ func _process(_delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _paused:
+		return
+
 	var throttle: float = _ship.throttle
-	if Input.is_key_pressed(KEY_W):
+	if _held("bindings.throttle_up"):
 		throttle += THROTTLE_RATE * delta
-	if Input.is_key_pressed(KEY_S):
+	if _held("bindings.throttle_down"):
 		throttle -= THROTTLE_RATE * delta
 
 	var roll := 0.0
-	if Input.is_key_pressed(KEY_A):
+	if _held("bindings.roll_left"):
 		roll -= TURN_RATE * delta
-	if Input.is_key_pressed(KEY_D):
+	if _held("bindings.roll_right"):
 		roll += TURN_RATE * delta
 
+	# Read per frame rather than held, so it is hot without anything having to react to a change.
+	var sensitivity: float = SpacesimSettings.get_value("mouse.sensitivity")
 	var input := {
 		"throttle": clampf(throttle, 0.0, 1.0),
-		"pitch": -_look.y * MOUSE_SENSITIVITY,
-		"yaw": _look.x * MOUSE_SENSITIVITY,
+		"pitch": -_look.y * sensitivity,
+		"yaw": _look.x * sensitivity,
 		"roll": roll,
 	}
 	_look = Vector2.ZERO
@@ -147,9 +236,8 @@ func _physics_process(delta: float) -> void:
 	_ship.step(delta, input)
 	_world.frame_tree.evaluate()
 	_world.aim_sun_at(_ship.global_position)
-	var camera: Camera3D = _ship.get_node("Camera")
-	_update_markers(camera)
-	_update_camera(camera)
+	_update_markers(_camera)
+	_update_camera(_camera)
 	_update_hud()
 
 
@@ -170,29 +258,30 @@ func _update_markers(camera: Camera3D) -> void:
 ## settled number.
 func _update_camera(camera: Camera3D) -> void:
 	var frame: Frame = _world.frame_tree.active_frame
-	var range_for_frame := _camera_range(frame.kind)
+	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
 	camera.near = range_for_frame.x
 	camera.far = range_for_frame.y
 
 
-func _camera_range(kind: int) -> Vector2:
+func _range_key(kind: int) -> String:
 	match kind:
-		Frame.Kind.SPACE:
-			return Vector2(100.0, 1.0e11)
 		Frame.Kind.ORBITAL:
-			return Vector2(5.0, 1.0e8)
+			return "camera.range_orbital"
 		Frame.Kind.ATMOSPHERE:
-			return Vector2(0.5, 1.0e7)
+			return "camera.range_atmosphere"
 		Frame.Kind.SURFACE:
-			return Vector2(0.1, 2.0e5)
+			return "camera.range_surface"
+		Frame.Kind.INTERIOR:
+			return "camera.range_interior"
 		_:
-			return Vector2(0.05, 1.0e3)
+			return "camera.range_space"
 
 
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HUD"
 	add_child(layer)
+	_ui_layer = layer
 
 	var label := Label.new()
 	label.name = "Readout"
@@ -234,6 +323,7 @@ func _update_hud() -> void:
 		PackedStringArray(
 			[
 				"world       %s" % _world.name,
+				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
 				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
@@ -245,7 +335,7 @@ func _update_hud() -> void:
 				"bodies      %s, %d triangles" % [bodies, _triangles],
 				"",
 				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
-				"T cycle target    P bodies on/off    [ ] body detail",
+				"T cycle target    P bodies on/off    [ ] body detail    Alt+C settings",
 			]
 		)
 	)
