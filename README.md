@@ -28,13 +28,16 @@ is the only way one happens, and the same screen browses the histories and their
 addons/spacesim/   the engine library (idiomatic Godot addon layout)
   coordinate/      compartmentalised coordinate spaces and threshold transitions
   travel/          the local unit of travel (speed scales with distance to the nearest body)
-  system/          a solar system loaded from data, and the scene it builds
+  system/          the built scene (SpacesimSystemScene), the Kepler solver, and beneath it:
+    content/       the authored content as Godot Resources — bodies, orbits, layers, species
+    model/         the derivation: what a body's numbers are, from what it is made of
+  lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
   player/          the player's own state (attributes and assets) and the screen for it
   navigation/      navigation markers (targets, off-screen pointers)
   settings/        declared defaults in code, one machine-written file for what differs
   save/            git-backed saves: the repository, the histories, the session, the do-over
   ui/              chrome shared by the full-screen screens, and the dialogs over them
-systems/           solar system files (content)
+systems/           authored systems as `.tres` — Sol, and the playground flight-test fixture
 game/              the game: fly Sol and land on planets
 tests/             headless test scripts
 docs/API.md        what the engine exposes, as it is implemented
