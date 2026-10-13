@@ -189,6 +189,9 @@ func _something_else(key: String) -> Variant:
 			return default + Vector2(1.0, 1.0)
 		TYPE_VECTOR2I:
 			return default + Vector2i(1, 1)
+		TYPE_COLOR:
+			# Any other colour: the store only checks the type.
+			return Color(0.1, 0.2, 0.3, 1.0)
 		TYPE_STRING:
 			# A row that offers choices can only be given one of them, or it would not be acceptable.
 			var listed: Variant = row.get("choices", null)

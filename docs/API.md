@@ -413,7 +413,7 @@ about the others, which is exactly what placing a label clear of the others need
 |---|---|
 | `marks: Array[Dictionary]` | one per marker, set each frame: `{"circle", "color"}` plus `"start"`/`"end"` when there is a line to draw |
 | `RING_RADIUS`, `RING_WIDTH`, `LINE_WIDTH` | 10 px across, 1 px strokes |
-| `COLOR` | one colour for every marker |
+| `COLOR` | the colour everything is drawn in; the selected target's comes from the setting |
 | `static place_label(anchor, label_size, taken, bounds) -> Rect2` | **the overlap avoidance** |
 | `static fitted(box, bounds)`, `free_of(box, taken)` | the two halves of it |
 | `static border_point(rect, towards) -> Vector2` | where a rect's border is crossed on the way to a point |
@@ -536,6 +536,7 @@ on change (`camera.fov`, the marker pool and font size).
 | `markers.pool_size` | player | 12 |
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
+| `markers.selected_color` | player | `Color(1.0, 0.9, 0.3)` — the one thing on the overlay that stands out, so it can be made to stand out against what it is seen against |
 | `frames.system_band` / `_atmosphere_band` / `_surface_band` | world | `Vector2(1e4, 1e11)` and so on |
 | `frames.atmosphere_altitude` / `_surface_altitude` / `_pad_size` | world | 100000.0 / 2000.0 / 4000.0 |
 
@@ -589,7 +590,11 @@ Bindings are edited as text for now; capturing a key press is the next step.
 is the row's own array, or `"screens"` for the one list that is the machine's rather than ours. What
 a choice *is* depends on the setting: an enum's value is its word, a screen's is its number, since
 the position in the list is the screen index. A `Vector2i` row — a resolution — is a pair of integer
-fields, so an arrow key offers whole pixels rather than 1279.7.
+fields, so an arrow key offers whole pixels rather than 1279.7. A `Color` row is a `ColorPickerButton`:
+a colour is a thing you look at, so typing one as text would be a spelling test.
+
+**A setting type with no editor leaves its row with no control at all**, and `_refresh` then indexes
+the first one — so a new type has to arrive with its editor, which is what the settings suite checks.
 
 **A resolution row also carries a `MenuButton` of presets** beside its two fields, filled when the
 menu opens rather than when the row is built. Picking one fills the fields, which is a staged edit

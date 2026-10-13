@@ -4,6 +4,7 @@ extends RefCounted
 const Settings := preload("res://addons/spacesim/settings/settings.gd")
 const Edit := preload("res://addons/spacesim/settings/settings_edit.gd")
 const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
+const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
 
@@ -19,6 +20,7 @@ func run(h, root: Node) -> void:
 	_test_edits_are_staged_not_applied(h)
 	_test_reset_and_discard(h)
 	_test_bad_values_are_not_staged(h)
+	_test_every_setting_gets_a_control(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -148,6 +150,27 @@ func _test_reset_and_discard(h) -> void:
 	edit.discard()
 	h.check(not edit.has_changes(), "closing discards what was staged")
 	h.check(settings.get_value("camera.fov") != 100.0, "and the live setting never saw it")
+
+
+## **A registry type the panel has no editor for leaves the row with no control at all**, and
+## `_refresh` then indexes the first one — so a new setting type has to arrive with an editor, and this
+## is what says so. A color did, the first time one was added.
+func _test_every_setting_gets_a_control(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var panel := SettingsPanel.new()
+	panel.configure(_fixture.open())
+	layer.add_child(panel)
+
+	var fields: Dictionary = panel.get("_fields")
+	var bare: Array[String] = []
+	for key in Edit.editable_keys():
+		var editors: Array = fields.get(key, [])
+		if editors.is_empty():
+			bare.append(String(key))
+	h.check(bare.is_empty(), "every declared setting gets a control%s" % Fixture.detail(bare))
+
+	layer.free()
 
 
 func _test_bad_values_are_not_staged(h) -> void:

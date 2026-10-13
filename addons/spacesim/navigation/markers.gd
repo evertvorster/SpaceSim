@@ -44,6 +44,12 @@ const OFF_SCREEN_REACH := 1.0e6
 ## than the clearance an edge-clamped pointer used to need.
 var margin := 24.0
 
+## The selected target's colour; everything else is drawn in [constant SpacesimOverlay.COLOR]. A
+## colour rather than a flag, so a target can be made to stand out against whatever it is seen
+## against. Both defaults are declared in the settings registry, and this is the copy the caller
+## overwrites from there.
+var selected_color := Color(1.0, 0.9, 0.3)
+
 ## For each body that orbits another, the [SpacesimSceneBody] it orbits, keyed by the orbiting
 ## body's node. Handed over once by the caller, because it is a fact about the system rather than
 ## about a frame. Used by [method eclipsed].
@@ -159,13 +165,14 @@ func _place(
 ) -> Dictionary:
 	var target: Node3D = entry["node"]
 	var circle: Vector2 = entry["circle"]
+	var colour := colour_of(int(entry["priority"]))
 
 	# **A moon gives up its label, not its ring.** Yielding to the body it orbits is a fact about the
 	# two *labels* — two names a pixel apart say no more than one — and says nothing about whether the
 	# moon is there. So the ring is still drawn, with nothing written beside it.
 	if _yields_to_parent(target, int(entry["priority"]), marked):
 		label.visible = false
-		return {"circle": circle, "color": Overlay.COLOR}
+		return {"circle": circle, "color": colour}
 
 	label.text = "%s  %s" % [target.name, format_distance(entry["distance"])]
 	label.size = label.get_minimum_size()
@@ -176,9 +183,10 @@ func _place(
 	taken.append(box)
 
 	label.position = box.position
+	label.add_theme_color_override("font_color", colour)
 	label.visible = true
 
-	var mark := {"circle": circle, "color": Overlay.COLOR}
+	var mark := {"circle": circle, "color": colour}
 	# **A line only where there is a ring to draw it from.** Off screen the ring is not there, so the
 	# label at the edge is the whole marker — and a line to a ring nobody can see points at nothing.
 	if Rect2(Vector2.ZERO, viewport_size).has_point(circle):
@@ -188,6 +196,12 @@ func _place(
 		mark["start"] = Overlay.border_point(ring, box.get_center())
 		mark["end"] = Overlay.border_point(box, circle)
 	return mark
+
+
+## The colour one marker is drawn in. The selected target is the only thing that stands out, which is
+## what makes it findable among a screen of others.
+func colour_of(priority: int) -> Color:
+	return selected_color if priority == Priority.SELECTED else Overlay.COLOR
 
 
 ## Whether this marker gives way to the body it orbits.

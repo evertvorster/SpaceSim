@@ -15,6 +15,7 @@ func run(h, root: Node) -> void:
 	_test_distance_format(h)
 	_test_a_label_keeps_clear_of_the_others(h)
 	_test_a_line_leaves_the_ring_at_its_edge(h)
+	_test_the_target_has_its_own_colour(h, root)
 	_test_a_moon_gives_up_its_label_to_its_planet(h, root)
 
 
@@ -204,6 +205,37 @@ func _test_a_label_keeps_clear_of_the_others(h) -> void:
 	var huge := Vector2(2000.0, 40.0)
 	var unclamped := Overlay.place_label(Vector2(686.0, 360.0), huge, [], bounds)
 	h.check(unclamped.size == huge, "a label too wide for the screen is not squashed")
+
+
+## The selected target is the one thing on the overlay that stands out, and it does so in a colour of
+## its own so it can be made to stand out against whatever it happens to be seen against.
+func _test_the_target_has_its_own_colour(h, root: Node) -> void:
+	var markers := Markers.new()
+	root.add_child(markers)
+
+	h.check(
+		markers.colour_of(Markers.Priority.SELECTED) == markers.selected_color,
+		"the selected target is drawn in its own colour"
+	)
+	h.check(
+		markers.colour_of(Markers.Priority.CONTEXT) == Overlay.COLOR
+		and markers.colour_of(Markers.Priority.MISSION) == Overlay.COLOR,
+		"and a mission target and the ambient group in the one colour"
+	)
+	h.check(
+		markers.selected_color.r > 0.9
+		and markers.selected_color.g > 0.8
+		and markers.selected_color.b < 0.4,
+		"which starts yellow (%s)" % markers.selected_color
+	)
+
+	# Hot, like every other setting: read per frame, never cached at startup.
+	markers.selected_color = Color(0.2, 1.0, 0.4)
+	h.check(
+		markers.colour_of(Markers.Priority.SELECTED) == Color(0.2, 1.0, 0.4),
+		"and follows the setting rather than the default"
+	)
+	markers.free()
 
 
 ## A line exists only where there is a ring to draw it from.

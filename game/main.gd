@@ -238,11 +238,12 @@ func _apply_settings() -> void:
 	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
 	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
 	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))
+	_markers.selected_color = SpacesimSettings.get_value("markers.selected_color")
 
 
 func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
-		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin":
+		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color":
 			_apply_settings()
 
 

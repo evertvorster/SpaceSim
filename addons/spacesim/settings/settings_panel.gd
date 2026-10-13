@@ -99,9 +99,28 @@ func _build_editors(key: String) -> Array[Control]:
 			if typeof(default) == TYPE_VECTOR2I:
 				pair.add_child(_resolution_menu(key))
 			editors.append(pair)
+		TYPE_COLOR:
+			editors.append(_color_field(key))
 		TYPE_STRING:
 			editors.append(_text_field(key))
 	return editors
+
+
+## Godot's own colour button: a swatch that opens the picker. **A colour is a thing you look at**, so
+## typing one as text would be a spelling test, and picking one against the background it will be seen
+## on is the whole point of making it a setting.
+func _color_field(key: String) -> ColorPickerButton:
+	var field := ColorPickerButton.new()
+	field.custom_minimum_size = Vector2(120.0, 26.0)
+	field.color = _edit.value(key)
+	field.color_changed.connect(func(new_color: Color) -> void: _stage_color(key, new_color))
+	return field
+
+
+func _stage_color(key: String, new_color: Color) -> void:
+	if _updating:
+		return
+	_edit.stage(key, new_color)
 
 
 ## The display autoload, or null.
@@ -299,6 +318,8 @@ func _refresh() -> void:
 		elif editors[0] is OptionButton:
 			var row: Dictionary = SettingsScript.REGISTRY.get(key, {})
 			editors[0].selected = _choice_index(value, SettingsScript.default_of(key), _choices(row))
+		elif editors[0] is ColorPickerButton:
+			editors[0].color = value
 		elif editors[0] is LineEdit:
 			editors[0].text = String(value)
 			editors[0].modulate = IDLE_COLOR

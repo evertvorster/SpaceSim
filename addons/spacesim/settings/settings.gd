@@ -91,6 +91,9 @@ const REGISTRY := {
 	# Breathing room at the viewport edge. It was 100 when a pointer was clamped there and its own
 	# width decided the clearance; labels are placed inside the bounds now, so it is only a margin.
 	"markers.margin": {"default": 24.0, "scope": Scope.PLAYER, "min": 0.0, "max": 400.0},
+	# The selected target's own colour, against the one colour everything else is drawn in. A colour
+	# rather than a flag so the target can be made to stand out against whatever it is seen against.
+	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER},
 	"frames.system_band": {"default": Vector2(1.0e4, 1.0e11), "scope": Scope.WORLD},
 	"frames.atmosphere_band": {"default": Vector2(2.0e3, 4.0e5), "scope": Scope.WORLD},
 	"frames.surface_band": {"default": Vector2(1.0e2, 5.0e3), "scope": Scope.WORLD},
