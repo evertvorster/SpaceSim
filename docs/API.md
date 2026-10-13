@@ -134,11 +134,12 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 | Class | |
 |---|---|
 | `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_world_time`, `bodies`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
-| `SpacesimSystemBody` | `content/system_body.gd` — one body: `id`, `display_name`, `kind`, `parent_id`, `primary`, `radius`, `mass`, `rotation_period`, `axial_tilt`, `layers`, `orbit`, `fixed_position`, `atmosphere`, `surface`, `overrides`, `landable`, `significant` |
+| `SpacesimSystemBody` | `content/system_body.gd` — one body: `id`, `display_name`, `kind`, `parent_id`, `primary`, `radius`, `mass`, `rotation_period`, `axial_tilt`, `layers`, `orbit`, `fixed_position`, `atmosphere`, `surface`, `clouds`, `overrides`, `landable`, `significant` |
 | `SpacesimLayer` | `content/layer.gd` — `layer_name`, `radius` (outer boundary), `composition` |
 | `SpacesimOrbit` | `content/orbit.gd` — the six Keplerian elements, degrees |
 | `SpacesimAtmosphere` | `content/atmosphere.gd` — `surface_pressure`, `species`, `variable_species` |
 | `SpacesimSurface` | `content/surface.gd` — `coverage` |
+| `SpacesimClouds` | `content/clouds.gd` — `fraction`, `albedo`, `color`, `opacity`. **Authored for now, derived later.** On the body rather than in the atmosphere, because a gas giant's visible surface *is* its cloud deck and the giants carry no atmosphere block |
 | `SpacesimBodyOverrides` | `content/overrides.gd` — pinned derived values |
 | `SpacesimFraming` | `content/framing.gd` — the travel bands and thresholds |
 | `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name |
@@ -183,7 +184,7 @@ lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes liv
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
 | `static from_content(content) -> SpacesimSceneBody` | |
-| `static color_of(content) -> Color` | what content pinned, or `UNPINNED_COLOR` — colour is otherwise derived, and that derivation does not exist yet |
+| `static color_of(content, materials) -> Color` | what content pinned, or `SpacesimSurfaceModel.color` — the derivation, not a placeholder |
 | `orbits() -> bool` | |
 
 ### `SpacesimKepler` — `RefCounted`
@@ -237,6 +238,29 @@ not.
 `aim_sun_at()` re-aims it at wherever the player is. The planet you are at is lit correctly; the
 one on the far side of the star is lit from its own side rather than the near one.
 
+### Derivation — `model/`
+
+What a body's numbers *are*, computed from what it is made of. This is where the physics lives, and it
+is what makes the authored Sol a calibration target rather than a fixture.
+
+| Class | |
+|---|---|
+| `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
+| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions; the cloud deck is blended over it by fraction, which is why this cannot come from `surface` alone — **clouds dominate a planet's reflection** |
+
+**Calibrated against measured Bond albedos** (`test_surface.gd`): Luna 0.120 vs 0.110 measured,
+Earth **0.302 vs 0.306**, Venus 0.760 vs 0.760, Jupiter 0.520 vs 0.503, Saturn 0.340, Uranus 0.300,
+Neptune 0.290. Earth *without* its deck derives 0.081, which is what the deck exists for.
+
+Known data limitation, named rather than fudged: **one `regolith` material cannot be Moon-dark
+(0.11), Mercury-darker (0.088) and Mars-bright (0.25) at once**, so the airless bodies carry a wider
+tolerance. Io and Europa are not asserted at all — their bright frosts (SO₂ in particular) need their
+own species and verified albedos.
+
+Shared with the scene: the colour the renderer draws is `SpacesimSurfaceModel.color`, unless content
+pinned `surface_color`. A body with neither surface nor deck gets `UNPINNED_COLOR`, deliberately
+unlovely so a placeholder is never mistaken for a result.
+
 ## Lighting
 
 `addons/spacesim/lighting/` — the star as a physical light source, and the camera that exposes for it.
@@ -273,14 +297,10 @@ the world.
 | `static camera_attributes() -> CameraAttributesPhysical` | auto-exposure on plus the EV clamp; assign to `Camera3D.attributes` |
 | `static configure(environment, ambient_color)` | the AgX tone curve, `tonemap_white`, ambient, and the star's glare via `glow_*` — the star's disk rolls off instead of dominating the exposure histogram |
 
-### `SpacesimStarModel` — `RefCounted`
+### The star's numbers
 
-`addons/spacesim/system/model/` — the first of the derivation.
-
-| Member | |
-|---|---|
-| `static luminosity(body) -> float` | what content pinned, or the piecewise mass–luminosity relation |
-| `static effective_temperature(luminosity, radius) -> float` | Stefan-Boltzmann. **A check on the data, not a restatement of it**: L and R are measured independently, and the Sun's give 5772 K |
+Luminosity and effective temperature come from `SpacesimStarModel` — see **Derivation — `model/`**
+under Solar system above.
 
 ## Navigation
 

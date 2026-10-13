@@ -28,12 +28,13 @@ var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
 
-## Until the derivation supplies a colour from composition this is what an unpinned body is drawn
-## in — visibly a placeholder rather than a plausible-looking guess.
-const UNPINNED_COLOR := Color(0.62, 0.62, 0.66)
+## What a body with nothing to derive from is drawn in — visibly a placeholder rather than a
+## plausible-looking guess. Lives with the derivation that replaces it.
 
 
-static func from_content(content: SpacesimSystemBody) -> SpacesimSceneBody:
+static func from_content(
+	content: SpacesimSystemBody, materials: SpacesimMaterialTable = null
+) -> SpacesimSceneBody:
 	var body := SpacesimSceneBody.new()
 	body.content = content
 	body.id = content.id
@@ -45,18 +46,22 @@ static func from_content(content: SpacesimSystemBody) -> SpacesimSceneBody:
 	body.orbit = content.orbit
 	body.landable = content.landable
 	body.significant = content.significant
-	body.color = color_of(content)
+	body.color = color_of(content, materials)
 	return body
 
 
-## The colour to draw a body in: what content pinned, or a placeholder.
+## The colour to draw a body in: what content pinned, or **the derivation** — surface coverage blended
+## with the cloud deck, through the material table.
 ##
-## Colour is **derived** — from composition and surface coverage, via the material table. That
-## derivation does not exist yet, which is why an unpinned body is deliberately unlovely.
-static func color_of(content: SpacesimSystemBody) -> Color:
+## Pinning still wins, because content overrides derived values everywhere else: a system that wants a
+## particular look says so rather than being second-guessed. `UNPINNED_COLOR` is what a body with
+## nothing to derive from gets.
+static func color_of(
+	content: SpacesimSystemBody, materials: SpacesimMaterialTable = null
+) -> Color:
 	if content.overrides != null and content.overrides.set.has("surface_color"):
 		return content.overrides.surface_color
-	return UNPINNED_COLOR
+	return SpacesimSurfaceModel.color(content, materials)
 
 
 func orbits() -> bool:

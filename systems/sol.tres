@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://addons/spacesim/system/content/atmosphere.gd" id="atmosphere"]
 [ext_resource type="Script" path="res://addons/spacesim/system/content/surface.gd" id="surface"]
 [ext_resource type="Script" path="res://addons/spacesim/system/content/overrides.gd" id="overrides"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/clouds.gd" id="clouds"]
 
 ; SOL — the development and calibration system.
 ;
@@ -668,6 +669,73 @@ ascending_node = 0.0
 argument_of_periapsis = 0.0
 mean_anomaly_at_epoch = 0.0
 
+; ---------- cloud decks (authored for now; derived from the atmosphere later)
+;
+; These carry the albedo as well as the look, because **clouds dominate a planet's reflection**:
+; without them Earth derives 0.081 against a measured 0.306. They sit on the body rather than in the
+; atmosphere because a gas giant's visible surface *is* its cloud deck, and the giants carry no
+; atmosphere block.
+;
+; A gas giant's fraction is 1.0 and its albedo is its whole Bond albedo — there is nothing else to
+; reflect off. The four giant values are the measured ones: Jupiter 0.50, Saturn 0.34, Uranus 0.30,
+; Neptune 0.29.
+
+[sub_resource type="Resource" id="C_venus"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.76
+color = Color(0.98, 0.92, 0.72, 1)
+opacity = 1.0
+
+[sub_resource type="Resource" id="C_earth"]
+script = ExtResource("clouds")
+fraction = 0.6
+albedo = 0.45
+color = Color(0.95, 0.96, 1, 1)
+opacity = 0.9
+
+[sub_resource type="Resource" id="C_mars"]
+script = ExtResource("clouds")
+fraction = 0.35
+albedo = 0.4
+color = Color(0.85, 0.78, 0.68, 1)
+opacity = 0.6
+
+[sub_resource type="Resource" id="C_titan"]
+script = ExtResource("clouds")
+fraction = 0.9
+albedo = 0.22
+color = Color(0.9, 0.72, 0.42, 1)
+opacity = 0.5
+
+[sub_resource type="Resource" id="C_jupiter"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.52
+color = Color(0.85, 0.78, 0.68, 1)
+opacity = 1.0
+
+[sub_resource type="Resource" id="C_saturn"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.34
+color = Color(0.88, 0.82, 0.65, 1)
+opacity = 1.0
+
+[sub_resource type="Resource" id="C_uranus"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.3
+color = Color(0.65, 0.85, 0.88, 1)
+opacity = 1.0
+
+[sub_resource type="Resource" id="C_neptune"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.29
+color = Color(0.42, 0.55, 0.85, 1)
+opacity = 1.0
+
 ; ---------- bodies ----------
 
 [sub_resource type="Resource" id="B_sol"]
@@ -715,6 +783,7 @@ layers = Array[ExtResource("layer")]([SubResource("L_venus_core"), SubResource("
 orbit = SubResource("O_venus")
 atmosphere = SubResource("A_venus")
 surface = SubResource("S_venus")
+clouds = SubResource("C_venus")
 landable = true
 significant = true
 
@@ -732,6 +801,7 @@ layers = Array[ExtResource("layer")]([SubResource("L_earth_inner_core"), SubReso
 orbit = SubResource("O_earth")
 atmosphere = SubResource("A_earth")
 surface = SubResource("S_earth")
+clouds = SubResource("C_earth")
 landable = true
 significant = true
 
@@ -749,6 +819,7 @@ layers = Array[ExtResource("layer")]([SubResource("L_mars_core"), SubResource("L
 orbit = SubResource("O_mars")
 atmosphere = SubResource("A_mars")
 surface = SubResource("S_mars")
+clouds = SubResource("C_mars")
 landable = true
 significant = true
 
@@ -764,6 +835,7 @@ rotation_period = 35730.0
 axial_tilt = 3.13
 layers = Array[ExtResource("layer")]([SubResource("L_jupiter_core"), SubResource("L_jupiter_envelope")])
 orbit = SubResource("O_jupiter")
+clouds = SubResource("C_jupiter")
 landable = false
 significant = true
 
@@ -779,6 +851,7 @@ rotation_period = 38361.6
 axial_tilt = 26.73
 layers = Array[ExtResource("layer")]([SubResource("L_saturn_core"), SubResource("L_saturn_envelope")])
 orbit = SubResource("O_saturn")
+clouds = SubResource("C_saturn")
 landable = false
 significant = true
 
@@ -794,6 +867,7 @@ rotation_period = 62064.0
 axial_tilt = 97.77
 layers = Array[ExtResource("layer")]([SubResource("L_uranus_core"), SubResource("L_uranus_envelope")])
 orbit = SubResource("O_uranus")
+clouds = SubResource("C_uranus")
 landable = false
 significant = true
 
@@ -809,6 +883,7 @@ rotation_period = 57996.0
 axial_tilt = 28.32
 layers = Array[ExtResource("layer")]([SubResource("L_neptune_core"), SubResource("L_neptune_envelope")])
 orbit = SubResource("O_neptune")
+clouds = SubResource("C_neptune")
 landable = false
 significant = true
 
@@ -911,6 +986,7 @@ layers = Array[ExtResource("layer")]([SubResource("L_titan_core"), SubResource("
 orbit = SubResource("O_titan")
 atmosphere = SubResource("A_titan")
 surface = SubResource("S_titan")
+clouds = SubResource("C_titan")
 landable = true
 significant = true
 

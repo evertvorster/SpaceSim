@@ -68,8 +68,14 @@ static func from_content(content: SpacesimSolarSystem) -> SpacesimSystemScene:
 	scene.start_altitude = content.start_altitude
 	scene.start_time = content.start_world_time
 	for entry in content.bodies:
-		scene.bodies.append(SpacesimSceneBody.from_content(entry))
+		scene.bodies.append(SpacesimSceneBody.from_content(entry, _materials()))
 	return scene
+
+
+## The material table a scene derives from: the one the engine ships. Held so one load serves every
+## body rather than one per body.
+static func _materials() -> SpacesimMaterialTable:
+	return SpacesimMaterialTable.engine_table()
 
 
 ## The content revision this scene came from. A save records it so a mismatch is visible rather
