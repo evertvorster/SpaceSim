@@ -63,6 +63,15 @@ func _place_above(body_name: String, altitude: float) -> void:
 	var camera := _find_camera(get_root())
 	if camera == null:
 		return
+	# `up` looks straight up the body's own vertical — the zenith, which is where the sky was black.
+	if OS.get_environment("SHOT_AIM") == "up":
+		var up := (ship.global_position - body.global_position).normalized()
+		var side := up.cross(Vector3.UP)
+		if side.length() < 0.5:
+			side = up.cross(Vector3.RIGHT)
+		_aim(camera, up, side.normalized())
+		_report_aim(body, camera, "up")
+		return
 	if OS.get_environment("SHOT_AIM") == "level":
 		# **Level, relative to the body's own up**, which is the placement geometry rather than the
 		# camera's: the camera is a child of the ship and gets reparented by the frame tree, so anything
@@ -76,13 +85,7 @@ func _place_above(body_name: String, altitude: float) -> void:
 		var along := up.cross(Vector3.UP)
 		if along.length() < 0.5:
 			along = up.cross(Vector3.RIGHT)
-		along = along.normalized()
-		var right := along.cross(up).normalized()
-		var true_up := right.cross(along).normalized()
-		# Godot's convention: -Z is forward, +Y is up, +X is right.
-		camera.global_transform = Transform3D(
-			Basis(right, true_up, -along), camera.global_position
-		)
+		_aim(camera, along.normalized(), up)
 		_report_aim(body, camera, "level")
 		return
 	# The up vector must not be parallel to the look direction, or look_at is degenerate and the
@@ -94,6 +97,17 @@ func _place_above(body_name: String, altitude: float) -> void:
 		up = Vector3.RIGHT
 	camera.look_at(aim, up)
 	_report_aim(body, camera, "radial")
+
+
+## Point the camera **without `look_at`**, which fails when the target lands on the origin — it logs an
+## error, keeps the old orientation, and the shot then reads as a broken shader rather than a broken
+## rig. A constructed basis cannot do that.
+##
+## `forward` and `up` must be perpendicular, in world axes. Godot's convention: -Z forward, +Y up.
+func _aim(camera: Camera3D, forward: Vector3, up: Vector3) -> void:
+	var right := forward.cross(up).normalized()
+	var true_up := right.cross(forward).normalized()
+	camera.global_transform = Transform3D(Basis(right, true_up, -forward), camera.global_position)
 
 
 ## Say where the camera ended up pointing, in **degrees above the local horizontal**.
