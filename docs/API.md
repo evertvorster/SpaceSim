@@ -142,7 +142,7 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 | `SpacesimClouds` | `content/clouds.gd` — `fraction`, `albedo`, `color`, `opacity`. **Authored for now, derived later.** On the body rather than in the atmosphere, because a gas giant's visible surface *is* its cloud deck and the giants carry no atmosphere block. **Nothing draws a deck at present** — the shell that did was removed for standing `radius * 1.012` above the surface (76 km at Earth), which made it the outermost silhouette of every body. The content stays and is still read: `bond_albedo` needs `fraction` and `albedo`, and `color` is what a body with no surface coverage is drawn in |
 | `SpacesimBodyOverrides` | `content/overrides.gd` — pinned derived values |
 | `SpacesimFraming` | `content/framing.gd` — the travel bands and thresholds |
-| `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name |
+| `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name. `rayleigh` is the per-channel scattering cross-section, populated for every gas the authored atmospheres use **except water vapour and ammonia**; `materials.tres` records where each number came from |
 
 Data files: `addons/spacesim/system/content/materials.tres` (the material table; ships with the
 engine) and `systems/sol.tres` (Sol — the **development and calibration** system, not shipped
@@ -181,7 +181,8 @@ lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes liv
 | `color: Color`, `landable: bool`, `significant: bool` | |
 | `parent_id: String`, `fixed_position: Vector3`, `orbit: SpacesimOrbit` | |
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
-| `atmosphere_mesh: MeshInstance3D` | built — the air, on its own sphere; null when the body has no atmosphere |
+| `atmosphere_mesh: MeshInstance3D` | built — the air, on its own sphere reaching `radius + sky_top`; null when the body has no atmosphere |
+| `sky_top: float` | **how far above the surface this body's air is worth drawing**, metres — derived from the air's own scale height, floored by `frames.atmosphere_altitude`. The camera's far plane needs it (`sky_reach()`); zero for a body with no air |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
 | `static from_content(content) -> SpacesimSceneBody` | |
@@ -275,7 +276,7 @@ is what makes the authored Sol a calibration target rather than a fixture.
 |---|---|
 | `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
 | `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck was drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey. The split outlives the drawn deck, and should: the reflectance is physics and the colour is a picture |
-| `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static scale_height(...)` (`kT/(m-bar g)`), `static surface_gravity(body)`, `static equilibrium_temperature(...)` (§3.6's first row, used as the reference state), and `static coverage(...)`. See **The sky** under Render layers |
+| `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static scale_height(...)` (`kT/(m-bar g)`), `static shell_reach(...)` (**how many scale heights of air to draw** — see **The sky**), `static surface_gravity(body)`, `static reference_temperature(...)` (what content **pinned**, or equilibrium temperature), `static equilibrium_temperature(...)` (§3.6's first row, the placeholder), and `static coverage(...)` |
 
 **Calibrated against measured Bond albedos** (`test_surface.gd`): Luna 0.120 vs 0.110 measured,
 Earth **0.302 vs 0.306**, Venus 0.760 vs 0.760, Jupiter 0.520 vs 0.503, Saturn 0.340, Uranus 0.300,
@@ -368,7 +369,7 @@ model-space position is captured in `vertex()` and passed as a varying.
 
 ### The sky
 
-A body with an atmosphere gets a second sphere reaching `radius + frames.atmosphere_altitude`, drawn
+A body with an atmosphere gets a second sphere reaching `radius + sky_top`, drawn
 with `body_atmosphere.gdshader` — **Rayleigh and Mie scattering**, and the one shader here that is not
 ours: it is [`glsl-atmosphere`](https://github.com/wwwtyro/glsl-atmosphere) by
 <https://wwwtyro.net/> (Unlicense, public domain), applied to a shell instead of a fullscreen quad.
@@ -392,6 +393,43 @@ reads from a distance; if the disk haze is ever wanted it needs a second pass ov
 | `mie_*` | **named constants, not derivation.** Mie is aerosols, not the species mix — Earth-like values from `glsl-atmosphere`'s example |
 | `sun_intensity` | `SKY_INTENSITY * illuminance / REFERENCE_LUX`, so the sky keeps its proportion to the surface the star lights instead of brightening with distance |
 | `eye_offset`, `sun_direction` | **refreshed per frame, as offsets.** Bodies sit at ~1.5e11 m and a GLSL float has ~7 digits, so a world coordinate would arrive with ~16 km of resolution against an air 100 km deep |
+
+**How far the shell reaches is derived, not authored.** `SHELL_SCALE_HEIGHTS` scale heights of the
+air's own `kT/(m-bar g)`, because one altitude for the whole system is right for exactly one body: a
+fixed 100 km is **twelve** scale heights over Earth and **four** over Jupiter, where the air is still
+2% of surface density at the top and the shell would end in visible haze. It is then floored by
+`frames.atmosphere_altitude`, so a shell can never be shorter than the atmosphere frame the game puts
+the player in — 100 km is a *gameplay* convention and stays one.
+
+Printed from the running code, and asserted in `test_render.gd`:
+
+| body | scale height | shell reaches |
+|---|---|---|
+| Venus | 5.0 km | 100 km (the floor wins) |
+| Earth | 7.5 km | 100 km (the floor wins) |
+| Mars | 11.4 km | 114 km |
+| Triton | 15.8 km | 158 km |
+| Titan | 19.4 km | 194 km |
+| Neptune | 20.7 km | 207 km |
+| Jupiter | 22.7 km | 227 km |
+| Uranus | 27.5 km | 275 km |
+| Saturn | 50.1 km | 501 km |
+
+**Venus is where the placeholder temperature hurts most**, and it is worth knowing: `T_eq` puts its
+surface at 229 K against a measured 737 K, so its derived scale height is 5.0 km against a real ~16.
+Earth is 256 K against 288; the giants are pinned. The greenhouse stage is what fixes the rest.
+
+**A gas giant's "surface" is the 1-bar level, and that is a convention rather than a boundary.**
+Hydrogen's critical point is 33.15 K at 13.2 bar and every giant's 1-bar level is far above it, so the
+H2/He envelope is a **supercritical fluid** from the cloud tops down to metallic hydrogen — there is
+no liquid to land on and no sharp interface at any depth. 1 bar is the standard level for a giant's
+radius, which is what `radius` already is; the visible clouds condense between roughly 0.5 and 10 bar,
+so the floor sits just above what you would actually see. The giants carry an `atmosphere` block like
+anything else and are `landable = false`, so they have air and **no frames** — which is why their sky
+works without a landable surface.
+
+**Their temperature is pinned through `overrides`**, at the measured 1-bar value, because a giant
+radiates more than it receives: Jupiter's equilibrium temperature is ~101 K against a measured 165 K.
 
 **The march starts at the camera, and that is not incidental.** `glsl-atmosphere`'s own example has
 the eye *outside* the atmosphere, where both roots of the ray-sphere test lie ahead of it; from

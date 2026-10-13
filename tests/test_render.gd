@@ -32,7 +32,7 @@ func run(h, root: Node) -> void:
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
-	_test_the_gas_giants_have_air(h, scene, sol)
+	_test_the_air_shells_reach_the_right_height(h, scene, sol)
 	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
@@ -195,26 +195,38 @@ func _test_the_sky_is_derived(
 ## you see. **Their "surface" is the 1-bar level, which is a convention and not a boundary:** there is
 ## no liquid to land on, because hydrogen is supercritical above 33 K at 13 bar and every giant's 1-bar
 ## level is far above that. The radius is already the 1-bar radius, so the shell sits above it.
-func _test_the_gas_giants_have_air(h, scene: SpacesimSystemScene, sol: SpacesimSolarSystem) -> void:
+func _test_the_air_shells_reach_the_right_height(
+	h, scene: SpacesimSystemScene, sol: SpacesimSolarSystem
+) -> void:
 	var materials := SpacesimMaterialTable.engine_table()
 	var top := sol.framing.atmosphere_altitude
 	# Ten scale heights of the *measured* 1-bar temperature. Equilibrium temperature would be ~101 K
 	# for Jupiter against a measured 165, because a giant radiates more than it receives -- so the
 	# temperature is pinned in content and this is the check that the pin is read.
+	# Every air body, against the values the code produces today. They are derived from authored
+	# content, so they should be stable -- and if a cross-section or a temperature changes, this is
+	# what should go red and say so.
 	for entry in [
-		{"name": "Jupiter", "reach": 227.0}, {"name": "Saturn", "reach": 501.0},
-		{"name": "Uranus", "reach": 275.0}, {"name": "Neptune", "reach": 207.0},
+		{"id": "planet:venus", "reach": 100.0, "covered": 1.0},
+		{"id": "planet:earth", "reach": 100.0, "covered": 0.99},
+		{"id": "planet:mars", "covered": 1.0, "reach": 114.0}, {"id": "moon:triton", "covered": 1.0, "reach": 158.0},
+		{"id": "moon:titan", "covered": 1.0, "reach": 194.0}, {"id": "planet:neptune", "covered": 1.0, "reach": 207.0},
+		{"id": "planet:jupiter", "covered": 1.0, "reach": 227.0}, {"id": "planet:uranus", "covered": 1.0, "reach": 275.0},
+		{"id": "planet:saturn", "covered": 1.0, "reach": 501.0},
 	]:
-		var body := scene.body_by_id("planet:%s" % String(entry["name"]).to_lower())
-		h.check(body.atmosphere_mesh != null, "%s has an air shell" % entry["name"])
+		var body := scene.body_by_id(String(entry["id"]))
+		h.check(body != null and body.atmosphere_mesh != null,
+			"%s has an air shell" % entry["id"])
 		if body.atmosphere_mesh == null:
 			continue
 		h.check(absf(body.sky_top - float(entry["reach"]) * 1000.0) < 6000.0,
 			"reaching %.0f km, ten scale heights of its measured 1-bar air (floor %.0f km)"
 				% [body.sky_top / 1000.0, top / 1000.0])
-		h.check(SpacesimAtmosphereModel.coverage(body.content.atmosphere, materials) == 1.0,
-			"and every species in its air has a cross-section -- hydrogen included (%.3f)"
-				% SpacesimAtmosphereModel.coverage(body.content.atmosphere, materials))
+		# Every species but Earth's water vapour: **hydrogen was the gap for the giants**, and it is
+		# why Titan stopped being listed as short too.
+		var covered := SpacesimAtmosphereModel.coverage(body.content.atmosphere, materials)
+		h.check(absf(covered - float(entry["covered"])) < 1.0e-3,
+			"%s: %.3f of its air has a cross-section" % [entry["id"], covered])
 	# Hydrogen is the reason those are covered at all, and it is checked against helium: the two
 	# formulations agree to four digits for helium, where a dispersion relation exists.
 	var hydrogen := materials.by_name("hydrogen")
