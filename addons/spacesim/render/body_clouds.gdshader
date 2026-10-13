@@ -15,7 +15,9 @@ uniform vec3 cloud_color : source_color = vec3(1.0);
 uniform float coverage : hint_range(0.0, 1.0) = 0.0;
 uniform float opacity : hint_range(0.0, 1.0) = 1.0;
 uniform float edge_softness : hint_range(0.001, 0.5) = 0.12;
-uniform float noise_scale : hint_range(0.1, 32.0) = 4.0;
+// See the note in `body_surface.gdshader`: the direction is mapped into the texture rather than
+// scaled up, because scaling it wraps the texture and repeats the deck in a visible grid.
+uniform float noise_scale : hint_range(0.1, 2.0) = 1.6;
 uniform vec3 noise_offset = vec3(0.0);
 uniform sampler3D noise_field : filter_linear, repeat_enable;
 
@@ -28,7 +30,7 @@ void vertex() {
 
 void fragment() {
 	vec3 direction = normalize(local_position);
-	float n = texture(noise_field, (direction + noise_offset) * noise_scale).r;
+	float n = texture(noise_field, direction * (0.25 * noise_scale) + vec3(0.5) + noise_offset).r;
 
 	// More coverage means a lower bar for what counts as cloud.
 	float threshold = 1.0 - coverage;

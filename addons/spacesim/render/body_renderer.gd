@@ -32,26 +32,30 @@ const RELIEF := 0.05
 const DETAIL_MIX := 0.5
 const DETAIL_SOFTNESS := 0.18
 
-## Features across a body. These are scaled over the **unit sphere**, not over metres — see the note
-## in `body_surface.gdshader`. They are the obvious knobs if a surface is too busy or too plain.
-const SURFACE_NOISE_SCALE := 6.0
-const CLOUD_NOISE_SCALE := 4.0
+## Features **inside the noise texture**, not wraps of it. The sphere is mapped into a quarter of the
+## texture, so detail comes from how much noise the texture holds — raising the sampling scale instead
+## walks out of the texture and repeats the whole pattern as a visible grid.
+const SURFACE_NOISE_SCALE := 1.0
+const CLOUD_NOISE_SCALE := 1.6
 
 ## The deck samples the field somewhere else, so clouds do not sit in exactly the pattern the terrain
-## underneath is wearing.
-const CLOUD_OFFSET := Vector3(7.3, 3.1, 11.7)
+## underneath is wearing. Small on purpose — see `offset_for`.
+const CLOUD_OFFSET := Vector3(0.07, 0.03, 0.11)
 
 static var _noise: NoiseTexture3D
 
 
 ## One 3D noise field, shared by every body and every layer. Each body gets its own **offset**, so
 ## sharing the field costs nothing visually and only one texture is ever built.
+##
+## The frequency is what supplies the detail: the sphere samples only a quarter of the texture, so a
+## gentle noise reads as two smooth blobs and a busy one reads as terrain. 0.01 was far too gentle.
 static func noise_field() -> NoiseTexture3D:
 	if _noise == null:
 		var generator := FastNoiseLite.new()
 		generator.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-		generator.frequency = 0.01
-		generator.fractal_octaves = 4
+		generator.frequency = 0.09
+		generator.fractal_octaves = 5
 		var texture := NoiseTexture3D.new()
 		texture.noise = generator
 		texture.seamless = true
@@ -231,8 +235,12 @@ static func cloud_material(body: SpacesimSceneBody) -> ShaderMaterial:
 
 ## A stable offset into the noise field, derived from the body's id — so the same body always wears the
 ## same surface, and two bodies never wear the same one.
+##
+## **Small.** The sphere is mapped into a quarter of the texture, so an offset of more than about 0.2
+## walks the sample out of it and back into the tiling the mapping exists to avoid. The first version
+## returned values up to 10, which did exactly that.
 static func offset_for(id: String) -> Vector3:
 	var seed := int(hash(id))
 	return Vector3(
-		float(seed & 0x3ff) * 0.01, float((seed >> 10) & 0x3ff) * 0.01, float((seed >> 20) & 0x3ff) * 0.01
-	)
+		float(seed & 0xff) / 255.0, float((seed >> 8) & 0xff) / 255.0, float((seed >> 16) & 0xff) / 255.0
+	) * 0.15

@@ -161,11 +161,20 @@ func significant_nodes() -> Array[Node3D]:
 	return list
 
 
+## Where a fresh story puts the ship: **on the day side**, above the start body.
+##
+## Not simply at +X. A fixed +X put the ship on whichever side of the body happened to face *away* from
+## the star — Earth sits at +X and the star is at the origin, so +X is night. The result was a black
+## scene, no lit air, and a bug report that read as two unrelated faults: "the scene looks too dark"
+## and "I don't see the air at all". Both were the same thing — no light.
 func ship_start() -> Vector3:
 	var body := body_by_id(start_body_id)
 	if body == null:
 		return Vector3.ZERO
-	return body.node.global_position + Vector3(body.radius + start_altitude, 0.0, 0.0)
+	var outward := -body.node.global_position.normalized()
+	if outward.length() < 0.5:
+		outward = Vector3.RIGHT # the start body is the star itself
+	return body.node.global_position + outward * (body.radius + start_altitude)
 
 
 ## How far the camera must be able to see to draw this system: the outer edge of the system frame's

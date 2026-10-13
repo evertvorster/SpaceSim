@@ -14,17 +14,29 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // The local position is captured in `vertex()` because **`VERTEX` inside `fragment()` is in VIEW
 // space**, not model space.
 
+// **THE FIELD IS SAMPLED ONCE ACROSS THE SPHERE.** The direction spans ±1 per axis, so multiplying it
+// by a scale before sampling wraps the texture that many times — at scale 4 the cloud deck repeated
+// as a visible 8x8 grid of patches. Instead the unit direction is mapped into the middle of the
+// texture's [0,1] range, and the *detail* comes from how much noise the texture itself holds.
+//
+// Two other things are load-bearing and were each wrong once: sampling in world metres at all (every
+// pixel lands in an arbitrary voxel — a field of dots), and **`VERTEX` inside `fragment()` is VIEW
+// space**, so the model-space position is captured in `vertex()` and passed here.
+
 uniform vec3 base_color : source_color = vec3(0.5, 0.5, 0.5);
 uniform vec3 detail_color : source_color = vec3(0.5, 0.5, 0.5);
 // Where the blend sits, and how soft it is: a two-stop height gradient.
 uniform float detail_mix : hint_range(0.0, 1.0) = 0.5;
 uniform float detail_softness : hint_range(0.001, 0.5) = 0.15;
-uniform float noise_scale : hint_range(0.1, 32.0) = 6.0;
+// How far into the texture the sphere is mapped. 1.0 uses a quarter of it, which cannot wrap; above
+// about 2.0 the sampling starts to repeat and the surface tiles.
+uniform float noise_scale : hint_range(0.1, 2.0) = 1.0;
 // The knob for how pronounced the relief is. It multiplies a true gradient, so it is small.
 uniform float relief : hint_range(0.0, 0.5) = 0.05;
 uniform float roughness_value : hint_range(0.0, 1.0) = 0.9;
 uniform float specular_value : hint_range(0.0, 1.0) = 0.2;
-// A per-body offset, so two bodies with the same settings do not wear the same surface.
+// A small per-body shift, so two bodies do not wear the same surface. Small because a large one walks
+// the sample straight out of the texture and back into the tiling it was moved to avoid.
 uniform vec3 noise_offset = vec3(0.0);
 uniform sampler3D noise_field : filter_linear, repeat_enable;
 
@@ -37,7 +49,7 @@ void vertex() {
 
 // The field at a unit direction, shifted so each body gets its own place in it.
 float field(vec3 direction) {
-	return texture(noise_field, (direction + noise_offset) * noise_scale).r;
+	return texture(noise_field, direction * (0.25 * noise_scale) + vec3(0.5) + noise_offset).r;
 }
 
 void fragment() {
@@ -52,9 +64,8 @@ void fragment() {
 	SPECULAR = specular_value;
 
 	// Relief from the field's gradient, projected onto the surface so it perturbs the normal without
-	// tilting it off the sphere. Finite differences in direction space; `e` is chosen so the step in
-	// the *texture* stays constant however the scale is set.
-	float e = 0.02 / max(noise_scale, 0.001);
+	// tilting it off the sphere.
+	float e = 0.01;
 	vec3 gradient = vec3(field(p + vec3(e, 0.0, 0.0)) - height,
 		field(p + vec3(0.0, e, 0.0)) - height,
 		field(p + vec3(0.0, 0.0, e)) - height) / e;
