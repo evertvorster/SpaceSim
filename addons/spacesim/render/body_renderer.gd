@@ -19,14 +19,22 @@ const CLOUD_SHELL := 1.012
 ## shape from composition is the next thing the derivation can honestly supply.
 const SURFACE_ROUGHNESS := 0.9
 const SURFACE_SPECULAR := 0.15
-const RELIEF := 0.6
+## Multiplies a *true* gradient over the unit sphere, so it is small: at noise_scale 6 the gradient is
+## around 6, and 0.05 of that tips the normal by roughly 17 degrees where the field is steepest.
+const RELIEF := 0.05
 
 ## How far into the two-stop colour gradient the blend sits, and how soft the edge is.
 const DETAIL_MIX := 0.5
 const DETAIL_SOFTNESS := 0.18
 
-const SURFACE_NOISE_SCALE := 2.5
-const CLOUD_NOISE_SCALE := 3.5
+## Features across a body. These are scaled over the **unit sphere**, not over metres — see the note
+## in `body_surface.gdshader`. They are the obvious knobs if a surface is too busy or too plain.
+const SURFACE_NOISE_SCALE := 6.0
+const CLOUD_NOISE_SCALE := 4.0
+
+## The deck samples the field somewhere else, so clouds do not sit in exactly the pattern the terrain
+## underneath is wearing.
+const CLOUD_OFFSET := Vector3(7.3, 3.1, 11.7)
 
 static var _noise: NoiseTexture3D
 
@@ -82,7 +90,7 @@ static func cloud_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	material.set_shader_parameter("coverage", clampf(clouds.fraction, 0.0, 1.0))
 	material.set_shader_parameter("opacity", clampf(clouds.opacity, 0.0, 1.0))
 	material.set_shader_parameter("noise_scale", CLOUD_NOISE_SCALE)
-	material.set_shader_parameter("noise_offset", offset_for(body.id))
+	material.set_shader_parameter("noise_offset", offset_for(body.id) + CLOUD_OFFSET)
 	material.set_shader_parameter("noise_field", noise_field())
 	return material
 
