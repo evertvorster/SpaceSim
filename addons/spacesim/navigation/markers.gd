@@ -159,36 +159,35 @@ func _place(
 ) -> Dictionary:
 	var target: Node3D = entry["node"]
 	var circle: Vector2 = entry["circle"]
-	var colour: Color = (
-		Overlay.SELECTED_COLOR if int(entry["priority"]) == Priority.SELECTED else Overlay.COLOR
-	)
 
 	# **A moon gives up its label, not its ring.** Yielding to the body it orbits is a fact about the
 	# two *labels* — two names a pixel apart say no more than one — and says nothing about whether the
-	# moon is there. So the ring is still drawn, with no line and nothing written beside it.
+	# moon is there. So the ring is still drawn, with nothing written beside it.
 	if _yields_to_parent(target, int(entry["priority"]), marked):
 		label.visible = false
-		return {"circle": circle, "color": colour}
+		return {"circle": circle, "color": Overlay.COLOR}
 
 	label.text = "%s  %s" % [target.name, format_distance(entry["distance"])]
 	label.size = label.get_minimum_size()
-	# An object over the edge still wants its label in view, so the label gathers at the edge point
-	# in the object's direction — and the ring stays out there, with the line pointing at it.
+	# An object over the edge still wants its label in view, so the label gathers at the edge point in
+	# the object's direction.
 	var anchor := clamp_to_edge(circle, viewport_size, margin)
 	var box := Overlay.place_label(anchor, label.size, taken, bounds)
 	taken.append(box)
 
 	label.position = box.position
-	label.add_theme_color_override("font_color", colour)
 	label.visible = true
 
-	var viewport := Rect2(Vector2.ZERO, viewport_size)
-	return {
-		"circle": circle,
-		"start": leader_start(circle, box.get_center(), viewport),
-		"end": Overlay.border_point(box, circle),
-		"color": colour,
-	}
+	var mark := {"circle": circle, "color": Overlay.COLOR}
+	# **A line only where there is a ring to draw it from.** Off screen the ring is not there, so the
+	# label at the edge is the whole marker — and a line to a ring nobody can see points at nothing.
+	if Rect2(Vector2.ZERO, viewport_size).has_point(circle):
+		var ring := Rect2(
+			circle - Vector2.ONE * Overlay.RING_RADIUS, Vector2.ONE * Overlay.RING_RADIUS * 2.0
+		)
+		mark["start"] = Overlay.border_point(ring, box.get_center())
+		mark["end"] = Overlay.border_point(box, circle)
+	return mark
 
 
 ## Whether this marker gives way to the body it orbits.
@@ -206,17 +205,6 @@ func _yields_to_parent(node: Node3D, priority: int, marked: Dictionary) -> bool:
 	if parent == null or parent.node == null:
 		return false
 	return marked.has(parent.node.get_instance_id())
-
-
-## Where the line leaves: the ring's own edge, or — for a ring that is off screen — the point where
-## that same line crosses the edge of the viewport, which is the part of it that can be seen.
-static func leader_start(circle: Vector2, towards: Vector2, viewport: Rect2) -> Vector2:
-	if not viewport.has_point(circle):
-		return Overlay.border_point(viewport, circle)
-	var ring := Rect2(
-		circle - Vector2.ONE * Overlay.RING_RADIUS, Vector2.ONE * Overlay.RING_RADIUS * 2.0
-	)
-	return Overlay.border_point(ring, towards)
 
 
 func _candidates(eye: Vector3) -> Array[Dictionary]:

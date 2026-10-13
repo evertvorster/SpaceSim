@@ -377,13 +377,13 @@ That script needs a window (`xvfb-run` counts), which is why it is not part of `
 label**. The beginning of the HUD's navigation overlay.
 
 - **The ring** is the object's own screen position, and **may be off screen**. It is the label that
-  stays in view, so an object over the edge leaves its line running in from the edge, pointing at
-  where it is — the one fact a marker has to carry when the object cannot be seen. That is why the
-  ring is not clamped along with the label.
-- **The line** runs from the ring's edge to the label's box, which is what makes a label in the
-  middle of a crowded screen still belong to something. It leaves a *visible* ring at the ring's
-  edge rather than its middle, so it does not run across the circle it belongs to.
-- **The label** is a name and a distance, placed clear of every other label and of the HUD.
+  stays in view, which is why the ring is not clamped along with it.
+- **The line** runs from the ring's edge to the label's box, and exists **only when the ring is on
+  screen**: off screen there is no ring to point from, and the label at the edge is the whole marker.
+  It leaves a *visible* ring at the ring's edge rather than its middle, so it does not run across the
+  circle it belongs to.
+- **The label** is a name and a distance, beside its own ring when the ring is on screen, and at the
+  edge of the window when it is not. **Another label is the only thing that moves one.**
 
 The set is rebuilt every frame and the labels are **pooled, not allocated**; the pool size is the
 screen-space budget in one place.
@@ -397,12 +397,10 @@ screen-space budget in one place.
 | `context_targets`, `mission_targets: Array[Node3D]` | ambient group, then mission objectives |
 | `selected: Node3D` | the selected target, or null |
 | `refresh(camera) -> void` | rebuild the set, place its labels, hand the rings to the overlay; call once a frame |
-| `reserved: Array[Rect2]` | rectangles no label may be placed over — the HUD, handed in by the caller |
 | `orbits: Dictionary` | moon node → the [SpacesimSceneBody] it orbits; handed in once, a fact about the system |
 | `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame |
-| `static clamp_to_edge(point, size, margin) -> Vector2` | the smallest turn that brings a point into view |
+| `static clamp_to_edge(point, size, margin) -> Vector2` | the edge point in a direction — **and the point itself when it is already inside** |
 | `static screen_direction(camera, target) -> Vector2` | viewport direction, valid behind the camera |
-| `static leader_start(circle, towards, viewport) -> Vector2` | the ring's edge, or where the line crosses the viewport edge |
 | `static format_distance(metres) -> String` | `1.50 Gm`, `2.5 km`, `12 m` |
 
 ### `SpacesimOverlay` — `Control`
@@ -413,9 +411,9 @@ about the others, which is exactly what placing a label clear of the others need
 
 | Member | |
 |---|---|
-| `marks: Array[Dictionary]` | one per marker, set each frame; a mark with no `start` is a ring with no label |
+| `marks: Array[Dictionary]` | one per marker, set each frame: `{"circle", "color"}` plus `"start"`/`"end"` when there is a line to draw |
 | `RING_RADIUS`, `RING_WIDTH`, `LINE_WIDTH` | 10 px across, 1 px strokes |
-| `COLOR`, `SELECTED_COLOR` | `SELECTED_COLOR` is the amber of a target |
+| `COLOR` | one colour for every marker |
 | `static place_label(anchor, label_size, taken, bounds) -> Rect2` | **the overlap avoidance** |
 | `static fitted(box, bounds)`, `free_of(box, taken)` | the two halves of it |
 | `static border_point(rect, towards) -> Vector2` | where a rect's border is crossed on the way to a point |

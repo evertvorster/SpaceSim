@@ -14,7 +14,7 @@ func run(h, root: Node) -> void:
 	_test_screen_direction(h, root)
 	_test_distance_format(h)
 	_test_a_label_keeps_clear_of_the_others(h)
-	_test_a_leader_line_meets_the_edge(h)
+	_test_a_line_leaves_the_ring_at_its_edge(h)
 	_test_a_moon_gives_up_its_label_to_its_planet(h, root)
 
 
@@ -206,27 +206,16 @@ func _test_a_label_keeps_clear_of_the_others(h) -> void:
 	h.check(unclamped.size == huge, "a label too wide for the screen is not squashed")
 
 
-func _test_a_leader_line_meets_the_edge(h) -> void:
-	var viewport := Rect2(0.0, 0.0, 1000.0, 600.0)
-
-	# A ring on screen: the line leaves the ring's own edge, not its middle, so it does not run
-	# across the circle it belongs to.
-	var on_screen := Markers.leader_start(Vector2(500.0, 300.0), Vector2(500.0, 200.0), viewport)
+## A line exists only where there is a ring to draw it from.
+func _test_a_line_leaves_the_ring_at_its_edge(h) -> void:
+	var ring := Rect2(Vector2(490.0, 290.0), Vector2(20.0, 20.0))
+	var edge := Overlay.border_point(ring, Vector2(500.0, 200.0))
 	h.check_near(
-		on_screen.distance_to(Vector2(500.0, 300.0)),
-		Overlay.RING_RADIUS,
-		"a line leaves a visible ring at the ring's edge",
+		edge.distance_to(Vector2(500.0, 300.0)), Overlay.RING_RADIUS,
+		"a line leaves a ring at the ring's edge, not its middle",
 		0.01
 	)
 
-	# A ring off screen: the line's visible part starts where it crosses the edge, which is the
-	# direction the object is in. This is the pointer the whole thing is for.
-	var off_screen := Markers.leader_start(Vector2(5000.0, 300.0), Vector2(600.0, 300.0), viewport)
-	h.check_near(off_screen.x, 1000.0, "a line from an off-screen ring starts at the edge", 0.01)
-	h.check_near(off_screen.y, 300.0, "at the height that points at it", 0.01)
-
-	var far := Markers.leader_start(Vector2(1.0e6, 300.0), Vector2(600.0, 300.0), viewport)
-	h.check_vector2_near(far, off_screen, "however far off it is, the same edge point", 0.01)
 
 
 ## **A moon gives up its label, not its ring.** Io is a pixel from Jupiter and Luna a pixel from

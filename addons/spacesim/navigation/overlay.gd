@@ -1,15 +1,15 @@
 class_name SpacesimOverlay
 extends Control
-## The navigation overlay: a ring where each object is, and a line from the ring to its label.
+## The navigation overlay: a ring where each object is, and a short line to its label.
 ##
 ## Drawn in **one pass** rather than as a node each. Twelve markers would otherwise be twelve
 ## Controls to build, place and hide every frame — and none of them would know about the others,
 ## which is exactly what placing a label clear of the others needs to know.
 ##
-## **The ring is where the object actually is, and may be off screen.** It is the *label* that stays
-## in view, so a ring over the edge leaves its line running in from the edge — which is the direction
-## the object lies in, and the one fact the marker has to carry when the object itself cannot be
-## seen. That is the whole reason the ring is not simply clamped to the viewport with it.
+## **The ring is where the object actually is, and may be off screen.** The label stays in view: on
+## screen it sits against its own ring, and over the edge it sits at the edge of the window on its
+## own, with **no line** — there is no ring in sight to point from, and a line to one nobody can see
+## points at nothing.
 
 const RING_RADIUS := 10.0
 const RING_WIDTH := 1.0
