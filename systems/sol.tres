@@ -451,6 +451,83 @@ species = Dictionary[String, float]({
 "nitrogen": 0.9999
 })
 
+; ---------- gas giants ----------
+;
+; **A giant's "surface" is the 1-bar level**, and that is a convention rather than a boundary: there
+; is no liquid to land on. Hydrogen's critical point is 33.15 K at 13.2 bar, and the 1-bar level of
+; every giant here is far above that, so the H2/He envelope is a **supercritical fluid** from the
+; cloud tops down to metallic hydrogen -- no sharp gas/liquid interface exists at any depth
+; (Wikipedia, Atmosphere of Jupiter). 1 bar is the standard level for a giant's radius, which is
+; what `radius` above already is.
+;
+; The visible clouds condense between roughly 0.5 and 10 bar (water deepest, then ammonium
+; hydrosulfide, then ammonia: the main deck on Jupiter sits near 1.5 bar), so the 1-bar floor sits
+; just above what you would actually see. Close enough, and it is the convention.
+;
+; **Composition is the three species that dominate**, and trace absorbers (ammonia, water, hydrogen
+; sulfide) are deliberately absent until their Rayleigh cross-sections exist -- around 0.06% of the
+; mix, so the scattering is unaffected, but they matter for the greenhouse stage later.
+;
+; Temperatures are the **measured** 1-bar values and are **pinned** through `overrides`, because a
+; giant radiates more than it receives: Jupiter's equilibrium temperature is ~101 K against a
+; measured 165 K, and internal heat is most of the budget. `reference_temperature()` reads the pin.
+
+[sub_resource type="Resource" id="A_jupiter"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"helium": 0.136,
+"hydrogen": 0.861,
+"methane": 0.003
+})
+
+[sub_resource type="Resource" id="A_saturn"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"helium": 0.0335,
+"hydrogen": 0.962,
+"methane": 0.0045
+})
+
+[sub_resource type="Resource" id="A_uranus"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"helium": 0.15,
+"hydrogen": 0.83,
+"methane": 0.02
+})
+
+[sub_resource type="Resource" id="A_neptune"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"helium": 0.19,
+"hydrogen": 0.795,
+"methane": 0.015
+})
+
+[sub_resource type="Resource" id="Ovr_jupiter"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 165.0
+
+[sub_resource type="Resource" id="Ovr_saturn"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 135.0
+
+[sub_resource type="Resource" id="Ovr_uranus"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 76.0
+
+[sub_resource type="Resource" id="Ovr_neptune"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 72.0
+
 ; ---------- surfaces ----------
 
 [sub_resource type="Resource" id="S_mercury"]
@@ -835,6 +912,8 @@ rotation_period = 35730.0
 axial_tilt = 3.13
 layers = Array[ExtResource("layer")]([SubResource("L_jupiter_core"), SubResource("L_jupiter_envelope")])
 orbit = SubResource("O_jupiter")
+atmosphere = SubResource("A_jupiter")
+overrides = SubResource("Ovr_jupiter")
 clouds = SubResource("C_jupiter")
 landable = false
 significant = true
@@ -851,6 +930,8 @@ rotation_period = 38361.6
 axial_tilt = 26.73
 layers = Array[ExtResource("layer")]([SubResource("L_saturn_core"), SubResource("L_saturn_envelope")])
 orbit = SubResource("O_saturn")
+atmosphere = SubResource("A_saturn")
+overrides = SubResource("Ovr_saturn")
 clouds = SubResource("C_saturn")
 landable = false
 significant = true
@@ -867,6 +948,8 @@ rotation_period = 62064.0
 axial_tilt = 97.77
 layers = Array[ExtResource("layer")]([SubResource("L_uranus_core"), SubResource("L_uranus_envelope")])
 orbit = SubResource("O_uranus")
+atmosphere = SubResource("A_uranus")
+overrides = SubResource("Ovr_uranus")
 clouds = SubResource("C_uranus")
 landable = false
 significant = true
@@ -883,6 +966,8 @@ rotation_period = 57996.0
 axial_tilt = 28.32
 layers = Array[ExtResource("layer")]([SubResource("L_neptune_core"), SubResource("L_neptune_envelope")])
 orbit = SubResource("O_neptune")
+atmosphere = SubResource("A_neptune")
+overrides = SubResource("Ovr_neptune")
 clouds = SubResource("C_neptune")
 landable = false
 significant = true

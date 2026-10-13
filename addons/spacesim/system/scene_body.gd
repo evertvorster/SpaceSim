@@ -27,8 +27,15 @@ var mesh: MeshInstance3D
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
-## The air's own sphere, reaching `frames.atmosphere_altitude`; null when the body has no atmosphere.
+## The air's own sphere, reaching `radius + sky_top`; null when the body has no atmosphere.
 var atmosphere_mesh: MeshInstance3D
+## **How far above the surface this body's air is worth drawing**, in metres — derived from the air's
+## own scale height, floored where the framing says its atmosphere frame begins.
+##
+## Kept on the body rather than recomputed because two things need it and they must agree: the shell's
+## mesh, and the camera's far plane (`SpacesimSystemScene.sky_reach`), which falls short of the sky
+## otherwise. Zero for a body with no air.
+var sky_top: float = 0.0
 
 ## What a body with nothing to derive from is drawn in — visibly a placeholder rather than a
 ## plausible-looking guess. Lives with the derivation that replaces it.

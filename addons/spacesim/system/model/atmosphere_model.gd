@@ -37,6 +37,29 @@ const SKY_INTENSITY := 22.0
 ## and the exposure cannot drift apart.
 const REFERENCE_LUX := 100_000.0
 
+## **How many scale heights of air to draw.** The shell's top is derived, not authored: the air thins
+## exponentially, so "where it ends" is a multiple of `kT/(m-bar g)` and nothing else.
+##
+## Ten puts the density at `e^-10` — one part in 22,000 of the surface — which is invisible. **It
+## matters that this is per body and not one number for the system**: at a fixed 100 km the shell is
+## twelve scale heights over Earth but only four over Jupiter, where the air is still 2% of surface
+## density at the top and the shell would end in visible haze.
+const SHELL_SCALE_HEIGHTS := 10.0
+
+
+## How far above the surface the air is worth drawing, in metres: `SHELL_SCALE_HEIGHTS` scale heights.
+##
+## **Derived, and it has to be.** The alternative — one authored altitude for the whole system — is
+## right for exactly one body. A caller that needs the air to cover a region regardless (a frame's
+## transition altitude, say) takes the maximum of this and its own floor.
+static func shell_reach(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	temperature: float,
+	gravity: float
+) -> float:
+	return scale_height(atmosphere, materials, temperature, gravity) * SHELL_SCALE_HEIGHTS
+
 
 ## Molecules per cubic metre, from the ideal gas law. Everything else follows from this: the
 ## coefficients are cross-sections **per molecule**, so the density is what turns them into 1/m.
@@ -108,11 +131,26 @@ static func surface_gravity(body: SpacesimSystemBody) -> float:
 	return GRAVITATION * body.mass / (body.radius * body.radius)
 
 
-## **The temperature the coefficients are evaluated at, and the only one there is.** This is §3.6's
-## first row — equilibrium temperature — and it is a placeholder for the real thing: with no
-## greenhouse, Earth comes out at 255 K against a measured 288 K, which makes the air about 13%
-## denser than it should be. That is a number to fix, not to hide: when §3.6 lands, this is what it
-## replaces.
+## **The temperature the coefficients are evaluated at.** Content may **pin** it, and for some bodies
+## it must: `reference_temperature` otherwise returns §3.6's first row, equilibrium temperature, which
+## is a placeholder — with no greenhouse it leaves Earth 32 K cold, and the gas giants radiate more
+## than they receive, so insolation is not even the right question for them. A pinned value is a
+## **measured** one, which is what the model is meant to be checked against.
+static func reference_temperature(
+	body: SpacesimSystemBody,
+	materials: SpacesimMaterialTable,
+	luminosity: float,
+	distance: float
+) -> float:
+	if body != null and body.overrides != null \
+		and body.overrides.set.has("mean_surface_temperature"):
+		return body.overrides.mean_surface_temperature
+	return equilibrium_temperature(body, materials, luminosity, distance)
+
+
+## **Equilibrium temperature — §3.6's first row, and the placeholder for the real thing.** With no
+## greenhouse Earth comes out at 255 K against a measured 288 K, which makes the air about 13% denser
+## than it should be. That is a number to fix, not to hide: when §3.6 lands, this is what it replaces.
 static func equilibrium_temperature(
 	body: SpacesimSystemBody,
 	materials: SpacesimMaterialTable,

@@ -298,7 +298,9 @@ func sky_reach(frame: SpacesimFrame) -> float:
 	var body := air_body(frame)
 	if body == null:
 		return 0.0
-	var outer := body.radius + _framing.atmosphere_altitude
+	# **The body's own shell top**, not the framing's altitude: a giant's air is worth drawing far
+	# higher than 100 km, and the far plane has to reach wherever the shell actually ends.
+	var outer := body.radius + body.sky_top
 	return sqrt(2.0 * (outer * outer - body.radius * body.radius))
 
 
@@ -538,17 +540,28 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	if star_body != null and star_body.content != null:
 		luminosity = SpacesimStarModel.luminosity(star_body.content)
 		distance = body.position.distance_to(star_body.position)
-	var temperature := SpacesimAtmosphereModel.equilibrium_temperature(
+	var temperature := SpacesimAtmosphereModel.reference_temperature(
 		body.content, _materials(), luminosity, distance
 	)
+	# **The shell's top is derived, and floored by the frame's transition altitude.** Derived because
+	# it is a property of the air -- `SHELL_SCALE_HEIGHTS` scale heights of it -- and one authored
+	# altitude for the whole system is right for exactly one body: 100 km is twelve scale heights over
+	# Earth and four over Jupiter, where the air is still 2% of surface density at the top. Floored
+	# because the atmosphere frame begins at `frames.atmosphere_altitude`: a shorter shell would leave
+	# a band where the player is *in the atmosphere* with no sky to draw.
+	var shell_reach := SpacesimAtmosphereModel.shell_reach(
+		body.content.atmosphere, _materials(), temperature,
+		SpacesimAtmosphereModel.surface_gravity(body.content)
+	)
+	body.sky_top = maxf(shell_reach, _framing.atmosphere_altitude)
 	var material := SpacesimBodyRenderer.atmosphere_material(
-		body, _materials(), _framing.atmosphere_altitude, temperature,
+		body, _materials(), body.sky_top, temperature,
 		SpacesimStarLight.illuminance(luminosity, distance)
 	)
 	if material == null:
 		return
 	body.atmosphere_mesh = _add_sphere(
-		body.node, body.radius + _framing.atmosphere_altitude, material, "%sAir" % body.name
+		body.node, body.radius + body.sky_top, material, "%sAir" % body.name
 	)
 
 
