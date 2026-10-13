@@ -347,20 +347,7 @@ func _update_markers(camera: Camera3D) -> void:
 	if in_space:
 		context = _system.significant_nodes()
 	_markers.context_targets = context
-	_markers.reserved = _hud_exclusion_rects()
 	_markers.refresh(camera)
-
-
-## What a nav label must not be placed over: the HUD's own text. A label across a readout makes both
-## unreadable, and handing over rectangles is all the overlay needs — it stays ignorant of what it is
-## avoiding.
-func _hud_exclusion_rects() -> Array[Rect2]:
-	var boxes: Array[Rect2] = []
-	for label in [_hud, _fps]:
-		if label != null and label.visible:
-			# With a little clearance, so a label lands beside the text rather than against it.
-			boxes.append(label.get_global_rect().grow(8.0))
-	return boxes
 
 
 ## Render range tracks the scale you are operating at. Only the ratio costs depth precision, and

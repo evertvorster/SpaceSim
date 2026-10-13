@@ -44,11 +44,6 @@ const OFF_SCREEN_REACH := 1.0e6
 ## than the clearance an edge-clamped pointer used to need.
 var margin := 24.0
 
-## Rectangles no label may be placed over — the HUD's own text, handed in by the caller. Kept as
-## rectangles rather than as a rule about the HUD, so the overlay stays ignorant of what it is
-## avoiding.
-var reserved: Array[Rect2] = []
-
 ## For each body that orbits another, the [SpacesimSceneBody] it orbits, keyed by the orbiting
 ## body's node. Handed over once by the caller, because it is a fact about the system rather than
 ## about a frame. Used by [method eclipsed].
@@ -126,11 +121,8 @@ func refresh(camera: Camera3D) -> void:
 	for entry in entries:
 		entry["circle"] = _project(entry["node"], camera, viewport_size)
 
-	# The HUD's rectangles go in first, so a label arranges itself around them exactly as it does
-	# around another label — rather than needing a rule of its own.
+	# Only other labels: a label is placed against its own object, and the HUD is not reserved around.
 	var taken: Array[Rect2] = []
-	for box in reserved:
-		taken.append(box)
 
 	var marks: Array[Dictionary] = []
 	for index in _labels.size():

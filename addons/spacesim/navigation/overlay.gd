@@ -18,6 +18,12 @@ const LINE_WIDTH := 1.0
 ## How much clear space a label keeps from its own ring, and from another label.
 const GAP := 12.0
 
+## How far a label creeps, and in how many steps, when the place beside its ring is taken. **Small
+## steps matter**: a label that leaps to twice the distance because one spot was occupied reads as
+## belonging to the screen rather than to the object, and the line to it stops being a pointer.
+const STEP_RATIO := 1.22
+const STEPS := 14
+
 const RING_SEGMENTS := 24
 
 const COLOR := Color(0.85, 0.92, 1.0, 0.9)
@@ -48,11 +54,14 @@ func _draw() -> void:
 ## Where a label goes: **as near its ring as it can be without landing on another label**, and
 ## always inside `bounds`.
 ##
-## Candidates are a ring round the anchor — eight directions at six growing distances — and the first
-## that fits and collides with nothing wins. The nearest of them is *just* clear of the ring, so a
-## label sits against its own object and only moves away when something else is in the way. Labels are placed nearest-first, so what matters
-## most picks its spot first and the rest arrange themselves around it, which is what keeps a screen
-## full of them readable instead of a pile at the edge.
+## Candidates are eight places round the anchor — each as close as the label's own shape allows — at
+## growing distances from it. The first that fits and collides with nothing wins, so a label **hugs
+## its own ring** and only moves when another label is in that spot.
+##
+## Labels are placed nearest-first, so what matters most picks its spot first and the rest arrange
+## themselves around it. **Another label is the only thing that moves one**: nothing is reserved
+## around the HUD, because the readout is usually where markers are, and pushing labels clear of it
+## throws them hundreds of pixels off objects that are plainly on screen.
 ##
 ## A last-resort fallback is returned when nothing is free, so a label is never silently dropped:
 ## an overlapping label still says where something is, and a missing one does not.
@@ -61,15 +70,16 @@ static func place_label(
 ) -> Rect2:
 	var half := label_size * 0.5
 	var offsets := _offsets(half, RING_RADIUS + GAP)
-	# The first ring is *just clear of the ring*, so a label sits against its own object rather than out
-	# at the edge of the screen. The rest are the same eight places pushed further, for when the near
-	# ones are taken by another label — or by the HUD, which is why the range has to reach past a
-	# readout a few hundred pixels tall rather than stopping just outside it.
-	for scale in [1.0, 1.9, 3.2, 5.0, 7.5, 11.0]:
+	# Never across its own ring: near the edge of the screen, fitting a candidate back inside can slide
+	# it straight over the circle it belongs to.
+	var own_ring := Rect2(anchor - Vector2.ONE * RING_RADIUS, Vector2.ONE * RING_RADIUS * 2.0)
+	var scale := 1.0
+	for step in STEPS:
 		for offset in offsets:
 			var box := fitted(Rect2(anchor + offset * scale - half, label_size), bounds)
-			if free_of(box, taken):
+			if not box.intersects(own_ring) and free_of(box, taken):
 				return box
+		scale *= STEP_RATIO
 	return fitted(Rect2(anchor - half, label_size), bounds)
 
 
