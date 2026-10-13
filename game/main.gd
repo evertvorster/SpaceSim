@@ -32,6 +32,9 @@ var _system: SpacesimSystemScene
 var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
+## The camera's exposure. Physics-computed — see SpacesimExposure — so it needs updating as the
+## player moves rather than being left to the engine's frame average.
+var _exposure: SpacesimExposure
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -62,6 +65,12 @@ func _ready() -> void:
 	_markers.name = "Markers"
 	add_child(_markers)
 	_camera = _ship.get_node("Camera")
+	# Exposure is a camera property, and it is ours: the star's light is physical, so the exposure that
+	# puts a lit body at middle grey is arithmetic. Settled at once rather than transitioned into, so
+	# the first frame is already right.
+	_exposure = SpacesimExposure.new()
+	_camera.attributes = _exposure.attributes
+	_exposure.snap_to(_system.illuminance_at(_ship.global_position))
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_set_detail(_detail)
@@ -280,6 +289,8 @@ func _physics_process(delta: float) -> void:
 	_system.frame_tree.evaluate()
 	_sync_player_location()
 	_system.aim_sun_at(_ship.global_position)
+	# Exposed for the light that is actually where the player is, not for the average of the frame.
+	_exposure.update(_system.illuminance_at(_ship.global_position), delta)
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_update_hud()

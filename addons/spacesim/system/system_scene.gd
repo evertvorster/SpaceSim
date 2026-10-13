@@ -166,6 +166,19 @@ func ship_start() -> Vector3:
 	return body.node.global_position + Vector3(body.radius + start_altitude, 0.0, 0.0)
 
 
+## The illuminance at a position, in lux: the light the camera should expose for. Computed from the
+## same distance the star light uses, so the light and the exposure can never disagree about how far
+## away the star is.
+func illuminance_at(position: Vector3) -> float:
+	if star_light == null:
+		return 0.0
+	var star_body := star()
+	var origin := Vector3.ZERO
+	if star_body != null and star_body.node != null:
+		origin = star_body.node.global_position
+	return star_light.lux_at(position.distance_to(origin))
+
+
 ## Point the star's light correctly for something at `position`, and set its strength for that
 ## distance. A single directional light cannot light a whole system from a star, so it lights
 ## wherever the player is: the planet you are at is lit from the right side, and a planet on the far
