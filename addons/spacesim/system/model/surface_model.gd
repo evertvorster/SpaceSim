@@ -43,21 +43,21 @@ static func surface_albedo(body: SpacesimSystemBody, materials: SpacesimMaterial
 	return total / weight if weight > 0.0 else 0.0
 
 
-## The colour to draw the body in: the surface blend with the cloud deck over it.
+## The colour to draw the **bare surface** in — the material blend, with **no cloud over it**.
 ##
-## Blended in the space the materials are authored in, which is what Godot's `albedo_color` expects
-## as well, so the result is self-consistent. The Shaders project lost time to the opposite mistake —
-## hand-picked sRGB values used as though they were linear — so the choice is deliberate rather than
-## incidental.
+## The deck is a separate drawn layer, so blending it in here double-counts it, and that is exactly
+## what washed Earth's blue into grey: 0.6 of white over a blue surface lands at a colour only 1.15:1
+## from neutral, which the eye reads as grey. Physics and picture want different things from the same
+## data — `bond_albedo` includes the deck because the temperature depends on it; the drawn surface
+## does not, because the deck is drawn on top of it.
 static func color(body: SpacesimSystemBody, materials: SpacesimMaterialTable) -> Color:
-	if body.surface == null and body.clouds == null:
+	if body.surface == null:
+		# Nothing to see *but* the deck: a gas giant has no surface coverage, so its cloud colour is
+		# the only honest thing to draw it in.
+		if body.clouds != null:
+			return body.clouds.color
 		return UNPINNED_COLOR
-	var surface_color := Color.BLACK
-	if body.surface != null:
-		surface_color = _surface_color(body, materials)
-	var cover := cloud_fraction(body)
-	var deck_color := body.clouds.color if body.clouds != null else Color.WHITE
-	return surface_color.lerp(deck_color, cover)
+	return _surface_color(body, materials)
 
 
 static func cloud_fraction(body: SpacesimSystemBody) -> float:
@@ -66,6 +66,10 @@ static func cloud_fraction(body: SpacesimSystemBody) -> float:
 	return clampf(body.clouds.fraction, 0.0, 1.0)
 
 
+## The colour blend, in the space the materials are authored in — which is what Godot's
+## `albedo_color` expects too, so the result is self-consistent. The Shaders project lost time to the
+## opposite mistake (hand-picked sRGB values used as though they were linear), so this is deliberate
+## rather than incidental.
 static func _surface_color(body: SpacesimSystemBody, materials: SpacesimMaterialTable) -> Color:
 	var total := Color(0.0, 0.0, 0.0)
 	var weight := 0.0

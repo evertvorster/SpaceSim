@@ -166,6 +166,16 @@ func ship_start() -> Vector3:
 	return body.node.global_position + Vector3(body.radius + start_altitude, 0.0, 0.0)
 
 
+## How far the camera must be able to see to draw this system: the outer edge of the system frame's
+## band. **A body beyond the far plane is not drawn at all**, which reads as a missing body rather
+## than a clipped one — Sol sat 0.67 au away from a camera whose far plane was 1e11 m, which is less
+## than one au, so pointing at it drew nothing.
+func view_distance() -> float:
+	if system_frame == null:
+		return 1.0e11
+	return system_frame.travel_length_max
+
+
 ## The illuminance at a position, in lux: the light the camera should expose for. Computed from the
 ## same distance the star light uses, so the light and the exposure can never disagree about how far
 ## away the star is.

@@ -79,12 +79,26 @@ func _test_airless_bodies_need_no_clouds(h, sol: SpacesimSolarSystem, materials:
 
 
 func _test_colours(h, sol: SpacesimSolarSystem, materials: SpacesimMaterialTable) -> void:
-	# Blue-dominant and pale: ocean and cloud over rock. Not a blue marble, but the direction is
-	# right and it is nothing like the placeholder grey it replaces.
+	# Deep blue, not pale: the deck is a drawn layer, so it must not also be mixed into the surface.
+	# Blending it in gave (0.66, 0.69, 0.73) — 1.15:1 from neutral, which the eye reads as grey, and
+	# which is why Earth had structure and no colour.
 	var earth := SpacesimSurfaceModel.color(sol.body_by_id("planet:earth"), materials)
 	h.check(earth.b > earth.g and earth.g > earth.r,
 		"Earth is blue-dominant (%.2f, %.2f, %.2f)" % [earth.r, earth.g, earth.b])
-	h.check(earth.b > 0.6, "and pale, because the deck is white")
+	h.check(earth.b < 0.45, "and deep rather than washed toward white")
+
+	# The two deliberately disagree: the albedo needs the deck, the picture does not.
+	var earth_body := sol.body_by_id("planet:earth")
+	h.check_near(SpacesimSurfaceModel.bond_albedo(earth_body, materials), 0.302,
+		"the albedo still counts the deck, because the temperature depends on it", 0.02)
+	h.check_near(SpacesimSurfaceModel.surface_albedo(earth_body, materials), 0.081,
+		"while the surface alone is the much darker number", 0.01)
+
+	# A body with no surface at all is drawn in its deck's colour — for a gas giant that is the only
+	# thing there is to see.
+	var neptune_body := sol.body_by_id("planet:neptune")
+	h.check(SpacesimSurfaceModel.color(neptune_body, materials) == neptune_body.clouds.color,
+		"Neptune has no surface, so it is drawn in its deck's colour")
 
 	# Luna is grey-brown, and stays that way — no deck to whiten it.
 	var luna := SpacesimSurfaceModel.color(sol.body_by_id("moon:luna"), materials)

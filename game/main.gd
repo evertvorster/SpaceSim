@@ -333,7 +333,13 @@ func _update_camera(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
 	camera.near = range_for_frame.x
-	camera.far = range_for_frame.y
+	var far: float = range_for_frame.y
+	# **Never let the far plane be smaller than the system being drawn.** The space range is a player
+	# quality knob with a 1e11 m default, which is *less than one au* — so in Sol every body beyond
+	# 0.67 au, the star included, was clipped and simply not drawn.
+	if frame.kind == Frame.Kind.SPACE:
+		far = maxf(far, _system.view_distance())
+	camera.far = far
 
 
 func _range_key(kind: int) -> String:
