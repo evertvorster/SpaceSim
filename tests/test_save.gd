@@ -23,7 +23,7 @@ func run(h, root: Node) -> void:
 	_test_history_names(h)
 	_test_save_and_list(h)
 	_test_preview_does_not_touch_the_tree(h)
-	_test_do_over(h)
+	_test_the_rewrite(h)
 	_test_state_round_trip(h)
 	_test_reading_a_location(h, root)
 	_clean()
@@ -161,7 +161,9 @@ func _test_preview_does_not_touch_the_tree(h) -> void:
 	h.check(repo.saves().size() == 2, "and without changing the history")
 
 
-func _test_do_over(h) -> void:
+## Reading a save costs nothing; **continuing from one is what moves the history**. This is the
+## rewrite on its own — the session suite covers when it is asked for.
+func _test_the_rewrite(h) -> void:
 	var repo := _fresh_repo(h)
 	repo.create({"world": "playground"})
 	repo.create_history("Evert")
@@ -177,13 +179,18 @@ func _test_do_over(h) -> void:
 
 	var target: String = repo.saves()[2]["hash"]  # the first save
 	h.check(repo.affected_saves(target).size() == 2, "two saves are affected")
-	h.check(repo.restore(target)["ok"], "the do-over runs")
+	h.check(repo.tip() != target, "and the history is not standing on the older one")
 
+	h.check(repo.preview(target).contains("\"Credits\": 10"), "a save can be read as it stood")
+	h.check(repo.saves().size() == 3, "with every later save still in the list")
+	h.check(repo.tip() != target, "and the history not moved by reading it")
+
+	h.check(repo.rewind_to(target)["ok"], "the rewrite runs")
 	h.check(repo.saves().size() == 1, "the later saves leave the history (%d left)" % repo.saves().size())
-	h.check(repo.read_text(Repo.STATE_FILE).contains("\"Credits\": 10"), "the player's state comes back")
+	h.check(repo.tip() == target, "and the history stands on the save being continued from")
 	h.check(
 		repo.read_text("world/delta.jsonl").contains("burnt"),
-		"and the world's state does NOT — the world moved on"
+		"the world's state does NOT come back — the world moved on"
 	)
 
 

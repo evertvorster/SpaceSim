@@ -81,8 +81,35 @@ func _test_the_do_over(h, system: SpacesimSystemScene) -> void:
 	h.check(int(preview.get("attributes", {}).get("Credits", -1)) == 0, "a save can be looked at as it stood")
 
 	h.check(session.load(oldest)["ok"], "loading it")
-	h.check(session.saves().size() == 1, "removes the later saves (%d left)" % session.saves().size())
+	h.check(
+		session.saves().size() == 3,
+		"removes nothing — the later saves stay (%d listed)" % session.saves().size()
+	)
 	h.check(session.player.attributes["Credits"] == 0, "and brings the player back to what they were")
+
+	# Reading is free; it is *saving from here* that rewrites the timeline — and that asks first.
+	session.player.attributes["Credits"] = 5
+	var asked := session.save(system)
+	h.check(not asked["ok"], "saving from an older save does not just happen")
+	h.check(asked.get("needs_confirmation", false), "it asks first")
+	h.check(asked["affected"].size() == 2, "naming what answering yes would remove")
+	h.check(session.saves().size() == 3, "and asking removes nothing")
+
+	h.check(session.save_confirmed(system)["ok"], "answering yes saves")
+	h.check(
+		session.saves().size() == 2,
+		"and the later saves go, leaving the one loaded and the new one (%d left)"
+		% session.saves().size()
+	)
+	h.check(
+		session.player.attributes["Credits"] == 5,
+		"with the story continuing from where it was loaded"
+	)
+	# Once saved, the history is back in step with what is in memory, so the next save is ordinary.
+	h.check(
+		not session.save(system).get("needs_confirmation", false),
+		"and the save after it is an ordinary one again"
+	)
 
 
 func _test_deleting_a_save(h, system: SpacesimSystemScene) -> void:

@@ -646,8 +646,9 @@ selection that can be empty and leave an action doing nothing at all:
 
 Entries that do not apply are disabled rather than absent — the current history cannot be played or
 deleted, the trunk can be neither, and a save in another history cannot be loaded from here.
-**Load is never one click from a surprise**: what it discards is named first, and the dialog says
-the world is not rewound.
+**Reading a save is free** — loading one removes nothing, and the saves after it are named as what a
+save from here *would* remove. **It is the save that asks**: nothing is written until it is
+answered, and the dialog says the world is not rewound.
 
 **The player's own values are editable here.** *Change my values* opens a field for each attribute —
 the name among them — and keeps each one the type it had, refusing a number that is not one rather
@@ -718,10 +719,11 @@ envelope.
 | `discard_working_tree() -> bool` | a save is a commit, so uncommitted writes were never a save |
 | `saves(history) -> Array`, `affected_saves(hash, history) -> Array` | `{"hash", "time", "subject"}`; the history is explicit because the browser shows the saves of the history you have *selected*, which is not necessarily the one being played |
 | `preview(hash, path) -> String` | read out of the commit; the working tree is untouched |
-| `restore(hash) -> Dictionary` | the do-over: `reset --soft`, then a path-scoped checkout |
+| `tip() -> String` | the commit the history stands on, abbreviated like `saves()`'s hashes |
+| `rewind_to(hash) -> Dictionary` | move the tip back so the later saves leave the list; **the working tree is left alone**, which is what keeps the world's own state out of a do-over |
 | `histories() -> Array`, `current_history()`, `has_history(name)` | |
 | `create_history(name)`, `rename_history(from, to)`, `delete_history(name)`, `switch_history(name)` | all `{"ok", "reason"}` |
-| `TRUNK`, `PLAYER_DIR`, `STATE_FILE`, `STATE_FORMAT_VERSION` | |
+| `TRUNK`, `STATE_FILE`, `DELETED_FILE`, `STATE_FORMAT_VERSION` | |
 | `static state_text(player_data, world_time)`, `static read_state(text)` | |
 
 **The trunk and the history you are playing cannot be deleted** — a new story branches from the
@@ -739,11 +741,18 @@ only place that knows a save is the player, the clock and the world.**
 | `static for_world(name) -> SpacesimSession` | under `$XDG_DATA_HOME/spacesim/worlds/` |
 | `start(system) -> Dictionary` | brings the repository up, loads the last save, or starts the first story |
 | `load_last() -> bool` | the state at HEAD; no git operation, because HEAD already *is* the last save |
-| `load(hash) -> Dictionary` | the do-over |
-| `save(system) -> Dictionary`, `label(system) -> String` | |
+| `load(hash) -> Dictionary` | reads the save out of the commit; nothing moves, in the history or the tree |
+| `save(system) -> Dictionary`, `save_confirmed(system)`, `label(system) -> String` | |
 | `new_story(name, system, player_name)` | branches from the trunk; history and player named separately |
 | `saves()`, `affected_saves(hash)`, `preview(hash)`, `delete_save(hash)` | deletions are tombstones |
 | `world_time: float`, `message: String`, `player`, `repo` | |
+
+**Reading a save is free; continuing from one is what costs.** `load()` reads the state out of the
+commit, so every save stays in the list and nothing is lost by looking. The session remembers which
+commit the state in memory came from, and when a save would continue from somewhere other than the
+tip, `save()` **writes nothing at all** and returns `{"needs_confirmation", "affected"}` for the
+screen to put to the player; `save_confirmed()` is the answer, and it is the one that moves the tip
+back (`reset --soft`) — only the player's own paths are ever rewritten, so the world is not rewound.
 
 **A save with nothing changed is refused, and the real-time stamp is deliberately not part of that
 comparison** — otherwise the file would differ from the last one by a few seconds every time and
@@ -831,7 +840,8 @@ focus key and the UI system would consume it first.
 **The personal data screen is where the world is saved and browsed**: Save and New Story act on the
 world, the player's own values and what they hold are editable there, and **right-clicking a row** —
 a history, a save, a thing you hold — offers what can be done with it. There is deliberately no save
-key: a save is a deliberate act, and loading one always says first which saves it discards.
+key: a save is a deliberate act, and **a save that continues from an older one says first which saves
+it removes** — reading a timeline costs nothing, and it is saving from it that rewrites the future.
 
 ## Tests
 

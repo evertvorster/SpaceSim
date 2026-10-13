@@ -371,8 +371,9 @@ func _show_save_row() -> void:
 			return
 
 
-## One dialog per save, holding what it is and what loading it would cost. **Load is never one
-## click away from a surprise** — what it discards is named before it happens.
+## One dialog per save, holding what it is and what reading it means. **A load discards nothing** —
+## the later saves are named as what a save from here *would* remove, and the asking happens at the
+## Save button.
 func _show_save(index: int) -> void:
 	var entry: Dictionary = _save_entries[index]
 	_pending = "save_details"
@@ -423,10 +424,11 @@ func _delete_history(name: String) -> void:
 func _confirm_load(hash: String) -> void:
 	_pending = "confirm_load"
 	_pending_hash = hash
-	_dialog.ask("Load this save?", _load_cost(hash), ["Load", "Cancel"])
+	_dialog.ask("Load this save?", _load_note(hash), ["Load", "Cancel"])
 
 
-## What a save holds, and — if loading it would cost anything — exactly what it would cost.
+## What a save holds, and what reading it would cost — which is nothing. **Continuing from it is
+## what costs**, and that is asked at the Save button, not here.
 func _save_details(hash: String, playing: bool) -> String:
 	var state := _session.preview(hash)
 	var assets: Array = state.get("assets", [])
@@ -437,18 +439,23 @@ func _save_details(hash: String, playing: bool) -> String:
 		"Where        %s" % _system.describe(Location.from_dictionary(state.get("location", {})), assets)
 	)
 	lines.append("")
-	lines.append("This is another history. Switch to it to load from it." if not playing else _load_cost(hash))
+	lines.append("This is another history. Switch to it to load from it." if not playing else _load_note(hash))
 	return "\n".join(lines)
 
 
-func _load_cost(hash: String) -> String:
+## Reading any save is free, and the saves after it stay where they are. They go only when the
+## story continues from here — which is why the warning belongs at the Save button, not at this one.
+func _load_note(hash: String) -> String:
 	var affected := _session.repo.affected_saves(hash, _session.repo.current_history())
 	if affected.is_empty():
 		return "Nothing was saved after this, so loading it costs nothing."
-	var lines := PackedStringArray(["Loading this discards %d later save(s), for good:" % affected.size()])
+	var lines := PackedStringArray(
+		["Loading this costs nothing. The %d save(s) after it stay:" % affected.size()]
+	)
 	for later in affected:
 		lines.append("     %s" % later["subject"])
 	lines.append("")
+	lines.append("Saving from here would remove them, and the story would continue from this point.")
 	lines.append("The world is not rewound — what you did to it stays done.")
 	return "\n".join(lines)
 
@@ -514,6 +521,8 @@ func _on_dialog_answered(action: String) -> void:
 					_session.message = "deleted a save"
 		"confirm_load":
 			_load(_pending_hash)
+		"confirm_save":
+			_session.save_confirmed(_system)
 		"confirm_delete_save":
 			_session.delete_save(_pending_hash)
 			_session.message = "deleted a save"
@@ -538,8 +547,27 @@ func _player_name_from_dialog() -> String:
 
 
 func _on_save() -> void:
-	_session.save(_system)
+	var written := _session.save(_system)
+	# Continuing from an older save is what removes the later ones, so it is asked here — and asked
+	# with their names, before anything is written.
+	if written.get("needs_confirmation", false):
+		_pending = "confirm_save"
+		_dialog.ask("Save from here?", _rewrite_note(written["affected"]), ["Save", "Cancel"])
+		return
 	opened()
+
+
+## What saving from where the story was loaded would remove. The mirror of [method _load_note]:
+## reading is free, and continuing is what costs.
+func _rewrite_note(affected: Array) -> String:
+	var lines := PackedStringArray(
+		["You loaded a save from the past, so the %d save(s) after it are removed:" % affected.size()]
+	)
+	for later in affected:
+		lines.append("     %s" % later["subject"])
+	lines.append("")
+	lines.append("The story continues from where you loaded, and the world is not rewound.")
+	return "\n".join(lines)
 
 
 # --- rows -----------------------------------------------------------------------------------------

@@ -16,7 +16,6 @@ extends RefCounted
 ## each other. See `Save and Load Plan` §6.
 
 const TRUNK := "main"
-const PLAYER_DIR := "player"
 const STATE_FILE := "player/state.json"
 
 ## The player's tombstones, in their own file **so that deleting a save is not itself a save in the
@@ -159,16 +158,25 @@ func preview(hash: String, path := STATE_FILE) -> String:
 	return _git.text(result) if result["ok"] else ""
 
 
-## Load a save. The history's tip moves back so the later saves leave the list, and then only the
-## player's own paths come back — the world's do not, which is what "the world has moved on" means
-## in practice.
-func restore(hash: String) -> Dictionary:
+## The commit the history is standing on. A save is a commit, so this is the last save.
+##
+## Abbreviated, like the hashes in [method saves] — the two are compared, so they have to be written
+## the same way.
+func tip() -> String:
+	var result := _git.run(["rev-parse", "--short", "HEAD"])
+	return _git.text(result).strip_edges() if result["ok"] else ""
+
+
+## Move the history's tip back to a save, so the later saves leave the list.
+##
+## The working tree is deliberately left alone, and that is what keeps the world honest: only the
+## player's paths are ever rewritten, so a burnt village stays burnt through a do-over. The state
+## being continued from arrives in memory, not by checking anything out — reading a save costs
+## nothing, and this is only run when one is *saved* from.
+func rewind_to(hash: String) -> Dictionary:
 	var moved := _git.run(["reset", "--soft", hash])
 	if not moved["ok"]:
 		return {"ok": false, "reason": "git could not move the history back"}
-	var restored := _git.run(["checkout", hash, "--", PLAYER_DIR])
-	if not restored["ok"]:
-		return {"ok": false, "reason": "git could not restore the player's state"}
 	return {"ok": true, "reason": ""}
 
 

@@ -26,6 +26,11 @@ var world_time: float = 0.0
 ## What the last operation has to say, for the screen to show. Empty when there is nothing to say.
 var message: String = ""
 
+## The commit the state in memory came from. It is the tip almost always — the difference is a
+## player who has read an older save and is standing somewhere in the past, and it is what makes the
+## *next save* a do-over rather than this load one.
+var _loaded_hash: String = ""
+
 ## The player and the clock as they were last written or loaded. A save with nothing changed is
 ## refused rather than committed — and the real-time stamp is deliberately not part of this, or the
 ## file would differ from the last one by a few seconds every time and nothing would ever be
@@ -73,19 +78,21 @@ func start(system: SpacesimSystemScene) -> Dictionary:
 func load_last() -> bool:
 	if not _apply(Repo.read_state(repo.read_text(Repo.STATE_FILE))):
 		return false
-	_read_deleted()
+	_read_deleted(repo.read_text(Repo.DELETED_FILE))
+	_loaded_hash = repo.tip()
 	return true
 
 
-## Load a save — which is the do-over, and costs everything after it: the history's tip moves back
-## so the later saves leave the list. The world's own state is not among the restored paths, so the
-## world has moved on regardless.
+## Load a save. **Reading one is free** — it is read out of the commit, and neither the history nor
+## the working tree moves, so every save stays in the list and nothing is lost by looking.
+##
+## What costs is continuing from here, and that is charged at [method save] rather than at the load.
 func load(hash: String) -> Dictionary:
-	var restored := repo.restore(hash)
-	if restored["ok"]:
-		_apply(Repo.read_state(repo.read_text(Repo.STATE_FILE)))
-		_read_deleted()
-	return restored
+	if not _apply(Repo.read_state(repo.preview(hash))):
+		return {"ok": false, "reason": "that save cannot be read"}
+	_read_deleted(repo.preview(hash, Repo.DELETED_FILE))
+	_loaded_hash = hash
+	return {"ok": true, "reason": ""}
 
 
 ## Start a history from the trunk: a fresh world and a fresh player, without ending the one being
@@ -100,14 +107,50 @@ func new_story(name: String, system: SpacesimSystemScene, player_name := Player.
 
 
 ## Write the player and the clock out as a save.
+##
+## **Continuing from an older save is what removes the later ones, and this is where that is asked**
+## rather than where the save was read. When the state in memory came from a save that is not the
+## tip, nothing is written at all: `{"needs_confirmation": true, "affected": [...]}` comes back with
+## the saves that answering yes would remove, for the screen to put to the player. [method
+## save_confirmed] is that answer.
 func save(system: SpacesimSystemScene) -> Dictionary:
 	if _body() == _last_body:
 		message = "nothing has changed since the last save"
 		return {"ok": false, "reason": message}
+	if _rewrites_the_timeline():
+		return {
+			"ok": false,
+			"reason": "",
+			"needs_confirmation": true,
+			"affected": affected_saves(_loaded_hash),
+		}
+	return _write(system)
+
+
+## Save, having been told what it removes: the tip moves back to the save being continued from, and
+## the new save appends there. The world's own files are untouched by the move, so what it did
+## stays done.
+func save_confirmed(system: SpacesimSystemScene) -> Dictionary:
+	if _rewrites_the_timeline():
+		var rewound := repo.rewind_to(_loaded_hash)
+		if not rewound["ok"]:
+			message = rewound["reason"]
+			return rewound
+	return _write(system)
+
+
+## Whether the next save continues from somewhere other than the tip. This, and only this, ever
+## removes a save.
+func _rewrites_the_timeline() -> bool:
+	return not _loaded_hash.is_empty() and _loaded_hash != repo.tip()
+
+
+func _write(system: SpacesimSystemScene) -> Dictionary:
 	var files := {Repo.STATE_FILE: Repo.state_text(player.to_dictionary(), world_time, now())}
 	var written := repo.save(files, label(system))
 	if written["ok"]:
 		_last_body = _body()
+		_loaded_hash = repo.tip()
 	# Saved silently would leave the player unable to tell whether it worked: the header above them
 	# only changes when the clock does.
 	message = written["reason"] if not written["ok"] else "saved"
@@ -190,9 +233,10 @@ func _apply(state: Dictionary) -> bool:
 	return true
 
 
-## The tombstones are their own file, and are the record of what the player has deleted.
-func _read_deleted() -> void:
-	var text := repo.read_text(Repo.DELETED_FILE)
+## The tombstones are their own file, and are the record of what the player has deleted. The text
+## comes from the working tree at startup and out of the commit when a save is read, because a save
+## carries the list as it stood when it was made.
+func _read_deleted(text: String) -> void:
 	if text.strip_edges().is_empty():
 		return
 	var parsed: Variant = JSON.parse_string(text)
