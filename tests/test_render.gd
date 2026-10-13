@@ -154,14 +154,15 @@ func _test_the_sky_is_derived(
 		"and Venus's is %.0f K against 232 K — the greenhouse is what is missing, not the geometry"
 			% venus_teq)
 
-	# **The far plane has to reach the sky, and it is much further than it looks.** The air is a thin
+	# **The far plane has to reach the sky, and the sky is further than it looks.** The air is a thin
 	# skin — 100 km over a 6,371 km planet — so the distance out to it is ~100 km straight up and
-	# ~1,130 km at the horizon. `camera.range_surface` defaulted to a 200 km far plane, so the sky was
-	# drawn above 29 degrees of elevation and left a black ring around the observer below that.
+	# ~1,130 km at the horizon, `camera.range_surface` defaulted to 200 km, and the sky was drawn above
+	# 29 degrees of elevation with a black ring below. **And the longest ray is not the horizontal one**:
+	# the ray that grazes the planet's limb and then climbs out reaches a horizon distance further.
 	var surface_frame := scene.frame_tree.frame_by_id("planet:earth/surface")
 	var reach := scene.sky_reach(surface_frame)
-	h.check(absf(reach - 1.133e6) < 2.0e3,
-		"the sky reaches %.0f km at the horizon from Earth's surface" % (reach / 1000.0))
+	h.check(absf(reach - 1.603e6) < 2.0e3,
+		"the sky reaches %.0f km from Earth's surface, grazing the limb on the way" % (reach / 1000.0))
 	h.check(scene.sky_reach(scene.frame_tree.frame_by_id("planet:earth/atmosphere")) == reach,
 		"and the same from inside its atmosphere frame")
 	h.check(scene.sky_reach(scene.system_frame) == 0.0, "while in space there is no sky to reach")

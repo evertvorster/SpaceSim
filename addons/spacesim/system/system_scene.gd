@@ -271,19 +271,35 @@ func air_body(frame: SpacesimFrame) -> SpacesimSceneBody:
 ##
 ## **The camera's far plane has to reach this or the sky is simply not drawn**, and the number is much
 ## larger than it looks. The air is a *thin skin* — 100 km over a 6,371 km planet — so the distance
-## out to it is ~100 km straight up and **~1,130 km at the horizon**. A far plane of 200 km, which is
-## what `camera.range_surface` defaulted to, therefore drew the sky above 29° elevation and left
-## everything from there down to the horizon beyond the plane: a black ring around the observer. It
-## read as *"something black surrounding you"* at the surface, and vanished at 2 km because that is
-## where the frame changes to the atmosphere frame and its 10,000 km range.
+## out to it is ~100 km straight up and ~1,130 km at the horizon. A far plane of 200 km, which is what
+## `camera.range_surface` defaulted to, therefore drew the sky above 29° elevation and left everything
+## from there down to the horizon beyond the plane: a black ring around the observer. It read as
+## *"something black surrounding you"* at the surface, and vanished at 2 km because that is where the
+## frame changes to the atmosphere frame and its 10,000 km range.
 ##
-## Measured from the **surface**, so it is the worst case and covers an observer at any altitude.
+## **And the longest ray is not the horizontal one.** For an observer at radius `r`,
+##
+##     t(elevation) = -r sin(elevation) + sqrt((r sin(elevation))^2 + outer^2 - r^2)
+##
+## and `dt/d elevation` is negative everywhere — so `t` is *maximised* by the most negative elevation
+## that still misses the planet, which is the ray that **grazes the limb and then climbs out**:
+##
+##     t_max = sqrt(r^2 - planet^2) + sqrt(outer^2 - r^2)
+##             the horizon distance     the horizon exit
+##
+## At 1.5 km that is 138 km + 1,133 km = **1,272 km**, and the first version of this returned only the
+## second term — 138 km short, which clipped a 1,460-pixel arc of haze exactly where the sky is
+## brightest. Evert: *"the atmosphere that you look through is still much bigger radius."*
+##
+## Maximised over every altitude inside the air the two terms are equal, so the worst case is neat:
+## `sqrt(2) * sqrt(outer^2 - planet^2)`. Earth derives 1,603 km — and this is a floor on `far`, so it
+## is the cheap side to be generous on.
 func sky_reach(frame: SpacesimFrame) -> float:
 	var body := air_body(frame)
 	if body == null:
 		return 0.0
 	var outer := body.radius + _framing.atmosphere_altitude
-	return sqrt(outer * outer - body.radius * body.radius)
+	return sqrt(2.0 * (outer * outer - body.radius * body.radius))
 
 
 ## Put a body's landing zone on the surface directly under `point`, with local up pointing away
