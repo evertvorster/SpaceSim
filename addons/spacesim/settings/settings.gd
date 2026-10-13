@@ -69,9 +69,6 @@ const REGISTRY := {
 		"max": Vector2i(16384, 16384),
 	},
 	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
-	# Scales the air's density. A look knob rather than a preference, and a *setting* rather than a
-	# constant because tuning a picture you cannot see must not require a rebuild.
-	"air.density": {"default": 1.0, "scope": Scope.PLAYER, "min": 0.0, "max": 100.0},
 	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
 	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},

@@ -4,7 +4,7 @@ extends SceneTree
 ##     xvfb-run -a godot-double-mono --path . --script res://tests/screenshot.gd
 ##
 ## The frame number and the output path come from SHOT_FRAMES and SHOT_PATH. It exists because
-## headless Godot neither compiles shaders nor draws anything, and "is the fog visible" is not a
+## headless Godot neither compiles shaders nor draws anything, and "is it visible" is not a
 ## question a headless test can answer.
 
 var _frames := 0
@@ -14,12 +14,6 @@ var _target := 90
 func _initialize() -> void:
 	if OS.has_environment("SHOT_FRAMES"):
 		_target = int(OS.get_environment("SHOT_FRAMES"))
-	if OS.has_environment("SHOT_AIR"):
-		# Lets a shot be taken with the air taken out, to tell air from emptiness.
-		# Autoloads are not global identifiers in a --script SceneTree; reach it through the root.
-		var settings := get_root().get_node_or_null("/root/SpacesimSettings")
-		if settings != null:
-			settings.set_value("air.density", float(OS.get_environment("SHOT_AIR")))
 	var packed: Variant = load("res://game/main.tscn")
 	if packed == null:
 		print("SHOT: could not load the game scene")

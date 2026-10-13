@@ -390,7 +390,6 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_cloud_shell(body)
-	_add_air(body)
 
 	if not body.landable:
 		return
@@ -478,32 +477,6 @@ func _add_lighting() -> void:
 
 ## The cloud deck, on its own sphere a little above the surface. Its own mesh rather than a second
 ## material on the surface, so it can carry alpha and draw over the surface instead of fighting it.
-## The air shell, if this body has any. Built once and left hidden: the game shows whichever body's
-## air the player is actually inside, and only that one, because volumetric fog costs.
-func _add_air(body: SpacesimSceneBody) -> void:
-	var volume := SpacesimBodyRenderer.atmosphere_volume(
-		body, _framing.atmosphere_altitude, _materials()
-	)
-	if volume == null:
-		return
-	body.node.add_child(volume)
-	body.air_volume = volume
-
-
-## **The body whose air the observer is inside**, or null in space.
-##
-## Both the atmosphere and the surface frames are inside a body's air; the system frame is not. This is
-## what decides whose fog shell is shown, so it is the same containment the frames already express
-## rather than a second opinion about altitude.
-func air_body(frame: SpacesimFrame) -> SpacesimSceneBody:
-	if frame == null or frame.kind == SpacesimFrame.Kind.SPACE:
-		return null
-	var parts := frame.frame_id.split("/", false)
-	if parts.is_empty():
-		return null
-	return body_by_id(parts[0])
-
-
 func _add_cloud_shell(body: SpacesimSceneBody) -> void:
 	var material := SpacesimBodyRenderer.cloud_material(body)
 	if material == null:

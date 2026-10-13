@@ -92,11 +92,6 @@ static func configure(environment: Environment, ambient_color: Color) -> void:
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = ambient_color
 	environment.ambient_light_energy = AMBIENT_ENERGY
-	# The air is carried entirely by the FogVolumes the scene builds. The environment's own global
-	# density is off, because it fogs *everywhere* at once — on top of whatever a shell is already
-	# doing — and that is a large part of why the first attempt was a whiteout nothing could be seen
-	# through.
-	environment.volumetric_fog_density = 0.0
 	# The star's disk should roll off through the tonemapper rather than sit in the frame as the
 	# brightest thing in the exposure histogram.
 	environment.glow_enabled = true
