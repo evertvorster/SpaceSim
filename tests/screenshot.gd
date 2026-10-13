@@ -63,6 +63,25 @@ func _place_above(body_name: String, altitude: float) -> void:
 	var camera := _find_camera(get_root())
 	if camera == null:
 		return
+	# `SHOT_PITCH` aims at a given elevation above the body's own horizon: 0 is level, 90 is straight
+	# up, -90 is straight down. The general case, and what a sky gradient has to be measured with —
+	# `level` and `up` are the two ends of it.
+	if OS.has_environment("SHOT_PITCH"):
+		var up := (ship.global_position - body.global_position).normalized()
+		var tangent := up.cross(Vector3.UP)
+		if tangent.length() < 0.5:
+			tangent = up.cross(Vector3.RIGHT)
+		tangent = tangent.normalized()
+		var pitch := deg_to_rad(float(OS.get_environment("SHOT_PITCH")))
+		var forward := (up * sin(pitch) + tangent * cos(pitch)).normalized()
+		# Keep the horizon level in frame: the camera's up is the local vertical, minus whatever the
+		# view direction already accounts for.
+		var cam_up := up - forward * up.dot(forward)
+		if cam_up.length() < 0.01:
+			cam_up = tangent
+		_aim(camera, forward, cam_up.normalized())
+		_report_aim(body, camera, "pitch=%d" % int(round(rad_to_deg(pitch))))
+		return
 	# `up` looks straight up the body's own vertical — the zenith, which is where the sky was black.
 	if OS.get_environment("SHOT_AIM") == "up":
 		var up := (ship.global_position - body.global_position).normalized()

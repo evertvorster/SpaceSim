@@ -1027,7 +1027,8 @@ SHOT_BODY=Earth SHOT_ALT=20000000 SHOT_PATH=/tmp/shot.png SHOT_FRAMES=90
 |---|---|
 | `SHOT_BODY` / `SHOT_ALT` | put the ship above that body on its **day side**, at that altitude, and aim at it |
 | `SHOT_PATH` / `SHOT_FRAMES` | where to save, and how many frames to settle for |
-| `SHOT_AIM` | `level` pitches the camera along the **horizon** instead of down at the body. The default aim is always a radial, so no shot taken without it can contain a horizon, a limb or a sky |
+| `SHOT_AIM` | `level` along the **horizon**, `up` straight up the body's vertical. Without it the camera is aimed down a radial, so no shot can contain a horizon, a limb or a sky |
+| `SHOT_PITCH` | aim at an **elevation in degrees** (0 level, 90 up, -90 down). The general case — `level` and `up` are its two ends. **This is what a sky gradient has to be measured with** |
 
 ## See also
 
