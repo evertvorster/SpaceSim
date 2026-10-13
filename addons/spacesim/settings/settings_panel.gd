@@ -12,6 +12,7 @@ extends SpacesimScreen
 
 const SettingsScript := preload("res://addons/spacesim/settings/settings.gd")
 const EditScript := preload("res://addons/spacesim/settings/settings_edit.gd")
+const DisplayScript := preload("res://addons/spacesim/settings/display.gd")
 
 const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
@@ -79,10 +80,17 @@ func _build_editors(key: String) -> Array[Control]:
 	var row: Dictionary = SettingsScript.REGISTRY.get(key, {})
 	var editors: Array[Control] = []
 
+	# A row that declares choices is offered rather than typed into. That is the whole difference
+	# between picking your monitor and guessing at a number for it.
+	var choices := _choices(row)
+	if not choices.is_empty():
+		editors.append(_choice_field(key, default, choices))
+		return editors
+
 	match typeof(default):
 		TYPE_FLOAT, TYPE_INT:
 			editors.append(_number_field(key, default, row, 0))
-		TYPE_VECTOR2:
+		TYPE_VECTOR2, TYPE_VECTOR2I:
 			var pair := HBoxContainer.new()
 			pair.add_theme_constant_override("separation", 6)
 			pair.add_child(_number_field(key, default, row, 0))
@@ -93,10 +101,66 @@ func _build_editors(key: String) -> Array[Control]:
 	return editors
 
 
+## The list a row offers, or an empty one when it offers none. `"screens"` is a reserved name for
+## the one list that cannot be written down here, because it is the machine's, not ours.
+func _choices(row: Dictionary) -> Array:
+	var declared: Variant = row.get("choices", null)
+	if declared == null:
+		return []
+	if declared is Array:
+		return declared
+	if String(declared) != "screens":
+		return []
+	# The main loop rather than `get_tree()`: these rows are built when the panel is configured,
+	# which can be before it has been added to the tree — and `get_tree()` is an error, not a null,
+	# in that state.
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return []
+	var display := (loop as SceneTree).root.get_node_or_null("SpacesimDisplay")
+	if display == null:
+		return []
+	return display.screen_names()
+
+
+## A list to choose from. What a choice *is* depends on the setting: an enum's value is its word, a
+## screen's is its number — the position in the list is the screen index.
+func _choice_field(key: String, default: Variant, choices: Array) -> OptionButton:
+	var field := OptionButton.new()
+	field.custom_minimum_size = Vector2(300.0, 0.0)
+	for index in choices.size():
+		field.add_item(String(choices[index]), index)
+	field.selected = _choice_index(_edit.value(key), default, choices)
+	field.item_selected.connect(
+		func(index: int) -> void: _stage_choice(key, default, choices, index)
+	)
+	return field
+
+
+## A stored screen that has since gone still has to land on something to show, so the index is
+## clamped rather than left to point past the end of the list.
+static func _choice_index(value: Variant, default: Variant, choices: Array) -> int:
+	if typeof(default) == TYPE_INT:
+		return clampi(int(value), 0, maxi(0, choices.size() - 1))
+	return maxi(0, choices.find(String(value)))
+
+
+func _stage_choice(key: String, default: Variant, choices: Array, index: int) -> void:
+	if _updating:
+		return
+	var chosen: Variant = index if typeof(default) == TYPE_INT else String(choices[index])
+	_edit.stage(key, chosen)
+
+
 func _number_field(key: String, default: Variant, row: Dictionary, component: int) -> SpinBox:
 	var field := SpinBox.new()
 	field.custom_minimum_size = Vector2(150.0, 0.0)
-	field.step = 1.0 if typeof(default) == TYPE_INT else _step_for(_component_of(default, component))
+	# A resolution is whole numbers: an arrow key that offers 1279.7 is not a resolution.
+	field.step = (
+		1.0
+		if typeof(default) == TYPE_INT or typeof(default) == TYPE_VECTOR2I
+		else _step_for(_component_of(default, component))
+	)
 
 	var low: Variant = _bound(row, component, "min")
 	var high: Variant = _bound(row, component, "max")
@@ -120,15 +184,23 @@ func _text_field(key: String) -> LineEdit:
 func _stage_number(key: String, component: int, new_value: float) -> void:
 	if _updating:
 		return
+	var default: Variant = SettingsScript.default_of(key)
 	var current: Variant = _edit.value(key)
-	if typeof(current) == TYPE_VECTOR2:
+	if typeof(default) == TYPE_VECTOR2I:
+		var rounded: Vector2i = Vector2i(current)
+		if component == 0:
+			rounded.x = int(roundf(new_value))
+		else:
+			rounded.y = int(roundf(new_value))
+		_edit.stage(key, rounded)
+	elif typeof(current) == TYPE_VECTOR2:
 		var updated: Vector2 = current
 		if component == 0:
 			updated.x = new_value
 		else:
 			updated.y = new_value
 		_edit.stage(key, updated)
-	elif typeof(SettingsScript.default_of(key)) == TYPE_INT:
+	elif typeof(default) == TYPE_INT:
 		_edit.stage(key, int(roundf(new_value)))
 	else:
 		_edit.stage(key, new_value)
@@ -170,6 +242,9 @@ func _refresh() -> void:
 					field.value = _component_of(value, index)
 		elif editors[0] is SpinBox:
 			editors[0].value = float(value)
+		elif editors[0] is OptionButton:
+			var row: Dictionary = SettingsScript.REGISTRY.get(key, {})
+			editors[0].selected = _choice_index(value, SettingsScript.default_of(key), _choices(row))
 		elif editors[0] is LineEdit:
 			editors[0].text = String(value)
 			editors[0].modulate = IDLE_COLOR
@@ -181,8 +256,11 @@ func _refresh() -> void:
 
 
 static func _component_of(value: Variant, index: int) -> float:
-	if typeof(value) == TYPE_VECTOR2:
-		return value.x if index == 0 else value.y
+	match typeof(value):
+		TYPE_VECTOR2:
+			return value.x if index == 0 else value.y
+		TYPE_VECTOR2I:
+			return float(value.x) if index == 0 else float(value.y)
 	return float(value)
 
 
@@ -190,10 +268,13 @@ static func _bound(row: Dictionary, component: int, name: String) -> Variant:
 	if not row.has(name):
 		return null
 	var bound: Variant = row[name]
-	if typeof(bound) == TYPE_VECTOR2:
-		return bound.x if component == 0 else bound.y
-	if typeof(bound) == TYPE_FLOAT or typeof(bound) == TYPE_INT:
-		return float(bound)
+	match typeof(bound):
+		TYPE_VECTOR2:
+			return bound.x if component == 0 else bound.y
+		TYPE_VECTOR2I:
+			return float(bound.x) if component == 0 else float(bound.y)
+		TYPE_FLOAT, TYPE_INT:
+			return float(bound)
 	return null
 
 

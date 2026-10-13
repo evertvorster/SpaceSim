@@ -35,6 +35,39 @@ const KNOWN_VALIDATORS := ["key_binding"]
 ## `max` are optional guards for the values that would otherwise be able to break something — a
 ## wrong camera far plane is a black screen.
 const REGISTRY := {
+	# --- the window and the display. Three sizes, and they are three different things: the canvas
+	# resolution is the UI's coordinate space (and so how large the HUD reads), the render resolution
+	# is what the 3D is drawn at, and the window size is how big the window is. "Windowed
+	# fullscreen" is not a fourth thing — it is the window size set to the screen's.
+	#
+	# The aspect is `expand`, so a window of another shape shows more rather than stretching. `keep`
+	# is offered for anyone who would rather have bars and an exact canvas.
+	"video.mode": {
+		"default": "windowed",
+		"scope": Scope.PLAYER,
+		"choices": ["windowed", "fullscreen", "exclusive"],
+	},
+	"video.aspect": {"default": "expand", "scope": Scope.PLAYER, "choices": ["expand", "keep"]},
+	# The list of screens is the machine's, not ours, so the row names a builder rather than a list.
+	"video.screen": {"default": 0, "scope": Scope.PLAYER, "min": 0, "choices": "screens"},
+	"video.canvas_resolution": {
+		"default": Vector2i(1280, 720),
+		"scope": Scope.PLAYER,
+		"min": Vector2i(320, 240),
+		"max": Vector2i(7680, 4320),
+	},
+	"video.render_resolution": {
+		"default": Vector2i(1280, 720),
+		"scope": Scope.PLAYER,
+		"min": Vector2i(160, 120),
+		"max": Vector2i(7680, 4320),
+	},
+	"video.window_size": {
+		"default": Vector2i(1280, 720),
+		"scope": Scope.PLAYER,
+		"min": Vector2i(320, 240),
+		"max": Vector2i(16384, 16384),
+	},
 	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
 	# Scales the air's density. A look knob rather than a preference, and a *setting* rather than a
 	# constant because tuning a picture you cannot see must not require a rebuild.
@@ -237,6 +270,13 @@ static func _within(row: Dictionary, value: Variant) -> bool:
 			return false
 		return true
 
+	if typeof(value) == TYPE_VECTOR2I:
+		if typeof(low) == TYPE_VECTOR2I and (value.x < low.x or value.y < low.y):
+			return false
+		if typeof(high) == TYPE_VECTOR2I and (value.x > high.x or value.y > high.y):
+			return false
+		return true
+
 	if typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
 		if (typeof(low) == TYPE_FLOAT or typeof(low) == TYPE_INT) and float(value) < float(low):
 			return false
@@ -287,4 +327,8 @@ static func _coerce(value: Variant, fallback: Variant) -> Variant:
 	if typeof(fallback) == TYPE_INT and typeof(value) == TYPE_FLOAT:
 		if is_equal_approx(value, roundf(value)):
 			return int(value)
+	# A `Vector2i` is written and read back as one, so this is for a hand-edited file that spelled
+	# it `Vector2(1280, 720)` — which is what somebody will type.
+	if typeof(fallback) == TYPE_VECTOR2I and typeof(value) == TYPE_VECTOR2:
+		return Vector2i(value)
 	return value

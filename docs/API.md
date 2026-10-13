@@ -476,6 +476,12 @@ on change (`camera.fov`, the marker pool and font size).
 
 | Key | Scope | Default |
 |---|---|---|
+| `video.mode` | player | `windowed` — `windowed` / `fullscreen` / `exclusive` |
+| `video.aspect` | player | `expand` — `expand` / `keep` |
+| `video.screen` | player | 0 — which monitor; a list, so it is offered rather than typed |
+| `video.canvas_resolution` | player | `Vector2i(1280, 720)` — the UI's coordinate space |
+| `video.render_resolution` | player | `Vector2i(1280, 720)` — what the 3D is drawn at |
+| `video.window_size` | player | `Vector2i(1280, 720)` — the windowed window, remembered |
 | `mouse.sensitivity` | player | 0.0015 |
 | `air.density` | player | 1.0 — scales the air shells; a look knob, and a *setting* so it can be tuned without a rebuild |
 | `camera.fov` | player | 70.0 |
@@ -532,6 +538,12 @@ config screen:
 Rows come from the registry, so a newly declared setting appears without the panel changing.
 Bindings are edited as text for now; capturing a key press is the next step.
 
+**A row that declares `choices` is offered rather than typed into** — an `OptionButton`, whose list
+is the row's own array, or `"screens"` for the one list that is the machine's rather than ours. What
+a choice *is* depends on the setting: an enum's value is its word, a screen's is its number, since
+the position in the list is the screen index. A `Vector2i` row — a resolution — is a pair of integer
+fields, so an arrow key offers whole pixels rather than 1279.7.
+
 | `SpacesimSettingsEdit` — `RefCounted` | |
 |---|---|
 | `static editable_keys() -> Array` | the player-scope keys, in registry order |
@@ -574,6 +586,49 @@ edit directly.
 
 `get_value` never touches the disk. Tests use their own instance with their own path, so the suite
 never writes to the real file.
+
+### `SpacesimDisplay` — `Node`, registered as the `SpacesimDisplay` autoload, after `SpacesimSettings`
+
+**Three sizes, and they are three different things.** Confusing them is the usual way this goes
+wrong:
+
+- **canvas resolution** — the UI's coordinate space. Screens and the HUD are laid out in these units
+  and the whole space is scaled to the window, so this sets how large the text reads. The stretch
+  mode is `canvas_items`, so a font is re-rasterised for the window rather than magnified, and stays
+  crisp at any size. `viewport` stretch would render the HUD *and* the 3D into the canvas resolution
+  and blow both up; that was measured, and the HUD text goes soft.
+- **render resolution** — what the 3D is drawn at, independent of the window. A space sim is
+  GPU-bound long before it is CPU-bound, so this is the performance knob.
+- **window size** — how big the window is. **Windowed fullscreen is not a mode**: it is this set to
+  the screen's size.
+
+**Nothing is ever stretched.** The aspect is `expand`, never `ignore` — the one that distorts.
+`expand` grows the root viewport by one axis to match the window, so the pixel grid stays square and
+a differently-shaped window shows *more* rather than a wider-looking ship. The 3D scale is one factor
+for both axes, so its buffer has exactly the viewport's aspect, and the camera is a stock `Camera3D`
+whose `keep_aspect` grows the horizontal field of view. So the render resolution's **height is exact
+and its width follows the window** — the extra width has to come from somewhere, and it comes from
+more world rather than from distortion.
+
+| Member | |
+|---|---|
+| `apply() -> void` | put the window where the settings say it should be; called at startup, which is what makes these *startup* settings |
+| `use(settings)` | read from somewhere other than the autoload — for tests |
+| `screen_index() -> int` | the screen to open on, clamped: a stored number outlives the monitor it named |
+| `mode_of(name)` / `aspect_of(name)` | a setting's word to the engine's enum; anything unknown lands on the safe default |
+| `render_scale(render_height, drawn_height) -> float` | pure, and clamped to the range the engine allows |
+| `screen_names() -> Array` | the monitors, as `"1: 2560 x 1440  (primary)"` |
+
+**Through the window, not the display server.** `DisplayServer.window_set_size` changes what the
+display server says the size is and leaves the root `Window` — and so the viewport that is actually
+drawn — where it was. Setting `Window.size` moves both. This was found by probing, not by reading:
+the window reported `1280x800` while the root viewport stayed `1152x648`, and the render resolution
+was worked out against a window that was no longer there. Only `window_set_current_screen` has no
+window equivalent, because the list of screens is the display server's.
+
+A resize re-fits the 3D immediately and remembers the window size **after the resizing stops** —
+a drag emits an event per frame, and a write per event is a file write per frame. It writes nothing
+when the size has not moved, so applying the settings cannot feed back into itself.
 
 ## Screens
 

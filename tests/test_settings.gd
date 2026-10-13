@@ -187,7 +187,15 @@ func _something_else(key: String) -> Variant:
 			return wanted_int
 		TYPE_VECTOR2:
 			return default + Vector2(1.0, 1.0)
+		TYPE_VECTOR2I:
+			return default + Vector2i(1, 1)
 		TYPE_STRING:
+			# A row that offers choices can only be given one of them, or it would not be acceptable.
+			var listed: Variant = row.get("choices", null)
+			if listed is Array:
+				for choice in listed:
+					if String(choice) != String(default):
+						return String(choice)
 			# A different valid binding, so the round-trip test does not accidentally stage the
 			# default and trip over the self-cleaning.
 			return "Alt+U" if String(default) == "Alt+V" else "Alt+V"

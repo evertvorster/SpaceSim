@@ -17,6 +17,9 @@ run/main_scene="res://game/main.tscn"
 [autoload]
 
 SpacesimSettings="*res://addons/spacesim/settings/settings.gd"
+; After the settings, because it reads them: this is what makes the window settings *startup*
+; settings rather than preferences that need a restart.
+SpacesimDisplay="*res://addons/spacesim/settings/display.gd"
 
 [rendering]
 

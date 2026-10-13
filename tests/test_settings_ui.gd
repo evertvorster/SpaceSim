@@ -70,6 +70,20 @@ func _test_registry_is_sound(h) -> void:
 			unknown.append(key)
 		if row.get("validator", "") == "key_binding" and not Bindings.is_valid(String(row["default"])):
 			bad_defaults.append(key)
+	# A row offering choices that does not include its own default would open showing nothing, and a
+	# row that offers a list but names one we cannot build would fall back to a text box silently.
+	var bad_choices: Array[String] = []
+	for key in Settings.declared_keys():
+		var row: Dictionary = Settings.REGISTRY[key]
+		var listed: Variant = row.get("choices", null)
+		if listed is Array and not listed.has(row["default"]):
+			bad_choices.append(key)
+		if listed is String and listed != "screens":
+			bad_choices.append(key)
+	h.check(
+		bad_choices.is_empty(),
+		"every row that offers choices offers its own default%s" % Fixture.detail(bad_choices)
+	)
 	h.check(unknown.is_empty(), "every declared validator exists%s" % Fixture.detail(unknown))
 	h.check(bad_defaults.is_empty(), "every binding default is a valid binding%s" % Fixture.detail(bad_defaults))
 	h.check(undotted.is_empty(), "every key is sectioned%s" % Fixture.detail(undotted))
