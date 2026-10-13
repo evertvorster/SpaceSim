@@ -1,0 +1,527 @@
+[gd_resource type="Resource" script_class="SpacesimSolarSystem" format=3]
+
+[ext_resource type="Script" path="res://addons/spacesim/system/content/solar_system.gd" id="system"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/framing.gd" id="framing"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/system_body.gd" id="body"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/layer.gd" id="layer"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/orbit.gd" id="orbit"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/atmosphere.gd" id="atmosphere"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/surface.gd" id="surface"]
+
+; SOL — the development and calibration system.
+;
+; There is no Sol in the shipped game: every system the player visits is generated. This file
+; exists so the derivation can be built and falsified against real values (Earth's 288 K, Venus's
+; 737 K, the Moon's day/night contrast) before a generator exists.
+;
+; SOURCES. Physical data (mass, radius, rotation, obliquity, surface pressure, composition) from
+; the NASA/NSSDC planetary fact sheets, 2025-03-18 edition. Orbital elements at J2000 from JPL
+; SSD "Approximate Positions of the Planets" (Table 1, mean ecliptic and equinox of J2000, valid
+; 1800-2050), converted here to argument of periapsis (longitude of perihelion minus longitude of
+; ascending node) and mean anomaly at epoch (mean longitude minus longitude of perihelion).
+;
+; CONVENTIONS. Metres, kilograms, seconds, kelvin, pascals, degrees. A layer's `radius` is its
+; OUTER BOUNDARY. `rotation_period` is always positive: retrograde is `axial_tilt > 90` (Venus
+; 177.4, Uranus 97.77). Angles are degrees.
+;
+; TWO THINGS THAT ARE DELIBERATELY INCOMPLETE:
+;
+; 1. GAS GIANTS AUTHOR THEIR MASS. A constant-density layer model cannot represent a smoothly
+;    compressed hydrogen envelope, so Jupiter, Saturn, Uranus and Neptune carry `mass` the same way
+;    the Sun does, and their layers describe structure rather than produce it. Whether they should
+;    instead get a compression model, or keep an authored mass permanently, is an open question.
+; 2. THE SUN'S LAYERS ARE ONE BULK LAYER. Its mass is authored, so no density profile is needed to
+;    get mass; the layer exists to carry composition, which the spectral and temperature derivation
+;    reads. A core/radiative/convective split adds nothing the model currently uses.
+;
+; Trace solar abundances are approximate: hydrogen and helium are the standard mass fractions, the
+; minor species are close but not sourced to the last digit.
+
+[sub_resource type="Resource" id="Framing_sol"]
+script = ExtResource("framing")
+system_band = Vector2(10000, 10000000000000)
+atmosphere_band = Vector2(2000, 400000)
+surface_band = Vector2(100, 5000)
+atmosphere_altitude = 100000.0
+surface_altitude = 2000.0
+pad_size = 4000.0
+
+; ---------- layers ----------
+
+[sub_resource type="Resource" id="L_sol"]
+script = ExtResource("layer")
+layer_name = "bulk"
+radius = 695700000.0
+composition = Dictionary[String, float]({
+"carbon": 0.0029,
+"helium": 0.2485,
+"hydrogen": 0.7346,
+"iron": 0.0016,
+"magnesium": 0.0008,
+"neon": 0.0012,
+"nitrogen": 0.0011,
+"oxygen": 0.0077,
+"silicon": 0.0009,
+"sulfur": 0.0007
+})
+
+[sub_resource type="Resource" id="L_mercury_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 2020000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_mercury_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 2439500.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_venus_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 3200000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_venus_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 6022000.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_venus_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 6052000.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_earth_inner_core"]
+script = ExtResource("layer")
+layer_name = "inner_core"
+radius = 1220000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_earth_outer_core"]
+script = ExtResource("layer")
+layer_name = "outer_core"
+radius = 3480000.0
+composition = Dictionary[String, float]({
+"iron": 0.8,
+"nickel": 0.05,
+"sulfur": 0.15
+})
+
+[sub_resource type="Resource" id="L_earth_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 6341000.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_earth_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 6371000.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_mars_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 1700000.0
+composition = Dictionary[String, float]({
+"iron": 0.8,
+"nickel": 0.1,
+"sulfur": 0.1
+})
+
+[sub_resource type="Resource" id="L_mars_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 3339500.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_mars_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 3389500.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_jupiter_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 14000000.0
+composition = Dictionary[String, float]({
+"iron": 0.45,
+"silicate": 0.55
+})
+
+[sub_resource type="Resource" id="L_jupiter_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 69911000.0
+composition = Dictionary[String, float]({
+"helium": 0.1,
+"hydrogen": 0.9
+})
+
+[sub_resource type="Resource" id="L_saturn_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 12000000.0
+composition = Dictionary[String, float]({
+"iron": 0.5,
+"silicate": 0.5
+})
+
+[sub_resource type="Resource" id="L_saturn_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 60268000.0
+composition = Dictionary[String, float]({
+"helium": 0.06,
+"hydrogen": 0.94
+})
+
+[sub_resource type="Resource" id="L_uranus_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 5000000.0
+composition = Dictionary[String, float]({
+"iron": 0.45,
+"silicate": 0.55
+})
+
+[sub_resource type="Resource" id="L_uranus_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 25559000.0
+composition = Dictionary[String, float]({
+"helium": 0.15,
+"hydrogen": 0.85
+})
+
+[sub_resource type="Resource" id="L_neptune_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 5000000.0
+composition = Dictionary[String, float]({
+"iron": 0.45,
+"silicate": 0.55
+})
+
+[sub_resource type="Resource" id="L_neptune_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 24764000.0
+composition = Dictionary[String, float]({
+"helium": 0.2,
+"hydrogen": 0.8
+})
+
+; ---------- atmospheres ----------
+
+[sub_resource type="Resource" id="A_venus"]
+script = ExtResource("atmosphere")
+surface_pressure = 9200000.0
+species = Dictionary[String, float]({
+"carbon_dioxide": 0.965,
+"nitrogen": 0.035
+})
+
+[sub_resource type="Resource" id="A_earth"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"argon": 0.00934,
+"carbon_dioxide": 0.00036,
+"nitrogen": 0.78084,
+"oxygen": 0.20946,
+"water_vapour": 0.01
+})
+variable_species = PackedStringArray("water_vapour")
+
+[sub_resource type="Resource" id="A_mars"]
+script = ExtResource("atmosphere")
+surface_pressure = 610.0
+species = Dictionary[String, float]({
+"argon": 0.0193,
+"carbon_dioxide": 0.9527,
+"nitrogen": 0.028
+})
+
+; ---------- surfaces ----------
+
+[sub_resource type="Resource" id="S_mercury"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+[sub_resource type="Resource" id="S_venus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+[sub_resource type="Resource" id="S_earth"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"ocean": 0.708,
+"regolith": 0.192,
+"vegetation": 0.1
+})
+
+[sub_resource type="Resource" id="S_mars"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+; ---------- orbits (J2000) ----------
+
+[sub_resource type="Resource" id="O_mercury"]
+script = ExtResource("orbit")
+semi_major_axis = 57909226541.52439
+eccentricity = 0.20563593
+inclination = 7.00497902
+ascending_node = 48.33076593
+argument_of_periapsis = 29.12703035
+mean_anomaly_at_epoch = 174.79252722
+
+[sub_resource type="Resource" id="O_venus"]
+script = ExtResource("orbit")
+semi_major_axis = 108209474537.37917
+eccentricity = 0.00677672
+inclination = 3.39467605
+ascending_node = 76.67984255
+argument_of_periapsis = 54.92262463
+mean_anomaly_at_epoch = 50.37663232
+
+[sub_resource type="Resource" id="O_earth"]
+script = ExtResource("orbit")
+semi_major_axis = 149598261150.4425
+eccentricity = 0.01671123
+inclination = -1.531e-05
+ascending_node = 0.0
+argument_of_periapsis = 102.93768193
+mean_anomaly_at_epoch = -2.47311027
+
+[sub_resource type="Resource" id="O_mars"]
+script = ExtResource("orbit")
+semi_major_axis = 227943822427.57306
+eccentricity = 0.0933941
+inclination = 1.84969142
+ascending_node = 49.55953891
+argument_of_periapsis = 286.4968315
+mean_anomaly_at_epoch = 19.39019754
+
+[sub_resource type="Resource" id="O_jupiter"]
+script = ExtResource("orbit")
+semi_major_axis = 778340816692.7108
+eccentricity = 0.04838624
+inclination = 1.30439695
+ascending_node = 100.47390909
+argument_of_periapsis = 274.25457074
+mean_anomaly_at_epoch = 19.66796068
+
+[sub_resource type="Resource" id="O_saturn"]
+script = ExtResource("orbit")
+semi_major_axis = 1426666414179.921
+eccentricity = 0.05386179
+inclination = 2.48599187
+ascending_node = 113.66242448
+argument_of_periapsis = 338.93645383
+mean_anomaly_at_epoch = 317.35536592
+
+[sub_resource type="Resource" id="O_uranus"]
+script = ExtResource("orbit")
+semi_major_axis = 2870658170655.7324
+eccentricity = 0.04725744
+inclination = 0.77263783
+ascending_node = 74.01692503
+argument_of_periapsis = 96.93735127
+mean_anomaly_at_epoch = 142.28382821
+
+[sub_resource type="Resource" id="O_neptune"]
+script = ExtResource("orbit")
+semi_major_axis = 4498396417009.467
+eccentricity = 0.00859048
+inclination = 1.77004347
+ascending_node = 131.78422574
+argument_of_periapsis = 273.18053653
+mean_anomaly_at_epoch = -100.08479196
+
+; ---------- bodies ----------
+
+[sub_resource type="Resource" id="B_sol"]
+script = ExtResource("body")
+id = "star:sol"
+display_name = "Sol"
+kind = 0
+primary = true
+radius = 695700000.0
+mass = 1.9884e+30
+rotation_period = 2192832.0
+axial_tilt = 7.25
+layers = Array[ExtResource("layer")]([SubResource("L_sol")])
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_mercury"]
+script = ExtResource("body")
+id = "planet:mercury"
+display_name = "Mercury"
+kind = 1
+parent_id = "star:sol"
+radius = 2439500.0
+rotation_period = 5067360.0
+axial_tilt = 0.034
+layers = Array[ExtResource("layer")]([SubResource("L_mercury_core"), SubResource("L_mercury_crust")])
+orbit = SubResource("O_mercury")
+surface = SubResource("S_mercury")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_venus"]
+script = ExtResource("body")
+id = "planet:venus"
+display_name = "Venus"
+kind = 1
+parent_id = "star:sol"
+radius = 6052000.0
+rotation_period = 20997000.0
+axial_tilt = 177.4
+layers = Array[ExtResource("layer")]([SubResource("L_venus_core"), SubResource("L_venus_mantle"), SubResource("L_venus_crust")])
+orbit = SubResource("O_venus")
+atmosphere = SubResource("A_venus")
+surface = SubResource("S_venus")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_earth"]
+script = ExtResource("body")
+id = "planet:earth"
+display_name = "Earth"
+kind = 1
+parent_id = "star:sol"
+radius = 6371000.0
+rotation_period = 86164.2
+axial_tilt = 23.44
+layers = Array[ExtResource("layer")]([SubResource("L_earth_inner_core"), SubResource("L_earth_outer_core"), SubResource("L_earth_mantle"), SubResource("L_earth_crust")])
+orbit = SubResource("O_earth")
+atmosphere = SubResource("A_earth")
+surface = SubResource("S_earth")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_mars"]
+script = ExtResource("body")
+id = "planet:mars"
+display_name = "Mars"
+kind = 1
+parent_id = "star:sol"
+radius = 3389500.0
+rotation_period = 88642.44
+axial_tilt = 25.19
+layers = Array[ExtResource("layer")]([SubResource("L_mars_core"), SubResource("L_mars_mantle"), SubResource("L_mars_crust")])
+orbit = SubResource("O_mars")
+atmosphere = SubResource("A_mars")
+surface = SubResource("S_mars")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_jupiter"]
+script = ExtResource("body")
+id = "planet:jupiter"
+display_name = "Jupiter"
+kind = 1
+parent_id = "star:sol"
+radius = 69911000.0
+mass = 1.898e+27
+rotation_period = 35730.0
+axial_tilt = 3.13
+layers = Array[ExtResource("layer")]([SubResource("L_jupiter_core"), SubResource("L_jupiter_envelope")])
+orbit = SubResource("O_jupiter")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_saturn"]
+script = ExtResource("body")
+id = "planet:saturn"
+display_name = "Saturn"
+kind = 1
+parent_id = "star:sol"
+radius = 60268000.0
+mass = 5.68e+26
+rotation_period = 38361.6
+axial_tilt = 26.73
+layers = Array[ExtResource("layer")]([SubResource("L_saturn_core"), SubResource("L_saturn_envelope")])
+orbit = SubResource("O_saturn")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_uranus"]
+script = ExtResource("body")
+id = "planet:uranus"
+display_name = "Uranus"
+kind = 1
+parent_id = "star:sol"
+radius = 25559000.0
+mass = 8.68e+25
+rotation_period = 62064.0
+axial_tilt = 97.77
+layers = Array[ExtResource("layer")]([SubResource("L_uranus_core"), SubResource("L_uranus_envelope")])
+orbit = SubResource("O_uranus")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_neptune"]
+script = ExtResource("body")
+id = "planet:neptune"
+display_name = "Neptune"
+kind = 1
+parent_id = "star:sol"
+radius = 24764000.0
+mass = 1.02e+26
+rotation_period = 57996.0
+axial_tilt = 28.32
+layers = Array[ExtResource("layer")]([SubResource("L_neptune_core"), SubResource("L_neptune_envelope")])
+orbit = SubResource("O_neptune")
+landable = false
+significant = true
+
+[resource]
+script = ExtResource("system")
+content_version = 1
+epoch = "2000-01-01T12:00:00"
+framing = SubResource("Framing_sol")
+start_body_id = "planet:earth"
+start_altitude = 20000000.0
+start_world_time = 0.0
+bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune")])

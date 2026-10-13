@@ -1,0 +1,276 @@
+[gd_resource type="Resource" script_class="SpacesimMaterialTable" format=3]
+
+[ext_resource type="Script" path="res://addons/spacesim/system/content/material_table.gd" id="table"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/species.gd" id="species"]
+
+; The substances a system's compositions name. Ships with the engine: changing the density of iron
+; changes physics, not art. A system may extend it.
+;
+; Density and molar mass are standard physical values. `albedo` is the material's Bond albedo and
+; `color` its visual colour, both used by the surface derivation. Condensation temperatures are at
+; one atmosphere. `rayleigh` and `greenhouse` are deliberately EMPTY: the sky and the greenhouse
+; need wavelength-resolved data, and a guessed cross-section would be worse than an absent one.
+
+[sub_resource type="Resource" id="Sp_iron"]
+script = ExtResource("species")
+species_name = "iron"
+domain = 0
+density = 7874.0
+molar_mass = 55.845
+albedo = 0.1
+color = Color(0.55, 0.5, 0.47, 1)
+condensation_temperature = 1811.0
+
+[sub_resource type="Resource" id="Sp_nickel"]
+script = ExtResource("species")
+species_name = "nickel"
+domain = 0
+density = 8908.0
+molar_mass = 58.693
+albedo = 0.15
+color = Color(0.62, 0.62, 0.6, 1)
+condensation_temperature = 1728.0
+
+[sub_resource type="Resource" id="Sp_silicate"]
+script = ExtResource("species")
+species_name = "silicate"
+domain = 0
+density = 3300.0
+molar_mass = 60.084
+albedo = 0.15
+color = Color(0.55, 0.45, 0.35, 1)
+condensation_temperature = 1983.0
+
+[sub_resource type="Resource" id="Sp_sulfur"]
+script = ExtResource("species")
+species_name = "sulfur"
+domain = 0
+density = 2070.0
+molar_mass = 32.06
+albedo = 0.1
+color = Color(0.85, 0.8, 0.35, 1)
+condensation_temperature = 388.0
+
+[sub_resource type="Resource" id="Sp_carbon"]
+script = ExtResource("species")
+species_name = "carbon"
+domain = 0
+density = 2267.0
+molar_mass = 12.011
+albedo = 0.05
+color = Color(0.15, 0.15, 0.16, 1)
+condensation_temperature = 3915.0
+
+[sub_resource type="Resource" id="Sp_magnesium"]
+script = ExtResource("species")
+species_name = "magnesium"
+domain = 0
+density = 1738.0
+molar_mass = 24.305
+albedo = 0.15
+color = Color(0.62, 0.62, 0.6, 1)
+condensation_temperature = 923.0
+
+[sub_resource type="Resource" id="Sp_silicon"]
+script = ExtResource("species")
+species_name = "silicon"
+domain = 0
+density = 2329.0
+molar_mass = 28.085
+albedo = 0.15
+color = Color(0.45, 0.45, 0.5, 1)
+condensation_temperature = 1687.0
+
+[sub_resource type="Resource" id="Sp_water_ice"]
+script = ExtResource("species")
+species_name = "water_ice"
+domain = 0
+density = 917.0
+molar_mass = 18.015
+albedo = 0.6
+color = Color(0.85, 0.9, 0.95, 1)
+condensation_temperature = 273.15
+
+[sub_resource type="Resource" id="Sp_ammonia_ice"]
+script = ExtResource("species")
+species_name = "ammonia_ice"
+domain = 0
+density = 817.0
+molar_mass = 17.031
+albedo = 0.55
+color = Color(0.8, 0.85, 0.8, 1)
+condensation_temperature = 195.4
+
+[sub_resource type="Resource" id="Sp_methane_ice"]
+script = ExtResource("species")
+species_name = "methane_ice"
+domain = 0
+density = 450.0
+molar_mass = 16.043
+albedo = 0.5
+color = Color(0.82, 0.78, 0.72, 1)
+condensation_temperature = 90.7
+
+[sub_resource type="Resource" id="Sp_hydrogen_metallic"]
+script = ExtResource("species")
+species_name = "hydrogen_metallic"
+domain = 1
+density = 1000.0
+molar_mass = 2.016
+albedo = 0.05
+color = Color(0.55, 0.45, 0.7, 1)
+condensation_temperature = 0.0
+
+[sub_resource type="Resource" id="Sp_hydrogen"]
+script = ExtResource("species")
+species_name = "hydrogen"
+domain = 2
+density = 0.08988
+molar_mass = 2.016
+albedo = 0.0
+color = Color(0.8, 0.82, 0.9, 1)
+condensation_temperature = 20.3
+
+[sub_resource type="Resource" id="Sp_helium"]
+script = ExtResource("species")
+species_name = "helium"
+domain = 2
+density = 0.1786
+molar_mass = 4.003
+albedo = 0.0
+color = Color(0.85, 0.85, 0.88, 1)
+condensation_temperature = 4.2
+
+[sub_resource type="Resource" id="Sp_nitrogen"]
+script = ExtResource("species")
+species_name = "nitrogen"
+domain = 2
+density = 1.251
+molar_mass = 28.014
+albedo = 0.0
+color = Color(0.75, 0.78, 0.85, 1)
+condensation_temperature = 77.4
+
+[sub_resource type="Resource" id="Sp_oxygen"]
+script = ExtResource("species")
+species_name = "oxygen"
+domain = 2
+density = 1.429
+molar_mass = 31.998
+albedo = 0.0
+color = Color(0.6, 0.72, 0.9, 1)
+condensation_temperature = 90.2
+
+[sub_resource type="Resource" id="Sp_carbon_dioxide"]
+script = ExtResource("species")
+species_name = "carbon_dioxide"
+domain = 2
+density = 1.977
+molar_mass = 44.009
+albedo = 0.0
+color = Color(0.8, 0.78, 0.7, 1)
+condensation_temperature = 194.7
+
+[sub_resource type="Resource" id="Sp_argon"]
+script = ExtResource("species")
+species_name = "argon"
+domain = 2
+density = 1.784
+molar_mass = 39.948
+albedo = 0.0
+color = Color(0.75, 0.78, 0.85, 1)
+condensation_temperature = 83.8
+
+[sub_resource type="Resource" id="Sp_water_vapour"]
+script = ExtResource("species")
+species_name = "water_vapour"
+domain = 2
+density = 0.804
+molar_mass = 18.015
+albedo = 0.0
+color = Color(0.85, 0.9, 0.95, 1)
+condensation_temperature = 273.15
+
+[sub_resource type="Resource" id="Sp_methane"]
+script = ExtResource("species")
+species_name = "methane"
+domain = 2
+density = 0.657
+molar_mass = 16.043
+albedo = 0.0
+color = Color(0.8, 0.75, 0.68, 1)
+condensation_temperature = 90.7
+
+[sub_resource type="Resource" id="Sp_ammonia"]
+script = ExtResource("species")
+species_name = "ammonia"
+domain = 2
+density = 0.769
+molar_mass = 17.031
+albedo = 0.0
+color = Color(0.78, 0.82, 0.78, 1)
+condensation_temperature = 239.8
+
+[sub_resource type="Resource" id="Sp_sulfur_dioxide"]
+script = ExtResource("species")
+species_name = "sulfur_dioxide"
+domain = 2
+density = 2.628
+molar_mass = 64.066
+albedo = 0.0
+color = Color(0.85, 0.82, 0.62, 1)
+condensation_temperature = 263.1
+
+[sub_resource type="Resource" id="Sp_neon"]
+script = ExtResource("species")
+species_name = "neon"
+domain = 2
+density = 0.9002
+molar_mass = 20.18
+albedo = 0.0
+color = Color(0.8, 0.85, 0.9, 1)
+condensation_temperature = 24.6
+
+[sub_resource type="Resource" id="Sp_ocean"]
+script = ExtResource("species")
+species_name = "ocean"
+domain = 1
+density = 1025.0
+molar_mass = 18.015
+albedo = 0.06
+color = Color(0.05, 0.15, 0.35, 1)
+condensation_temperature = 273.15
+
+[sub_resource type="Resource" id="Sp_ice_cap"]
+script = ExtResource("species")
+species_name = "ice_cap"
+domain = 0
+density = 917.0
+molar_mass = 18.015
+albedo = 0.75
+color = Color(0.95, 0.97, 1, 1)
+condensation_temperature = 273.15
+
+[sub_resource type="Resource" id="Sp_regolith"]
+script = ExtResource("species")
+species_name = "regolith"
+domain = 0
+density = 1500.0
+molar_mass = 60.084
+albedo = 0.12
+color = Color(0.45, 0.4, 0.35, 1)
+condensation_temperature = 0.0
+
+[sub_resource type="Resource" id="Sp_vegetation"]
+script = ExtResource("species")
+species_name = "vegetation"
+domain = 0
+density = 700.0
+molar_mass = 30.0
+albedo = 0.15
+color = Color(0.2, 0.4, 0.18, 1)
+condensation_temperature = 0.0
+
+[resource]
+script = ExtResource("table")
+species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])

@@ -116,9 +116,10 @@ fast, because the limit falls with the remaining distance by construction.
 
 ## Solar system
 
-`addons/spacesim/system/` — a solar system loaded from data, and the scene it builds. **Content,
-not engine:** the file says what exists; the engine builds the frames, geometry, scale bodies and
-transition rules from it. A different system file should not require engine changes.
+`addons/spacesim/system/` — a solar system loaded from data, and the scene it builds, plus the
+**content classes** ([code]content/[/code]) the derivation will read. **Content, not engine:** the
+file says what exists; the engine builds the frames, geometry, scale bodies and transition rules
+from it. A different system file should not require engine changes.
 
 ### System file
 
@@ -138,6 +139,41 @@ or into, not somewhere to go. `significant` is whether it is worth marking on sc
 worth flying to without being worth a label, and every rock in a belt is the latter. A generated
 universe will add `seed` and `generator_version` here; the playground is hand-authored and has
 neither.
+
+### System **content** — `content/`
+
+The authored shape the derivation reads and the generator will emit: Godot **Resources**, saved as
+`.tres`. Independent of the JSON system file above, which is what the game still flies.
+
+| Class | |
+|---|---|
+| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_world_time`, `bodies`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
+| `SpacesimSystemBody` | `content/system_body.gd` — one body: `id`, `display_name`, `kind`, `parent_id`, `primary`, `radius`, `mass`, `rotation_period`, `axial_tilt`, `layers`, `orbit`, `fixed_position`, `atmosphere`, `surface`, `overrides`, `landable`, `significant` |
+| `SpacesimLayer` | `content/layer.gd` — `layer_name`, `radius` (outer boundary), `composition` |
+| `SpacesimOrbit` | `content/orbit.gd` — the six Keplerian elements, degrees |
+| `SpacesimAtmosphere` | `content/atmosphere.gd` — `surface_pressure`, `species`, `variable_species` |
+| `SpacesimSurface` | `content/surface.gd` — `coverage` |
+| `SpacesimBodyOverrides` | `content/overrides.gd` — pinned derived values |
+| `SpacesimFraming` | `content/framing.gd` — the travel bands and thresholds |
+| `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name |
+
+Data files: `addons/spacesim/system/content/materials.tres` (the material table; ships with the
+engine) and `systems/sol.tres` (Sol — the **development and calibration** system, not shipped
+content, since every system in the game is generated).
+
+**Conventions.** SI units; angles in degrees. A layer's `radius` is its **outer boundary**, so a
+thickness cannot contradict it. `rotation_period` is always positive and **retrograde is
+`axial_tilt > 90`** (Venus 177.4, Uranus 97.77) — one place for the direction. `mass` is authored
+for stars **and gas giants** (a constant-density layer model cannot represent a self-gravitating
+body or a compressed envelope) and derived from the layers for everything else; 0.0 means derive. A
+body with no `orbit` is fixed, so "orbiting *and* fixed" cannot happen rather than being rejected.
+
+**`validate()`** reports fraction sums that are not 1 (skipping `variable_species`, which are
+reference values for condensables), layer boundaries that do not ascend with the outermost equal to
+the body radius, a body that is its own parent, a body that neither orbits nor is the primary, a
+parent that is not in the system, a moon of a star, a non-positive rotation period, and an axial
+tilt outside `[0, 180]`. It reports rather than corrects: a silently repaired world is a wrong
+world nobody notices.
 
 ### `SpacesimSceneBody` — `RefCounted`
 
