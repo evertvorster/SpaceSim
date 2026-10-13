@@ -1,20 +1,24 @@
 class_name SpacesimSceneBody
 extends RefCounted
-## One body in a solar system: the data describing it, and the scene it was built into.
+## One body's **built** half: the content it came from, and the nodes it was built into.
 ##
-## The data half comes from the system file; the node half is filled in by
-## [code]SpacesimSystemScene.build()[/code]. Which bodies count as significant — for the travel unit,
-## and for having frames at all — is content's decision, expressed in the file.
+## The content lives in [SpacesimSystemBody]. A Godot `Resource` is cached and shared, so one
+## holding node references would hand the same nodes to a second build — the nodes live here, and
+## this is the object the scene hands out.
 
+## The authored body this was built from. The fields below are copied out of it so the scene does
+## not have to reach through it everywhere; `content` is kept for anything the derivation will need.
+var content: SpacesimSystemBody
 var id: String
 var name: String
 var kind: String ## "star", "planet", "moon", ...
 var radius: float ## metres
-var position: Vector3 ## in the system frame, metres
+var position: Vector3 ## in the system frame, metres — fixed, or solved from the orbit
 var color: Color
-var landable: bool ## whether it gets atmosphere and surface frames
-## Whether it is worth marking on screen. A body can be worth flying to without being worth a
-## label — every rock in a belt is the latter.
+var parent_id: String
+var fixed_position: Vector3
+var orbit: SpacesimOrbit
+var landable: bool
 var significant: bool
 
 # Built by SpacesimSystemScene.
@@ -24,23 +28,36 @@ var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
 
+## Until the derivation supplies a colour from composition this is what an unpinned body is drawn
+## in — visibly a placeholder rather than a plausible-looking guess.
+const UNPINNED_COLOR := Color(0.62, 0.62, 0.66)
 
-static func from_dictionary(data: Dictionary) -> SpacesimSceneBody:
+
+static func from_content(content: SpacesimSystemBody) -> SpacesimSceneBody:
 	var body := SpacesimSceneBody.new()
-	body.id = String(data.get("id", ""))
-	body.name = String(data.get("name", body.id))
-	body.kind = String(data.get("kind", "planet"))
-	body.radius = float(data.get("radius", 0.0))
-	body.position = _vector_from(data.get("position", [0.0, 0.0, 0.0]))
-	body.landable = bool(data.get("landable", false))
-	body.significant = bool(data.get("significant", true))
-	var channels: Array = data.get("color", [0.8, 0.8, 0.8])
-	body.color = Color(float(channels[0]), float(channels[1]), float(channels[2]))
+	body.content = content
+	body.id = content.id
+	body.name = content.display_name
+	body.kind = content.kind_name()
+	body.radius = content.radius
+	body.parent_id = content.parent_id
+	body.fixed_position = content.fixed_position
+	body.orbit = content.orbit
+	body.landable = content.landable
+	body.significant = content.significant
+	body.color = color_of(content)
 	return body
 
 
-static func _vector_from(values: Variant) -> Vector3:
-	var components: Array = values
-	if components.size() < 3:
-		return Vector3.ZERO
-	return Vector3(float(components[0]), float(components[1]), float(components[2]))
+## The colour to draw a body in: what content pinned, or a placeholder.
+##
+## Colour is **derived** — from composition and surface coverage, via the material table. That
+## derivation does not exist yet, which is why an unpinned body is deliberately unlovely.
+static func color_of(content: SpacesimSystemBody) -> Color:
+	if content.overrides != null and content.overrides.set.has("surface_color"):
+		return content.overrides.surface_color
+	return UNPINNED_COLOR
+
+
+func orbits() -> bool:
+	return orbit != null

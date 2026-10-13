@@ -523,5 +523,7 @@ epoch = "2000-01-01T12:00:00"
 framing = SubResource("Framing_sol")
 start_body_id = "planet:earth"
 start_altitude = 20000000.0
-start_world_time = 0.0
+; J2000 on the world clock, which counts from year zero. Placing the system at exactly the epoch
+; its elements are stated for is what makes the m0 values mean what JPL says they mean.
+start_world_time = 63113947200.0
 bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune")])

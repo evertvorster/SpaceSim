@@ -67,21 +67,21 @@ func validate() -> PackedStringArray:
 			problems.append("a body has no id")
 		if body.radius <= 0.0:
 			problems.append("%s has no radius" % body.id)
-		if body.rotation_period <= 0.0:
-			problems.append("%s has a non-positive rotation period (retrograde is axial_tilt > 90)" % body.id)
+		if body.rotation_period < 0.0:
+			problems.append("%s has a negative rotation period (retrograde is axial_tilt > 90)" % body.id)
 		if body.axial_tilt < 0.0 or body.axial_tilt > 180.0:
 			problems.append("%s has an axial tilt outside [0, 180]" % body.id)
 
 		# Every body but the primary must orbit something: a body left without an orbit would
 		# silently stand at the system origin. The primary has no parent, so it is never checked
 		# against one.
+		# A body with no orbit does not move: it stands at its fixed position, and that is a perfectly
+		# good arrangement (a station, or a hand-placed placeholder) rather than an error. The
+		# primary is the exception — it is the centre of the system and must not orbit anything.
 		if body.primary:
 			if body.orbits():
 				problems.append("%s is the primary star and should not orbit" % body.id)
 		else:
-			if not body.orbits():
-				problems.append("%s neither orbits nor is the primary" % body.id)
-
 			var parent_id := body.parent_id
 			if parent_id.is_empty():
 				parent_id = primary.id if primary != null else ""

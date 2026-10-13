@@ -8,7 +8,7 @@ extends Node3D
 ##   P          hide/show the bodies
 ##   [ / ]      body tessellation, for attributing frame cost
 ##
-## The solar system comes from `systems/playground.json`; this script only adds input, the camera's
+## The solar system comes from `systems/sol.tres`; this script only adds input, the camera's
 ## render range and a readout. A different system file should not need this script changed.
 
 const PlayerShip := preload("res://game/player_ship.gd")
@@ -18,7 +18,7 @@ const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
 const Session := preload("res://addons/spacesim/save/session.gd")
 
-const SYSTEM_PATH := "res://systems/playground.json"
+const SYSTEM_PATH := "res://systems/sol.tres"
 
 const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys

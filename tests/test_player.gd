@@ -8,7 +8,7 @@ const Session := preload("res://addons/spacesim/save/session.gd")
 const Repo := preload("res://addons/spacesim/save/world_repo.gd")
 const Fixture := preload("res://tests/settings_fixture.gd")
 
-const SYSTEM_PATH := "res://systems/playground.json"
+const SYSTEM_PATH := "res://systems/playground.tres"
 
 ## The personal-data screen hosts saving, so building it needs a session and a system. Neither
 ## touches anything here: the screen only reads their names, so no repository is disturbed.

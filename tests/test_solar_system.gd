@@ -3,7 +3,7 @@ extends RefCounted
 
 const PlayerShip := preload("res://game/player_ship.gd")
 
-const SYSTEM_PATH := "res://systems/playground.json"
+const SYSTEM_PATH := "res://systems/playground.tres"
 
 
 func run(h, root: Node) -> void:
@@ -13,7 +13,7 @@ func run(h, root: Node) -> void:
 	if system == null:
 		return
 
-	h.check(system.name == "playground", "and is named '%s'" % system.name)
+	h.check(system.name == "Helios", "and is named after its star: '%s'" % system.name)
 	h.check(system.bodies.size() == 5, "with five bodies (%d)" % system.bodies.size())
 
 	var star := system.body_by_id("star:helios")

@@ -12,7 +12,7 @@ const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const PlayerShip := preload("res://game/player_ship.gd")
 
-const SYSTEM_PATH := "res://systems/playground.json"
+const SYSTEM_PATH := "res://systems/playground.tres"
 const TEST_ROOT := "/tmp/spacesim-session-test"
 
 

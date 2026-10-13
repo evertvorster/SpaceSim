@@ -121,29 +121,15 @@ fast, because the limit falls with the remaining distance by construction.
 file says what exists; the engine builds the frames, geometry, scale bodies and transition rules
 from it. A different system file should not require engine changes.
 
-### System file
-
-JSON, in `systems/`. `systems/playground.json` is the placeholder system. On-disk formats are part
-of the public interface, so the format is versioned (`format_version`).
-
-| Field | |
-|---|---|
-| `format_version` | int |
-| `name` | system name, shown in the game's readout |
-| `frames` | `system_band`, `atmosphere_band`, `surface_band` ([min, max] metres), `atmosphere_altitude`, `surface_altitude` (metres), `pad_size` |
-| `start` | `body` (an id) and `altitude` (metres above that body's surface) |
-| `bodies[]` | `id`, `name`, `kind`, `radius`, `position` (system frame, metres), `color`, `landable`, `significant` |
-
-A body that is not `landable` gets geometry and a scale body but no frames — something to fly past
-or into, not somewhere to go. `significant` is whether it is worth marking on screen: a body can be
-worth flying to without being worth a label, and every rock in a belt is the latter. A generated
-universe will add `seed` and `generator_version` here; the playground is hand-authored and has
-neither.
-
 ### System **content** — `content/`
 
 The authored shape the derivation reads and the generator will emit: Godot **Resources**, saved as
-`.tres`. Independent of the JSON system file above, which is what the game still flies.
+`.tres`. **One format, not two** — this replaced a JSON system file on 2026-10-13, and there is no
+converter and no second dialect.
+
+A body that is not `landable` gets geometry and a scale body but no frames — something to fly past
+or into, not somewhere to go. `significant` is whether it is worth marking on screen: a body can be
+worth flying to without being worth a label, and every rock in a belt is the latter.
 
 | Class | |
 |---|---|
@@ -162,7 +148,7 @@ engine) and `systems/sol.tres` (Sol — the **development and calibration** syst
 content, since every system in the game is generated).
 
 **Conventions.** SI units; angles in degrees. A layer's `radius` is its **outer boundary**, so a
-thickness cannot contradict it. `rotation_period` is always positive and **retrograde is
+thickness cannot contradict it. `rotation_period` is never negative and **retrograde is
 `axial_tilt > 90`** (Venus 177.4, Uranus 97.77) — one place for the direction. `mass` is authored
 for stars **and gas giants** (a constant-density layer model cannot represent a self-gravitating
 body or a compressed envelope) and derived from the layers for everything else; 0.0 means derive. A
@@ -170,34 +156,63 @@ body with no `orbit` is fixed, so "orbiting *and* fixed" cannot happen rather th
 
 **`validate()`** reports fraction sums that are not 1 (skipping `variable_species`, which are
 reference values for condensables), layer boundaries that do not ascend with the outermost equal to
-the body radius, a body that is its own parent, a body that neither orbits nor is the primary, a
-parent that is not in the system, a moon of a star, a non-positive rotation period, and an axial
-tilt outside `[0, 180]`. It reports rather than corrects: a silently repaired world is a wrong
-world nobody notices.
+the body radius, layer or surface fractions that are empty where they are required, a body that is
+its own parent, a parent that is not in the system, a moon of a star, a parent chain that is a
+cycle, a negative rotation period, and an axial tilt outside `[0, 180]`. It reports rather than
+corrects: a silently repaired world is a wrong world nobody notices.
+
+A body with **no `orbit` does not move** — it stands at its `fixed_position` — and that is a
+perfectly good arrangement (a station, or a hand-placed placeholder such as every body in the
+playground), not an error. The primary star is the exception: it is the centre of the system and
+must not orbit anything.
 
 ### `SpacesimSceneBody` — `RefCounted`
 
-The data half comes from the file; the node half is filled in by `build()`.
+One body's **built** half: the content it came from, and the nodes it was built into. The content
+lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes live here instead.
 
 | Member | |
 |---|---|
+| `content: SpacesimSystemBody` | the authored body this was built from |
 | `id`, `name`, `kind: String` | |
 | `radius: float` | metres |
-| `position: Vector3` | in the system frame |
-| `color: Color`, `landable: bool` | |
+| `position: Vector3` | in the system frame — fixed, or solved from the orbit |
+| `color: Color`, `landable: bool`, `significant: bool` | |
+| `parent_id: String`, `fixed_position: Vector3`, `orbit: SpacesimOrbit` | |
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
-| `static from_dictionary(data) -> SpacesimSceneBody` | |
+| `static from_content(content) -> SpacesimSceneBody` | |
+| `static color_of(content) -> Color` | what content pinned, or `UNPINNED_COLOR` — colour is otherwise derived, and that derivation does not exist yet |
+| `orbits() -> bool` | |
+
+### `SpacesimKepler` — `RefCounted`
+
+Where a body is, from its elements. A **pure function of time**: no integration, no state, nothing
+stepped forward, so a system is reproducible at any `t`.
+
+| Member | |
+|---|---|
+| `G` | `6.6743e-11` |
+| `static mu_of(total_mass) -> float` | `G(M + m)` — the **two-body** parameter; Jupiter's own mass shifts its period by half a day |
+| `static period(orbit, mu) -> float` | seconds, 0 when the orbit or the mass is unknown |
+| `static position_at(orbit, mu, t, epoch_time) -> Vector3` | in the parent's frame, ecliptic mapped to the engine's Y-up right-handed frame |
+
+A body whose parent mass is not known does not move rather than moving wrongly — the rocky bodies
+have no derived mass yet, so a moon of one stands still.
 
 ### `SpacesimSystemScene` — `RefCounted`
 
 | Member | |
 |---|---|
-| `static from_file(path) -> SpacesimSystemScene` | null on a read or parse failure |
-| `static from_dictionary(data) -> SpacesimSystemScene` | |
-| `build(parent) -> SpacesimSystemScene` | builds the scene; the observer is the caller's business |
-| `name`, `bodies: Array[SpacesimSceneBody]` | |
+| `content: SpacesimSolarSystem` | the authored content it was built from |
+| `static from_file(path) -> SpacesimSystemScene` | loads a `.tres` and works on a **copy**, since a resource is shared and building hangs nodes off it |
+| `static from_content(content) -> SpacesimSystemScene` | |
+| `static clock_at_epoch(iso) -> float` | world-clock seconds for an ISO epoch; J2000 is 63,113,947,200 |
+| `build(parent) -> SpacesimSystemScene` | places the bodies, then builds; the observer is the caller's business |
+| `name` | read from the primary star |
+| `bodies: Array[SpacesimSceneBody]` | |
+| `content_version() -> int` | the revision a save records |
 | `container: Node3D`, `system_frame: SpacesimFrame`, `frame_tree: SpacesimFrameTree` | built |
 | `body_by_id(id) -> SpacesimSceneBody` | |
 | `scale_bodies() -> Array[SpacesimScaleBody]` | every body, for the travel unit |
@@ -207,6 +222,10 @@ The data half comes from the file; the node half is filled in by `build()`.
 | `aim_sun_at(position) -> void` | aims the star's light at a position |
 | `body_for_surface_frame(frame) -> SpacesimSceneBody` | |
 | `place_landing_zone(body, point) -> void` | puts a body's landing zone on the surface under `point` |
+
+**Placement.** Bodies go down in dependency order rather than file order — a moon is placed relative
+to its planet — and a body whose parent is not in the system says so instead of quietly landing at
+the origin, which is inside the star. A body with no `orbit` does not move.
 
 **Landing zone.** A surface frame's origin is wherever the ship came down, not one fixed site —
 otherwise landing anywhere else would leave the ship millions of metres from its own frame's

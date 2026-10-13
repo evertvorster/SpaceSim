@@ -55,7 +55,7 @@ func start(system: SpacesimSystemScene) -> Dictionary:
 			return {"ok": true, "reason": ""}
 	else:
 		# The reference field is named "world" on disk — the persistence sense, not the system.
-		var created := repo.create({"world": system.name, "format_version": system.format_version})
+		var created := repo.create({"world": system.name, "content_version": system.content_version()})
 		if not created["ok"]:
 			return created
 	var began := repo.create_history(FIRST_HISTORY)

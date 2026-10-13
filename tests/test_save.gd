@@ -10,7 +10,7 @@ const Player := preload("res://addons/spacesim/player/player.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 
-const SYSTEM_PATH := "res://systems/playground.json"
+const SYSTEM_PATH := "res://systems/playground.tres"
 const TEST_ROOT := "/tmp/spacesim-save-test"
 
 

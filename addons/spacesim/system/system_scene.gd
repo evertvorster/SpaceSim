@@ -1,11 +1,11 @@
 class_name SpacesimSystemScene
 extends RefCounted
-## A solar system loaded from data, and the scene it builds.
+## A solar system's **built scene**: the coordinate frames, geometry, scale bodies and transition
+## rules, and the content they were built from.
 ##
-## **Content, not engine.** The file says what exists — bodies, sizes, positions, colours, the
-## frame conventions, where the player starts. This builds the coordinate frames, the geometry,
-## the scale bodies and the transition rules from it. "playground" is a placeholder; the engine
-## should not need to change when Cladogenesis content replaces it.
+## The content is authored ([SpacesimSolarSystem], a `Resource`); this half owns the nodes, because a
+## resource is cached and shared and must not reference them. Bodies are placed by solving their
+## orbits at the system's start time, or at their fixed position.
 ##
 ## A body that is not `landable` gets geometry and a scale body but no frames — it is something
 ## to fly past or into, not somewhere to go.
@@ -21,8 +21,10 @@ const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 const ASSET_FRAME_PREFIX := "asset:"
 const INTERIOR_SUFFIX := "/interior"
 
-var format_version: int
-var name: String
+## The authored content this scene was built from.
+var content: SpacesimSolarSystem
+
+var name: String ## read from the primary star
 var bodies: Array[SpacesimSceneBody] = []
 
 ## Built by build().
@@ -36,35 +38,51 @@ var start_altitude: float
 ## The world's clock at the beginning of a story that has not been played yet.
 var start_time: float = 0.0
 
-var _framing: Dictionary = {}
+var _framing: SpacesimFraming
+## World-clock seconds at which the orbital elements are stated — the content's `epoch`.
+var _epoch_time: float = 0.0
 var _sun_light: DirectionalLight3D
 
 
 static func from_file(path: String) -> SpacesimSystemScene:
-	var text := FileAccess.get_file_as_string(path)
-	if text.is_empty():
-		push_error("SpacesimSystemScene: cannot read '%s'" % path)
+	var loaded: Variant = load(path)
+	if loaded == null or not (loaded is SpacesimSolarSystem):
+		push_error("SpacesimSystemScene: '%s' is not a solar system" % path)
 		return null
-	var parsed: Variant = JSON.parse_string(text)
-	if typeof(parsed) != TYPE_DICTIONARY:
-		push_error("SpacesimSystemScene: '%s' is not a JSON object" % path)
-		return null
-	return from_dictionary(parsed)
+	# A resource is shared, and building hangs nodes off what it is given: work on a copy, so two
+	# scenes cannot fight over one authored system.
+	var copy: SpacesimSolarSystem = loaded.duplicate(true)
+	return from_content(copy)
 
 
-static func from_dictionary(data: Dictionary) -> SpacesimSystemScene:
-	var system := SpacesimSystemScene.new()
-	system.format_version = int(data.get("format_version", 0))
-	system.name = String(data.get("name", "unnamed"))
-	system._framing = data.get("frames", {})
-	for entry in data.get("bodies", []):
-		system.bodies.append(SpacesimSceneBody.from_dictionary(entry))
-	var start: Dictionary = data.get("start", {})
-	system.start_body_id = String(start.get("body", ""))
-	system.start_altitude = float(start.get("altitude", 1.0e7))
-	# A story may begin at any point in the world's time; a world with none begins at its epoch.
-	system.start_time = float(start.get("world_time", 0.0))
-	return system
+static func from_content(content: SpacesimSolarSystem) -> SpacesimSystemScene:
+	if content == null:
+		return null
+	var scene := SpacesimSystemScene.new()
+	scene.content = content
+	scene.name = content.system_name()
+	scene._framing = content.framing if content.framing != null else SpacesimFraming.new()
+	scene._epoch_time = clock_at_epoch(content.epoch)
+	scene.start_body_id = content.start_body_id
+	scene.start_altitude = content.start_altitude
+	scene.start_time = content.start_world_time
+	for entry in content.bodies:
+		scene.bodies.append(SpacesimSceneBody.from_content(entry))
+	return scene
+
+
+## The content revision this scene came from. A save records it so a mismatch is visible rather
+## than silent.
+func content_version() -> int:
+	return content.content_version if content != null else 0
+
+
+## World-clock seconds for an ISO 8601 epoch, on the same calendar [method format_time] reads. The
+## clock counts from year zero, so J2000 is a large positive number rather than a special case.
+static func clock_at_epoch(iso: String) -> float:
+	if iso.is_empty():
+		return 0.0
+	return float(Time.get_unix_time_from_datetime_string(iso)) - EPOCH_AT_YEAR_ZERO
 
 
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set
@@ -80,8 +98,8 @@ func build(parent: Node) -> SpacesimSystemScene:
 	system_frame.name = "System"
 	system_frame.kind = Frame.Kind.SPACE
 	system_frame.frame_id = Frame.SYSTEM_ID
-	system_frame.travel_length_min = _band("system_band").x
-	system_frame.travel_length_max = _band("system_band").y
+	system_frame.travel_length_min = _framing.system_band.x
+	system_frame.travel_length_max = _framing.system_band.y
 	container.add_child(system_frame)
 
 	frame_tree = FrameTree.new()
@@ -90,6 +108,7 @@ func build(parent: Node) -> SpacesimSystemScene:
 	container.add_child(frame_tree)
 	frame_tree.register(system_frame)
 
+	_place_bodies()
 	for body in bodies:
 		_build_body(body)
 
@@ -231,6 +250,70 @@ func place_observer(location: SpacesimLocation) -> bool:
 	return exact
 
 
+func _parent_id_of(body: SpacesimSceneBody) -> String:
+	if body.content != null and body.content.primary:
+		return ""
+	if not body.parent_id.is_empty():
+		return body.parent_id
+	return _primary_id()
+
+
+func _primary_id() -> String:
+	var primary := content.star() if content != null else null
+	return primary.id if primary != null else ""
+
+
+## Place every body in the system frame: the primary where it stands, everything else by solving
+## its orbit at the start time, relative to whatever it orbits.
+##
+## Order is dependency, not file order — a moon is placed relative to its planet — and a body whose
+## parent is not in the system says so instead of quietly landing at the origin, which is inside
+## the star.
+func _place_bodies() -> void:
+	var placed := {}
+	var pending: Array[SpacesimSceneBody] = bodies.duplicate()
+
+	for _pass in bodies.size() + 1:
+		if pending.is_empty():
+			break
+		var progressed := false
+		for body in pending.duplicate():
+			var parent_id := _parent_id_of(body)
+			if not parent_id.is_empty() and not placed.has(parent_id):
+				continue
+			var origin: Vector3 = placed.get(parent_id, Vector3.ZERO)
+			body.position = _position_of(body, origin, parent_id)
+			placed[body.id] = body.position
+			pending.erase(body)
+			progressed = true
+		if not progressed:
+			break
+
+	for body in pending:
+		push_warning(
+			"SpacesimSystemScene: '%s' orbits '%s', which is not in this system" % [body.id, body.parent_id]
+		)
+		body.position = body.fixed_position
+
+
+## Where a body sits, given where its parent sits. A body with no orbit does not move; one with an
+## orbit is solved, and does not move either when its parent's mass is not known — a body whose
+## mass has not been derived yet should stand still rather than drift wrongly.
+func _position_of(body: SpacesimSceneBody, origin: Vector3, parent_id: String) -> Vector3:
+	if body.orbit == null:
+		return body.fixed_position
+	var parent := body_by_id(parent_id)
+	var parent_mass := 0.0
+	if parent != null and parent.content != null:
+		parent_mass = parent.content.mass
+	var body_mass := 0.0
+	if body.content != null:
+		body_mass = body.content.mass
+	# Two bodies, so G(M + m) — a giant's own mass measurably shortens its own orbit.
+	var mu := SpacesimKepler.mu_of(parent_mass + body_mass)
+	return origin + SpacesimKepler.position_at(body.orbit, mu, start_time, _epoch_time)
+
+
 func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
 	body.node.name = body.name
@@ -244,15 +327,15 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	if not body.landable:
 		return
 
-	var atmosphere_altitude := float(_framing.get("atmosphere_altitude", 100000.0))
-	var surface_altitude := float(_framing.get("surface_altitude", 2000.0))
+	var atmosphere_altitude := _framing.atmosphere_altitude
+	var surface_altitude := _framing.surface_altitude
 
 	body.atmosphere = Frame.new()
 	body.atmosphere.name = "Atmosphere"
 	body.atmosphere.kind = Frame.Kind.ATMOSPHERE
 	body.atmosphere.frame_id = "%s/atmosphere" % body.id
-	body.atmosphere.travel_length_min = _band("atmosphere_band").x
-	body.atmosphere.travel_length_max = _band("atmosphere_band").y
+	body.atmosphere.travel_length_min = _framing.atmosphere_band.x
+	body.atmosphere.travel_length_max = _framing.atmosphere_band.y
 	body.node.add_child(body.atmosphere)
 	frame_tree.register(body.atmosphere)
 
@@ -260,8 +343,8 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.surface.name = "Surface"
 	body.surface.kind = Frame.Kind.SURFACE
 	body.surface.frame_id = "%s/surface" % body.id
-	body.surface.travel_length_min = _band("surface_band").x
-	body.surface.travel_length_max = _band("surface_band").y
+	body.surface.travel_length_min = _framing.surface_band.x
+	body.surface.travel_length_max = _framing.surface_band.y
 	body.node.add_child(body.surface)
 	frame_tree.register(body.surface)
 	place_landing_zone(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
@@ -340,7 +423,7 @@ func _add_sphere(parent: Node3D, radius: float, color: Color) -> MeshInstance3D:
 
 ## Meter-scale references at the landing zone, so the scale is legible once you are down.
 func _add_landing_site(surface: SpacesimFrame) -> void:
-	var pad_size := float(_framing.get("pad_size", 4000.0))
+	var pad_size := _framing.pad_size
 
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(pad_size, pad_size)
@@ -436,8 +519,3 @@ static func _asset_at(assets: Array, frame_id: String) -> Dictionary:
 		if String(asset.get("id", "")) == id:
 			return asset
 	return {}
-
-
-func _band(key: String) -> Vector2:
-	var values: Array = _framing.get(key, [1.0, 1.0e11])
-	return Vector2(float(values[0]), float(values[1]))

@@ -7,7 +7,7 @@ extends RefCounted
 
 const PlayerShip := preload("res://game/player_ship.gd")
 
-const SYSTEM_PATH := "res://systems/playground.json"
+const SYSTEM_PATH := "res://systems/playground.tres"
 const STEP := 1.0 / 60.0
 const MAX_STEPS := 120000
 

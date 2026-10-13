@@ -8,7 +8,7 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 
 ## Status
 
-**Early, but real.** The playground system and the player are the game now, not a demo: coordinate
+**Early, but real.** Sol and the player are the game now, not a demo: coordinate
 frames, the travel unit, a data-driven system, navigation markers, settings, and a player who can be
 saved, loaded and browsed. There is no terrain, no physics and no simulation.
 
@@ -35,7 +35,7 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   save/            git-backed saves: the repository, the histories, the session, the do-over
   ui/              chrome shared by the full-screen screens, and the dialogs over them
 systems/           solar system files (content)
-game/              the game: fly the playground system and land on planets
+game/              the game: fly Sol and land on planets
 tests/             headless test scripts
 docs/API.md        what the engine exposes, as it is implemented
 ```
@@ -55,8 +55,9 @@ Open the project:
 godot-double-mono --path .
 ```
 
-It starts in `game/main.tscn`, flying the **playground** system from
-`systems/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **T** to cycle
+It starts in `game/main.tscn`, flying **Sol** from `systems/sol.tres` — the real solar system, with
+the planets placed where JPL says they were at J2000. **W/S** throttle, **mouse** pitch and yaw,
+**A/D** roll, **T** to cycle
 the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
 **`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
 than guessed at. **Tab** opens the personal data screen and **Alt+C** the settings screen; both
