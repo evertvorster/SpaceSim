@@ -117,5 +117,9 @@ epoch = ""
 framing = SubResource("Framing_playground")
 start_body_id = "planet:terra"
 start_altitude = 20000000.0
+; Away from the star, deliberately: this system's bodies run along +X from a star at the origin, so
+; the day side of Terra faces away from all of them — and the test that flies between them needs the
+; old geometry. Sol takes the default (the day side) and starts in daylight.
+start_direction = Vector3(1, 0, 0)
 start_world_time = 0.0
 bodies = Array[ExtResource("body")]([SubResource("B_helios"), SubResource("B_cinder"), SubResource("B_terra"), SubResource("B_borealis"), SubResource("B_nix")])

@@ -12,6 +12,11 @@ extends Resource
 @export var framing: SpacesimFraming
 @export var start_body_id: String = ""
 @export var start_altitude: float = 1.0e7 ## metres above that body's surface
+## The side of the start body to begin on. **Zero means the side facing the star** — the day side,
+## which is what a fresh story should have. Content overrides it for a world laid out so that the
+## interesting places are elsewhere: the playground's bodies run along +X from a star at the origin,
+## so its day side faces away from all the others.
+@export var start_direction: Vector3 = Vector3.ZERO
 @export var start_world_time: float = 0.0 ## seconds from the world epoch
 @export var bodies: Array[SpacesimSystemBody] = []
 

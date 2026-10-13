@@ -34,6 +34,8 @@ var frame_tree: SpacesimFrameTree
 
 var start_body_id: String
 var start_altitude: float
+## Which side of the start body to begin on; zero means the side facing the star.
+var start_direction: Vector3 = Vector3.ZERO
 
 ## The world's clock at the beginning of a story that has not been played yet.
 var start_time: float = 0.0
@@ -68,6 +70,7 @@ static func from_content(content: SpacesimSolarSystem) -> SpacesimSystemScene:
 	scene._epoch_time = clock_at_epoch(content.epoch)
 	scene.start_body_id = content.start_body_id
 	scene.start_altitude = content.start_altitude
+	scene.start_direction = content.start_direction
 	scene.start_time = content.start_world_time
 	for entry in content.bodies:
 		scene.bodies.append(SpacesimSceneBody.from_content(entry, _materials()))
@@ -161,20 +164,23 @@ func significant_nodes() -> Array[Node3D]:
 	return list
 
 
-## Where a fresh story puts the ship: **on the day side**, above the start body.
+## Where a fresh story puts the ship: above the start body, **on the side facing the star** unless
+## content says otherwise.
 ##
-## Not simply at +X. A fixed +X put the ship on whichever side of the body happened to face *away* from
-## the star — Earth sits at +X and the star is at the origin, so +X is night. The result was a black
-## scene, no lit air, and a bug report that read as two unrelated faults: "the scene looks too dark"
-## and "I don't see the air at all". Both were the same thing — no light.
+## The default matters. A fixed +X put the ship on whichever side of the body happened to face *away*
+## from the star — Earth sits at +X and the star is at the origin, so +X is night — and every fresh
+## story began in the dark. That read as two unrelated faults: *"the scene looks too dark"* and *"I
+## don't see the air at all"*, because volumetric fog needs light to be seen.
 func ship_start() -> Vector3:
 	var body := body_by_id(start_body_id)
 	if body == null:
 		return Vector3.ZERO
-	var outward := -body.node.global_position.normalized()
+	var outward := start_direction
 	if outward.length() < 0.5:
-		outward = Vector3.RIGHT # the start body is the star itself
-	return body.node.global_position + outward * (body.radius + start_altitude)
+		outward = -body.node.global_position.normalized()
+		if outward.length() < 0.5:
+			outward = Vector3.RIGHT # the start body is the star itself
+	return body.node.global_position + outward.normalized() * (body.radius + start_altitude)
 
 
 ## How far the camera must be able to see to draw this system: the outer edge of the system frame's

@@ -133,7 +133,7 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 
 | Class | |
 |---|---|
-| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_world_time`, `bodies`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
+| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_direction`, `start_world_time`, `bodies`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
 | `SpacesimSystemBody` | `content/system_body.gd` — one body: `id`, `display_name`, `kind`, `parent_id`, `primary`, `radius`, `mass`, `rotation_period`, `axial_tilt`, `layers`, `orbit`, `fixed_position`, `atmosphere`, `surface`, `clouds`, `overrides`, `landable`, `significant` |
 | `SpacesimLayer` | `content/layer.gd` — `layer_name`, `radius` (outer boundary), `composition` |
 | `SpacesimOrbit` | `content/orbit.gd` — the six Keplerian elements, degrees |
@@ -246,7 +246,8 @@ is what makes the authored Sol a calibration target rather than a fixture.
 | Class | |
 |---|---|
 | `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
-| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions; the cloud deck is blended over it by fraction, which is why this cannot come from `surface` alone — **clouds dominate a planet's reflection** |
+| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck is drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey |
+| `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — `static color(body, materials)`: the air's colour, mole-fraction weighted over its species. `static density(body)`: how thick it looks, from surface pressure, square-rooted. See **The air** under Render layers |
 
 **Calibrated against measured Bond albedos** (`test_surface.gd`): Luna 0.120 vs 0.110 measured,
 Earth **0.302 vs 0.306**, Venus 0.760 vs 0.760, Jupiter 0.520 vs 0.503, Saturn 0.340, Uranus 0.300,
@@ -285,17 +286,29 @@ it off, Godot ignores `light_intensity_lux` entirely and every number below is c
 
 ### `SpacesimExposure` — `RefCounted`
 
-**Auto-exposure is on `CameraAttributes`, not on the `Environment`** — probed on 4.7.2. The
-Environment owns only the tone curve, which is convenient: a camera is re-exposed without touching
-the world.
+**Computed from the light, not metered from the frame.** Godot's auto-exposure averages the frame and
+drives that average toward middle grey, and it has **no metering mode** — the API is `enabled`,
+`scale`, `speed` and an EV clamp, and nothing else. On a frame that is mostly empty space with one lit
+body in it, it has exactly one way to reach its target: raise exposure until that body is white. Which
+is what it did.
+
+The illuminance at the observer is already derived, so the exposure that puts a lit body at middle
+grey is arithmetic: `multiplier = REFERENCE_LUX / illuminance`. Deterministic, impossible to fool with
+an empty frame, no pumping, and **testable headlessly** — which image-based metering is not.
 
 | Member | |
 |---|---|
-| `MIN_EXPOSURE_EV`, `MAX_EXPOSURE_EV` | -6 to 16: 22 stops, wider than the ~16 the system spans |
-| `ADAPTATION_SPEED` | 0.6 — slow, because fast exposure pumps while you fly past something |
-| `AMBIENT_ENERGY` | 0.02 — a floor so a night side is dark rather than a hole, and so auto-exposure is not driven to its ceiling by an almost-empty frame. **Not physics**: space has almost no ambient |
-| `static camera_attributes() -> CameraAttributesPhysical` | auto-exposure on plus the EV clamp; assign to `Camera3D.attributes` |
-| `static configure(environment, ambient_color)` | the AgX tone curve, `tonemap_white`, ambient, and the star's glare via `glow_*` — the star's disk rolls off instead of dominating the exposure histogram |
+| `REFERENCE_LUX` | 100,000 — Godot's own default for `light_intensity_lux`, so a multiplier of 1.0 means "the light Godot considers normal" |
+| `MAX_MULTIPLIER` | the clamp: past this, a very dark or very bright body keeps some of its own character instead of every body rendering alike |
+| `ADAPTATION_RATE` | how fast exposure follows a change, per second |
+| `AMBIENT_ENERGY` | 0.02 — a floor, so a shadowed side reads as dark rather than as a hole. **Not physics**: space has almost no ambient |
+| `attributes: CameraAttributesPhysical` | **auto-exposure off**; assign to `Camera3D.attributes` |
+| `static target_multiplier(lux) -> float` | 0.78 at one au (128,000 lux), 707 at Neptune (141 lux) — the 9.8 stops between them is derived, not tuned |
+| `update(lux, delta)` / `snap_to(lux)` | follow the light, or land on it at once |
+| `static configure(environment, ambient_color)` | AgX, `tonemap_white`, the ambient floor, `glow_*`, and the global volumetric fog density at **0** so the air is carried only by its own shells |
+
+**The star is a source, not a reflector**: it cannot be brought into range without making everything
+else black, so it is allowed to clip and `glow_*` handles how that reads. Nothing here exposes for it.
 
 ### The star's numbers
 
@@ -310,13 +323,40 @@ derivation**, so a shader cannot quietly disagree with the model.
 | | |
 |---|---|
 | `body_surface.gdshader` | the surface layer: a height field from Godot's own 3D noise, colour as a two-stop gradient, relief from the field's gradient projected onto the surface |
-| `body_clouds.gdshader` | the cloud deck, on its own sphere: **the authored `fraction` is the coverage** — it sets the noise threshold, so a body content calls 60% covered comes out 60% covered |
-| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials from the derived values, owns the one shared `NoiseTexture3D`, and gives each body a stable offset from its id |
+| `body_clouds.gdshader` | the cloud deck, on its own sphere: **the authored `fraction` is the coverage** — it sets the noise threshold |
+| `body_star.gdshader` | the star's own surface: **unshaded and emissive**, coloured from its temperature. Unshaded because a star is a source — drawn with the ordinary surface material it was lit by *its own* light, and its near face, the one facing the observer, came out black |
+| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials, the cloud shells and the air shells from derived values; owns the one shared `NoiseTexture3D` and gives each body a stable offset from its id |
 
 The gradient's two stops are the derived colour **darkened and lightened**, not two hand-picked colours,
 so a world keeps its identity while gaining structure. Roughness, specularity and relief strength are
 constants in the renderer because the material table does not carry them yet — named there rather than
 buried in the shader, so they can be found when the picture is wrong.
+
+**The field is sampled on the unit sphere, mapped into a quarter of the texture.** Sampling world
+metres puts every pixel in an arbitrary voxel — a field of dots; and *scaling* the unit direction wraps
+the texture, which repeated the cloud deck as a visible 8×8 grid. Detail comes from how much noise the
+texture holds, not from how often it is wrapped. `VERTEX` inside `fragment()` is **view space**, so the
+model-space position is captured in `vertex()` and passed as a varying.
+
+### The air
+
+`SpacesimBodyRenderer.atmosphere_volume()` — **a hollow sphere of fog**, the inner bound below the
+planet's surface and the outer bound where the atmosphere is declared to end. A `FogVolume` with an
+ellipsoid shape measures height from *its own local shape*, so a shell parented to a body **is** the
+atmosphere, and the planet occludes the middle.
+
+| | |
+|---|---|
+| Outer bound | `frames.atmosphere_altitude` — the same number the frame transition uses, so the air ends exactly where the air is declared to end |
+| `static air_profile(distance, surface_radius, scale_height) -> float` | 1.0 at the surface, exponential above it: full → 0.05 halfway → 0.0025 at the top, "almost gone when you transition into space" |
+| `static air_density_texture(surface_radius, outer_radius) -> Texture3D` | that profile baked into a 3D texture, because **`height_falloff` measures world Y** and a sphere's height above its own surface is a radius, not a Y — left to it, the fog measured uniform all the way up |
+| `SpacesimAtmosphereModel.color(body, materials)` | the air's colour, mole-fraction weighted: Earth pale blue from nitrogen and oxygen, Venus cream from CO₂ |
+| `SpacesimAtmosphereModel.density(body)` | from surface pressure, square-rooted — linear would make Venus's 92 bar opaque |
+| `air.density` (setting) | scales the whole shell, **read every frame** so the look can be dialled without a rebuild |
+
+Shown only for the body whose air the observer is inside — that is containment, not altitude, and the
+frames already say it. In space, volumetric fog is switched off entirely rather than left running with
+nothing to fog.
 
 ### Checking a shader
 
@@ -437,6 +477,7 @@ on change (`camera.fov`, the marker pool and font size).
 | Key | Scope | Default |
 |---|---|---|
 | `mouse.sensitivity` | player | 0.0015 |
+| `air.density` | player | 1.0 — scales the air shells; a look knob, and a *setting* so it can be tuned without a rebuild |
 | `camera.fov` | player | 70.0 |
 | `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on |
 | `markers.pool_size` | player | 12 |
@@ -795,6 +836,27 @@ key: a save is a deliberate act, and loading one always says first which saves i
 ## Tests
 
 `tests/` — headless, synchronous, no test framework dependency. See the README for the command.
+
+Three things the headless suite cannot cover, each with its own tool:
+
+```
+./tests/shader_check.sh    compile the shaders for real — headless Godot does not compile them at all
+./tests/screenshot.gd      render one frame offscreen and save a PNG
+```
+
+**The screenshot rig is how the visual work gets reviewed without asking a person.** Headless Godot
+neither compiles shaders nor draws, so "is the fog visible" is not a question any test can answer:
+
+```
+xvfb-run -a godot-double-mono --path . --script res://tests/screenshot.gd
+SHOT_BODY=Earth SHOT_ALT=20000000 SHOT_PATH=/tmp/shot.png SHOT_FRAMES=90
+```
+
+| Variable | |
+|---|---|
+| `SHOT_BODY` / `SHOT_ALT` | put the ship above that body on its **day side**, at that altitude, and aim at it |
+| `SHOT_PATH` / `SHOT_FRAMES` | where to save, and how many frames to settle for |
+| `SHOT_AIR` | sets `air.density` for the shot, so the air can be taken out to tell it from emptiness |
 
 ## See also
 

@@ -40,7 +40,9 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   ui/              chrome shared by the full-screen screens, and the dialogs over them
 systems/           authored systems as `.tres` — Sol, and the playground flight-test fixture
 game/              the game: fly Sol and land on planets
-tests/             headless test scripts
+tests/             headless tests; `shader_check.sh` compiles the shaders for real and
+                   `screenshot.gd` renders a frame to a PNG, both under xvfb — headless Godot
+                   compiles no shaders and draws nothing
 docs/API.md        what the engine exposes, as it is implemented
 ```
 
