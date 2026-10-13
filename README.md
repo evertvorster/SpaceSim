@@ -34,7 +34,9 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
   lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
   render/          what a body looks like: the surface and cloud-deck shader layers
   player/          the player's own state (attributes and assets) and the screen for it
-  navigation/      navigation markers (targets, off-screen pointers)
+  navigation/      the overlay: a ring at each object, a short line, and its label, placed
+                   so labels never overlap and a moon yields to its planet only where the two
+                   compete for the same space
   settings/        declared defaults in code, one machine-written file for what differs
   save/            git-backed saves: the repository, the histories, the session, the do-over
   ui/              chrome shared by the full-screen screens, and the dialogs over them

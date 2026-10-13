@@ -373,8 +373,8 @@ That script needs a window (`xvfb-run` counts), which is why it is not part of `
 
 ## Navigation
 
-`addons/spacesim/navigation/` — navigation markers: **a ring where each object is, a line, and a
-label**. The beginning of the HUD's navigation overlay.
+`addons/spacesim/navigation/` — navigation markers: **a ring where each object is, a short line, and
+a label**. The beginning of the HUD's navigation overlay.
 
 - **The ring** is the object's own screen position, and **may be off screen**. It is the label that
   stays in view, which is why the ring is not clamped along with it.
@@ -394,6 +394,9 @@ screen-space budget in one place.
 |---|---|
 | `Priority` | `CONTEXT`, `MISSION`, `SELECTED` |
 | `pool_size: int` | the cap, and the screen-space budget |
+| `font_size: int`, `margin: float` | applied from the settings; `margin` is the inset the labels are fitted inside |
+| `selected_color: Color` | the selected target's own colour — see `markers.selected_color` |
+| `colour_of(priority) -> Color` | that colour for `SELECTED`, `SpacesimOverlay.COLOR` otherwise |
 | `context_targets`, `mission_targets: Array[Node3D]` | ambient group, then mission objectives |
 | `selected: Node3D` | the selected target, or null |
 | `refresh(camera) -> void` | rebuild the set, place its labels, hand the rings to the overlay; call once a frame |
@@ -405,7 +408,7 @@ screen-space budget in one place.
 
 ### `SpacesimOverlay` — `Control`
 
-Draws every ring and leader line in **one `_draw()` pass** rather than as a node each. Twelve markers
+Draws every ring and line in **one `_draw()` pass** rather than as a node each. Twelve markers
 would otherwise be twelve Controls to build, place and hide every frame — and none of them would know
 about the others, which is exactly what placing a label clear of the others needs to know.
 
@@ -421,16 +424,23 @@ about the others, which is exactly what placing a label clear of the others need
 
 **`place_label` is the whole of the label placement.** Candidates are eight places round the anchor,
 each **as near it as the label's own shape allows** — a wide label goes beside the ring, a tall one
-above or below — at six growing distances. The first that fits inside `bounds` and collides with
-nothing already in `taken` wins.
+above or below — at fourteen growing distances, `STEP_RATIO` 1.22 apart. The first that fits inside
+`bounds` and collides with nothing already in `taken` wins.
 
-That the offsets are not a single radius matters: one radius has to be the label's *largest*
-dimension, so a short wide label ends up a hundred pixels off in every direction, including straight
-up, which reads as labels tied to the edges of the screen rather than to their objects. Six distances
-rather than four because the near ring is genuinely near, so the search has to reach past a HUD
-readout a few hundred pixels tall. Labels are placed nearest-first, so what matters most picks its spot
-first and the rest arrange themselves around it. A last-resort fallback is returned when nothing is
-free: an overlapping label still says where something is, and a missing one does not.
+Neither the per-axis offsets nor the small steps are incidental, and both were wrong first:
+
+- **One radius for every direction** has to be the label's *largest* dimension, so a short wide label
+  ends up a hundred pixels off in every direction, including straight up — which reads as labels tied
+  to the edges of the screen rather than to their objects. A label needs half its *width* to sit
+  beside a ring and half its *height* to sit above it.
+- **Coarse steps** (1, 1.9, 3.2, 5 …) make one occupied spot throw a label twice as far as it needed
+  to go. Creeping by 1.22 keeps it as near its object as the space allows.
+
+**Nothing is reserved around the HUD**: another label is the only thing that moves one. Reserving the
+readout pushed labels hundreds of pixels off objects that were plainly on screen, because the readout
+is usually exactly where the markers are. Labels are placed nearest-first, so what matters most picks
+its spot first and the rest arrange themselves around it. A last-resort fallback is returned when
+nothing is free: an overlapping label still says where something is, and a missing one does not.
 
 ### A moon gives up its label, not its ring — but only where the two compete
 

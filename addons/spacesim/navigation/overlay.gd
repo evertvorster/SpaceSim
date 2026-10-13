@@ -27,7 +27,6 @@ const STEPS := 14
 const RING_SEGMENTS := 24
 
 const COLOR := Color(0.85, 0.92, 1.0, 0.9)
-const SELECTED_COLOR := Color(1.0, 0.85, 0.42, 0.95)
 
 ## One entry per marker, set by [SpacesimMarkers] each frame:
 ## `{"circle": Vector2, "start": Vector2, "end": Vector2, "color": Color}` — or without `start`
