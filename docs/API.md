@@ -142,7 +142,7 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 | `SpacesimClouds` | `content/clouds.gd` — `fraction`, `albedo`, `color`, `opacity`. **Authored for now, derived later.** On the body rather than in the atmosphere, because a gas giant's visible surface *is* its cloud deck and the giants carry no atmosphere block. **Nothing draws a deck at present** — the shell that did was removed for standing `radius * 1.012` above the surface (76 km at Earth), which made it the outermost silhouette of every body. The content stays and is still read: `bond_albedo` needs `fraction` and `albedo`, and `color` is what a body with no surface coverage is drawn in |
 | `SpacesimBodyOverrides` | `content/overrides.gd` — pinned derived values |
 | `SpacesimFraming` | `content/framing.gd` — the travel bands and thresholds |
-| `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name. `rayleigh` is the per-channel scattering cross-section, populated for every gas the authored atmospheres use **except water vapour and ammonia**; `materials.tres` records where each number came from |
+| `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name. `rayleigh`, `heat_capacity` (J/(kg·K)) and `greenhouse` (the grey infrared mass-absorption coefficient, or an explicit zero for a gas transparent in the infrared) are populated for every gas the authored atmospheres use **except water vapour's and ammonia's `rayleigh`**; `materials.tres` records where each number came from |
 
 Data files: `addons/spacesim/system/content/materials.tres` (the material table; ships with the
 engine) and `systems/sol.tres` (Sol — the **development and calibration** system, not shipped
@@ -276,6 +276,34 @@ is what makes the authored Sol a calibration target rather than a fixture.
 |---|---|
 | `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
 | `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck was drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey. The split outlives the drawn deck, and should: the reflectance is physics and the colour is a picture |
+### Temperature
+
+| | |
+|---|---|
+| `static heat_capacity(atmosphere, materials) -> float` | the mix's specific heat, J/(kg·K) — **mass-weighted**, unlike every other mix here, because it is per kilogram. From `SpacesimSpecies.heat_capacity` |
+| `static lapse_rate(atmosphere, materials, gravity) -> float` | the dry adiabatic lapse rate, `g/c_p`, K/m. **Derived, and a real check**: Earth's composition and gravity give 9.72 K/km against a textbook 9.8; Venus 10.46 against 10.5; Mars 4.43 against 4.4 |
+| `static greenhouse_optical_depth(atmosphere, materials, gravity) -> float` | `sum(kappa_i * column_i)` over the infrared, where `column_i = x_i * (M_i/m-bar) * (p_surface/g)`. `kappa` is `SpacesimSpecies.greenhouse[0]`, and is **explicitly zero** for the gases transparent in the infrared, so "known transparent" and "not known" do not look alike |
+| `static surface_temperature(atmosphere, materials, gravity, equilibrium) -> float` | **the greenhouse**: `T_eff * (1 + 3*tau/4)^(1/4)`, the grey-atmosphere result |
+| `static reference_temperature(body, materials, luminosity, distance) -> float` | **what everything reads.** A content pin first, then the greenhouse, then plain equilibrium. See **Calibration** below |
+| `static tropopause_temperature(equilibrium) -> float` | the grey-atmosphere skin temperature, `2^-1/4 * T_eff` = 0.8409 |
+| `static temperature_at(height, surface_temperature, lapse, tropopause_temperature) -> float` | the profile: the adiabat down from the tropopause, flat above it |
+
+**Calibration, and what is checked against what.** Three infrared absorptivities are each fixed
+against one measured surface temperature — water vapour against Earth's 288 K, CO₂ against Venus's
+737 K, methane against Titan's 94 K — and then **Mars and Triton are untouched checks**: Mars derives
+212.9 K against ~210 (its residual is its albedo, not its greenhouse) and Triton 41.6 against 38, with
+a greenhouse of zero, which is right for a body with almost no air. The absorbers are ordered as
+physics says (H₂O ≫ CH₄ > CO₂), and N₂, O₂, Ar, He and H₂ are zero — which is why Earth is warmed by
+1% water vapour rather than by the 78% nitrogen under it.
+
+**A season is free.** Insolation is evaluated at the body's *current* orbit position, so Earth swings
+4.2 K between perihelion and aphelion and sits 2.2 K above its own mean at J2000. Nothing models a
+season — it falls out of asking the orbit for a position.
+
+**Two named limitations.** The adiabat is **dry**, so Earth's tropopause comes out 4 km low (moist
+convection is the fix; cloud *bases* are unaffected). And the sky is **single-scattering only**, which
+is why Venus renders nearly dark at an optical depth of 16.6 — see the plan doc.
+
 | `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static scale_height(...)` (`kT/(m-bar g)`), `static shell_reach(...)` (**how many scale heights of air to draw** — see **The sky**), `static surface_gravity(body)`, `static reference_temperature(...)` (what content **pinned**, or equilibrium temperature), `static equilibrium_temperature(...)` (§3.6's first row, the placeholder), and `static coverage(...)` |
 
 **Calibrated against measured Bond albedos** (`test_surface.gd`): Luna 0.120 vs 0.110 measured,
