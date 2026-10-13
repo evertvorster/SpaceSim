@@ -27,8 +27,6 @@ var mesh: MeshInstance3D
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
-## The cloud deck's own sphere, above the surface; null when the body has no deck.
-var cloud_mesh: MeshInstance3D
 ## The air's own sphere, reaching `frames.atmosphere_altitude`; null when the body has no atmosphere.
 var atmosphere_mesh: MeshInstance3D
 

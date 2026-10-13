@@ -1,24 +1,25 @@
 class_name SpacesimBodyRenderer
 extends RefCounted
-## Builds what a body looks like: its surface material, and its cloud deck when it has one.
+## Builds what a body looks like: its surface material, and its air when it has one.
 ##
-## Everything the shaders are given comes from **the derivation** — the albedo colour, the cloud
-## fraction and colour — so a shader cannot quietly disagree with the model. What is *not* derived yet
-## is named in the constants below rather than buried in the shader, because a hidden constant is one
-## nobody can find when the picture is wrong.
+## Everything the shaders are given comes from **the derivation** — the albedo colour, the scattering
+## coefficient and scale height — so a shader cannot quietly disagree with the model. What is *not*
+## derived yet is named in the constants below rather than buried in the shader, because a hidden
+## constant is one nobody can find when the picture is wrong.
+##
+## **Nothing draws a cloud deck.** The shell that did was removed (commit pending): it stood at
+## `radius * 1.012` — 76 km up at Earth, seven times a real cloud top — which made it the outermost
+## silhouette of every body, and it is what read as "an atmosphere" from space while the actual air
+## was invisible. `SpacesimClouds` stays and is still read: `bond_albedo` needs it, and Earth's
+## calibrated 0.302 against a measured 0.306 depends on the deck's fraction and albedo.
 
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
-const CLOUDS_SHADER := preload("res://addons/spacesim/render/body_clouds.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 const ATMOSPHERE_SHADER := preload("res://addons/spacesim/render/body_atmosphere.gdshader")
 
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare.
 const STAR_INTENSITY := 24.0
-
-## How far above the surface the cloud shell sits. Near enough to read as a deck *on* the body, far
-## enough that the two spheres do not z-fight.
-const CLOUD_SHELL := 1.012
 
 ## **Not derived, and deliberately visible here.** Roughness and specularity are per-material
 ## properties the material table does not carry yet, and relief strength is a look decision. Terrain
@@ -37,11 +38,6 @@ const DETAIL_SOFTNESS := 0.18
 ## texture, so detail comes from how much noise the texture holds — raising the sampling scale instead
 ## walks out of the texture and repeats the whole pattern as a visible grid.
 const SURFACE_NOISE_SCALE := 1.0
-const CLOUD_NOISE_SCALE := 1.6
-
-## The deck samples the field somewhere else, so clouds do not sit in exactly the pattern the terrain
-## underneath is wearing. Small on purpose — see `offset_for`.
-const CLOUD_OFFSET := Vector3(0.07, 0.03, 0.11)
 
 static var _noise: NoiseTexture3D
 
@@ -148,25 +144,6 @@ static func surface_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	material.set_shader_parameter("roughness_value", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("specular_value", SURFACE_SPECULAR)
 	material.set_shader_parameter("noise_offset", offset_for(body.id))
-	material.set_shader_parameter("noise_field", noise_field())
-	return material
-
-
-## The cloud deck's material, or null when the body has no deck.
-##
-## The authored fraction **is** the coverage: it sets the noise threshold, so a body content calls 60%
-## covered comes out 60% covered, rather than the fraction being a number the shader politely ignores.
-static func cloud_material(body: SpacesimSceneBody) -> ShaderMaterial:
-	var clouds: SpacesimClouds = body.content.clouds if body.content != null else null
-	if clouds == null or clouds.fraction <= 0.0 or clouds.opacity <= 0.0:
-		return null
-	var material := ShaderMaterial.new()
-	material.shader = CLOUDS_SHADER
-	material.set_shader_parameter("cloud_color", clouds.color)
-	material.set_shader_parameter("coverage", clampf(clouds.fraction, 0.0, 1.0))
-	material.set_shader_parameter("opacity", clampf(clouds.opacity, 0.0, 1.0))
-	material.set_shader_parameter("noise_scale", CLOUD_NOISE_SCALE)
-	material.set_shader_parameter("noise_offset", offset_for(body.id) + CLOUD_OFFSET)
 	material.set_shader_parameter("noise_field", noise_field())
 	return material
 

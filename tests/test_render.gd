@@ -31,9 +31,8 @@ func run(h, root: Node) -> void:
 
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_star_is_a_source(h, scene)
-	_test_clouds_are_derived(h, scene, earth, luna)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
-	_test_hiding_bodies_hides_their_clouds(h, scene)
+	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
 
@@ -167,42 +166,14 @@ func _test_the_sky_is_derived(
 		"only Earth (water vapour) and Titan (hydrogen) are short of a cross-section: %s" % [uncovered])
 
 
-## The link that matters: the **authored cloud fraction is the coverage**, so content's number is what
-## the shader draws rather than a figure it politely ignores.
-func _test_clouds_are_derived(h, scene: SpacesimSystemScene, earth: SpacesimSceneBody, luna: SpacesimSceneBody) -> void:
-	h.check(luna.cloud_mesh == null, "Luna has no cloud shell — content gives it no deck")
-
-	h.check(earth.cloud_mesh != null, "Earth has one")
-	if earth.cloud_mesh == null:
-		return
-	var shell := earth.cloud_mesh.mesh as SphereMesh
-	h.check_near(shell.radius, earth.radius * SpacesimBodyRenderer.CLOUD_SHELL,
-		"the deck sits just above the surface, so it draws over it rather than fighting it", 1.0)
-
-	var material: ShaderMaterial = earth.cloud_mesh.material_override
-	h.check(material != null and material.shader != null, "with its own shader material")
-	if material == null:
-		return
-	h.check_near(material.get_shader_parameter("coverage"), earth.content.clouds.fraction,
-		"whose coverage IS the authored fraction (%.2f)" % earth.content.clouds.fraction, 1.0e-6)
-	h.check(material.get_shader_parameter("cloud_color") == earth.content.clouds.color,
-		"and whose colour is the authored one")
-
-	# A body under a solid deck: the fraction is 1.0, so the shader has nothing left to decide.
-	var venus_material := SpacesimBodyRenderer.cloud_material(scene.body_by_id("planet:venus"))
-	h.check(venus_material != null and venus_material.get_shader_parameter("coverage") == 1.0,
-		"a body under a solid deck reports full coverage")
-
-	# And a body with no deck at all gets no material, rather than one drawing nothing.
-	h.check(SpacesimBodyRenderer.cloud_material(luna) == null,
-		"a body without a deck is given no cloud material at all")
-
-
-func _test_hiding_bodies_hides_their_clouds(h, scene: SpacesimSystemScene) -> void:
-	# `P` hides the bodies. Leaving the decks behind would look like a bug rather than a debug key.
+func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:
+	# `P` hides the bodies. Leaving the air behind would look like a bug rather than a debug key.
+	# **Nothing draws a cloud deck any more** — the shell that did was removed for standing 76 km above
+	# Earth and reading as the atmosphere from space. `SpacesimClouds` stays and is still read by
+	# `bond_albedo`, which `test_surface.gd` guards: Earth's 0.302 against a measured 0.306.
 	var meshes := scene.meshes()
-	var clouds := 0
+	var air := 0
 	for mesh in meshes:
-		if mesh.name.ends_with("Clouds"):
-			clouds += 1
-	h.check(clouds > 0, "the debug key's mesh list includes the cloud decks (%d)" % clouds)
+		if mesh.name.ends_with("Air"):
+			air += 1
+	h.check(air > 0, "the debug key's mesh list includes the air shells (%d)" % air)

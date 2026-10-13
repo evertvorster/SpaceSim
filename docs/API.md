@@ -139,7 +139,7 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 | `SpacesimOrbit` | `content/orbit.gd` — the six Keplerian elements, degrees |
 | `SpacesimAtmosphere` | `content/atmosphere.gd` — `surface_pressure`, `species`, `variable_species` |
 | `SpacesimSurface` | `content/surface.gd` — `coverage` |
-| `SpacesimClouds` | `content/clouds.gd` — `fraction`, `albedo`, `color`, `opacity`. **Authored for now, derived later.** On the body rather than in the atmosphere, because a gas giant's visible surface *is* its cloud deck and the giants carry no atmosphere block |
+| `SpacesimClouds` | `content/clouds.gd` — `fraction`, `albedo`, `color`, `opacity`. **Authored for now, derived later.** On the body rather than in the atmosphere, because a gas giant's visible surface *is* its cloud deck and the giants carry no atmosphere block. **Nothing draws a deck at present** — the shell that did was removed for standing `radius * 1.012` above the surface (76 km at Earth), which made it the outermost silhouette of every body. The content stays and is still read: `bond_albedo` needs `fraction` and `albedo`, and `color` is what a body with no surface coverage is drawn in |
 | `SpacesimBodyOverrides` | `content/overrides.gd` — pinned derived values |
 | `SpacesimFraming` | `content/framing.gd` — the travel bands and thresholds |
 | `SpacesimMaterialTable`, `SpacesimSpecies` | `content/material_table.gd`, `content/species.gd` — the substances compositions name |
@@ -181,7 +181,7 @@ lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes liv
 | `color: Color`, `landable: bool`, `significant: bool` | |
 | `parent_id: String`, `fixed_position: Vector3`, `orbit: SpacesimOrbit` | |
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
-| `cloud_mesh`, `atmosphere_mesh: MeshInstance3D` | built — the deck and the air, each on its own sphere; null when the body has neither |
+| `atmosphere_mesh: MeshInstance3D` | built — the air, on its own sphere; null when the body has no atmosphere |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
 | `static from_content(content) -> SpacesimSceneBody` | |
@@ -247,7 +247,7 @@ is what makes the authored Sol a calibration target rather than a fixture.
 | Class | |
 |---|---|
 | `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
-| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck is drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey |
+| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck was drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey. The split outlives the drawn deck, and should: the reflectance is physics and the colour is a picture |
 | `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static scale_height(...)` (`kT/(m-bar g)`), `static surface_gravity(body)`, `static equilibrium_temperature(...)` (§3.6's first row, used as the reference state), and `static coverage(...)`. See **The sky** under Render layers |
 
 **Calibrated against measured Bond albedos** (`test_surface.gd`): Luna 0.120 vs 0.110 measured,
@@ -324,10 +324,9 @@ derivation**, so a shader cannot quietly disagree with the model.
 | | |
 |---|---|
 | `body_surface.gdshader` | the surface layer: a height field from Godot's own 3D noise, colour as a two-stop gradient, relief from the field's gradient projected onto the surface |
-| `body_clouds.gdshader` | the cloud deck, on its own sphere: **the authored `fraction` is the coverage** — it sets the noise threshold |
 | `body_star.gdshader` | the star's own surface: **unshaded and emissive**, coloured from its temperature. Unshaded because a star is a source — drawn with the ordinary surface material it was lit by *its own* light, and its near face, the one facing the observer, came out black |
 | `body_atmosphere.gdshader` | the air: **Rayleigh and Mie scattering**, from `glsl-atmosphere` by <https://wwwtyro.net/> (Unlicense). One shell, drawn `cull_front` |
-| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials, the cloud shells and the air shells from derived values; owns the one shared `NoiseTexture3D` and gives each body a stable offset from its id |
+| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials and the air shells from derived values; owns the one shared `NoiseTexture3D` and gives each body a stable offset from its id. **Nothing draws a cloud deck:** the shell that did stood at `radius * 1.012`, which put Earth's clouds 76 km up and made them the outermost silhouette of every body — what read as "an atmosphere" from space while the air itself was invisible |
 
 The gradient's two stops are the derived colour **darkened and lightened**, not two hand-picked colours,
 so a world keeps its identity while gaining structure. Roughness, specularity and relief strength are
@@ -336,7 +335,7 @@ buried in the shader, so they can be found when the picture is wrong.
 
 **The field is sampled on the unit sphere, mapped into a quarter of the texture.** Sampling world
 metres puts every pixel in an arbitrary voxel — a field of dots; and *scaling* the unit direction wraps
-the texture, which repeated the cloud deck as a visible 8×8 grid. Detail comes from how much noise the
+the texture, which repeated the (since removed) cloud deck as a visible 8×8 grid. Detail comes from how much noise the
 texture holds, not from how often it is wrapped. `VERTEX` inside `fragment()` is **view space**, so the
 model-space position is captured in `vertex()` and passed as a varying.
 

@@ -150,8 +150,6 @@ func meshes() -> Array[MeshInstance3D]:
 	for body in bodies:
 		if body.mesh != null:
 			list.append(body.mesh)
-		if body.cloud_mesh != null:
-			list.append(body.cloud_mesh)
 		if body.atmosphere_mesh != null:
 			list.append(body.atmosphere_mesh)
 	return list
@@ -391,7 +389,6 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		body.node, body.radius, SpacesimBodyRenderer.material_for(body), "%sSurface" % body.name
 	)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
-	_add_cloud_shell(body)
 	_add_atmosphere_shell(body)
 
 	if not body.landable:
@@ -476,17 +473,6 @@ func _add_lighting() -> void:
 	world_environment.name = "Environment"
 	world_environment.environment = environment
 	container.add_child(world_environment)
-
-
-## The cloud deck, on its own sphere a little above the surface. Its own mesh rather than a second
-## material on the surface, so it can carry alpha and draw over the surface instead of fighting it.
-func _add_cloud_shell(body: SpacesimSceneBody) -> void:
-	var material := SpacesimBodyRenderer.cloud_material(body)
-	if material == null:
-		return
-	body.cloud_mesh = _add_sphere(
-		body.node, body.radius * SpacesimBodyRenderer.CLOUD_SHELL, material, "%sClouds" % body.name
-	)
 
 
 ## The air, on a sphere whose outer bound is where the atmosphere is declared to end.
