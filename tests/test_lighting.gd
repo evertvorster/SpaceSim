@@ -40,6 +40,21 @@ func _test_the_star(h, star: SpacesimSystemBody) -> void:
 	h.check_near(temperature, SUN_EFFECTIVE_TEMPERATURE,
 		"Stefan-Boltzmann gives 5772 K from L and R (%.1f)" % temperature, 5.0)
 
+	# The colour follows the temperature, by the blackbody fit the Shaders project already uses —
+	# taken rather than invented, and linearised on the way out.
+	var sun_color := SpacesimStarModel.color(temperature)
+	h.check(sun_color.r >= sun_color.g and sun_color.g >= sun_color.b,
+		"so the Sun is warm white (%.3f, %.3f, %.3f)" % [sun_color.r, sun_color.g, sun_color.b])
+	h.check(sun_color.r > 0.9 and sun_color.b > 0.6, "and near-white rather than strongly tinted")
+
+	# A cooler star is markedly redder and a hotter one bluer — the point of deriving it at all, since
+	# it means every stellar class is free.
+	var cool := SpacesimStarModel.color(3000.0)
+	var hot := SpacesimStarModel.color(15000.0)
+	h.check(cool.r > cool.b * 3.0,
+		"a 3000 K star is markedly redder (%.3f red against %.3f blue)" % [cool.r, cool.b])
+	h.check(hot.b > hot.r, "and a 15000 K star is bluer than it is red")
+
 
 func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	var luminosity := SpacesimStarModel.luminosity(sol.star())

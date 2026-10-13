@@ -349,7 +349,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	system_frame.add_child(body.node)
 
 	body.mesh = _add_sphere(
-		body.node, body.radius, SpacesimBodyRenderer.surface_material(body), "%sSurface" % body.name
+		body.node, body.radius, SpacesimBodyRenderer.material_for(body), "%sSurface" % body.name
 	)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_cloud_shell(body)

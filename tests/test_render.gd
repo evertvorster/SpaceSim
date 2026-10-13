@@ -30,10 +30,28 @@ func run(h, root: Node) -> void:
 	var luna := scene.body_by_id("moon:luna")
 
 	_test_surface_is_derived(h, earth, luna)
+	_test_the_star_is_a_source(h, scene)
 	_test_clouds_are_derived(h, scene, earth, luna)
 	_test_hiding_bodies_hides_their_clouds(h, scene)
 
 	scene.container.free()
+
+
+## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own
+## light — which travels from the star toward the observer, so its near face was back-lit and came out
+## black — and it could not bloom, because nothing about it was above the glow threshold.
+func _test_the_star_is_a_source(h, scene: SpacesimSystemScene) -> void:
+	var sun := scene.body_by_id("star:sol")
+	var material: ShaderMaterial = sun.mesh.material_override
+	h.check(material != null and material.shader != null, "the star has a material of its own")
+	if material == null:
+		return
+	h.check(material.shader.code.contains("unshaded"), "which is unshaded, so its own light cannot darken it")
+	h.check(float(material.get_shader_parameter("intensity")) > 1.0,
+		"and emissive well past the glow threshold, so it blooms")
+	var color: Color = material.get_shader_parameter("star_color")
+	h.check(color.r >= color.g and color.g >= color.b,
+		"with the Sun's colour: warm white (%.3f, %.3f, %.3f)" % [color.r, color.g, color.b])
 
 
 func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBody) -> void:

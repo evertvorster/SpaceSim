@@ -9,6 +9,11 @@ extends RefCounted
 
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
 const CLOUDS_SHADER := preload("res://addons/spacesim/render/body_clouds.gdshader")
+const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
+
+## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
+## star at 1.0 is a bright dot, and a star is supposed to glare.
+const STAR_INTENSITY := 24.0
 
 ## How far above the surface the cloud shell sits. Near enough to read as a deck *on* the body, far
 ## enough that the two spheres do not z-fight.
@@ -53,6 +58,32 @@ static func noise_field() -> NoiseTexture3D:
 		texture.normalize = true
 		_noise = texture
 	return _noise
+
+
+## The material a body is drawn with.
+##
+## **A star is a source and everything else is a reflector**, so the choice is by kind rather than by
+## anything a shader could work out for itself.
+static func material_for(body: SpacesimSceneBody) -> Material:
+	if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
+		return star_material(body)
+	return surface_material(body)
+
+
+## A star's own surface: unshaded, and coloured from its temperature.
+##
+## Unshaded because it is a source — drawn with the ordinary surface material it was lit by *its own*
+## light, which travels from the star toward the observer, so its near face was back-lit and rendered
+## black. Which is exactly what it looked like.
+static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
+	var content := body.content
+	var luminosity := SpacesimStarModel.luminosity(content)
+	var temperature := SpacesimStarModel.effective_temperature(luminosity, content.radius)
+	var material := ShaderMaterial.new()
+	material.shader = STAR_SHADER
+	material.set_shader_parameter("star_color", SpacesimStarModel.color(temperature))
+	material.set_shader_parameter("intensity", STAR_INTENSITY)
+	return material
 
 
 ## The surface material: the body's derived colour, split into a two-stop height gradient.

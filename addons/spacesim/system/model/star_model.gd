@@ -42,3 +42,32 @@ static func effective_temperature(luminosity_watts: float, radius: float) -> flo
 	if radius <= 0.0 or luminosity_watts <= 0.0:
 		return 0.0
 	return pow(luminosity_watts / (4.0 * PI * radius * radius * STEFAN_BOLTZMANN), 0.25)
+
+
+## A star's colour, from its effective temperature.
+##
+## Tanner Helland's compact blackbody fit — the same one the Shaders project uses in `star-colour.md`,
+## taken rather than invented, which is the standing rule about that site: it is short, fast and good
+## enough, and a second implementation would only be a worse copy.
+##
+## It is **linearised** on the way out. The fit yields sRGB-ish numbers, and using those as though they
+## were linear is the exact mistake that cost the Shaders project hours (its "pale and milky" field),
+## so the conversion is explicit rather than left to whoever reads it next.
+static func color(temperature: float) -> Color:
+	var t := clampf(temperature, 1000.0, 40000.0) / 100.0
+	var r: float = 255.0
+	var g: float = 99.4708025861 * log(t) - 161.1195681661
+	if t > 66.0:
+		r = 329.698727446 * pow(t - 60.0, -0.1332047592)
+		g = 288.1221695283 * pow(t - 60.0, -0.0755148492)
+	var b: float = 255.0
+	if t < 66.0:
+		if t <= 19.0:
+			b = 0.0
+		else:
+			b = 138.5177312231 * log(t - 10.0) - 305.0447927307
+	return Color(
+		pow(clampf(r, 0.0, 255.0) / 255.0, 2.2),
+		pow(clampf(g, 0.0, 255.0) / 255.0, 2.2),
+		pow(clampf(b, 0.0, 255.0) / 255.0, 2.2)
+	)
