@@ -181,6 +181,7 @@ lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes liv
 | `color: Color`, `landable: bool`, `significant: bool` | |
 | `parent_id: String`, `fixed_position: Vector3`, `orbit: SpacesimOrbit` | |
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
+| `cloud_mesh`, `atmosphere_mesh: MeshInstance3D` | built — the deck and the air, each on its own sphere; null when the body has neither |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
 | `static from_content(content) -> SpacesimSceneBody` | |
@@ -247,6 +248,7 @@ is what makes the authored Sol a calibration target rather than a fixture.
 |---|---|
 | `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
 | `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck is drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey |
+| `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static scale_height(...)` (`kT/(m-bar g)`), `static surface_gravity(body)`, `static equilibrium_temperature(...)` (§3.6's first row, used as the reference state), and `static coverage(...)`. See **The sky** under Render layers |
 
 **Calibrated against measured Bond albedos** (`test_surface.gd`): Luna 0.120 vs 0.110 measured,
 Earth **0.302 vs 0.306**, Venus 0.760 vs 0.760, Jupiter 0.520 vs 0.503, Saturn 0.340, Uranus 0.300,
@@ -324,7 +326,8 @@ derivation**, so a shader cannot quietly disagree with the model.
 | `body_surface.gdshader` | the surface layer: a height field from Godot's own 3D noise, colour as a two-stop gradient, relief from the field's gradient projected onto the surface |
 | `body_clouds.gdshader` | the cloud deck, on its own sphere: **the authored `fraction` is the coverage** — it sets the noise threshold |
 | `body_star.gdshader` | the star's own surface: **unshaded and emissive**, coloured from its temperature. Unshaded because a star is a source — drawn with the ordinary surface material it was lit by *its own* light, and its near face, the one facing the observer, came out black |
-| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials and the cloud shells from derived values; owns the one shared `NoiseTexture3D` and gives each body a stable offset from its id |
+| `body_atmosphere.gdshader` | the air: **Rayleigh and Mie scattering**, from `glsl-atmosphere` by <https://wwwtyro.net/> (Unlicense). One shell, drawn `cull_front` |
+| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials, the cloud shells and the air shells from derived values; owns the one shared `NoiseTexture3D` and gives each body a stable offset from its id |
 
 The gradient's two stops are the derived colour **darkened and lightened**, not two hand-picked colours,
 so a world keeps its identity while gaining structure. Roughness, specularity and relief strength are
@@ -337,17 +340,32 @@ the texture, which repeated the cloud deck as a visible 8×8 grid. Detail comes 
 texture holds, not from how often it is wrapped. `VERTEX` inside `fragment()` is **view space**, so the
 model-space position is captured in `vertex()` and passed as a varying.
 
-### The air
+### The sky
 
-**Nothing draws it yet.** The air was a hollow `FogVolume` shell, and it was removed: a fog medium
-has one density for every channel, so it can tint but cannot separate red from blue the way Rayleigh
-scattering does, and it has no per-pixel ray, so it cannot make a horizon. It measured as a flat wash
-at any density and contributed about 2% at Earth's surface.
+A body with an atmosphere gets a second sphere reaching `radius + frames.atmosphere_altitude`, drawn
+with `body_atmosphere.gdshader` — **Rayleigh and Mie scattering**, and the one shader here that is not
+ours: it is [`glsl-atmosphere`](https://github.com/wwwtyro/glsl-atmosphere) by
+<https://wwwtyro.net/> (Unlicense, public domain), applied to a shell instead of a fullscreen quad.
 
-What remains is the **content**: `SpacesimAtmosphere` (`surface_pressure`, `species`,
-`variable_species`) and the `rayleigh` and `greenhouse` fields on `SpacesimSpecies`, all of which the
-scattering derivation will read. The derivation itself is
-[[SpaceSim/Solar Systems and the Physics Model]] §3.4 and is not built.
+**One shell, one material, every regime**, because `cull_front` shades only the far surface — the view
+ray's exit point — and the march runs from the camera to `min(exit, planet hit)`, with the planet hit
+computed *in the shader* (a spatial shader cannot read the depth buffer). The depth buffer then does
+the occlusion for free: from outside, the far side is depth-rejected wherever the planet covers it, so
+only the ring around the limb is shaded; from inside, the far side **is** the sky dome.
+
+| | |
+|---|---|
+| `rayleigh_coefficient` | the derivation's `kRlh`, per channel — blue scattering most is the whole reason the sky is blue |
+| `rayleigh_scale_height` | `kT/(m-bar g)`. Earth derives **8,371 m** against the model doc's 8.5 km and `glsl-atmosphere`'s own 8.0 km |
+| `mie_*` | **named constants, not derivation.** Mie is aerosols, not the species mix — Earth-like values from `glsl-atmosphere`'s example |
+| `sun_intensity` | `SKY_INTENSITY * illuminance / REFERENCE_LUX`, so the sky keeps its proportion to the surface the star lights instead of brightening with distance |
+| `eye_offset`, `sun_direction` | **refreshed per frame, as offsets.** Bodies sit at ~1.5e11 m and a GLSL float has ~7 digits, so a world coordinate would arrive with ~16 km of resolution against an air 100 km deep |
+
+What it does **not** draw: the haze over the planet's *disk* seen from outside — the shell's far side is
+behind the planet there. The limb is the part that reads.
+
+Cost: 16 primary steps with an 8-step sun ray, so **128 samples per pixel** on every pixel the shell
+covers. The heaviest shader in the project, and the frame-rate loop owes a measurement.
 
 ### Checking a shader
 
@@ -1010,6 +1028,7 @@ SHOT_BODY=Earth SHOT_ALT=20000000 SHOT_PATH=/tmp/shot.png SHOT_FRAMES=90
 |---|---|
 | `SHOT_BODY` / `SHOT_ALT` | put the ship above that body on its **day side**, at that altitude, and aim at it |
 | `SHOT_PATH` / `SHOT_FRAMES` | where to save, and how many frames to settle for |
+| `SHOT_AIM` | `level` pitches the camera along the **horizon** instead of down at the body. The default aim is always a radial, so no shot taken without it can contain a horizon, a limb or a sky |
 
 ## See also
 

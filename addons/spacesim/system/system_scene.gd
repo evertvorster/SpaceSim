@@ -152,6 +152,8 @@ func meshes() -> Array[MeshInstance3D]:
 			list.append(body.mesh)
 		if body.cloud_mesh != null:
 			list.append(body.cloud_mesh)
+		if body.atmosphere_mesh != null:
+			list.append(body.atmosphere_mesh)
 	return list
 
 
@@ -390,6 +392,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_cloud_shell(body)
+	_add_atmosphere_shell(body)
 
 	if not body.landable:
 		return
@@ -484,6 +487,58 @@ func _add_cloud_shell(body: SpacesimSceneBody) -> void:
 	body.cloud_mesh = _add_sphere(
 		body.node, body.radius * SpacesimBodyRenderer.CLOUD_SHELL, material, "%sClouds" % body.name
 	)
+
+
+## The air, on a sphere whose outer bound is where the atmosphere is declared to end.
+##
+## **The shell is the sky and the limb at once.** Only its far surface is shaded, so from inside it is
+## the sky dome and from outside it is the ring around the planet — see `body_atmosphere.gdshader`,
+## which is where that is explained. Nothing here hides it: distance and the depth buffer decide.
+func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
+	if body.content == null or body.content.atmosphere == null:
+		return
+	# The coefficients are evaluated at the body's equilibrium temperature, which is §3.6's first row
+	# and the only temperature there is. Named in SpacesimAtmosphereModel, not guessed here.
+	var luminosity := 0.0
+	var distance := 0.0
+	var star_body := star()
+	if star_body != null and star_body.content != null:
+		luminosity = SpacesimStarModel.luminosity(star_body.content)
+		distance = body.position.distance_to(star_body.position)
+	var temperature := SpacesimAtmosphereModel.equilibrium_temperature(
+		body.content, _materials(), luminosity, distance
+	)
+	var material := SpacesimBodyRenderer.atmosphere_material(
+		body, _materials(), _framing.atmosphere_altitude, temperature,
+		SpacesimStarLight.illuminance(luminosity, distance)
+	)
+	if material == null:
+		return
+	body.atmosphere_mesh = _add_sphere(
+		body.node, body.radius + _framing.atmosphere_altitude, material, "%sAir" % body.name
+	)
+
+
+## Point every atmosphere at the observer and at its star.
+##
+## **Both are handed over as offsets, not positions.** Our bodies sit at ~1.5e11 m and a GLSL float
+## has ~7 significant digits, so a world coordinate would arrive with ~16 km of resolution — against
+## an air 100 km deep. Computed here in double precision, the difference is ~6.4e6 m and arrives with
+## sub-metre resolution.
+func update_atmospheres(observer: Vector3) -> void:
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	for body in bodies:
+		if body.atmosphere_mesh == null or body.node == null:
+			continue
+		var material := body.atmosphere_mesh.material_override as ShaderMaterial
+		if material == null:
+			continue
+		material.set_shader_parameter("eye_offset", observer - body.node.global_position)
+		material.set_shader_parameter(
+			"sun_direction", (star_body.node.global_position - body.node.global_position).normalized()
+		)
 
 
 func _add_sphere(

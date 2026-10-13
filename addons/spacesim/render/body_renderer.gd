@@ -10,6 +10,7 @@ extends RefCounted
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
 const CLOUDS_SHADER := preload("res://addons/spacesim/render/body_clouds.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
+const ATMOSPHERE_SHADER := preload("res://addons/spacesim/render/body_atmosphere.gdshader")
 
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare.
@@ -62,6 +63,46 @@ static func noise_field() -> NoiseTexture3D:
 		texture.normalize = true
 		_noise = texture
 	return _noise
+
+
+## The air's material, or null when the body has none.
+##
+## **Every number here comes from `SpacesimAtmosphereModel`**, so the shader cannot disagree with the
+## model: the coefficient and the scale height are the derivation's, and the Mie terms are named
+## constants there rather than buried in the shader. `temperature` is the reference state the
+## coefficient is evaluated at and `illuminance` scales the whole sky — see the model for both.
+static func atmosphere_material(
+	body: SpacesimSceneBody,
+	materials: SpacesimMaterialTable,
+	atmosphere_altitude: float,
+	temperature: float,
+	illuminance: float
+) -> ShaderMaterial:
+	var air := body.content.atmosphere if body.content != null else null
+	if air == null or atmosphere_altitude <= 0.0:
+		return null
+	var material := ShaderMaterial.new()
+	material.shader = ATMOSPHERE_SHADER
+	material.set_shader_parameter("planet_radius", body.radius)
+	material.set_shader_parameter("atmosphere_radius", body.radius + atmosphere_altitude)
+	material.set_shader_parameter(
+		"rayleigh_coefficient", SpacesimAtmosphereModel.rayleigh_coefficient(air, materials, temperature)
+	)
+	material.set_shader_parameter(
+		"rayleigh_scale_height",
+		SpacesimAtmosphereModel.scale_height(
+			air, materials, temperature, SpacesimAtmosphereModel.surface_gravity(body.content)
+		)
+	)
+	material.set_shader_parameter("mie_coefficient", SpacesimAtmosphereModel.MIE_COEFFICIENT)
+	material.set_shader_parameter("mie_scale_height", SpacesimAtmosphereModel.MIE_SCALE_HEIGHT)
+	material.set_shader_parameter("mie_anisotropy", SpacesimAtmosphereModel.MIE_ANISOTROPY)
+	# Relative to the star's light, so the sky keeps its proportion to the surface it is seen against.
+	material.set_shader_parameter(
+		"sun_intensity",
+		SpacesimAtmosphereModel.SKY_INTENSITY * illuminance / SpacesimAtmosphereModel.REFERENCE_LUX
+	)
+	return material
 
 
 ## The material a body is drawn with.

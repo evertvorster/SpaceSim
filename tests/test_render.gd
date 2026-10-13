@@ -32,6 +32,7 @@ func run(h, root: Node) -> void:
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_star_is_a_source(h, scene)
 	_test_clouds_are_derived(h, scene, earth, luna)
+	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_hiding_bodies_hides_their_clouds(h, scene)
 
 	scene.container.free()
@@ -75,6 +76,95 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 		"and each body is given its own place in it")
 	h.check(SpacesimBodyRenderer.offset_for("planet:earth") == material.get_shader_parameter("noise_offset"),
 		"which is stable for a given id")
+
+
+## The sky: that the shader's inputs are the derivation's, and that the derivation agrees with
+## measured air.
+##
+## **The coefficients are checked against a published Earth value**, the same way the albedos are
+## checked against measured Bond albedos. It is a consistency check, not a fit: if a cross-section in
+## the material table is wrong, this goes red by naming the number.
+func _test_the_sky_is_derived(
+	h,
+	scene: SpacesimSystemScene,
+	sol: SpacesimSolarSystem,
+	earth: SpacesimSceneBody,
+	luna: SpacesimSceneBody
+) -> void:
+	var materials := SpacesimMaterialTable.engine_table()
+
+	# The shell reaches where the framing says the air ends, and only bodies with air get one.
+	h.check(luna.atmosphere_mesh == null, "Luna has no atmosphere shell — content gives it no air")
+	h.check(earth.atmosphere_mesh != null, "Earth has one")
+	if earth.atmosphere_mesh == null:
+		return
+	var shell := earth.atmosphere_mesh.mesh as SphereMesh
+	var top := earth.radius + sol.framing.atmosphere_altitude
+	h.check_near(shell.radius, top, "reaching where the atmosphere is declared to end", 1.0)
+
+	var material: ShaderMaterial = earth.atmosphere_mesh.material_override
+	h.check(material != null and material.shader != null, "with the scattering shader")
+	if material == null:
+		return
+	h.check_near(material.get_shader_parameter("atmosphere_radius"), top,
+		"and the shader knows both radii, so its ray test matches the mesh", 1.0)
+	h.check_near(material.get_shader_parameter("planet_radius"), earth.radius,
+		"planet radius included", 1.0)
+
+	# The mix, at a temperature we can check by hand. Earth's air is 78% nitrogen, 21% oxygen.
+	var reference := SpacesimAtmosphereModel.rayleigh_coefficient(
+		earth.content.atmosphere, materials, 288.15
+	)
+	# A coefficient is per **channel**, so a Vector3's components are red, green and blue.
+	var red := reference.x
+	var green := reference.y
+	var blue := reference.z
+	# GDScript's `%` has no `%e`, so the numbers are scaled into micro-units and printed as floats.
+	h.check(blue > green and green > red,
+		"blue scatters most — which is the whole reason the sky is blue (%.2f, %.2f, %.2f) e-06"
+			% [red * 1.0e6, green * 1.0e6, blue * 1.0e6])
+	# 5.5e-6 and 13.0e-6 are glsl-atmosphere's Earth-like values for red and green.
+	h.check(absf(red / 5.5e-6 - 1.0) < 0.25,
+		"and the red channel lands on the published value (%.2f against 5.50 e-06)" % (red * 1.0e6))
+	h.check(absf(green / 13.0e-6 - 1.0) < 0.25,
+		"as does green (%.2f against 13.00 e-06)" % (green * 1.0e6))
+	h.check(reference.length_squared() > 0.0, "and the air scatters at all")
+
+	# Scale height: kT/(m-bar g), against the model doc's ~8.5 km for Earth.
+	var gravity := SpacesimAtmosphereModel.surface_gravity(earth.content)
+	h.check_near(gravity, 9.81, "Earth's surface gravity from its authored mass", 0.05)
+	var height := SpacesimAtmosphereModel.scale_height(
+		earth.content.atmosphere, materials, 288.15, gravity
+	)
+	h.check(absf(height / 8500.0 - 1.0) < 0.1,
+		"and a scale height of %.0f m against the model's 8.5 km" % height)
+
+	# The temperature the coefficients are actually evaluated at, and the greenhouse-sized gap in it.
+	var luminosity := SpacesimStarModel.luminosity(scene.star().content)
+	var sun := scene.star()
+	var earth_teq := SpacesimAtmosphereModel.equilibrium_temperature(
+		earth.content, materials, luminosity, earth.position.distance_to(sun.position)
+	)
+	h.check(absf(earth_teq - 255.0) < 10.0,
+		"Earth's equilibrium temperature is %.0f K against the published 255 K" % earth_teq)
+	var venus := scene.body_by_id("planet:venus")
+	var venus_teq := SpacesimAtmosphereModel.equilibrium_temperature(
+		venus.content, materials, luminosity, venus.position.distance_to(sun.position)
+	)
+	h.check(absf(venus_teq - 229.0) < 10.0,
+		"and Venus's is %.0f K against 232 K — the greenhouse is what is missing, not the geometry"
+			% venus_teq)
+
+	# **A named gap, not a silent one.** Every species the authored atmospheres use has a
+	# cross-section except water vapour and hydrogen, and what that costs is written down here.
+	var uncovered: Array[String] = []
+	for body in scene.bodies:
+		if body.content == null or body.content.atmosphere == null:
+			continue
+		if SpacesimAtmosphereModel.coverage(body.content.atmosphere, materials) < 1.0:
+			uncovered.append(body.name)
+	h.check(uncovered == ["Earth", "Titan"],
+		"only Earth (water vapour) and Titan (hydrogen) are short of a cross-section: %s" % [uncovered])
 
 
 ## The link that matters: the **authored cloud fraction is the coverage**, so content's number is what

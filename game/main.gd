@@ -294,6 +294,9 @@ func _physics_process(delta: float) -> void:
 	_system.frame_tree.evaluate()
 	_sync_player_location()
 	_system.aim_sun_at(_ship.global_position)
+	# The sky follows the **camera**, not the ship: it is the eye that scattering is seen from, and
+	# nothing about it depends on which body the player is attached to.
+	_system.update_atmospheres(_camera.global_position)
 	# Exposed for the light that is actually where the player is, not for the average of the frame.
 	_exposure.update(_system.illuminance_at(_ship.global_position), delta)
 	_update_markers(_camera)

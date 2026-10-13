@@ -8,8 +8,22 @@
 ;
 ; Density and molar mass are standard physical values. `albedo` is the material's Bond albedo and
 ; `color` its visual colour, both used by the surface derivation. Condensation temperatures are at
-; one atmosphere. `rayleigh` and `greenhouse` are deliberately EMPTY: the sky and the greenhouse
-; need wavelength-resolved data, and a guessed cross-section would be worse than an absent one.
+; one atmosphere.
+;
+; `rayleigh` is the per-channel Rayleigh scattering cross-section, in square metres per molecule, at
+; three channel wavelengths (680, 550 and 440 nm). It is populated for the gases the authored
+; atmospheres are actually made of, and the derivation sums each species' cross-section times its
+; number density to get the mix's coefficient — see `SpacesimAtmosphereModel`.
+;
+; SOURCE. Five of the six are **computed, not recalled**, from the refractive-index dispersion
+; relations and King correction factors in Table 1 of Wilmouth & Sayres (2019), JQSRT 234, 32-39,
+; using the n-based cross-section expression from Sneep & Ubachs (2005), JQSRT 92, 293-310. Methane
+; uses Wilmouth & Sayres' own corrected dispersion (their Eq. 4), which is 22% below the older
+; published one. Oxygen is the one literature value taken at face value (4.0e-31 m^2 at 550 nm,
+; scaled by wavelength to the fourth). **Close enough is the standard here** — the guard is that
+; Earth's mixture lands on the published effective coefficient, which `tests/test_render.gd` asserts.
+; `greenhouse` remains deliberately EMPTY: the greenhouse model is not built, and a guessed
+; absorptivity would be worse than an absent one.
 
 [sub_resource type="Resource" id="Sp_iron"]
 script = ExtResource("species")
@@ -139,6 +153,7 @@ density = 0.1786
 molar_mass = 4.003
 albedo = 0.0
 color = Color(0.85, 0.85, 0.88, 1)
+rayleigh = Vector3(2.887e-33, 6.782e-33, 1.670e-32)
 condensation_temperature = 4.2
 
 [sub_resource type="Resource" id="Sp_nitrogen"]
@@ -149,6 +164,7 @@ density = 1.251
 molar_mass = 28.014
 albedo = 0.0
 color = Color(0.75, 0.78, 0.85, 1)
+rayleigh = Vector3(1.956e-31, 4.631e-31, 1.156e-30)
 condensation_temperature = 77.4
 
 [sub_resource type="Resource" id="Sp_oxygen"]
@@ -159,6 +175,7 @@ density = 1.429
 molar_mass = 31.998
 albedo = 0.0
 color = Color(0.6, 0.72, 0.9, 1)
+rayleigh = Vector3(1.712e-31, 4.000e-31, 9.766e-31)
 condensation_temperature = 90.2
 
 [sub_resource type="Resource" id="Sp_carbon_dioxide"]
@@ -169,6 +186,7 @@ density = 1.977
 molar_mass = 44.009
 albedo = 0.0
 color = Color(0.8, 0.78, 0.7, 1)
+rayleigh = Vector3(4.895e-31, 1.164e-30, 2.923e-30)
 condensation_temperature = 194.7
 
 [sub_resource type="Resource" id="Sp_argon"]
@@ -179,6 +197,7 @@ density = 1.784
 molar_mass = 39.948
 albedo = 0.0
 color = Color(0.75, 0.78, 0.85, 1)
+rayleigh = Vector3(1.687e-31, 3.991e-31, 9.943e-31)
 condensation_temperature = 83.8
 
 [sub_resource type="Resource" id="Sp_water_vapour"]
@@ -199,6 +218,7 @@ density = 0.657
 molar_mass = 16.043
 albedo = 0.0
 color = Color(0.8, 0.75, 0.68, 1)
+rayleigh = Vector3(4.045e-31, 9.702e-31, 2.470e-30)
 condensation_temperature = 90.7
 
 [sub_resource type="Resource" id="Sp_ammonia"]

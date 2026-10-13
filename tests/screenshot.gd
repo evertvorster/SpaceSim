@@ -45,6 +45,11 @@ func _process(_delta: float) -> bool:
 
 ## Put the ship where a test wants it: on the side of the start body that faces the star, at a chosen
 ## altitude. Without this the shot shows whatever the last save was, which is usually night.
+##
+## `SHOT_AIM=level` pitches the camera along the **horizon** instead of down at the body. It matters
+## because the default aim is always a radial, so no shot taken with it can contain a horizon, a limb
+## or a sky — and "is there a sky" is exactly the question an atmosphere has to answer. `SHOT_AIM` is
+## otherwise unset, which keeps every existing shot looking at the body.
 func _place_above(body_name: String, altitude: float) -> void:
 	var ship := _find_ship(get_root())
 	var body_name_real := body_name if body_name != "star" else "Sol"
@@ -56,15 +61,25 @@ func _place_above(body_name: String, altitude: float) -> void:
 	ship.global_position = body.global_position + to_star * (6.371e6 + altitude)
 	# Point the camera at the body, so the shot shows it rather than empty space.
 	var camera := _find_camera(get_root())
-	if camera != null:
-		# The up vector must not be parallel to the look direction, or look_at is degenerate and the
-		# camera ends up pointing nowhere — which reads as "the planet is not rendered".
-		var aim := body.global_position + to_star * (6.371e6 * 0.4)
-		var look := (aim - camera.global_position).normalized()
-		var up := Vector3.UP
-		if absf(look.dot(up)) > 0.99:
-			up = Vector3.RIGHT
-		camera.look_at(aim, up)
+	if camera == null:
+		return
+	if OS.get_environment("SHOT_AIM") == "level":
+		# Along the horizon: perpendicular to the local vertical, with the vertical kept as "up" so
+		# the horizon sits level in the frame rather than rolled.
+		var radial := (ship.global_position - body.global_position).normalized()
+		var along := radial.cross(Vector3.UP)
+		if along.length() < 0.01:
+			along = radial.cross(Vector3.RIGHT)
+		camera.look_at(camera.global_position + along.normalized(), radial)
+		return
+	# The up vector must not be parallel to the look direction, or look_at is degenerate and the
+	# camera ends up pointing nowhere — which reads as "the planet is not rendered".
+	var aim := body.global_position + to_star * (6.371e6 * 0.4)
+	var look := (aim - camera.global_position).normalized()
+	var up := Vector3.UP
+	if absf(look.dot(up)) > 0.99:
+		up = Vector3.RIGHT
+	camera.look_at(aim, up)
 
 
 func _find_camera(node: Node) -> Camera3D:
