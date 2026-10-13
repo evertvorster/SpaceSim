@@ -35,7 +35,7 @@ static func create(ship_name := "Ship") -> Node3D:
 
 
 ## Put a ship into a system at the system's start position, in the system frame.
-static func place(system: SpacesimSolarSystem, ship: Node3D) -> void:
+static func place(system: SpacesimSystemScene, ship: Node3D) -> void:
 	ship.bodies = system.scale_bodies()
 	ship.frame_tree = system.frame_tree
 	system.frame_tree.observer = ship

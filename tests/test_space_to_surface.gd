@@ -14,7 +14,7 @@ const MAX_STEPS := 120000
 
 func run(h, root: Node) -> void:
 	print("  fly the playground")
-	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	var system := SpacesimSystemScene.from_file(SYSTEM_PATH)
 	if system == null:
 		h.check(false, "the playground system file loads")
 		return
@@ -77,7 +77,7 @@ func run(h, root: Node) -> void:
 
 
 ## Fly at a body until the ship is down on its surface.
-func _descend(system: SpacesimSolarSystem, ship: Node3D, body: SpacesimSystemBody) -> Dictionary:
+func _descend(system: SpacesimSystemScene, ship: Node3D, body: SpacesimSceneBody) -> Dictionary:
 	var tree = system.frame_tree
 	var saw_atmosphere := false
 	var saw_surface := false

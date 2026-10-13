@@ -8,7 +8,7 @@ const SYSTEM_PATH := "res://systems/playground.json"
 
 func run(h, root: Node) -> void:
 	print("  playground system")
-	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	var system := SpacesimSystemScene.from_file(SYSTEM_PATH)
 	h.check(system != null, "the playground system file loads")
 	if system == null:
 		return
@@ -68,6 +68,6 @@ func run(h, root: Node) -> void:
 
 
 ## Whether the ship's nearest significant body is the one with this id.
-func nearest_is(system: SpacesimSolarSystem, ship: Node3D, id: String) -> bool:
+func nearest_is(system: SpacesimSystemScene, ship: Node3D, id: String) -> bool:
 	var body := system.body_by_id(id)
 	return body != null and ship.nearest_name == body.name

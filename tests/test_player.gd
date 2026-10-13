@@ -111,8 +111,8 @@ func _test_player_screen_shows_the_player(h, root: Node) -> void:
 
 
 ## A built playground, for the screen to read names out of.
-static func _system(root: Node) -> SpacesimSolarSystem:
-	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+static func _system(root: Node) -> SpacesimSystemScene:
+	var system := SpacesimSystemScene.from_file(SYSTEM_PATH)
 	system.build(root)
 	return system
 

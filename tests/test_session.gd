@@ -20,7 +20,7 @@ func run(h, root: Node) -> void:
 	print("  session")
 	_clean()
 
-	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	var system := SpacesimSystemScene.from_file(SYSTEM_PATH)
 	system.build(root)
 	var ship := PlayerShip.create()
 	PlayerShip.place(system, ship)
@@ -39,7 +39,7 @@ func run(h, root: Node) -> void:
 	_clean()
 
 
-func _test_first_run(h, system: SpacesimSolarSystem) -> void:
+func _test_first_run(h, system: SpacesimSystemScene) -> void:
 	var session := _session()
 	h.check(not session.repo.exists(), "there is no repository to begin with")
 	h.check(session.start(system)["ok"], "starting brings one up")
@@ -50,7 +50,7 @@ func _test_first_run(h, system: SpacesimSolarSystem) -> void:
 	h.check(session.player.display_name() == Player.DEFAULT_NAME, "and a player at their defaults")
 
 
-func _test_starting_again(h, system: SpacesimSolarSystem) -> void:
+func _test_starting_again(h, system: SpacesimSystemScene) -> void:
 	var session := _session()
 	h.check(session.start(system)["ok"], "starting again")
 	h.check(session.message == "the last save", "picks up the last save rather than starting over")
@@ -58,7 +58,7 @@ func _test_starting_again(h, system: SpacesimSolarSystem) -> void:
 	h.check(session.repo.histories().size() == 2, "and did not make another history")
 
 
-func _test_saving(h, system: SpacesimSolarSystem) -> void:
+func _test_saving(h, system: SpacesimSystemScene) -> void:
 	var session := _session()
 	session.player.attributes["Credits"] = 500
 	session.player.location = Location.new("planet:terra/surface", Vector3(10.0, 0.0, 20.0))
@@ -69,7 +69,7 @@ func _test_saving(h, system: SpacesimSolarSystem) -> void:
 	h.check(session.label(system).contains("landed on Terra"), "a label says where you were: %s" % session.label(system))
 
 
-func _test_the_do_over(h, system: SpacesimSolarSystem) -> void:
+func _test_the_do_over(h, system: SpacesimSystemScene) -> void:
 	var session := _session()
 	session.player.attributes["Credits"] = 999
 	session.save(system)
@@ -85,7 +85,7 @@ func _test_the_do_over(h, system: SpacesimSolarSystem) -> void:
 	h.check(session.player.attributes["Credits"] == 0, "and brings the player back to what they were")
 
 
-func _test_deleting_a_save(h, system: SpacesimSolarSystem) -> void:
+func _test_deleting_a_save(h, system: SpacesimSystemScene) -> void:
 	var session := _session()
 	var revision_count := session.repo.saves().size()
 	var newest: String = session.saves()[0]["hash"]
@@ -109,7 +109,7 @@ func _test_deleting_a_save(h, system: SpacesimSolarSystem) -> void:
 	)
 
 
-func _test_the_clock_moves_on(h, system: SpacesimSolarSystem) -> void:
+func _test_the_clock_moves_on(h, system: SpacesimSystemScene) -> void:
 	var session := _session()
 	var player_data := session.player.to_dictionary()
 
@@ -128,7 +128,7 @@ func _test_the_clock_moves_on(h, system: SpacesimSolarSystem) -> void:
 	h.check(session.world_time == 5000.0, "and a save from the future does not take it backwards")
 
 
-func _test_putting_the_ship_back(h, system: SpacesimSolarSystem, ship: Node3D) -> void:
+func _test_putting_the_ship_back(h, system: SpacesimSystemScene, ship: Node3D) -> void:
 	var away := Location.new("planet:terra/surface", Vector3(5.0, 0.5, 8.0))
 	h.check(system.place_observer(away), "the ship can be put back where it was")
 	h.check(
@@ -161,7 +161,7 @@ func _test_putting_the_ship_back(h, system: SpacesimSolarSystem, ship: Node3D) -
 
 
 ## The two lists, with something in them — a browser that cannot be opened proves nothing.
-func _test_the_browser(h, root: Node, system: SpacesimSolarSystem) -> void:
+func _test_the_browser(h, root: Node, system: SpacesimSystemScene) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
 	var session := _session()

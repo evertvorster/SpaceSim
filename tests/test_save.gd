@@ -217,7 +217,7 @@ func _test_state_round_trip(h) -> void:
 
 
 func _test_reading_a_location(h, root: Node) -> void:
-	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	var system := SpacesimSystemScene.from_file(SYSTEM_PATH)
 	if system == null:
 		h.check(false, "the playground system loads")
 		return

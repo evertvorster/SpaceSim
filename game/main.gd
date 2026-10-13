@@ -28,7 +28,7 @@ const THROTTLE_RATE := 0.7 ## per second
 ## flat across these, and if it tracks triangle count it moves with them.
 const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), Vector2i(256, 128)]
 
-var _system: SpacesimSolarSystem
+var _system: SpacesimSystemScene
 var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
@@ -51,7 +51,7 @@ var _bodies_visible := true
 
 
 func _ready() -> void:
-	_system = SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	_system = SpacesimSystemScene.from_file(SYSTEM_PATH)
 	if _system == null:
 		push_error("cannot load %s" % SYSTEM_PATH)
 		return

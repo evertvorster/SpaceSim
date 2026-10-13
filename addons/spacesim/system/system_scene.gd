@@ -1,4 +1,4 @@
-class_name SpacesimSolarSystem
+class_name SpacesimSystemScene
 extends RefCounted
 ## A solar system loaded from data, and the scene it builds.
 ##
@@ -23,7 +23,7 @@ const INTERIOR_SUFFIX := "/interior"
 
 var format_version: int
 var name: String
-var bodies: Array[SpacesimSystemBody] = []
+var bodies: Array[SpacesimSceneBody] = []
 
 ## Built by build().
 var container: Node3D
@@ -40,25 +40,25 @@ var _framing: Dictionary = {}
 var _sun_light: DirectionalLight3D
 
 
-static func from_file(path: String) -> SpacesimSolarSystem:
+static func from_file(path: String) -> SpacesimSystemScene:
 	var text := FileAccess.get_file_as_string(path)
 	if text.is_empty():
-		push_error("SpacesimSolarSystem: cannot read '%s'" % path)
+		push_error("SpacesimSystemScene: cannot read '%s'" % path)
 		return null
 	var parsed: Variant = JSON.parse_string(text)
 	if typeof(parsed) != TYPE_DICTIONARY:
-		push_error("SpacesimSolarSystem: '%s' is not a JSON object" % path)
+		push_error("SpacesimSystemScene: '%s' is not a JSON object" % path)
 		return null
 	return from_dictionary(parsed)
 
 
-static func from_dictionary(data: Dictionary) -> SpacesimSolarSystem:
-	var system := SpacesimSolarSystem.new()
+static func from_dictionary(data: Dictionary) -> SpacesimSystemScene:
+	var system := SpacesimSystemScene.new()
 	system.format_version = int(data.get("format_version", 0))
 	system.name = String(data.get("name", "unnamed"))
 	system._framing = data.get("frames", {})
 	for entry in data.get("bodies", []):
-		system.bodies.append(SpacesimSystemBody.from_dictionary(entry))
+		system.bodies.append(SpacesimSceneBody.from_dictionary(entry))
 	var start: Dictionary = data.get("start", {})
 	system.start_body_id = String(start.get("body", ""))
 	system.start_altitude = float(start.get("altitude", 1.0e7))
@@ -69,7 +69,7 @@ static func from_dictionary(data: Dictionary) -> SpacesimSolarSystem:
 
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set
 ## `frame_tree.observer` and call `enter_frame()` afterwards.
-func build(parent: Node) -> SpacesimSolarSystem:
+func build(parent: Node) -> SpacesimSystemScene:
 	container = Node3D.new()
 	container.name = "SolarSystem"
 	parent.add_child(container)
@@ -97,7 +97,7 @@ func build(parent: Node) -> SpacesimSolarSystem:
 	return self
 
 
-func body_by_id(id: String) -> SpacesimSystemBody:
+func body_by_id(id: String) -> SpacesimSceneBody:
 	for body in bodies:
 		if body.id == id:
 			return body
@@ -158,14 +158,14 @@ func aim_sun_at(position: Vector3) -> void:
 	)
 
 
-func star() -> SpacesimSystemBody:
+func star() -> SpacesimSceneBody:
 	for body in bodies:
 		if body.kind == "star":
 			return body
 	return null
 
 
-func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimSystemBody:
+func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimSceneBody:
 	for body in bodies:
 		if body.surface == frame:
 			return body
@@ -178,7 +178,7 @@ func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimSystemBody:
 ## The Coordinate doc's surface frame is "relative to landing zone", so the zone sits wherever
 ## the ship came down rather than at one fixed site — otherwise landing anywhere but that site
 ## would put the ship millions of metres from its frame's origin, which defeats the frame.
-func place_landing_zone(body: SpacesimSystemBody, point: Vector3) -> void:
+func place_landing_zone(body: SpacesimSceneBody, point: Vector3) -> void:
 	if body.surface == null or body.node == null:
 		return
 	var outward := (point - body.node.global_position).normalized()
@@ -231,7 +231,7 @@ func place_observer(location: SpacesimLocation) -> bool:
 	return exact
 
 
-func _build_body(body: SpacesimSystemBody) -> void:
+func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
 	body.node.name = body.name
 	body.node.position = body.position

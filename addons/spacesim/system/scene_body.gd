@@ -1,9 +1,9 @@
-class_name SpacesimSystemBody
+class_name SpacesimSceneBody
 extends RefCounted
 ## One body in a solar system: the data describing it, and the scene it was built into.
 ##
 ## The data half comes from the system file; the node half is filled in by
-## [code]SpacesimSolarSystem.build()[/code]. Which bodies count as significant — for the travel unit,
+## [code]SpacesimSystemScene.build()[/code]. Which bodies count as significant — for the travel unit,
 ## and for having frames at all — is content's decision, expressed in the file.
 
 var id: String
@@ -17,7 +17,7 @@ var landable: bool ## whether it gets atmosphere and surface frames
 ## label — every rock in a belt is the latter.
 var significant: bool
 
-# Built by SpacesimSolarSystem.
+# Built by SpacesimSystemScene.
 var node: Node3D
 var mesh: MeshInstance3D
 var atmosphere: SpacesimFrame
@@ -25,8 +25,8 @@ var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
 
 
-static func from_dictionary(data: Dictionary) -> SpacesimSystemBody:
-	var body := SpacesimSystemBody.new()
+static func from_dictionary(data: Dictionary) -> SpacesimSceneBody:
+	var body := SpacesimSceneBody.new()
 	body.id = String(data.get("id", ""))
 	body.name = String(data.get("name", body.id))
 	body.kind = String(data.get("kind", "planet"))

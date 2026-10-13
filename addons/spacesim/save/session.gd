@@ -47,7 +47,7 @@ func _init(repository: SpacesimWorldRepo) -> void:
 ##
 ## With no repository, or none with a save on the current history, the first story starts at the
 ## world's beginning and is saved straight away, so the next startup has something to load.
-func start(system: SpacesimSolarSystem) -> Dictionary:
+func start(system: SpacesimSystemScene) -> Dictionary:
 	if repo.exists():
 		repo.discard_working_tree()
 		if load_last():
@@ -90,7 +90,7 @@ func load(hash: String) -> Dictionary:
 
 ## Start a history from the trunk: a fresh world and a fresh player, without ending the one being
 ## played. The history and the player are named separately, because they are separate things.
-func new_story(name: String, system: SpacesimSolarSystem, player_name := Player.DEFAULT_NAME) -> Dictionary:
+func new_story(name: String, system: SpacesimSystemScene, player_name := Player.DEFAULT_NAME) -> Dictionary:
 	var created := repo.create_history(name)
 	if not created["ok"]:
 		return created
@@ -100,7 +100,7 @@ func new_story(name: String, system: SpacesimSolarSystem, player_name := Player.
 
 
 ## Write the player and the clock out as a save.
-func save(system: SpacesimSolarSystem) -> Dictionary:
+func save(system: SpacesimSystemScene) -> Dictionary:
 	if _body() == _last_body:
 		message = "nothing has changed since the last save"
 		return {"ok": false, "reason": message}
@@ -120,7 +120,7 @@ func _body() -> String:
 
 
 ## A save's label: the world's date and time, and where the player is. Never coordinate numbers.
-func label(system: SpacesimSolarSystem) -> String:
+func label(system: SpacesimSystemScene) -> String:
 	return "%s   %s" % [system.format_time(world_time), system.describe(player.location, player.assets)]
 
 

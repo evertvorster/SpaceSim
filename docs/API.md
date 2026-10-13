@@ -139,7 +139,7 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 universe will add `seed` and `generator_version` here; the playground is hand-authored and has
 neither.
 
-### `SpacesimSystemBody` — `RefCounted`
+### `SpacesimSceneBody` — `RefCounted`
 
 The data half comes from the file; the node half is filled in by `build()`.
 
@@ -152,24 +152,24 @@ The data half comes from the file; the node half is filled in by `build()`.
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
-| `static from_dictionary(data) -> SpacesimSystemBody` | |
+| `static from_dictionary(data) -> SpacesimSceneBody` | |
 
-### `SpacesimSolarSystem` — `RefCounted`
+### `SpacesimSystemScene` — `RefCounted`
 
 | Member | |
 |---|---|
-| `static from_file(path) -> SpacesimSolarSystem` | null on a read or parse failure |
-| `static from_dictionary(data) -> SpacesimSolarSystem` | |
-| `build(parent) -> SpacesimSolarSystem` | builds the scene; the observer is the caller's business |
-| `name`, `bodies: Array[SpacesimSystemBody]` | |
+| `static from_file(path) -> SpacesimSystemScene` | null on a read or parse failure |
+| `static from_dictionary(data) -> SpacesimSystemScene` | |
+| `build(parent) -> SpacesimSystemScene` | builds the scene; the observer is the caller's business |
+| `name`, `bodies: Array[SpacesimSceneBody]` | |
 | `container: Node3D`, `system_frame: SpacesimFrame`, `frame_tree: SpacesimFrameTree` | built |
-| `body_by_id(id) -> SpacesimSystemBody` | |
+| `body_by_id(id) -> SpacesimSceneBody` | |
 | `scale_bodies() -> Array[SpacesimScaleBody]` | every body, for the travel unit |
 | `meshes() -> Array[MeshInstance3D]` | every body's mesh, for the hide/detail debug keys |
 | `ship_start() -> Vector3` | the system's start position |
-| `star() -> SpacesimSystemBody` | |
+| `star() -> SpacesimSceneBody` | |
 | `aim_sun_at(position) -> void` | aims the star's light at a position |
-| `body_for_surface_frame(frame) -> SpacesimSystemBody` | |
+| `body_for_surface_frame(frame) -> SpacesimSceneBody` | |
 | `place_landing_zone(body, point) -> void` | puts a body's landing zone on the surface under `point` |
 
 **Landing zone.** A surface frame's origin is wherever the ship came down, not one fixed site —
@@ -568,7 +568,7 @@ runs backwards — a machine clock that is ahead does not take the world back wi
 
 ### `SpacesimLocation` — `RefCounted`
 
-Where something is: a frame, and a position in it. Turned into words by `SpacesimSolarSystem.describe()`,
+Where something is: a frame, and a position in it. Turned into words by `SpacesimSystemScene.describe()`,
 because saying "landed on Nix" needs the system's names and the player's assets — and `coordinate/`
 should depend on neither.
 
@@ -585,7 +585,7 @@ something is — and `resolve_frame(id)` — resolving the **longest existing pr
 a frame the system no longer has is placed at the frame that remains, at its origin, rather than
 refused.
 
-### `SpacesimSolarSystem` additions
+### `SpacesimSystemScene` additions
 
 | Member | |
 |---|---|

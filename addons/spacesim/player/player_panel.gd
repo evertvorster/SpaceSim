@@ -33,7 +33,7 @@ enum AssetAction { RENAME }
 
 var _player: SpacesimPlayer
 var _session: SpacesimSession
-var _system: SpacesimSolarSystem
+var _system: SpacesimSystemScene
 
 var _dialog: SpacesimDialog
 var _assets: ItemList
@@ -62,7 +62,7 @@ var _menu_hash: String = ""
 var _menu_asset: String = ""
 
 
-func configure(player: SpacesimPlayer, session: SpacesimSession, system: SpacesimSolarSystem) -> void:
+func configure(player: SpacesimPlayer, session: SpacesimSession, system: SpacesimSystemScene) -> void:
 	_player = player
 	_session = session
 	_system = system
