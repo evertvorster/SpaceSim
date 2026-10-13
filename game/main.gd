@@ -347,6 +347,12 @@ func _update_camera(camera: Camera3D) -> void:
 	# 0.67 au, the star included, was clipped and simply not drawn.
 	if frame.kind == Frame.Kind.SPACE:
 		far = maxf(far, _system.view_distance())
+	# **And the same for the sky, which reaches much further than it looks.** The air is a thin skin —
+	# 100 km over a 6,371 km planet — so the distance out to it is ~100 km straight up and ~1,130 km at
+	# the horizon. With the surface range's 200 km the sky was drawn above 29° elevation and everything
+	# from there down to the horizon fell outside the plane and drew nothing: a black ring around the
+	# observer, gone one frame up where the range changes. See `SpacesimSystemScene.sky_reach`.
+	far = maxf(far, _system.sky_reach(frame))
 	camera.far = far
 
 

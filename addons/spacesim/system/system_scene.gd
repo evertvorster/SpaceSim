@@ -255,6 +255,37 @@ func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimSceneBody:
 	return null
 
 
+## **The body whose air this frame is inside** — its atmosphere or surface frame, and null in space.
+##
+## Both are inside the body's air and the system frame is not, so this is the containment the frames
+## already express rather than a second opinion about altitude.
+func air_body(frame: SpacesimFrame) -> SpacesimSceneBody:
+	for body in bodies:
+		if body.atmosphere == frame or body.surface == frame:
+			return body
+	return null
+
+
+## How far away the sky can be, from an observer inside this frame. Zero in space, where there is
+## none.
+##
+## **The camera's far plane has to reach this or the sky is simply not drawn**, and the number is much
+## larger than it looks. The air is a *thin skin* — 100 km over a 6,371 km planet — so the distance
+## out to it is ~100 km straight up and **~1,130 km at the horizon**. A far plane of 200 km, which is
+## what `camera.range_surface` defaulted to, therefore drew the sky above 29° elevation and left
+## everything from there down to the horizon beyond the plane: a black ring around the observer. It
+## read as *"something black surrounding you"* at the surface, and vanished at 2 km because that is
+## where the frame changes to the atmosphere frame and its 10,000 km range.
+##
+## Measured from the **surface**, so it is the worst case and covers an observer at any altitude.
+func sky_reach(frame: SpacesimFrame) -> float:
+	var body := air_body(frame)
+	if body == null:
+		return 0.0
+	var outer := body.radius + _framing.atmosphere_altitude
+	return sqrt(outer * outer - body.radius * body.radius)
+
+
 ## Put a body's landing zone on the surface directly under `point`, with local up pointing away
 ## from the body's centre.
 ##

@@ -154,6 +154,20 @@ func _test_the_sky_is_derived(
 		"and Venus's is %.0f K against 232 K — the greenhouse is what is missing, not the geometry"
 			% venus_teq)
 
+	# **The far plane has to reach the sky, and it is much further than it looks.** The air is a thin
+	# skin — 100 km over a 6,371 km planet — so the distance out to it is ~100 km straight up and
+	# ~1,130 km at the horizon. `camera.range_surface` defaulted to a 200 km far plane, so the sky was
+	# drawn above 29 degrees of elevation and left a black ring around the observer below that.
+	var surface_frame := scene.frame_tree.frame_by_id("planet:earth/surface")
+	var reach := scene.sky_reach(surface_frame)
+	h.check(absf(reach - 1.133e6) < 2.0e3,
+		"the sky reaches %.0f km at the horizon from Earth's surface" % (reach / 1000.0))
+	h.check(scene.sky_reach(scene.frame_tree.frame_by_id("planet:earth/atmosphere")) == reach,
+		"and the same from inside its atmosphere frame")
+	h.check(scene.sky_reach(scene.system_frame) == 0.0, "while in space there is no sky to reach")
+	h.check(scene.air_body(surface_frame) == earth, "and the surface frame is inside Earth's air")
+	h.check(scene.air_body(scene.system_frame) == null, "as the system frame is not")
+
 	# **A named gap, not a silent one.** Every species the authored atmospheres use has a
 	# cross-section except water vapour and hydrogen, and what that costs is written down here.
 	var uncovered: Array[String] = []

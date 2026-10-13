@@ -64,13 +64,26 @@ func _place_above(body_name: String, altitude: float) -> void:
 	if camera == null:
 		return
 	if OS.get_environment("SHOT_AIM") == "level":
-		# Along the horizon: perpendicular to the local vertical, with the vertical kept as "up" so
-		# the horizon sits level in the frame rather than rolled.
-		var radial := (ship.global_position - body.global_position).normalized()
-		var along := radial.cross(Vector3.UP)
-		if along.length() < 0.01:
-			along = radial.cross(Vector3.RIGHT)
-		camera.look_at(camera.global_position + along.normalized(), radial)
+		# **Level, relative to the body's own up**, which is the placement geometry rather than the
+		# camera's: the camera is a child of the ship and gets reparented by the frame tree, so anything
+		# derived from where it happens to be is a moving target.
+		#
+		# The basis is built and assigned directly, **not with `look_at`**. `look_at` fails silently-ish
+		# (an error to the log, the old orientation kept) when the target lands on the origin, and an
+		# earlier version of this could produce exactly that — which meant every "level" shot was really
+		# aimed straight down and read as a broken shader. A basis that is constructed cannot do that.
+		var up := (ship.global_position - body.global_position).normalized()
+		var along := up.cross(Vector3.UP)
+		if along.length() < 0.5:
+			along = up.cross(Vector3.RIGHT)
+		along = along.normalized()
+		var right := along.cross(up).normalized()
+		var true_up := right.cross(along).normalized()
+		# Godot's convention: -Z is forward, +Y is up, +X is right.
+		camera.global_transform = Transform3D(
+			Basis(right, true_up, -along), camera.global_position
+		)
+		_report_aim(body, camera, "level")
 		return
 	# The up vector must not be parallel to the look direction, or look_at is degenerate and the
 	# camera ends up pointing nowhere — which reads as "the planet is not rendered".
@@ -80,6 +93,22 @@ func _place_above(body_name: String, altitude: float) -> void:
 	if absf(look.dot(up)) > 0.99:
 		up = Vector3.RIGHT
 	camera.look_at(aim, up)
+	_report_aim(body, camera, "radial")
+
+
+## Say where the camera ended up pointing, in **degrees above the local horizontal**.
+##
+## Worth printing because the aim is set once, on one frame, and the ship is reparented by the frame
+## tree afterwards — so "did the camera stay where I put it" is not something a picture answers, and a
+## shot that quietly looks the wrong way reads as a broken shader rather than a broken rig. It has
+## already caught one: `look_at` failing left every "level" shot aimed straight down.
+##
+## `up` is the body's own vertical taken from the *ship*, not from the camera.
+func _report_aim(body: Node3D, camera: Camera3D, mode: String) -> void:
+	var up := (body.global_position - camera.global_position).normalized()
+	var forward := -camera.global_transform.basis.z
+	var elevation := rad_to_deg(asin(clampf(forward.dot(-up), -1.0, 1.0)))
+	print("SHOT: aim=%s elevation=%.1f deg" % [mode, elevation])
 
 
 func _find_camera(node: Node) -> Camera3D:
