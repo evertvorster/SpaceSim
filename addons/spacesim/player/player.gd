@@ -19,8 +19,13 @@ extends RefCounted
 ## elsewhere when they do not.
 
 const DEFAULT_NAME := "Traveller"
+
+## The player's own name, as an attribute — a value of theirs, changeable like any other, and the one
+## attribute a screen may edit.
+const ATTRIBUTE_NAME := "Name"
+
 const DEFAULT_ATTRIBUTES := {
-	"Name": DEFAULT_NAME,
+	ATTRIBUTE_NAME: DEFAULT_NAME,
 	"Credits": 0,
 	"Condition": 100,
 	"Knowledge": 0,
@@ -55,7 +60,7 @@ func _init(player_name := DEFAULT_NAME) -> void:
 ## the old ones are gone with the old state.
 func reset(player_name := DEFAULT_NAME) -> void:
 	attributes = DEFAULT_ATTRIBUTES.duplicate()
-	attributes["Name"] = player_name
+	attributes[ATTRIBUTE_NAME] = player_name
 	location = SpacesimLocation.new(SpacesimFrame.SYSTEM_ID, Vector3.ZERO)
 	assets = []
 	deleted = []
@@ -64,7 +69,7 @@ func reset(player_name := DEFAULT_NAME) -> void:
 
 
 func display_name() -> String:
-	return String(attributes.get("Name", DEFAULT_NAME))
+	return String(attributes.get(ATTRIBUTE_NAME, DEFAULT_NAME))
 
 
 ## Give the player something. The id is generated here because a location refers to it.

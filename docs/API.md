@@ -697,36 +697,51 @@ them is; and the browser:
 | `session_reloaded` | signal: a load, a switch or a new story moved the player, so whoever is flying the ship has to be told |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
-**Histories** and **Saves** are two scrolling `ItemList`s side by side, and **Assets** is a third —
-a long list gets a scrollbar of its own rather than pushing everything below it off the panel.
-Selecting a history shows its saves; clicking a save shows what it holds.
+**Histories** and **Saves** are two scrolling `ItemList`s side by side. Selecting a history shows
+its saves and is what the controls under the lists act on; clicking a save shows what it holds.
 
-**What you can do to a row lives on the row, as a right-click menu**, and the rows say so because a
-hidden affordance is not an affordance. A menu is opened *on* something, so there is no separate
-selection that can be empty and leave an action doing nothing at all:
+**Nothing is behind a right-click.** What a row can do is written on the screen: Play, Delete and
+the history's name field sit under the Histories list, and a save's Load and Delete are in the
+dialog its own row opens — a menu beside a save could only repeat them. Entries that do not apply
+are **disabled rather than absent**: the current history cannot be played or deleted, and the trunk
+can be neither.
 
-| Row | Right-click |
-|---|---|
-| History | Play this history · Rename history… · Delete history… |
-| Save | Show this save · Load this save… · Delete this save |
-| Asset | Rename this… |
-
-Entries that do not apply are disabled rather than absent — the current history cannot be played or
-deleted, the trunk can be neither, and a save in another history cannot be loaded from here.
 **Reading a save is free** — loading one removes nothing, and the saves after it are named as what a
 save from here *would* remove. **It is the save that asks**: nothing is written until it is
 answered, and the dialog says the world is not rewound.
 
-**The player's own values are editable here.** *Change my values* opens a field for each attribute —
-the name among them — and keeps each one the type it had, refusing a number that is not one rather
-than quietly reading it as zero. **An asset is referred to by its id, which is why renaming one is
-safe**: nothing points at a name, so a location survives a rename — the whole reason the id exists.
-And **an edit is not a save**: saving stays a deliberate act, so the screen says
-`changed — press Save` rather than writing one behind the player's back.
+## Only names are editable
 
-**The two renames are different things and are named as such.** A *history* is a label on a line of
-time, renamed on its own row; the player's name is a value of theirs, changed with *Change my
-values*. Neither dialog will do the other's job.
+A name — the player's, an asset's, a history's — is the one thing a person legitimately types.
+**Everything else a player has is a gameplay value**: credits move when something is bought,
+condition when something is damaged. Typing into those would be a cheat with extra steps, so they
+are shown and not offered. There is no longer a *Change my values* dialog, and its removal is the
+point rather than a side effect.
+
+**The word on the button says what commits the name**, which is the whole of how the difference is
+communicated:
+
+| | Button | Commits |
+|---|---|---|
+| the player's name | **Apply** | on **Save** — it is player state |
+| an asset's name | **Apply** | on **Save** — likewise |
+| a history's name | **Rename** | at once — it is a `git branch -m`, a repository operation |
+
+Every one of them is **disabled until its field differs** from what stands, so a control never
+offers to do nothing; Enter in the field is the same as pressing it. **An asset is referred to by
+its id, which is why renaming one is safe**: nothing points at a name, so a location survives a
+rename — the whole reason the id exists. An empty name is refused rather than written, because a
+player with no name reads as a bug everywhere their name is shown.
+
+**An edit is not a save**: the screen says `changed — press Save` rather than writing one behind the
+player's back.
+
+### Rebuilding from inside a control
+
+`opened()` frees everything in `content`, so a control in there **cannot call it from its own
+signal** — the button would be freed mid-emit, which Godot reports as *"freed or unreferenced while
+a signal is being emitted"*. `_rebuild()` defers it by a frame, and is what a field, a list
+selection or a rename calls instead. Found by the tests, which said exactly that.
 
 ## `SpacesimPlayer`
 
@@ -905,8 +920,8 @@ screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab 
 focus key and the UI system would consume it first.
 
 **The personal data screen is where the world is saved and browsed**: Save and New Story act on the
-world, the player's own values and what they hold are editable there, and **right-clicking a row** —
-a history, a save, a thing you hold — offers what can be done with it. There is deliberately no save
+world, and **names are the only thing editable there** — a name each for the player, for what they
+hold, and for the history being browsed. There is deliberately no save
 key: a save is a deliberate act, and **a save that continues from an older one says first which saves
 it removes** — reading a timeline costs nothing, and it is saving from it that rewrites the future.
 

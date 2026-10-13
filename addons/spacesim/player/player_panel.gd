@@ -5,12 +5,23 @@ extends SpacesimScreen
 ## The personal-data screen, on Tab. **This is where saving lives**, because a save is a deliberate
 ## act: there is no autosave and no save key, so the button here is the only way one happens.
 ##
-## **What you can do to a row lives on the row**, as a right-click menu. That is not only tidier: a
-## menu is opened *on* something, so there is no separate selection that can be empty and leave an
-## action doing nothing at all.
+## ## Only names are editable
 ##
-## The two renames are different things and are named differently: **Rename history** is on a history
-## row, and the player's own name is a value of theirs, changed with *Change my values*.
+## A name — the player's, an asset's, a history's — is the one thing a person legitimately types.
+## Everything else a player has is a *gameplay* value: credits move when something is bought,
+## condition when something is damaged, knowledge when something is learned. Typing into those would
+## be a cheat with extra steps, so they are shown and not offered.
+##
+## ## Where a name is edited says what commits it
+##
+## The player's name and an asset's name are player state, so their button says **Apply**, it stages
+## the change, and **Save** is what writes it. A history's name is a repository operation — a
+## `git branch -m` — so its button says **Rename** and happens at once. That is a real difference
+## rather than an inconsistency, and putting it in the button's word is the whole of how it is
+## communicated.
+##
+## Every one of those buttons is **disabled until its field differs** from what stands, so a control
+## never offers to do nothing.
 ##
 ## The lists are a browser, and **the file path is the ownership** — the world's own state is never
 ## among the paths a load touches, whatever is clicked here.
@@ -22,44 +33,30 @@ const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
 const Repo := preload("res://addons/spacesim/save/world_repo.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 
-const LIST_HEIGHT := 140.0
+const LIST_HEIGHT := 96.0
 const FIELD_HISTORY := "History name"
 const FIELD_PLAYER := "Your name"
-const FIELD_ASSET := "Name"
-
-enum HistoryAction { PLAY, RENAME, DELETE }
-enum SaveAction { DETAILS, LOAD, DELETE }
-enum AssetAction { RENAME }
 
 var _player: SpacesimPlayer
 var _session: SpacesimSession
 var _system: SpacesimSystemScene
 
 var _dialog: SpacesimDialog
-var _assets: ItemList
 var _histories: ItemList
 var _saves: ItemList
-var _history_menu: PopupMenu
-var _save_menu: PopupMenu
-var _asset_menu: PopupMenu
+var _play_button: Button
+var _delete_history_button: Button
 
 ## The history whose saves are being shown, and each list's rows. Kept because a row index means
 ## nothing on its own: it has to stay in step with the thing it stands for.
 var _browsing: String = ""
 var _history_names: Array = []
 var _save_entries: Array = []
-var _asset_ids: Array = []
 
 ## What a dialog was opened about, and what it is about.
 var _pending: String = ""
 var _pending_history: String = ""
 var _pending_hash: String = ""
-var _pending_asset: String = ""
-
-## The row a menu was opened on, so an answer knows what it was about.
-var _menu_history: String = ""
-var _menu_hash: String = ""
-var _menu_asset: String = ""
 
 
 func configure(player: SpacesimPlayer, session: SpacesimSession, system: SpacesimSystemScene) -> void:
@@ -70,10 +67,6 @@ func configure(player: SpacesimPlayer, session: SpacesimSession, system: Spacesi
 	add_button("Save", _on_save)
 	add_button("New Story", _on_new_story)
 	add_button("Close", func() -> void: closed.emit())
-
-	_history_menu = _build_history_menu()
-	_save_menu = _build_save_menu()
-	_asset_menu = _build_asset_menu()
 
 	_dialog = Dialog.new()
 	_dialog.visible = false
@@ -88,107 +81,96 @@ func opened() -> void:
 	for child in content.get_children():
 		child.free()
 
-	_add_heading("%s   %s" % [_session.repo.current_history(), _system.format_time(_session.world_time)])
-	_add_heading(_system.describe(_player.location, _player.assets))
+	# One line for where and when, because the screen is tall enough already and three heading lines
+	# pushed the browser below the fold.
+	_add_heading(
+		"%s   %s   %s"
+		% [
+			_session.repo.current_history(),
+			_system.format_time(_session.world_time),
+			_system.describe(_player.location, _player.assets),
+		]
+	)
 	if not _session.message.is_empty():
 		_add_heading(_session.message)
 
-	_add_section("Attributes", ["Attribute", "Value"], _attribute_rows(_player.attributes))
-	_button_under("Change my values", _on_change_attributes)
+	_add_attributes()
 	_add_assets()
 	_add_browser()
 
 
 # --- the player's own values ----------------------------------------------------------------------
 
-## Every value of the player's, the name among them. Not the history's name: that is a label on a
-## timeline, and it is renamed on its own row.
-func _on_change_attributes() -> void:
-	var keys: Array = _player.attributes.keys()
-	_pending = "change_attributes"
-	_dialog.ask(
-		"Change my values",
-		"Everything of your own. A number stays a number.\n\nThe history's name is separate — rename "
-		+ "that on its own row.",
-		["Apply", "Cancel"],
-		keys
-	)
-	for key in keys:
-		_dialog.set_value(String(key), str(_player.attributes[key]))
-	_dialog.focus_first_field()
+## Every value of the player's, in one table. **The name is the only cell that is a field** — the
+## rest are shown because they are what the player has, and changed by playing rather than by typing.
+func _add_attributes() -> void:
+	var grid := _add_table("Attributes", ["Attribute", "Value"])
+	for key in _player.attributes:
+		var name_label := Label.new()
+		name_label.text = String(key)
+		grid.add_child(name_label)
+		if String(key) == SpacesimPlayer.ATTRIBUTE_NAME:
+			grid.add_child(_name_field(_player.display_name(), _set_player_name))
+		else:
+			grid.add_child(_text_label(str(_player.attributes[key])))
 
 
-func _apply_attributes() -> void:
-	for key in _player.attributes.keys():
-		var original: Variant = _player.attributes[key]
-		var typed: String = _dialog.value(String(key))
-		_player.attributes[key] = _coerce(original, typed)
+## Rebuild the screen, but not while a control inside [member content] is still emitting the signal
+## that asked for it: [method opened] frees everything in there, and a control cannot be freed from
+## inside its own signal. Found by the tests, which reported the object being freed mid-emit.
+func _rebuild() -> void:
+	opened.call_deferred()
+
+
+func _set_player_name(named: String) -> void:
+	if named.is_empty():
+		# A player with no name reads as a bug everywhere their name is shown, so an empty field is
+		# refused rather than written.
+		_session.message = "a name cannot be empty"
+		_rebuild()
+		return
+	_player.attributes[SpacesimPlayer.ATTRIBUTE_NAME] = named
 	_session.message = "changed — press Save"
-
-
-## An attribute keeps the type it had: a name stays a name, and credits stay a number — refusing
-## something that is not one rather than quietly reading it as zero.
-static func _coerce(original: Variant, typed: String) -> Variant:
-	match typeof(original):
-		TYPE_INT:
-			return int(typed) if typed.is_valid_int() else original
-		TYPE_FLOAT:
-			return float(typed) if typed.is_valid_float() else original
-		_:
-			return typed
+	_rebuild()
 
 
 func _add_assets() -> void:
-	_add_heading("Assets — right-click one for what you can do with it")
-	_assets = _new_list()
-	content.add_child(_assets)
-	_assets.item_clicked.connect(_on_asset_clicked)
-
-	_assets.clear()
-	_asset_ids.clear()
+	var grid := _add_table("Assets", ["Name", "Type", "Value", "Location"])
 	for asset in _player.assets:
-		_assets.add_item(_asset_line(asset))
-		_asset_ids.append(String(asset.get("id", "")))
+		var id := String(asset.get("id", ""))
+		grid.add_child(_name_field(String(asset.get("name", "")), _rename_asset.bind(id)))
+		grid.add_child(_text_label(String(asset.get("type", ""))))
+		grid.add_child(_text_label(str(asset.get("value", 0))))
+		grid.add_child(_text_label(_asset_where(asset)))
 
 
-func _on_asset_clicked(index: int, at: Vector2, button: int) -> void:
-	if index < 0 or index >= _asset_ids.size():
-		return
-	_assets.select(index)
-	_menu_asset = String(_asset_ids[index])
-	if button == MOUSE_BUTTON_RIGHT:
-		_refresh_menu_state()
-		_popup(_asset_menu, at)
-
-
-## The id is what locations point at, so a rename cannot break one — which is the whole reason an
+## The id is what a location points at, so renaming cannot break one — which is the whole reason an
 ## asset has an id at all.
-func _asset_of(id: String) -> Dictionary:
-	return _player.asset_by_id(id)
-
-
-func _rename_asset() -> void:
-	var asset := _asset_of(_menu_asset)
-	if asset.is_empty():
+##
+## `named` comes first because the id is bound onto this callable with [method Callable.bind], and
+## **`bind` appends** — the bound arguments arrive after the one the call supplies.
+func _rename_asset(named: String, id: String) -> void:
+	var asset := _player.asset_by_id(id)
+	if asset.is_empty() or named.is_empty():
 		return
-	_pending = "rename_asset"
-	_pending_asset = _menu_asset
-	_dialog.ask("Rename this", "What should it be called?", ["Rename", "Cancel"], [FIELD_ASSET])
-	_dialog.set_value(FIELD_ASSET, String(asset.get("name", "")))
-	_dialog.focus_first_field()
-
-
-func _apply_asset_name() -> void:
-	var asset := _asset_of(_pending_asset)
-	if asset.is_empty():
-		return
-	asset["name"] = _dialog.value(FIELD_ASSET)
+	asset["name"] = named
 	_session.message = "changed — press Save"
+	_rebuild()
+
+
+func _asset_where(asset: Dictionary) -> String:
+	return _system.describe(
+		SpacesimLocation.from_dictionary(asset.get("location", {})), _player.assets
+	)
 
 
 # --- the browser -----------------------------------------------------------------------------------
 
 func _add_browser() -> void:
+	# Before the lists, because the rename field below them shows what is being browsed.
+	if _browsing.is_empty() or not _session.repo.has_history(_browsing):
+		_browsing = _session.repo.current_history()
+
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_theme_constant_override("separation", 24)
@@ -201,30 +183,41 @@ func _add_browser() -> void:
 func _add_histories(row: HBoxContainer) -> void:
 	var left := VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.add_theme_constant_override("separation", 8)
 	row.add_child(left)
-	left.add_child(_title_label("Histories — right-click one"))
+	left.add_child(_title_label("Histories"))
 	_histories = _new_list()
 	left.add_child(_histories)
+	# The selection is what the saves list and the rename field are about, so it is the only thing
+	# this list emits; the buttons below act on it.
 	_histories.item_selected.connect(_on_history_chosen)
-	_histories.item_clicked.connect(_on_history_clicked)
+
+	# **One row for everything you can do to the browsed history.** A history's name is a branch name,
+	# and renaming one is a `git branch -m` — the repository's business rather than the save's — so
+	# this one happens now and says Rename.
+	var controls := _name_field(_browsing, _rename_history, "Rename")
+	left.add_child(controls)
+	_play_button = _add_action(controls, "Play", _play_browsed)
+	_delete_history_button = _add_action(controls, "Delete", _delete_browsed_history)
 
 
 func _add_saves(row: HBoxContainer) -> void:
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.add_theme_constant_override("separation", 8)
 	row.add_child(right)
-	right.add_child(_title_label("Saves — click one to see it, right-click for more"))
+	right.add_child(_title_label("Saves — click one to see it"))
 	_saves = _new_list()
 	right.add_child(_saves)
 	# item_clicked, not item_selected: clicking the same save twice should open it twice, and a
 	# selection that has not changed emits nothing.
-	_saves.item_clicked.connect(_on_save_clicked)
+	_saves.item_clicked.connect(
+		func(index: int, _at: Vector2, _button: int) -> void: _show_save_at(index)
+	)
 
 
 func _fill_browser() -> void:
 	var current := _session.repo.current_history()
-	if _browsing.is_empty() or not _session.repo.has_history(_browsing):
-		_browsing = current
 
 	_histories.clear()
 	_history_names.clear()
@@ -244,21 +237,11 @@ func _fill_browser() -> void:
 		_saves.add_item("%s" % entry["subject"])
 		_save_entries.append(entry)
 
-	_refresh_menu_state()
-
-
-## Which of the menu entries apply to the row it was opened on.
-func _refresh_menu_state() -> void:
-	var playing := _browsing == _session.repo.current_history()
-	var trunk := _browsing == Repo.TRUNK
 	# Switching to where you already are is what you are doing, and the trunk is the world rather
-	# than a playthrough, so neither is offered.
-	_history_menu.set_item_disabled(HistoryAction.PLAY, playing)
-	_history_menu.set_item_disabled(HistoryAction.DELETE, playing or trunk)
-	_asset_menu.set_item_disabled(AssetAction.RENAME, _menu_asset.is_empty())
-	# A save in another history cannot be loaded from here — you switch history, then pick a save.
-	_save_menu.set_item_disabled(SaveAction.LOAD, not playing)
-	_save_menu.set_item_disabled(SaveAction.DELETE, not playing)
+	# than a playthrough — git refuses to delete it, and playing there would leave the next startup
+	# with nothing to load.
+	_play_button.disabled = _browsing == current
+	_delete_history_button.disabled = _browsing == current or _browsing == Repo.TRUNK
 
 
 ## The saves of a history, less the ones it has deleted. Only the history being played has
@@ -271,109 +254,67 @@ func _saves_of(history: String) -> Array:
 
 
 func _on_history_chosen(index: int) -> void:
-	if index >= 0 and index < _history_names.size():
-		_browsing = String(_history_names[index])
-		_fill_browser()
-
-
-func _on_history_clicked(index: int, at: Vector2, button: int) -> void:
 	if index < 0 or index >= _history_names.size():
 		return
-	_on_history_chosen(index)
-	_menu_history = String(_history_names[index])
-	if button == MOUSE_BUTTON_RIGHT:
-		_refresh_menu_state()
-		_popup(_history_menu, at)
+	_browsing = String(_history_names[index])
+	# Everything below the lists is about what is selected, so the screen is rebuilt rather than
+	# patched in four places.
+	_rebuild()
 
 
-func _on_save_clicked(index: int, at: Vector2, button: int) -> void:
+func _show_save_at(index: int) -> void:
 	if index < 0 or index >= _save_entries.size():
 		return
 	_saves.select(index)
-	_menu_hash = String(_save_entries[index]["hash"])
-	if button == MOUSE_BUTTON_RIGHT:
-		_refresh_menu_state()
-		_popup(_save_menu, at)
+	_show_save(index)
+
+
+# --- histories -------------------------------------------------------------------------------------
+
+func _rename_history(named: String) -> void:
+	var renamed := _session.repo.rename_history(_browsing, named)
+	if renamed["ok"]:
+		_browsing = String(renamed["name"])
+		_session.message = "renamed the history to %s" % _browsing
 	else:
-		_show_save(index)
+		_session.message = renamed["reason"]
+	_rebuild()
 
 
-func _popup(menu: PopupMenu, at: Vector2) -> void:
-	menu.position = Vector2i(get_screen_position() + at)
-	menu.popup()
+func _play_browsed() -> void:
+	var switched := _session.repo.switch_history(_browsing)
+	if not switched["ok"]:
+		_session.message = switched["reason"]
+		_rebuild()
+		return
+	_session.message = "switched to %s" % _browsing
+	_session.load_last()
+	session_reloaded.emit()
+	_rebuild()
 
 
-# --- the menus -------------------------------------------------------------------------------------
-
-func _build_history_menu() -> PopupMenu:
-	var menu := PopupMenu.new()
-	menu.add_item("Play this history", HistoryAction.PLAY)
-	menu.add_item("Rename history…", HistoryAction.RENAME)
-	menu.add_item("Delete history…", HistoryAction.DELETE)
-	menu.id_pressed.connect(_on_history_action)
-	add_child(menu)
-	return menu
-
-
-func _build_save_menu() -> PopupMenu:
-	var menu := PopupMenu.new()
-	menu.add_item("Show this save", SaveAction.DETAILS)
-	menu.add_item("Load this save…", SaveAction.LOAD)
-	menu.add_item("Delete this save", SaveAction.DELETE)
-	menu.id_pressed.connect(_on_save_action)
-	add_child(menu)
-	return menu
+func _delete_browsed_history() -> void:
+	_pending = "delete_history"
+	_pending_history = _browsing
+	_dialog.ask(
+		"Delete history",
+		(
+			"Delete '%s' and every save in it?\n\nThe history goes from the list. Its commits stay "
+			% _browsing
+			+ "in the repository, but nothing in the game will reach them again."
+		),
+		["Delete history", "Cancel"]
+	)
 
 
-func _build_asset_menu() -> PopupMenu:
-	var menu := PopupMenu.new()
-	menu.add_item("Rename this…", AssetAction.RENAME)
-	menu.id_pressed.connect(_on_asset_action)
-	add_child(menu)
-	return menu
-
-
-func _on_history_action(action: int) -> void:
-	match action:
-		HistoryAction.PLAY:
-			_switch_to(_menu_history)
-		HistoryAction.RENAME:
-			_rename_history(_menu_history)
-		HistoryAction.DELETE:
-			_delete_history(_menu_history)
-
-
-func _on_save_action(action: int) -> void:
-	match action:
-		SaveAction.DETAILS:
-			_show_save_row()
-		SaveAction.LOAD:
-			_confirm_load(_menu_hash)
-		SaveAction.DELETE:
-			_pending = "confirm_delete_save"
-			_pending_hash = _menu_hash
-			_dialog.ask(
-				"Delete this save?",
-				"Take it out of the list?\n\nIts commit stays in the repository.",
-				["Delete", "Cancel"]
-			)
-
-
-func _on_asset_action(action: int) -> void:
-	if action == AssetAction.RENAME:
-		_rename_asset()
-
-
-func _show_save_row() -> void:
-	for index in _save_entries.size():
-		if String(_save_entries[index]["hash"]) == _menu_hash:
-			_show_save(index)
-			return
-
+# --- saves -----------------------------------------------------------------------------------------
 
 ## One dialog per save, holding what it is and what reading it means. **A load discards nothing** —
 ## the later saves are named as what a save from here *would* remove, and the asking happens at the
 ## Save button.
+##
+## This is also where a save's Load and Delete live: the row it belongs to is what opened it, so
+## there is nothing a menu beside it could add.
 func _show_save(index: int) -> void:
 	var entry: Dictionary = _save_entries[index]
 	_pending = "save_details"
@@ -383,48 +324,12 @@ func _show_save(index: int) -> void:
 	_dialog.ask("Save   %s" % entry["subject"], _save_details(_pending_hash, playing), buttons)
 
 
-func _switch_to(name: String) -> void:
-	var switched := _session.repo.switch_history(name)
-	_session.message = switched["reason"] if not switched["ok"] else "switched to %s" % name
-	if switched["ok"]:
-		_browsing = name
-		_session.load_last()
+func _load(hash: String) -> void:
+	var loaded := _session.load(hash)
+	if loaded["ok"]:
 		session_reloaded.emit()
-	_fill_browser()
-	opened()
-
-
-## Renames the **history** — a label on a timeline. The player's own name is a value of theirs and is
-## changed under Attributes, which is a different thing entirely.
-func _rename_history(name: String) -> void:
-	_pending = "rename"
-	_pending_history = name
-	_dialog.ask(
-		"Rename history",
-		"What should the history '%s' be called?\n\nThis is the label on this line of time. Your own "
-		% name + "name is not changed here — it lives under Attributes.",
-		["Rename history", "Cancel"],
-		[FIELD_HISTORY]
-	)
-	_dialog.set_value(FIELD_HISTORY, name)
-	_dialog.focus_first_field()
-
-
-func _delete_history(name: String) -> void:
-	_pending = "delete_history"
-	_pending_history = name
-	_dialog.ask(
-		"Delete history",
-		"Delete '%s' and every save in it?\n\nThe history goes from the list. Its commits stay in "
-		% name + "the repository, but nothing in the game will reach them again.",
-		["Delete history", "Cancel"]
-	)
-
-
-func _confirm_load(hash: String) -> void:
-	_pending = "confirm_load"
-	_pending_hash = hash
-	_dialog.ask("Load this save?", _load_note(hash), ["Load", "Cancel"])
+	else:
+		_session.message = loaded["reason"]
 
 
 ## What a save holds, and what reading it would cost — which is nothing. **Continuing from it is
@@ -460,6 +365,8 @@ func _load_note(hash: String) -> String:
 	return "\n".join(lines)
 
 
+# --- the dialogs -----------------------------------------------------------------------------------
+
 func _on_new_story() -> void:
 	_pending = "new_story"
 	_dialog.ask(
@@ -471,8 +378,6 @@ func _on_new_story() -> void:
 	_dialog.focus_first_field()
 	_on_dialog_input()
 
-
-# --- what the dialogs were asked ------------------------------------------------------------------
 
 func _on_dialog_input() -> void:
 	if _pending == "new_story":
@@ -494,13 +399,6 @@ func _on_dialog_answered(action: String) -> void:
 				session_reloaded.emit()
 			else:
 				_session.message = started["reason"]
-		"rename":
-			var renamed := _session.repo.rename_history(_pending_history, _dialog.value(FIELD_HISTORY))
-			if renamed["ok"]:
-				_browsing = String(renamed["name"])
-				_session.message = "renamed the history to %s" % _browsing
-			else:
-				_session.message = renamed["reason"]
 		"delete_history":
 			var deleted := _session.repo.delete_history(_pending_history)
 			if deleted["ok"]:
@@ -508,10 +406,6 @@ func _on_dialog_answered(action: String) -> void:
 				_session.message = "deleted the history %s" % _pending_history
 			else:
 				_session.message = deleted["reason"]
-		"change_attributes":
-			_apply_attributes()
-		"rename_asset":
-			_apply_asset_name()
 		"save_details":
 			match action:
 				"Load":
@@ -519,24 +413,10 @@ func _on_dialog_answered(action: String) -> void:
 				"Delete":
 					_session.delete_save(_pending_hash)
 					_session.message = "deleted a save"
-		"confirm_load":
-			_load(_pending_hash)
 		"confirm_save":
 			_session.save_confirmed(_system)
-		"confirm_delete_save":
-			_session.delete_save(_pending_hash)
-			_session.message = "deleted a save"
 	_pending = ""
-	_fill_browser()
 	opened()
-
-
-func _load(hash: String) -> void:
-	var loaded := _session.load(hash)
-	if loaded["ok"]:
-		session_reloaded.emit()
-	else:
-		_session.message = loaded["reason"]
 
 
 ## The player's name is optional at New Story: left empty they keep the default, and can change it
@@ -572,6 +452,39 @@ func _rewrite_note(affected: Array) -> String:
 
 # --- rows -----------------------------------------------------------------------------------------
 
+## A name, editable, with the button that commits it. The button is **disabled until the text
+## differs**, so a control never offers to do nothing, and it says what it does: *Apply* stages a
+## change that Save writes, *Rename* does it now.
+##
+## Enter in the field is the same as pressing it, when there is something to do.
+func _name_field(current: String, on_apply: Callable, action := "Apply") -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+
+	var field := LineEdit.new()
+	field.text = current
+	field.custom_minimum_size = Vector2(240.0, 0.0)
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(field)
+
+	var button := Button.new()
+	button.name = "NameAction"
+	button.text = action
+	button.disabled = true
+	row.add_child(button)
+
+	field.text_changed.connect(
+		func(text: String) -> void: button.disabled = text.strip_edges() == current
+	)
+	field.text_submitted.connect(
+		func(_text: String) -> void:
+			if not button.disabled:
+				button.pressed.emit()
+	)
+	button.pressed.connect(func() -> void: on_apply.call(field.text.strip_edges()))
+	return row
+
+
 func _add_heading(text: String) -> void:
 	content.add_child(_title_label(text))
 
@@ -583,9 +496,13 @@ func _title_label(text: String) -> Label:
 	return label
 
 
-func _button_under(label: String, on_pressed: Callable) -> Button:
-	var row := HBoxContainer.new()
-	content.add_child(row)
+func _text_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	return label
+
+
+func _add_action(row: HBoxContainer, label: String, on_pressed: Callable) -> Button:
 	var button := Button.new()
 	button.text = label
 	button.pressed.connect(on_pressed)
@@ -600,16 +517,16 @@ func _new_list() -> ItemList:
 	return list
 
 
-## A heading, then a table of the rows under it. The headers say what the columns are, so a
-## section with more columns reads without this file changing.
-func _add_section(title: String, headers: Array, rows: Array) -> void:
+## A heading, then a grid with its column headers. The caller adds the rows, because a row may hold
+## a field rather than a label.
+func _add_table(title: String, headers: Array) -> GridContainer:
 	_add_heading(title)
 
 	var grid := GridContainer.new()
 	grid.columns = headers.size()
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 24)
-	grid.add_theme_constant_override("v_separation", 4)
+	grid.add_theme_constant_override("v_separation", 6)
 	content.add_child(grid)
 
 	for header in headers:
@@ -617,30 +534,7 @@ func _add_section(title: String, headers: Array, rows: Array) -> void:
 		header_label.text = String(header)
 		header_label.modulate = Color(1.0, 1.0, 1.0, 0.55)
 		grid.add_child(header_label)
-
-	for row in rows:
-		for cell in row:
-			var cell_label := Label.new()
-			cell_label.text = String(cell)
-			grid.add_child(cell_label)
-
-
-func _attribute_rows(attributes: Dictionary) -> Array:
-	var rows: Array = []
-	for key in attributes:
-		rows.append([key, str(attributes[key])])
-	return rows
-
-
-## An asset reads as its own name, then what it is and where it is, so the panel does not need to
-## know what an asset is.
-func _asset_line(asset: Dictionary) -> String:
-	var where := _system.describe(
-		SpacesimLocation.from_dictionary(asset.get("location", {})), _player.assets
-	)
-	return "%s   —   %s, %s   —   %s" % [
-		asset.get("name", "?"), asset.get("type", ""), asset.get("value", 0), where
-	]
+	return grid
 
 
 static func _pairs(attributes: Dictionary) -> String:

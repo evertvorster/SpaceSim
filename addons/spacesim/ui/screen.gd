@@ -25,13 +25,18 @@ var title_label: Label
 
 
 func build_screen(title: String) -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# `set_anchors_and_offsets_preset`, not `set_anchors_preset`. The latter defaults to keeping the
+	# rect the control *currently* has — which for a control that has just been made is 0x0, so it
+	# stays 0x0 and everything anchored inside it lands off the corner of the window. The screens get
+	# away with the difference because they are built before they are in the tree; a dialog, built
+	# while it is already in one, does not.
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var dim := ColorRect.new()
 	dim.name = "Dim"
 	dim.color = Color(0.0, 0.0, 0.0, 0.65)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(dim)
 
