@@ -22,3 +22,9 @@ enum Domain { SOLID, LIQUID, GAS }
 ## not built, and a guessed absorptivity would be worse than an absent one.
 @export var greenhouse: PackedFloat32Array = []
 @export var condensation_temperature: float = 0.0 ## kelvin, 0 where it does not apply
+## **Specific heat capacity at constant pressure**, J/(kg·K) — what sets the adiabatic lapse rate
+## `g / c_p`, and therefore the shape of every temperature profile. Sourced physical values, like
+## `density` and `molar_mass`; zero where a species is not a gas.
+##
+## Note that this one mixes by **mass** and not by mole fraction, because it is per kilogram.
+@export var heat_capacity: float = 0.0

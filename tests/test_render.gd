@@ -33,6 +33,7 @@ func run(h, root: Node) -> void:
 	_test_the_star_is_a_source(h, scene)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_shells_reach_the_right_height(h, scene, sol)
+	_test_the_temperature_profile(h, scene, sol)
 	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
@@ -237,6 +238,68 @@ func _test_the_air_shells_reach_the_right_height(
 	# An airless body stays airless: no air block, no shell.
 	var mercury := scene.body_by_id("planet:mercury")
 	h.check(mercury.atmosphere_mesh == null, "Mercury still has no air at all")
+
+
+## **Stage A of the temperature work: the profile, not the temperature.**
+##
+## Nothing here changes the surface temperature -- the greenhouse is what does that. What is checked is
+## that the *shape* of the air comes out right from composition and gravity alone, which is a real test
+## rather than a fitted number: Earth's dry adiabatic lapse rate is a textbook 9.8 K/km and the model
+## derives it from the mix's heat capacity, and Earth's cloud base lands where cloud bases are.
+func _test_the_temperature_profile(h, scene: SpacesimSystemScene, sol: SpacesimSolarSystem) -> void:
+	var materials := SpacesimMaterialTable.engine_table()
+	var star := scene.star()
+	var luminosity := SpacesimStarModel.luminosity(star.content)
+
+	for entry in [
+		{"id": "planet:earth", "lapse": 9.8, "capacity": 1005.0},
+		{"id": "planet:venus", "lapse": 10.5, "capacity": 848.0},
+		{"id": "planet:mars", "lapse": 4.4, "capacity": 848.0},
+	]:
+		var body := scene.body_by_id(String(entry["id"]))
+		var air := body.content.atmosphere
+		var capacity := SpacesimAtmosphereModel.heat_capacity(air, materials)
+		h.check(absf(capacity / float(entry["capacity"]) - 1.0) < 0.06,
+			"%s: c_p of the mix is %.0f J/(kg K), mass-weighted" % [entry["id"], capacity])
+		var lapse := SpacesimAtmosphereModel.lapse_rate(
+			air, materials, SpacesimAtmosphereModel.surface_gravity(body.content)
+		)
+		h.check(absf(lapse * 1000.0 - float(entry["lapse"])) < 0.6,
+			"and g/c_p gives %.2f K/km against the textbook %.1f" % [lapse * 1000.0, entry["lapse"]])
+
+	# **The profile's shape, and the one number that proves it is not arbitrary.** A dry adiabat is
+	# right where it matters most: the height at which water in Earth's air reaches its condensation
+	# temperature should be a real cloud base, 1-2 km. (The *tropopause* is 4 km low, because the
+	# adiabat is dry -- named in the model and in the plan, and it is what moist convection fixes.)
+	var earth := scene.body_by_id("planet:earth")
+	var materials_earth := SpacesimMaterialTable.engine_table()
+	var temperature := SpacesimAtmosphereModel.reference_temperature(
+		earth.content, materials_earth,
+		SpacesimStarModel.luminosity(star.content), earth.position.distance_to(star.position))
+	var tropopause := SpacesimAtmosphereModel.tropopause_temperature(temperature)
+	var lapse := SpacesimAtmosphereModel.lapse_rate(
+		earth.content.atmosphere, materials_earth,
+		SpacesimAtmosphereModel.surface_gravity(earth.content))
+	h.check(absf(tropopause / temperature - 0.8409) < 1.0e-4,
+		"the tropopause is the grey skin temperature, %.1f K for an effective %.1f"
+			% [tropopause, temperature])
+	# The profile shape is checked against the **measured** 288 K, not the placeholder 256.5: at the
+	# placeholder the surface is below freezing, so water "condenses" below ground — which is the
+	# model correctly reporting that it is 32 K too cold, and it is what the greenhouse stage fixes.
+	var water := materials_earth.by_name("water_vapour")
+	var measured := 288.0
+	var base := (measured - water.condensation_temperature) / lapse / 1000.0
+	h.check(base > 1.0 and base < 2.0,
+		"given the measured 288 K surface, water condenses %.1f km up -- a real cloud base" % base)
+	h.check((temperature - water.condensation_temperature) / lapse < 0.0,
+		"while at the placeholder %.1f K the surface is below freezing, so the base is below zero"
+			% temperature)
+	var surface := temperature
+	h.check(SpacesimAtmosphereModel.temperature_at(50.0e3, surface, lapse, tropopause)
+			== tropopause,
+		"above the tropopause the profile is flat, not still falling")
+	h.check(SpacesimAtmosphereModel.temperature_at(0.0, surface, lapse, tropopause) == surface,
+		"and at the surface it is the surface temperature")
 
 
 func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:

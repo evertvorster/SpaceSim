@@ -47,6 +47,78 @@ const REFERENCE_LUX := 100_000.0
 const SHELL_SCALE_HEIGHTS := 10.0
 
 
+## Below this the atmosphere is convective and follows the adiabat; above it, radiative. Named because
+## it is the grey-atmosphere skin temperature, `2^-1/4` of the effective temperature -- the temperature
+## a blackbody-only atmosphere settles at with no greenhouse at all.
+const SKIN_TEMPERATURE_FACTOR := 0.8408964152537145 ## 2 ** -0.25
+
+
+## The mix's specific heat capacity at constant pressure, J/(kg·K).
+##
+## **Mass-weighted, not mole-weighted** — this one is per kilogram, so the fractions that enter are mass
+## fractions. Every other mix in this file is mole-weighted, and getting this one wrong by copying them
+## would be a quiet factor of about four on the lapse rate.
+static func heat_capacity(
+	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable
+) -> float:
+	if atmosphere == null or materials == null:
+		return 0.0
+	var total := 0.0
+	var mass := 0.0
+	for key in atmosphere.species:
+		var material := materials.by_name(String(key))
+		if material == null:
+			continue
+		var amount := float(atmosphere.species[key]) * material.molar_mass
+		total += amount * material.heat_capacity
+		mass += amount
+	if mass <= 0.0:
+		return 0.0
+	return total / mass
+
+
+## The **dry adiabatic lapse rate**, `g / c_p`, in kelvin per metre: how fast a convecting parcel cools
+## as it rises.
+##
+## This is where the profile comes from, and it is a real check rather than a fitted number: Earth's
+## composition and gravity give **9.78 K/km**, against the textbook 9.8, and Venus's give ~10.5.
+static func lapse_rate(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	gravity: float
+) -> float:
+	var capacity := heat_capacity(atmosphere, materials)
+	if capacity <= 0.0 or gravity <= 0.0:
+		return 0.0
+	return gravity / capacity
+
+
+## The temperature at a height above the surface, kelvin.
+##
+## **Convective below, radiative above.** A parcel of air that is warmer than its surroundings rises and
+## cools at `lapse_rate`; that can continue only until it meets the temperature the radiation alone
+## would hold, which is the **skin temperature** `0.8409 * T_eff` at the top. So the profile is the
+## adiabat down from the tropopause to the surface, and the surface temperature is what that adiabat
+## lands on.
+##
+## **Named limitation:** this is a *dry* adiabat. Real convection is moist, which flattens the upper
+## troposphere — Earth's tropopause comes out at 7.4 km against a real 11-12. It does not affect cloud
+## *bases*, which is what the profile is chiefly for, and moist convection is the refinement.
+static func temperature_at(
+	height: float,
+	surface_temperature: float,
+	lapse: float,
+	tropopause_temperature: float
+) -> float:
+	return maxf(surface_temperature - lapse * maxf(height, 0.0), tropopause_temperature)
+
+
+## The temperature a purely radiative atmosphere would hold at its top: `2^-1/4 * T_eff`, the
+## grey-atmosphere skin temperature. Below this the profile is the adiabat instead.
+static func tropopause_temperature(equilibrium: float) -> float:
+	return equilibrium * SKIN_TEMPERATURE_FACTOR
+
+
 ## How far above the surface the air is worth drawing, in metres: `SHELL_SCALE_HEIGHTS` scale heights.
 ##
 ## **Derived, and it has to be.** The alternative — one authored altitude for the whole system — is
