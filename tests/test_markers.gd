@@ -85,8 +85,19 @@ func _test_pointer_is_the_smallest_turn(h) -> void:
 		"a point up and behind lands inside the margin on the correct side"
 	)
 
-	var inside := Markers.clamp_to_edge(Vector2(500.0, 300.0), size, 100.0)
-	h.check_vector2_near(inside, Vector2(500.0, 300.0), "a point at the centre is left alone", 0.01)
+	# **Not the centre.** A point inside is left alone — and the centre is the one place where a
+	# projection onto the border and a clamp agree, so testing only that hid a regression that threw
+	# every on-screen label out to the edge of the window with a line back to its own object.
+	var off_centre := Vector2(420.0, 260.0)
+	h.check_vector2_near(
+		Markers.clamp_to_edge(off_centre, size, 100.0), off_centre, "a point inside is left where it is", 0.01
+	)
+	h.check_vector2_near(
+		Markers.clamp_to_edge(Vector2(850.0, 450.0), size, 100.0),
+		Vector2(850.0, 450.0),
+		"anywhere inside, not just near the middle",
+		0.01
+	)
 
 
 func _test_screen_direction(h, root: Node) -> void:

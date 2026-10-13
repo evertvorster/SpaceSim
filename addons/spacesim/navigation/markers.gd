@@ -268,11 +268,17 @@ static func choose(candidates: Array[Dictionary], limit: int) -> Array[Dictionar
 
 ## Clamp a viewport point onto the edge of `size`, inset by `margin`, along the line from the centre.
 ## A point far outside the rectangle lands on the nearest edge, which is the smallest turn that would
-## bring it into view.
+## bring it into view. **A point already inside is left exactly where it is.**
+##
+## That last sentence is the whole of it, and `border_point` does not do it: projecting onto the border
+## is right for an off-screen ring and wrong for an on-screen one, where it would throw every label out
+## to the edge of the window with a line back to its own object.
 static func clamp_to_edge(point: Vector2, size: Vector2, margin: float) -> Vector2:
 	var inner := Rect2(Vector2(margin, margin), size - Vector2(margin, margin) * 2.0)
 	if inner.size.x <= 0.0 or inner.size.y <= 0.0:
 		return size * 0.5
+	if inner.has_point(point):
+		return point
 	return Overlay.border_point(inner, point)
 
 
