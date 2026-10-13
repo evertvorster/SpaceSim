@@ -252,11 +252,19 @@ static func surface_gravity(body: SpacesimSystemBody) -> float:
 	return GRAVITATION * body.mass / (body.radius * body.radius)
 
 
-## **The temperature the coefficients are evaluated at.** Content may **pin** it, and for some bodies
-## it must: `reference_temperature` otherwise returns §3.6's first row, equilibrium temperature, which
-## is a placeholder — with no greenhouse it leaves Earth 32 K cold, and the gas giants radiate more
-## than they receive, so insolation is not even the right question for them. A pinned value is a
-## **measured** one, which is what the model is meant to be checked against.
+## **The temperature the coefficients are evaluated at.** In order of authority:
+##
+## 1. **What content pinned.** Content wins everywhere else and it wins here; for the gas giants it is
+##    the only right answer, because they radiate more than they receive and their warmth is
+##    collision-induced absorption rather than molecular bands. A pinned value is a **measured** one,
+##    which is what the model is checked against.
+## 2. **The greenhouse**, `surface_temperature()` — equilibrium plus the warming from the column. This
+##    is what turns Earth's 254 K of insolation into 288 K and Venus's 229 K into 737 K.
+## 3. **Equilibrium**, for a body with no `atmosphere` block at all.
+##
+## **This is the number the whole sky hangs on.** `kRlh` is proportional to 1/T and the scale height to
+## T, so the greenhouse's arrival is visible without touching the shader: Venus's air was 3.2x too
+## dense and 3.2x too shallow until this landed.
 static func reference_temperature(
 	body: SpacesimSystemBody,
 	materials: SpacesimMaterialTable,
@@ -266,7 +274,12 @@ static func reference_temperature(
 	if body != null and body.overrides != null \
 		and body.overrides.set.has("mean_surface_temperature"):
 		return body.overrides.mean_surface_temperature
-	return equilibrium_temperature(body, materials, luminosity, distance)
+	var equilibrium := equilibrium_temperature(body, materials, luminosity, distance)
+	if body == null or body.atmosphere == null:
+		return equilibrium
+	return surface_temperature(
+		body.atmosphere, materials, surface_gravity(body), equilibrium
+	)
 
 
 ## **Equilibrium temperature — §3.6's first row, and the placeholder for the real thing.** With no

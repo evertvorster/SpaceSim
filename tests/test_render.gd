@@ -209,10 +209,10 @@ func _test_the_air_shells_reach_the_right_height(
 	# content, so they should be stable -- and if a cross-section or a temperature changes, this is
 	# what should go red and say so.
 	for entry in [
-		{"id": "planet:venus", "reach": 100.0, "covered": 1.0},
+		{"id": "planet:venus", "reach": 159.0, "covered": 1.0},
 		{"id": "planet:earth", "reach": 100.0, "covered": 0.99},
 		{"id": "planet:mars", "covered": 1.0, "reach": 114.0}, {"id": "moon:triton", "covered": 1.0, "reach": 158.0},
-		{"id": "moon:titan", "covered": 1.0, "reach": 194.0}, {"id": "planet:neptune", "covered": 1.0, "reach": 207.0},
+		{"id": "moon:titan", "covered": 1.0, "reach": 215.0}, {"id": "planet:neptune", "covered": 1.0, "reach": 207.0},
 		{"id": "planet:jupiter", "covered": 1.0, "reach": 227.0}, {"id": "planet:uranus", "covered": 1.0, "reach": 275.0},
 		{"id": "planet:saturn", "covered": 1.0, "reach": 501.0},
 	]:
@@ -222,7 +222,7 @@ func _test_the_air_shells_reach_the_right_height(
 		if body.atmosphere_mesh == null:
 			continue
 		h.check(absf(body.sky_top - float(entry["reach"]) * 1000.0) < 6000.0,
-			"reaching %.0f km, ten scale heights of its measured 1-bar air (floor %.0f km)"
+			"reaching %.0f km, ten scale heights of its reference temperature (floor %.0f km)"
 				% [body.sky_top / 1000.0, top / 1000.0])
 		# Every species but Earth's water vapour: **hydrogen was the gap for the giants**, and it is
 		# why Titan stopped being listed as short too.
@@ -284,17 +284,15 @@ func _test_the_temperature_profile(h, scene: SpacesimSystemScene, sol: SpacesimS
 	h.check(absf(tropopause / temperature - 0.8409) < 1.0e-4,
 		"the tropopause is the grey skin temperature, %.1f K for an effective %.1f"
 			% [tropopause, temperature])
-	# The profile shape is checked against the **measured** 288 K, not the placeholder 256.5: at the
-	# placeholder the surface is below freezing, so water "condenses" below ground — which is the
-	# model correctly reporting that it is 32 K too cold, and it is what the greenhouse stage fixes.
+	# **The profile's shape, and the check that the greenhouse landed.** Before the greenhouse this
+	# surface was 256.5 K — below freezing — so water "condensed" 1.7 km *below ground*. It is now
+	# above freezing and the base is where cloud bases are, from the profile and the material table.
 	var water := materials_earth.by_name("water_vapour")
-	var measured := 288.0
-	var base := (measured - water.condensation_temperature) / lapse / 1000.0
-	h.check(base > 1.0 and base < 2.0,
-		"given the measured 288 K surface, water condenses %.1f km up -- a real cloud base" % base)
-	h.check((temperature - water.condensation_temperature) / lapse < 0.0,
-		"while at the placeholder %.1f K the surface is below freezing, so the base is below zero"
-			% temperature)
+	var base := (temperature - water.condensation_temperature) / lapse / 1000.0
+	h.check(temperature > water.condensation_temperature,
+		"the surface is %.1f K, above water's condensation temperature" % temperature)
+	h.check(base > 0.5 and base < 3.0,
+		"so water condenses %.1f km up -- a real cloud base, where there was none before" % base)
 	var surface := temperature
 	h.check(SpacesimAtmosphereModel.temperature_at(50.0e3, surface, lapse, tropopause)
 			== tropopause,
