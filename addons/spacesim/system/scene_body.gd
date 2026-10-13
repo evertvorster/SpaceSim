@@ -29,6 +29,9 @@ var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
 ## The cloud deck's own sphere, above the surface; null when the body has no deck.
 var cloud_mesh: MeshInstance3D
+## The shell of fog that is this body's air; null when it has none. Hidden unless the observer is
+## inside it.
+var air_volume: FogVolume
 
 ## What a body with nothing to derive from is drawn in — visibly a placeholder rather than a
 ## plausible-looking guess. Lives with the derivation that replaces it.

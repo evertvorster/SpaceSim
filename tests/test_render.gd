@@ -32,9 +32,50 @@ func run(h, root: Node) -> void:
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_star_is_a_source(h, scene)
 	_test_clouds_are_derived(h, scene, earth, luna)
+	_test_the_air_is_a_shell(h, scene, sol)
 	_test_hiding_bodies_hides_their_clouds(h, scene)
 
 	scene.container.free()
+
+
+## Evert's model: the air as a **hollow sphere** whose inner bound is below the surface and whose outer
+## bound is where the atmosphere is declared to end. The planet occludes the middle, so what is left is
+## the shell — dense at the surface, thinning upward.
+func _test_the_air_is_a_shell(h, scene: SpacesimSystemScene, sol: SpacesimSolarSystem) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	h.check(earth.air_volume != null, "Earth has an air shell")
+	if earth.air_volume == null:
+		return
+
+	# The outer bound is not a guess: it is the altitude at which the framing says the observer crosses
+	# into space, so the air ends exactly where the air is declared to end.
+	var outer: float = earth.radius + sol.framing.atmosphere_altitude
+	h.check_near(earth.air_volume.size.x, outer * 2.0,
+		"its outer bound is where the atmosphere is declared to end", 1.0)
+	h.check(earth.air_volume.shape == SpacesimBodyRenderer.AIR_SHAPE_ELLIPSOID,
+		"and it is a sphere rather than a box")
+	h.check(not earth.air_volume.visible, "hidden until the observer is inside it")
+
+	var air: FogMaterial = earth.air_volume.material
+	h.check(air.height_falloff > 0.0,
+		"with a falloff, so it thins with height instead of filling the shell evenly")
+	h.check(air.albedo.b >= air.albedo.r,
+		"and pale blue air, from the nitrogen and oxygen that make it (%.2f, %.2f, %.2f)"
+			% [air.albedo.r, air.albedo.g, air.albedo.b])
+
+	# Air follows the atmosphere, so an airless body has none and a thick one has more.
+	h.check(scene.body_by_id("moon:luna").air_volume == null, "Luna has no air at all")
+	var venus: FogMaterial = scene.body_by_id("planet:venus").air_volume.material
+	h.check(venus.density > air.density * 5.0,
+		"and Venus's 92 bar is far thicker than Earth's one (%.3f against %.3f)" % [venus.density, air.density])
+
+	# Whose air you are in is containment, not altitude — the frames already say it.
+	h.check(scene.air_body(scene.system_frame) == null, "in space there is no air")
+	var surface_frame := scene.frame_tree.frame_by_id("planet:earth/surface")
+	h.check(scene.air_body(surface_frame) == earth, "and on Earth's surface it is Earth's")
+	var air_frame := scene.frame_tree.frame_by_id("planet:venus/atmosphere")
+	h.check(scene.air_body(air_frame) == scene.body_by_id("planet:venus"),
+		"as it is in Venus's atmosphere")
 
 
 ## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own

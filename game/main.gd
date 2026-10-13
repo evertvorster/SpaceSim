@@ -291,9 +291,24 @@ func _physics_process(delta: float) -> void:
 	_system.aim_sun_at(_ship.global_position)
 	# Exposed for the light that is actually where the player is, not for the average of the frame.
 	_exposure.update(_system.illuminance_at(_ship.global_position), delta)
+	_update_air()
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_update_hud()
+
+
+## Show the fog shell of the body whose air the player is inside, and no other.
+##
+## Volumetric fog is real screen-space work, so in space it is switched off entirely rather than left
+## running with nothing to fog — and the shell is bounded to where the air is declared to end, so it
+## thins out to nothing before the observer crosses into vacuum.
+func _update_air() -> void:
+	var air_body := _system.air_body(_system.frame_tree.active_frame)
+	for body in _system.bodies:
+		if body.air_volume != null:
+			body.air_volume.visible = body == air_body
+	if _system.environment != null:
+		_system.environment.volumetric_fog_enabled = air_body != null
 
 
 ## The player is *inside* the ship while flying, so their location follows it. They are separate

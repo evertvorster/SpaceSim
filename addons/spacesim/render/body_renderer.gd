@@ -60,6 +60,50 @@ static func noise_field() -> NoiseTexture3D:
 	return _noise
 
 
+## `FogVolumeShape` is **not exposed to GDScript at all** in this build — not as a member of FogVolume,
+## not as a global enum, and not in ClassDB's constant list. Its value comes from the property hint on
+## `FogVolume.shape` instead, which reads "Ellipsoid (Local),Cone (Local),Cylinder (Local),Box (Local),
+## World (Global)" — so ellipsoid is 0, and the default of 3 is box, which is what a FogVolume should
+## default to. Named here rather than left as a bare 0.
+##
+## *(Local)* matters: the volume is measured in its parent's space, so a shell parented to a body moves
+## with that body and needs no per-frame repositioning.
+const AIR_SHAPE_ELLIPSOID := 0
+
+## How far above the surface the air reaches, in metres: the altitude at which the observer crosses
+## into space. This is the *outer* bound of the fog shell, taken from the framing the scene already
+## uses for that transition rather than guessed at separately — so the air ends exactly where the air
+## is declared to end.
+const AIR_FALL_OFF := 0.15
+
+
+## The air as a **hollow shell of fog**: an ellipsoid whose outer bound is where the atmosphere ends
+## and whose inner bound is below the surface, so the planet itself occludes the middle and what is
+## left is the shell.
+##
+## The falloff between the two bounds is what makes it read as air rather than as a bubble: dense at
+## the surface, thinning upward. Godot calls that `height_falloff`.
+static func atmosphere_volume(
+	body: SpacesimSceneBody, top_altitude: float, materials: SpacesimMaterialTable
+) -> FogVolume:
+	var air := body.content.atmosphere if body.content != null else null
+	if air == null or top_altitude <= 0.0:
+		return null
+	var outer := body.radius + top_altitude
+	var material := FogMaterial.new()
+	material.albedo = SpacesimAtmosphereModel.color(body.content, materials)
+	material.density = SpacesimAtmosphereModel.density(body.content)
+	material.height_falloff = AIR_FALL_OFF
+	var volume := FogVolume.new()
+	volume.name = "%sAir" % body.name
+	volume.shape = AIR_SHAPE_ELLIPSOID
+	volume.size = Vector3(outer, outer, outer) * 2.0
+	volume.material = material
+	# Shown only when the observer is inside this body's air — see SpacesimSystemScene.air_body().
+	volume.visible = false
+	return volume
+
+
 ## The material a body is drawn with.
 ##
 ## **A star is a source and everything else is a reflector**, so the choice is by kind rather than by
