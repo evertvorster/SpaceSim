@@ -414,7 +414,8 @@ about the others, which is exactly what placing a label clear of the others need
 | `marks: Array[Dictionary]` | one per marker, set each frame: `{"circle", "color"}` plus `"start"`/`"end"` when there is a line to draw |
 | `RING_RADIUS`, `RING_WIDTH`, `LINE_WIDTH` | 10 px across, 1 px strokes |
 | `COLOR` | the colour everything is drawn in; the selected target's comes from the setting |
-| `static place_label(anchor, label_size, taken, bounds) -> Rect2` | **the overlap avoidance** |
+| `static place_label(anchor, label_size, taken, bounds) -> Rect2` | **the overlap avoidance** — always a rect, because an overlapping label beats no label |
+| `static nearest_free(anchor, label_size, taken, bounds, steps) -> Rect2` | the first free spot within `steps` rings, or an empty rect — what a moon's crowding test is built on |
 | `static fitted(box, bounds)`, `free_of(box, taken)` | the two halves of it |
 | `static border_point(rect, towards) -> Vector2` | where a rect's border is crossed on the way to a point |
 
@@ -431,15 +432,24 @@ readout a few hundred pixels tall. Labels are placed nearest-first, so what matt
 first and the rest arrange themselves around it. A last-resort fallback is returned when nothing is
 free: an overlapping label still says where something is, and a missing one does not.
 
-### A moon gives up its label, not its ring
+### A moon gives up its label, not its ring — but only where the two compete
 
-**Io is a pixel from Jupiter and Luna a pixel from Earth from anywhere short of close approach**, so
-two names a pixel apart say no more than one — and the parent's is the one that stays, because the
-planet is what tells you where you are. A moon is drawn only when it is the **target**.
+**A moon's label is dropped only where the body it orbits has taken its space.** The nearest spot
+beside the moon's ring *ignoring the planet's own label* is worked out; if the planet's label is what
+holds it, the moon yields. Io is a pixel from Jupiter from anywhere short of close approach, so there
+its label has nowhere to go that is not where Jupiter's already is — while **by Earth the two rings
+are well apart, both labels have room, and both are drawn**.
+
+An earlier version hid a moon whenever its planet was marked at all, which is not the same rule: it
+hid Luna while sitting in a clear patch of sky.
 
 It is a fact about the two *labels*, and says nothing about whether the moon is there: the ring is
-still drawn, with no line and nothing written beside it. The parent has to be marked at all, or there
-is nothing to give way to.
+still drawn, with nothing written beside it. A moon that is the **target** is never dropped, and
+neither is one whose planet is not marked — there is nothing to compete with.
+
+The set is ordered **parents before their own moons**, so a planet's label is placed by the time its
+moon asks. `SpacesimMarkers._parents_before_their_moons` does that, keeping the order within each
+part.
 
 The map it uses is `SpacesimSystemScene.orbit_parents()`, which is **moons only**. A planet's own
 `parent_id` is its star, and "hidden by the thing you orbit" is not the same claim there — a star's

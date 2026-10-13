@@ -123,12 +123,15 @@ func refresh(camera: Camera3D) -> void:
 	for candidate in gathered:
 		marked[(candidate["node"] as Node3D).get_instance_id()] = true
 
-	var entries := choose(gathered, pool_size)
+	var entries := _parents_before_their_moons(choose(gathered, pool_size))
 	for entry in entries:
 		entry["circle"] = _project(entry["node"], camera, viewport_size)
 
 	# Only other labels: a label is placed against its own object, and the HUD is not reserved around.
 	var taken: Array[Rect2] = []
+	# Where each body's own label ended up, so a moon can tell whether its planet's is what took its
+	# space rather than something else.
+	var placed := {}
 
 	var marks: Array[Dictionary] = []
 	for index in _labels.size():
@@ -136,12 +139,37 @@ func refresh(camera: Camera3D) -> void:
 		if index >= entries.size():
 			label.visible = false
 			continue
-		var mark := _place(entries[index], label, marked, viewport_size, bounds, taken)
+		var mark := _place(entries[index], label, marked, viewport_size, bounds, taken, placed)
 		if not mark.is_empty():
 			marks.append(mark)
 
 	_overlay.marks = marks
 	_overlay.queue_redraw()
+
+
+## The chosen set with **the bodies that orbit something already in it moved to the end**, keeping the
+## order within each part. A moon's label yields only to its planet's, so the planet has to be placed
+## first for the moon to be able to tell.
+func _parents_before_their_moons(entries: Array[Dictionary]) -> Array[Dictionary]:
+	var first: Array[Dictionary] = []
+	var last: Array[Dictionary] = []
+	for entry in entries:
+		var node: Node3D = entry["node"]
+		var parent: SpacesimSceneBody = orbits.get(node, null)
+		var parent_here := parent != null and parent.node != null and _in(entries, parent.node)
+		if parent_here:
+			last.append(entry)
+		else:
+			first.append(entry)
+	first.append_array(last)
+	return first
+
+
+static func _in(entries: Array[Dictionary], node: Node3D) -> bool:
+	for entry in entries:
+		if entry["node"] == node:
+			return true
+	return false
 
 
 ## An object's own screen position, **not clamped**: the ring marks where the thing is, and it is the
@@ -161,30 +189,44 @@ func _place(
 	marked: Dictionary,
 	viewport_size: Vector2,
 	bounds: Rect2,
-	taken: Array[Rect2]
+	taken: Array[Rect2],
+	placed: Dictionary
 ) -> Dictionary:
 	var target: Node3D = entry["node"]
 	var circle: Vector2 = entry["circle"]
 	var colour := colour_of(int(entry["priority"]))
-
-	# **A moon gives up its label, not its ring.** Yielding to the body it orbits is a fact about the
-	# two *labels* — two names a pixel apart say no more than one — and says nothing about whether the
-	# moon is there. So the ring is still drawn, with nothing written beside it.
-	if _yields_to_parent(target, int(entry["priority"]), marked):
-		label.visible = false
-		return {"circle": circle, "color": colour}
 
 	label.text = "%s  %s" % [target.name, format_distance(entry["distance"])]
 	label.size = label.get_minimum_size()
 	# An object over the edge still wants its label in view, so the label gathers at the edge point in
 	# the object's direction.
 	var anchor := clamp_to_edge(circle, viewport_size, margin)
+
+	# **Only the body a moon orbits can take a moon's space.** The planet's label is the one that
+	# stays, because the planet is what tells you where you are — but *only where the two are competing
+	# for the same piece of screen*. Near Earth the two rings are well apart and both labels are drawn;
+	# by Jupiter, where Io is a pixel from the planet, the moon's nearest spot is the one Jupiter's
+	# label already has. **The ring is always drawn**: this is a fact about two names, not about whether
+	# the moon is there.
+	var parent: SpacesimSceneBody = orbits.get(target, null)
+	var parent_box: Variant = null
+	if parent != null and parent.node != null:
+		parent_box = placed.get(parent.node.get_instance_id())
+	if (
+		_orbits_a_marked_body(target, int(entry["priority"]), marked)
+		and parent_box is Rect2
+		and _crowds_its_parent(anchor, label.size, taken, parent_box, bounds)
+	):
+		label.visible = false
+		return {"circle": circle, "color": colour}
+
 	var box := Overlay.place_label(anchor, label.size, taken, bounds)
 	taken.append(box)
 
 	label.position = box.position
 	label.add_theme_color_override("font_color", colour)
 	label.visible = true
+	placed[target.get_instance_id()] = box
 
 	var mark := {"circle": circle, "color": colour}
 	# **A line only where there is a ring to draw it from.** Off screen the ring is not there, so the
@@ -204,15 +246,34 @@ func colour_of(priority: int) -> Color:
 	return selected_color if priority == Priority.SELECTED else Overlay.COLOR
 
 
-## Whether this marker gives way to the body it orbits.
+## Whether the planet's label is what stands between this moon and a label of its own.
 ##
-## A moon and its planet are one thing on screen from anywhere short of close approach — Io is a
-## pixel from Jupiter, Luna a pixel from Earth — so **the parent's label is the one that stays**: the
-## planet is what tells you where you are. A moon's label is drawn only when it is the target, which
-## is when you have asked for that moon in particular.
+## The nearest spot beside the moon's ring **ignoring the planet** is worked out, and the answer is
+## whether the planet's label has taken it. That is what crowding means here: a moon whose ring is on
+## its planet's has nowhere to put a name that is not where the planet's already is, while a moon well
+## clear of its planet has its own space and keeps its label.
 ##
-## The parent has to be marked at all, or there is nothing to give way to.
-func _yields_to_parent(node: Node3D, priority: int, marked: Dictionary) -> bool:
+## No room at all — nothing free even with the planet's label set aside — is crowding too: the moon's
+## label can only be beside its own ring, or it names something other than what the ring points at.
+func _crowds_its_parent(
+	anchor: Vector2, size: Vector2, taken: Array[Rect2], parent_box: Rect2, bounds: Rect2
+) -> bool:
+	var without: Array[Rect2] = []
+	for box in taken:
+		if box != parent_box:
+			without.append(box)
+	var spot := Overlay.nearest_free(anchor, size, without, bounds, 1)
+	return not spot.has_area() or not Overlay.free_of(spot, taken)
+
+
+## Whether this marker is a moon whose planet is also marked — the one case where its label yields to
+## another rather than arranging itself around it.
+##
+## The planet is what tells you where you are, so **the parent's label is the one that stays** where the
+## two are competing for the same space. A moon is drawn regardless when it is the target — you asked
+## for that moon in particular — and when the body it orbits is not marked at all there is nothing to
+## compete with.
+func _orbits_a_marked_body(node: Node3D, priority: int, marked: Dictionary) -> bool:
 	if priority == Priority.SELECTED:
 		return false
 	var parent: SpacesimSceneBody = orbits.get(node, null)

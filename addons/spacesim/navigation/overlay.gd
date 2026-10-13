@@ -63,10 +63,22 @@ func _draw() -> void:
 ## around the HUD, because the readout is usually where markers are, and pushing labels clear of it
 ## throws them hundreds of pixels off objects that are plainly on screen.
 ##
-## A last-resort fallback is returned when nothing is free, so a label is never silently dropped:
-## an overlapping label still says where something is, and a missing one does not.
+## A last-resort fallback is returned when nothing is free, so a label is never silently dropped: an
+## overlapping label still says where something is, and a missing one does not. [method nearest_free] is
+## the other question — *is there space within `steps`?* — which a caller asks when a label away from its
+## own ring would be worse than no label at all.
 static func place_label(
 	anchor: Vector2, label_size: Vector2, taken: Array[Rect2], bounds: Rect2
+) -> Rect2:
+	var box := nearest_free(anchor, label_size, taken, bounds, STEPS)
+	# Nowhere within reach is still a label: an overlapping one says where something is, and a missing
+	# one says nothing.
+	return box if box.has_area() else fitted(Rect2(anchor - label_size * 0.5, label_size), bounds)
+
+
+## The first free spot in up to `steps` rings of candidates, or an empty rect when there is none.
+static func nearest_free(
+	anchor: Vector2, label_size: Vector2, taken: Array[Rect2], bounds: Rect2, steps: int
 ) -> Rect2:
 	var half := label_size * 0.5
 	var offsets := _offsets(half, RING_RADIUS + GAP)
@@ -74,13 +86,13 @@ static func place_label(
 	# it straight over the circle it belongs to.
 	var own_ring := Rect2(anchor - Vector2.ONE * RING_RADIUS, Vector2.ONE * RING_RADIUS * 2.0)
 	var scale := 1.0
-	for step in STEPS:
+	for step in steps:
 		for offset in offsets:
 			var box := fitted(Rect2(anchor + offset * scale - half, label_size), bounds)
 			if not box.intersects(own_ring) and free_of(box, taken):
 				return box
 		scale *= STEP_RATIO
-	return fitted(Rect2(anchor - half, label_size), bounds)
+	return Rect2()
 
 
 ## The eight places a label can sit, **each as near its ring as the label's own shape allows** — a

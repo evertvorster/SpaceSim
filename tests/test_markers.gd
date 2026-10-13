@@ -16,7 +16,7 @@ func run(h, root: Node) -> void:
 	_test_a_label_keeps_clear_of_the_others(h)
 	_test_a_line_leaves_the_ring_at_its_edge(h)
 	_test_the_target_has_its_own_colour(h, root)
-	_test_a_moon_gives_up_its_label_to_its_planet(h, root)
+	_test_a_moon_gives_up_its_label_only_when_crowded(h, root)
 
 
 func _test_keyed_union(h) -> void:
@@ -250,10 +250,11 @@ func _test_a_line_leaves_the_ring_at_its_edge(h) -> void:
 
 
 
-## **A moon gives up its label, not its ring.** Io is a pixel from Jupiter and Luna a pixel from
-## Earth from anywhere short of close approach, so two names a pixel apart say no more than one — and
-## the parent's is the one that stays, because the planet is what tells you where you are.
-func _test_a_moon_gives_up_its_label_to_its_planet(h, root: Node) -> void:
+## **A moon gives up its label only when there is no room beside its own ring** — and never its ring.
+## Io is a pixel from Jupiter from anywhere short of close approach, so a label pushed off its ring
+## names something other than what the ring points at; but by Earth the two rings are well apart and
+## both labels fit, so both are drawn.
+func _test_a_moon_gives_up_its_label_only_when_crowded(h, root: Node) -> void:
 	var container := Node3D.new()
 	root.add_child(container)
 
@@ -273,28 +274,65 @@ func _test_a_moon_gives_up_its_label_to_its_planet(h, root: Node) -> void:
 	# Both marked: the moon's label goes, the planet's stays.
 	var marked := {planet.get_instance_id(): true, moon.get_instance_id(): true}
 	h.check(
-		markers._yields_to_parent(moon, Markers.Priority.CONTEXT, marked),
-		"a moon whose planet is also marked gives way to it"
+		markers._orbits_a_marked_body(moon, Markers.Priority.CONTEXT, marked),
+		"a moon whose planet is also marked is the crowding case"
 	)
 	h.check(
-		not markers._yields_to_parent(moon, Markers.Priority.SELECTED, marked),
+		not markers._orbits_a_marked_body(moon, Markers.Priority.SELECTED, marked),
 		"unless it is the target, which is when you asked for that moon in particular"
 	)
 	h.check(
-		not markers._yields_to_parent(planet, Markers.Priority.CONTEXT, marked),
+		not markers._orbits_a_marked_body(planet, Markers.Priority.CONTEXT, marked),
 		"the planet itself orbits nothing, so it never gives way"
 	)
 	h.check(
-		not markers._yields_to_parent(other, Markers.Priority.CONTEXT, marked),
+		not markers._orbits_a_marked_body(other, Markers.Priority.CONTEXT, marked),
 		"and neither does a body with no parent"
 	)
 
-	# The planet is not marked at all: there is nothing to give way to, so the moon keeps its name.
+	# The planet is not marked at all: there is nothing to compete with, so the moon keeps its name.
 	var only_moon := {moon.get_instance_id(): true}
 	h.check(
-		not markers._yields_to_parent(moon, Markers.Priority.CONTEXT, only_moon),
-		"a moon keeps its label when the body it orbits is not marked"
+		not markers._orbits_a_marked_body(moon, Markers.Priority.CONTEXT, only_moon),
+		"and is not the crowding case when the body it orbits is not marked"
 	)
+
+	# --- and the half that decides it: is the planet's label what took the moon's space?
+	var bounds := Rect2(24.0, 24.0, 1324.0, 672.0)
+	var size := Vector2(150.0, 24.0)
+	var planet_box := Overlay.place_label(Vector2(690.0, 360.0), size, [], bounds)
+	var taken: Array[Rect2] = [planet_box]
+
+	# The moon's ring on the planet's: its nearest spot is the one the planet's label already has.
+	h.check(
+		markers._crowds_its_parent(Vector2(686.0, 360.0), size, taken, planet_box, bounds),
+		"a moon on its planet's ring is crowding the planet's label"
+	)
+	h.check(
+		not markers._crowds_its_parent(Vector2(200.0, 560.0), size, taken, planet_box, bounds),
+		"a moon well clear of its planet keeps its own space, and its label"
+	)
+
+	# Nothing free even with the planet's label set aside is crowding too: a moon's label is beside its
+	# own ring or it names something other than what the ring points at.
+	var blocked: Array[Rect2] = [bounds]
+	h.check(
+		markers._crowds_its_parent(Vector2(686.0, 360.0), size, blocked, Rect2(), bounds),
+		"and a moon with nowhere at all beside its ring is crowding too"
+	)
+
+	# Nothing within reach is reported, not faked: the caller decides what to do about it.
+	var full: Array[Rect2] = [bounds]
+	h.check(
+		not Overlay.nearest_free(Vector2(686.0, 360.0), size, full, bounds, Overlay.STEPS).has_area(),
+		"and a screen with nowhere at all says so"
+	)
+	h.check(
+		Overlay.place_label(Vector2(686.0, 360.0), size, full, bounds).has_area(),
+		"while place_label still draws something, because a label that overlaps beats no label"
+	)
+	# Last, because the markers above are its children: freeing it first leaves every call after it
+	# on a freed object, which is a segfault rather than a failure.
 	container.free()
 
 
