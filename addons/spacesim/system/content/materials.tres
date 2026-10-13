@@ -251,6 +251,16 @@ albedo = 0.75
 color = Color(0.95, 0.97, 1, 1)
 condensation_temperature = 273.15
 
+[sub_resource type="Resource" id="Sp_nitrogen_ice"]
+script = ExtResource("species")
+species_name = "nitrogen_ice"
+domain = 0
+density = 1026.0
+molar_mass = 28.014
+albedo = 0.6
+color = Color(0.88, 0.92, 0.96, 1)
+condensation_temperature = 63.15
+
 [sub_resource type="Resource" id="Sp_regolith"]
 script = ExtResource("species")
 species_name = "regolith"
@@ -273,4 +283,4 @@ condensation_temperature = 0.0
 
 [resource]
 script = ExtResource("table")
-species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])
+species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])
