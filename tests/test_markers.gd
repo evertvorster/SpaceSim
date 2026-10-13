@@ -115,6 +115,34 @@ func _test_a_label_keeps_clear_of_the_others(h) -> void:
 	var bounds := Rect2(24.0, 24.0, 1324.0, 672.0)
 	var size := Vector2(150.0, 22.0)
 
+	# **As close as its own shape allows**, not somewhere off at the edge. A wide label belongs beside
+	# its ring: sideways it needs half its width, and vertically it needs a third of that. Using one
+	# radius for both — the label's largest dimension — put a short wide label a hundred pixels off in
+	# every direction, including straight up.
+	var wide := Vector2(200.0, 20.0)
+	var beside := Overlay.place_label(Vector2(700.0, 400.0), wide, [], bounds)
+	h.check_near(beside.get_center().y, 400.0, "a wide label sits level with its ring", 0.01)
+	h.check_near(
+		beside.get_center().x - 700.0,
+		100.0 + Overlay.RING_RADIUS + Overlay.GAP,
+		"and just clear of it — half its width and the clearance, and no more",
+		0.01
+	)
+
+	# Block both sides and it stacks instead — **by its own half-height**, which is a third of the
+	# distance: a short wide label needs half its width sideways and only half its height up. One
+	# radius for every direction cannot tell those apart, which is what pushed labels off to the edges.
+	var other_side := Overlay.place_label(Vector2(700.0, 400.0), wide, [beside], bounds)
+	h.check_near(other_side.get_center().x, 578.0, "and with that taken it goes to the other side", 0.01)
+	var above := Overlay.place_label(Vector2(700.0, 400.0), wide, [beside, other_side], bounds)
+	h.check_near(above.get_center().x, 700.0, "with both sides taken, a wide label stacks", 0.01)
+	h.check_near(
+		absf(above.get_center().y - 400.0),
+		10.0 + Overlay.RING_RADIUS + Overlay.GAP,
+		"by its own half-height and the clearance, not its half-width",
+		0.01
+	)
+
 	# Nine objects in one direction: the anchors are on top of each other.
 	var taken: Array[Rect2] = []
 	for index in 9:

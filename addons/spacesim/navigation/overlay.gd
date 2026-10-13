@@ -48,8 +48,9 @@ func _draw() -> void:
 ## Where a label goes: **as near its ring as it can be without landing on another label**, and
 ## always inside `bounds`.
 ##
-## Candidates are a ring round the anchor — eight directions at four growing distances — and the
-## first that fits and collides with nothing wins. Labels are placed nearest-first, so what matters
+## Candidates are a ring round the anchor — eight directions at six growing distances — and the first
+## that fits and collides with nothing wins. The nearest of them is *just* clear of the ring, so a
+## label sits against its own object and only moves away when something else is in the way. Labels are placed nearest-first, so what matters
 ## most picks its spot first and the rest arrange themselves around it, which is what keeps a screen
 ## full of them readable instead of a pile at the edge.
 ##
@@ -58,16 +59,40 @@ func _draw() -> void:
 static func place_label(
 	anchor: Vector2, label_size: Vector2, taken: Array[Rect2], bounds: Rect2
 ) -> Rect2:
-	var reach := maxf(label_size.x, label_size.y) * 0.5 + RING_RADIUS + GAP
-	var radii: Array[float] = [reach, reach * 1.7, reach * 2.6, reach * 3.7]
-	for radius in radii:
-		for step in 8:
-			var angle := TAU * float(step) / 8.0
-			var at := anchor + Vector2(cos(angle), sin(angle)) * radius
-			var box := fitted(Rect2(at - label_size * 0.5, label_size), bounds)
+	var half := label_size * 0.5
+	var offsets := _offsets(half, RING_RADIUS + GAP)
+	# The first ring is *just clear of the ring*, so a label sits against its own object rather than out
+	# at the edge of the screen. The rest are the same eight places pushed further, for when the near
+	# ones are taken by another label — or by the HUD, which is why the range has to reach past a
+	# readout a few hundred pixels tall rather than stopping just outside it.
+	for scale in [1.0, 1.9, 3.2, 5.0, 7.5, 11.0]:
+		for offset in offsets:
+			var box := fitted(Rect2(anchor + offset * scale - half, label_size), bounds)
 			if free_of(box, taken):
 				return box
-	return fitted(Rect2(anchor - label_size * 0.5, label_size), bounds)
+	return fitted(Rect2(anchor - half, label_size), bounds)
+
+
+## The eight places a label can sit, **each as near its ring as the label's own shape allows** — a
+## wide one goes beside the ring, a tall one above or below it.
+##
+## This is why the offsets are not a radius: one radius has to be the label's *largest* dimension, so a
+## short wide label ends up a hundred pixels off in every direction, including straight up. Sideways
+## it needs half its width and no more; vertically it needs half its height.
+static func _offsets(half: Vector2, clearance: float) -> Array[Vector2]:
+	var side := Vector2(half.x + clearance, half.y + clearance)
+	# Diagonally the label's *corner* faces the ring, so the clearance is measured to there.
+	var corner := clearance * 0.7071
+	return [
+		Vector2(side.x, 0.0),
+		Vector2(-side.x, 0.0),
+		Vector2(0.0, side.y),
+		Vector2(0.0, -side.y),
+		Vector2(half.x + corner, half.y + corner),
+		Vector2(-half.x - corner, -half.y - corner),
+		Vector2(half.x + corner, -half.y - corner),
+		Vector2(-half.x - corner, half.y + corner),
+	]
 
 
 ## A rect slid the smallest distance that puts it inside `bounds`. One bigger than the bounds is left

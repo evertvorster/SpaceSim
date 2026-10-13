@@ -420,9 +420,16 @@ about the others, which is exactly what placing a label clear of the others need
 | `static fitted(box, bounds)`, `free_of(box, taken)` | the two halves of it |
 | `static border_point(rect, towards) -> Vector2` | where a rect's border is crossed on the way to a point |
 
-**`place_label` is the whole of the label placement.** Candidates are a ring round the anchor — eight
-directions at four growing distances — and the first that fits inside `bounds` and collides with
-nothing already in `taken` wins. Labels are placed nearest-first, so what matters most picks its spot
+**`place_label` is the whole of the label placement.** Candidates are eight places round the anchor,
+each **as near it as the label's own shape allows** — a wide label goes beside the ring, a tall one
+above or below — at six growing distances. The first that fits inside `bounds` and collides with
+nothing already in `taken` wins.
+
+That the offsets are not a single radius matters: one radius has to be the label's *largest*
+dimension, so a short wide label ends up a hundred pixels off in every direction, including straight
+up, which reads as labels tied to the edges of the screen rather than to their objects. Six distances
+rather than four because the near ring is genuinely near, so the search has to reach past a HUD
+readout a few hundred pixels tall. Labels are placed nearest-first, so what matters most picks its spot
 first and the rest arrange themselves around it. A last-resort fallback is returned when nothing is
 free: an overlapping label still says where something is, and a missing one does not.
 
