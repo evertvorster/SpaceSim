@@ -33,7 +33,7 @@ enum AssetAction { RENAME }
 
 var _player: SpacesimPlayer
 var _session: SpacesimSession
-var _world: SpacesimWorld
+var _system: SpacesimSolarSystem
 
 var _dialog: SpacesimDialog
 var _assets: ItemList
@@ -62,10 +62,10 @@ var _menu_hash: String = ""
 var _menu_asset: String = ""
 
 
-func configure(player: SpacesimPlayer, session: SpacesimSession, world: SpacesimWorld) -> void:
+func configure(player: SpacesimPlayer, session: SpacesimSession, system: SpacesimSolarSystem) -> void:
 	_player = player
 	_session = session
-	_world = world
+	_system = system
 	build_screen("Personal data")
 	add_button("Save", _on_save)
 	add_button("New Story", _on_new_story)
@@ -88,8 +88,8 @@ func opened() -> void:
 	for child in content.get_children():
 		child.free()
 
-	_add_heading("%s   %s" % [_session.repo.current_history(), _world.format_time(_session.world_time)])
-	_add_heading(_world.describe(_player.location, _player.assets))
+	_add_heading("%s   %s" % [_session.repo.current_history(), _system.format_time(_session.world_time)])
+	_add_heading(_system.describe(_player.location, _player.assets))
 	if not _session.message.is_empty():
 		_add_heading(_session.message)
 
@@ -434,7 +434,7 @@ func _save_details(hash: String, playing: bool) -> String:
 	lines.append("Attributes   %s" % _pairs(state.get("attributes", {})))
 	lines.append("Assets       %s" % _asset_list(assets))
 	lines.append(
-		"Where        %s" % _world.describe(Location.from_dictionary(state.get("location", {})), assets)
+		"Where        %s" % _system.describe(Location.from_dictionary(state.get("location", {})), assets)
 	)
 	lines.append("")
 	lines.append("This is another history. Switch to it to load from it." if not playing else _load_cost(hash))
@@ -481,7 +481,7 @@ func _on_dialog_answered(action: String) -> void:
 	match _pending:
 		"new_story":
 			var started := _session.new_story(
-				_dialog.value(FIELD_HISTORY), _world, _player_name_from_dialog()
+				_dialog.value(FIELD_HISTORY), _system, _player_name_from_dialog()
 			)
 			if started["ok"]:
 				session_reloaded.emit()
@@ -538,7 +538,7 @@ func _player_name_from_dialog() -> String:
 
 
 func _on_save() -> void:
-	_session.save(_world)
+	_session.save(_system)
 	opened()
 
 
@@ -607,7 +607,7 @@ func _attribute_rows(attributes: Dictionary) -> Array:
 ## An asset reads as its own name, then what it is and where it is, so the panel does not need to
 ## know what an asset is.
 func _asset_line(asset: Dictionary) -> String:
-	var where := _world.describe(
+	var where := _system.describe(
 		SpacesimLocation.from_dictionary(asset.get("location", {})), _player.assets
 	)
 	return "%s   —   %s, %s   —   %s" % [

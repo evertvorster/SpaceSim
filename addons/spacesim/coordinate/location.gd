@@ -6,7 +6,7 @@ extends RefCounted
 ## update code — that is what being parented into a moving frame means (see `Coordinate and Spatial
 ## Scale`). A thing flying in space is in the system frame with an absolute position.
 ##
-## Turned into words by [method SpacesimWorld.describe], because saying "landed on Nix" needs the
+## Turned into words by [method SpacesimSolarSystem.describe], because saying "landed on Nix" needs the
 ## world's names and the player's assets — and `coordinate/` should not depend on either.
 
 const FIELD_FRAME := "frame"

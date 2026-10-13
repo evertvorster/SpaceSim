@@ -10,7 +10,7 @@ const Player := preload("res://addons/spacesim/player/player.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 
-const WORLD_PATH := "res://worlds/playground.json"
+const SYSTEM_PATH := "res://systems/playground.json"
 const TEST_ROOT := "/tmp/spacesim-save-test"
 
 
@@ -217,45 +217,45 @@ func _test_state_round_trip(h) -> void:
 
 
 func _test_reading_a_location(h, root: Node) -> void:
-	var world := SpacesimWorld.from_file(WORLD_PATH)
-	if world == null:
-		h.check(false, "the playground world loads")
+	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	if system == null:
+		h.check(false, "the playground system loads")
 		return
-	world.build(root)
+	system.build(root)
 
 	h.check(
-		world.frame_tree.frame_by_id("planet:terra/surface") != null, "a frame can be found by the id a save names"
+		system.frame_tree.frame_by_id("planet:terra/surface") != null, "a frame can be found by the id a save names"
 	)
 	h.check(
-		world.frame_tree.resolve_frame("planet:nonexistent/surface") == world.system_frame,
-		"a frame the world does not have falls back towards the system frame"
+		system.frame_tree.resolve_frame("planet:nonexistent/surface") == system.system_frame,
+		"a frame the system does not have falls back towards the system frame"
 	)
 
 	var assets: Array = []
 	h.check(
-		world.describe(Location.new("planet:nix/surface", Vector3.ZERO), assets) == "landed on Nix",
+		system.describe(Location.new("planet:nix/surface", Vector3.ZERO), assets) == "landed on Nix",
 		"a surface location reads as prose"
 	)
 	h.check(
-		world.describe(Location.new(Frame.SYSTEM_ID, Vector3(3.0e10, 0.0, 0.0)), assets).begins_with("in space, near"),
+		system.describe(Location.new(Frame.SYSTEM_ID, Vector3(3.0e10, 0.0, 0.0)), assets).begins_with("in space, near"),
 		"open space reads by what is near"
 	)
 
 	var base := Player.new()
 	var made := base.add_asset("Base Foo", "base", 900000, Location.new("planet:borealis/surface", Vector3.ZERO))
 	h.check(
-		world.describe(Location.new("asset:%s/interior" % made["id"], Vector3.ZERO), base.assets)
+		system.describe(Location.new("asset:%s/interior" % made["id"], Vector3.ZERO), base.assets)
 		== "in Base Foo, landed on Borealis",
 		"and something inside a base names the base and where the base is"
 	)
 
-	h.check(world.format_time(0.0) == "0-01-01 00:00", "the world's epoch reads as year 0")
-	h.check(world.format_time(86400.0) == "0-01-02 00:00", "and a day later is a day later")
+	h.check(system.format_time(0.0) == "0-01-01 00:00", "the world's epoch reads as year 0")
+	h.check(system.format_time(86400.0) == "0-01-02 00:00", "and a day later is a day later")
 	# Not an exact year: the Terran year is 365.2425 days, so half a millennium of seconds lands on or
 	# beside 500-01-01. What matters is that it is there at all, and that it grows.
-	var later := world.format_time(31556952.0 * 500.0)
+	var later := system.format_time(31556952.0 * 500.0)
 	h.check(int(later.split("-")[0]) >= 499, "and half a millennium later reads as a year near 500 ('%s')" % later)
-	world.container.free()
+	system.container.free()
 
 
 # --- plumbing ------------------------------------------------------------------------------------

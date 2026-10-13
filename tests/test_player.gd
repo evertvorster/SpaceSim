@@ -8,9 +8,9 @@ const Session := preload("res://addons/spacesim/save/session.gd")
 const Repo := preload("res://addons/spacesim/save/world_repo.gd")
 const Fixture := preload("res://tests/settings_fixture.gd")
 
-const WORLD_PATH := "res://worlds/playground.json"
+const SYSTEM_PATH := "res://systems/playground.json"
 
-## The personal-data screen hosts saving, so building it needs a session and a world. Neither
+## The personal-data screen hosts saving, so building it needs a session and a system. Neither
 ## touches anything here: the screen only reads their names, so no repository is disturbed.
 const TEST_ROOT := "/tmp/spacesim-player-test"
 
@@ -78,7 +78,7 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	h.check(settings_panel.has_signal("closed"), "and the close signal it inherits")
 
 	var player_panel := PlayerPanel.new()
-	player_panel.configure(Player.new(), Session.new(Repo.new(TEST_ROOT)), _world(root))
+	player_panel.configure(Player.new(), Session.new(Repo.new(TEST_ROOT)), _system(root))
 	layer.add_child(player_panel)
 	h.check(player_panel.actions.get_child_count() == 3, "the player screen has Save, New Story and Close")
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
@@ -92,7 +92,7 @@ func _test_player_screen_shows_the_player(h, root: Node) -> void:
 	root.add_child(layer)
 	var player := Player.new()
 	var panel := PlayerPanel.new()
-	panel.configure(player, Session.new(Repo.new(TEST_ROOT)), _world(root))
+	panel.configure(player, Session.new(Repo.new(TEST_ROOT)), _system(root))
 	layer.add_child(panel)
 
 	panel.opened()
@@ -111,10 +111,10 @@ func _test_player_screen_shows_the_player(h, root: Node) -> void:
 
 
 ## A built playground, for the screen to read names out of.
-static func _world(root: Node) -> SpacesimWorld:
-	var world := SpacesimWorld.from_file(WORLD_PATH)
-	world.build(root)
-	return world
+static func _system(root: Node) -> SpacesimSolarSystem:
+	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	system.build(root)
+	return system
 
 
 ## Whether anything under `node` displays exactly this text.

@@ -1,33 +1,33 @@
 extends RefCounted
-## Loading a world from data and building it.
+## Loading a system from data and building it.
 
 const PlayerShip := preload("res://game/player_ship.gd")
 
-const WORLD_PATH := "res://worlds/playground.json"
+const SYSTEM_PATH := "res://systems/playground.json"
 
 
 func run(h, root: Node) -> void:
-	print("  playground world")
-	var world := SpacesimWorld.from_file(WORLD_PATH)
-	h.check(world != null, "the playground world file loads")
-	if world == null:
+	print("  playground system")
+	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	h.check(system != null, "the playground system file loads")
+	if system == null:
 		return
 
-	h.check(world.name == "playground", "and is named '%s'" % world.name)
-	h.check(world.bodies.size() == 5, "with five bodies (%d)" % world.bodies.size())
+	h.check(system.name == "playground", "and is named '%s'" % system.name)
+	h.check(system.bodies.size() == 5, "with five bodies (%d)" % system.bodies.size())
 
-	var star := world.body_by_id("star:helios")
+	var star := system.body_by_id("star:helios")
 	h.check(star != null and not star.landable, "the star is a body but not landable")
-	var terra := world.body_by_id("planet:terra")
+	var terra := system.body_by_id("planet:terra")
 	h.check(terra != null and terra.landable, "Terra is landable")
 	h.check(terra != null and terra.radius > 6.0e6, "at planet scale, not toggle scale")
 
-	world.build(root)
-	h.check(world.system_frame != null and world.frame_tree != null, "building gives frames")
+	system.build(root)
+	h.check(system.system_frame != null and system.frame_tree != null, "building gives frames")
 
 	var landable := 0
 	var framed := 0
-	for body in world.bodies:
+	for body in system.bodies:
 		if not body.landable:
 			continue
 		landable += 1
@@ -35,12 +35,12 @@ func run(h, root: Node) -> void:
 			framed += 1
 	h.check(landable == 4, "four landable bodies")
 	h.check(framed == 4, "each with atmosphere and surface frames")
-	h.check(world.scale_bodies().size() == 5, "every body counts towards the local travel unit")
+	h.check(system.scale_bodies().size() == 5, "every body counts towards the local travel unit")
 
 	# The landing zone goes wherever the ship came down, with local up pointing outwards.
 	# Anywhere else would leave the ship millions of metres from its own frame's origin.
 	var point: Vector3 = terra.node.global_position + Vector3(0.0, 0.0, terra.radius)
-	world.place_landing_zone(terra, point)
+	system.place_landing_zone(terra, point)
 	h.check_near(
 		terra.surface.global_position.distance_to(terra.node.global_position),
 		terra.radius,
@@ -55,19 +55,19 @@ func run(h, root: Node) -> void:
 	)
 
 	var ship := PlayerShip.create()
-	PlayerShip.place(world, ship)
+	PlayerShip.place(system, ship)
 	ship.step(1.0 / 60.0, {"throttle": 0.0})
-	h.check(world.frame_tree.active_frame == world.system_frame, "a ship starts in the system frame")
+	h.check(system.frame_tree.active_frame == system.system_frame, "a ship starts in the system frame")
 	h.check(
-		ship.altitude() != INF and nearest_is(world, ship, "planet:terra"),
-		"above the world's start body"
+		ship.altitude() != INF and nearest_is(system, ship, "planet:terra"),
+		"above the system's start body"
 	)
-	h.check_near(ship.altitude(), world.start_altitude, "at the world's start altitude", 1.0)
+	h.check_near(ship.altitude(), system.start_altitude, "at the system's start altitude", 1.0)
 
-	world.container.free()
+	system.container.free()
 
 
 ## Whether the ship's nearest significant body is the one with this id.
-func nearest_is(world: SpacesimWorld, ship: Node3D, id: String) -> bool:
-	var body := world.body_by_id(id)
+func nearest_is(system: SpacesimSolarSystem, ship: Node3D, id: String) -> bool:
+	var body := system.body_by_id(id)
 	return body != null and ship.nearest_name == body.name

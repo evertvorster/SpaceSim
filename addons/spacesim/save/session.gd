@@ -47,22 +47,23 @@ func _init(repository: SpacesimWorldRepo) -> void:
 ##
 ## With no repository, or none with a save on the current history, the first story starts at the
 ## world's beginning and is saved straight away, so the next startup has something to load.
-func start(world: SpacesimWorld) -> Dictionary:
+func start(system: SpacesimSolarSystem) -> Dictionary:
 	if repo.exists():
 		repo.discard_working_tree()
 		if load_last():
 			message = "the last save"
 			return {"ok": true, "reason": ""}
 	else:
-		var created := repo.create({"world": world.name, "format_version": world.format_version})
+		# The reference field is named "world" on disk — the persistence sense, not the system.
+		var created := repo.create({"world": system.name, "format_version": system.format_version})
 		if not created["ok"]:
 			return created
 	var began := repo.create_history(FIRST_HISTORY)
 	if not began["ok"]:
 		return began
 	player.reset()
-	world_time = world.start_time
-	var written := save(world)
+	world_time = system.start_time
+	var written := save(system)
 	message = "a new story" if written["ok"] else written["reason"]
 	return written
 
@@ -89,22 +90,22 @@ func load(hash: String) -> Dictionary:
 
 ## Start a history from the trunk: a fresh world and a fresh player, without ending the one being
 ## played. The history and the player are named separately, because they are separate things.
-func new_story(name: String, world: SpacesimWorld, player_name := Player.DEFAULT_NAME) -> Dictionary:
+func new_story(name: String, system: SpacesimSolarSystem, player_name := Player.DEFAULT_NAME) -> Dictionary:
 	var created := repo.create_history(name)
 	if not created["ok"]:
 		return created
 	player.reset(player_name)
-	world_time = world.start_time
-	return save(world)
+	world_time = system.start_time
+	return save(system)
 
 
 ## Write the player and the clock out as a save.
-func save(world: SpacesimWorld) -> Dictionary:
+func save(system: SpacesimSolarSystem) -> Dictionary:
 	if _body() == _last_body:
 		message = "nothing has changed since the last save"
 		return {"ok": false, "reason": message}
 	var files := {Repo.STATE_FILE: Repo.state_text(player.to_dictionary(), world_time, now())}
-	var written := repo.save(files, label(world))
+	var written := repo.save(files, label(system))
 	if written["ok"]:
 		_last_body = _body()
 	# Saved silently would leave the player unable to tell whether it worked: the header above them
@@ -119,8 +120,8 @@ func _body() -> String:
 
 
 ## A save's label: the world's date and time, and where the player is. Never coordinate numbers.
-func label(world: SpacesimWorld) -> String:
-	return "%s   %s" % [world.format_time(world_time), world.describe(player.location, player.assets)]
+func label(system: SpacesimSolarSystem) -> String:
+	return "%s   %s" % [system.format_time(world_time), system.describe(player.location, player.assets)]
 
 
 ## The saves on this history, newest first, less the ones that have been deleted.

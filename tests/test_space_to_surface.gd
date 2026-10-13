@@ -1,5 +1,5 @@
 extends RefCounted
-## Fly the playground world: down to one planet, back up, then across to another.
+## Fly the playground system: down to one planet, back up, then across to another.
 ##
 ## The spatial-scale proof, driven to completion and asserted rather than eyeballed. The second
 ## landing is the one that matters for a solar system: it crosses the gap between two bodies, so
@@ -7,26 +7,26 @@ extends RefCounted
 
 const PlayerShip := preload("res://game/player_ship.gd")
 
-const WORLD_PATH := "res://worlds/playground.json"
+const SYSTEM_PATH := "res://systems/playground.json"
 const STEP := 1.0 / 60.0
 const MAX_STEPS := 120000
 
 
 func run(h, root: Node) -> void:
 	print("  fly the playground")
-	var world := SpacesimWorld.from_file(WORLD_PATH)
-	if world == null:
-		h.check(false, "the playground world file loads")
+	var system := SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	if system == null:
+		h.check(false, "the playground system file loads")
 		return
-	world.build(root)
+	system.build(root)
 	var ship := PlayerShip.create()
-	PlayerShip.place(world, ship)
-	var tree = world.frame_tree
+	PlayerShip.place(system, ship)
+	var tree = system.frame_tree
 
-	var terra := world.body_by_id("planet:terra")
-	var borealis := world.body_by_id("planet:borealis")
+	var terra := system.body_by_id("planet:terra")
+	var borealis := system.body_by_id("planet:borealis")
 
-	var first := _descend(world, ship, terra)
+	var first := _descend(system, ship, terra)
 	h.check(first["saw_atmosphere"], "descending to Terra crosses its atmosphere")
 	h.check(first["saw_surface"], "and reaches its surface frame")
 	h.check(first["landed"], "and lands (%d steps, %.0f s of flight)" % [first["steps"], first["steps"] * STEP])
@@ -61,7 +61,7 @@ func run(h, root: Node) -> void:
 	h.check(tree.active_frame == terra.atmosphere, "and has climbed out of the surface frame")
 
 	# --- across to another planet -------------------------------------------------
-	var second := _descend(world, ship, borealis)
+	var second := _descend(system, ship, borealis)
 	h.check(second["landed"], "then flies across the system and lands on Borealis (%d steps)" % second["steps"])
 	h.check(tree.active_frame == borealis.surface, "in Borealis's surface frame, not Terra's")
 	h.check(
@@ -73,12 +73,12 @@ func run(h, root: Node) -> void:
 	)
 	h.check(second["saw_borealis_as_nearest"], "and the nearest body became Borealis on the way")
 
-	world.container.free()
+	system.container.free()
 
 
 ## Fly at a body until the ship is down on its surface.
-func _descend(world: SpacesimWorld, ship: Node3D, body: SpacesimWorldBody) -> Dictionary:
-	var tree = world.frame_tree
+func _descend(system: SpacesimSolarSystem, ship: Node3D, body: SpacesimSystemBody) -> Dictionary:
+	var tree = system.frame_tree
 	var saw_atmosphere := false
 	var saw_surface := false
 	var saw_body_as_nearest := false

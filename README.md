@@ -8,8 +8,8 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 
 ## Status
 
-**Early, but real.** The playground world and the player are the game now, not a demo: coordinate
-frames, the travel unit, a data-driven world, navigation markers, settings, and a player who can be
+**Early, but real.** The playground system and the player are the game now, not a demo: coordinate
+frames, the travel unit, a data-driven system, navigation markers, settings, and a player who can be
 saved, loaded and browsed. There is no terrain, no physics and no simulation.
 
 ## Saves
@@ -28,13 +28,13 @@ is the only way one happens, and the same screen browses the histories and their
 addons/spacesim/   the engine library (idiomatic Godot addon layout)
   coordinate/      compartmentalised coordinate spaces and threshold transitions
   travel/          the local unit of travel (speed scales with distance to the nearest body)
-  world/           a world loaded from data, and the scene it builds
+  system/          a solar system loaded from data, and the scene it builds
   player/          the player's own state (attributes and assets) and the screen for it
   navigation/      navigation markers (targets, off-screen pointers)
   settings/        declared defaults in code, one machine-written file for what differs
   save/            git-backed saves: the repository, the histories, the session, the do-over
   ui/              chrome shared by the full-screen screens, and the dialogs over them
-worlds/            world files (content)
+systems/           solar system files (content)
 game/              the game: fly the playground system and land on planets
 tests/             headless test scripts
 docs/API.md        what the engine exposes, as it is implemented
@@ -56,7 +56,7 @@ godot-double-mono --path .
 ```
 
 It starts in `game/main.tscn`, flying the **playground** system from
-`worlds/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **T** to cycle
+`systems/playground.json` — **W/S** throttle, **mouse** pitch and yaw, **A/D** roll, **T** to cycle
 the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
 **`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
 than guessed at. **Tab** opens the personal data screen and **Alt+C** the settings screen; both

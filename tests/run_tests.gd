@@ -16,7 +16,7 @@ const Harness := preload("res://tests/harness.gd")
 ## contains one of those words, which is what makes iterating on one module quick.
 var suites: Array = [
 	preload("res://tests/test_frame_transition.gd"),
-	preload("res://tests/test_world.gd"),
+	preload("res://tests/test_solar_system.gd"),
 	preload("res://tests/test_travel_scale.gd"),
 	preload("res://tests/test_markers.gd"),
 	preload("res://tests/test_settings.gd"),

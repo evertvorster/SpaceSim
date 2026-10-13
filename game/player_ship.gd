@@ -1,5 +1,5 @@
 extends RefCounted
-## Builds the player's ship and puts it into a world.
+## Builds the player's ship and puts it into a system.
 ##
 ## Demo code: the flight model is an episode's business, and what is engine is the travel unit
 ## the controller applies. Shared by the demo scene and the headless tests so both fly the
@@ -34,11 +34,11 @@ static func create(ship_name := "Ship") -> Node3D:
 	return ship
 
 
-## Put a ship into a world at the world's start position, in the system frame.
-static func place(world: SpacesimWorld, ship: Node3D) -> void:
-	ship.bodies = world.scale_bodies()
-	ship.frame_tree = world.frame_tree
-	world.frame_tree.observer = ship
-	world.system_frame.add_child(ship)
-	ship.global_position = world.ship_start()
-	world.frame_tree.enter_frame(world.system_frame)
+## Put a ship into a system at the system's start position, in the system frame.
+static func place(system: SpacesimSolarSystem, ship: Node3D) -> void:
+	ship.bodies = system.scale_bodies()
+	ship.frame_tree = system.frame_tree
+	system.frame_tree.observer = ship
+	system.system_frame.add_child(ship)
+	ship.global_position = system.ship_start()
+	system.frame_tree.enter_frame(system.system_frame)

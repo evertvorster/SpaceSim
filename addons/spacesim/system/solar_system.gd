@@ -1,6 +1,6 @@
-class_name SpacesimWorld
+class_name SpacesimSolarSystem
 extends RefCounted
-## A world loaded from data, and the scene it builds.
+## A solar system loaded from data, and the scene it builds.
 ##
 ## **Content, not engine.** The file says what exists — bodies, sizes, positions, colours, the
 ## frame conventions, where the player starts. This builds the coordinate frames, the geometry,
@@ -23,7 +23,7 @@ const INTERIOR_SUFFIX := "/interior"
 
 var format_version: int
 var name: String
-var bodies: Array[SpacesimWorldBody] = []
+var bodies: Array[SpacesimSystemBody] = []
 
 ## Built by build().
 var container: Node3D
@@ -40,38 +40,38 @@ var _framing: Dictionary = {}
 var _sun_light: DirectionalLight3D
 
 
-static func from_file(path: String) -> SpacesimWorld:
+static func from_file(path: String) -> SpacesimSolarSystem:
 	var text := FileAccess.get_file_as_string(path)
 	if text.is_empty():
-		push_error("SpacesimWorld: cannot read '%s'" % path)
+		push_error("SpacesimSolarSystem: cannot read '%s'" % path)
 		return null
 	var parsed: Variant = JSON.parse_string(text)
 	if typeof(parsed) != TYPE_DICTIONARY:
-		push_error("SpacesimWorld: '%s' is not a JSON object" % path)
+		push_error("SpacesimSolarSystem: '%s' is not a JSON object" % path)
 		return null
 	return from_dictionary(parsed)
 
 
-static func from_dictionary(data: Dictionary) -> SpacesimWorld:
-	var world := SpacesimWorld.new()
-	world.format_version = int(data.get("format_version", 0))
-	world.name = String(data.get("name", "unnamed"))
-	world._framing = data.get("frames", {})
+static func from_dictionary(data: Dictionary) -> SpacesimSolarSystem:
+	var system := SpacesimSolarSystem.new()
+	system.format_version = int(data.get("format_version", 0))
+	system.name = String(data.get("name", "unnamed"))
+	system._framing = data.get("frames", {})
 	for entry in data.get("bodies", []):
-		world.bodies.append(SpacesimWorldBody.from_dictionary(entry))
+		system.bodies.append(SpacesimSystemBody.from_dictionary(entry))
 	var start: Dictionary = data.get("start", {})
-	world.start_body_id = String(start.get("body", ""))
-	world.start_altitude = float(start.get("altitude", 1.0e7))
+	system.start_body_id = String(start.get("body", ""))
+	system.start_altitude = float(start.get("altitude", 1.0e7))
 	# A story may begin at any point in the world's time; a world with none begins at its epoch.
-	world.start_time = float(start.get("world_time", 0.0))
-	return world
+	system.start_time = float(start.get("world_time", 0.0))
+	return system
 
 
-## Build the world's scene under `parent`. The observer is the caller's business: set
+## Build the solar system's scene under `parent`. The observer is the caller's business: set
 ## `frame_tree.observer` and call `enter_frame()` afterwards.
-func build(parent: Node) -> SpacesimWorld:
+func build(parent: Node) -> SpacesimSolarSystem:
 	container = Node3D.new()
-	container.name = "World"
+	container.name = "SolarSystem"
 	parent.add_child(container)
 
 	_add_lighting()
@@ -97,7 +97,7 @@ func build(parent: Node) -> SpacesimWorld:
 	return self
 
 
-func body_by_id(id: String) -> SpacesimWorldBody:
+func body_by_id(id: String) -> SpacesimSystemBody:
 	for body in bodies:
 		if body.id == id:
 			return body
@@ -112,7 +112,7 @@ func scale_bodies() -> Array[SpacesimScaleBody]:
 	return list
 
 
-## Every mesh in the world, so a debug key can hide or re-tessellate all of it.
+## Every mesh in the system, so a debug key can hide or re-tessellate all of it.
 func meshes() -> Array[MeshInstance3D]:
 	var list: Array[MeshInstance3D] = []
 	for body in bodies:
@@ -158,14 +158,14 @@ func aim_sun_at(position: Vector3) -> void:
 	)
 
 
-func star() -> SpacesimWorldBody:
+func star() -> SpacesimSystemBody:
 	for body in bodies:
 		if body.kind == "star":
 			return body
 	return null
 
 
-func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimWorldBody:
+func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimSystemBody:
 	for body in bodies:
 		if body.surface == frame:
 			return body
@@ -178,7 +178,7 @@ func body_for_surface_frame(frame: SpacesimFrame) -> SpacesimWorldBody:
 ## The Coordinate doc's surface frame is "relative to landing zone", so the zone sits wherever
 ## the ship came down rather than at one fixed site — otherwise landing anywhere but that site
 ## would put the ship millions of metres from its frame's origin, which defeats the frame.
-func place_landing_zone(body: SpacesimWorldBody, point: Vector3) -> void:
+func place_landing_zone(body: SpacesimSystemBody, point: Vector3) -> void:
 	if body.surface == null or body.node == null:
 		return
 	var outward := (point - body.node.global_position).normalized()
@@ -193,7 +193,7 @@ func place_landing_zone(body: SpacesimWorldBody, point: Vector3) -> void:
 
 
 ## Landing: the zone moves under the ship, and then the ship is put back where it was. The
-## frame moved; the world did not.
+## frame moved; the ship did not.
 func _on_frame_changed(observer: Node3D, _from: SpacesimFrame, to: SpacesimFrame) -> void:
 	if observer == null or to == null or to.kind != SpacesimFrame.Kind.SURFACE:
 		return
@@ -210,11 +210,11 @@ func _aim_zone_under(subject: Node3D, frame: SpacesimFrame) -> void:
 	subject.global_transform = keep
 
 
-## Put the observer where a save says it was, and answer whether the world still had the frame that
+## Put the observer where a save says it was, and answer whether the system still had the frame that
 ## save named. A frame that is gone means the thing stands at the frame that remains, at its origin
 ## — the stored position would mean something else there.
 ##
-## Note what is *not* restored: a surface frame's placement is the world's business (the zone moves
+## Note what is *not* restored: a surface frame's placement is the system's business (the zone moves
 ## under you as you land), so the saved position is where you were **in your locale**, not a point on
 ## a globe. Nothing here changes when terrain arrives; a surface will need its own placement.
 func place_observer(location: SpacesimLocation) -> bool:
@@ -231,7 +231,7 @@ func place_observer(location: SpacesimLocation) -> bool:
 	return exact
 
 
-func _build_body(body: SpacesimWorldBody) -> void:
+func _build_body(body: SpacesimSystemBody) -> void:
 	body.node = Node3D.new()
 	body.node.name = body.name
 	body.node.position = body.position
@@ -380,7 +380,7 @@ func format_time(seconds: float) -> String:
 	return "%d-%02d-%02d %02d:%02d" % [when["year"], when["month"], when["day"], when["hour"], when["minute"]]
 
 
-## How a world frame reads: "landed on Nix", "above Nix". Empty for a frame this world does not
+## How a system frame reads: "landed on Nix", "above Nix". Empty for a frame this system does not
 ## have — and empty for open space, which reads by what is nearby instead.
 func frame_phrase(frame_id: String) -> String:
 	var parts := frame_id.split("/", false)
@@ -406,7 +406,7 @@ func nearest_body_name(position: Vector3) -> String:
 ## on Bar". No coordinate numbers — see `Save and Load Plan` §3.
 ##
 ## Containment is frame membership, so this walks outward: an asset frame recurses into where that
-## asset is, and a world frame reads from its own id. **The whole chain is named, innermost first** —
+## asset is, and a system frame reads from its own id. **The whole chain is named, innermost first** —
 ## being in a vehicle is worth saying, because it is where the player left it.
 func describe(location: SpacesimLocation, assets: Array) -> String:
 	if location == null or not location.is_set():

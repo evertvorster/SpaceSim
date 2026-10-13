@@ -8,8 +8,8 @@ extends Node3D
 ##   P          hide/show the bodies
 ##   [ / ]      body tessellation, for attributing frame cost
 ##
-## The world comes from `worlds/playground.json`; this script only adds input, the camera's
-## render range and a readout. A different world file should not need this script changed.
+## The solar system comes from `systems/playground.json`; this script only adds input, the camera's
+## render range and a readout. A different system file should not need this script changed.
 
 const PlayerShip := preload("res://game/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
@@ -18,7 +18,7 @@ const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
 const Session := preload("res://addons/spacesim/save/session.gd")
 
-const WORLD_PATH := "res://worlds/playground.json"
+const SYSTEM_PATH := "res://systems/playground.json"
 
 const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
@@ -28,7 +28,7 @@ const THROTTLE_RATE := 0.7 ## per second
 ## flat across these, and if it tracks triangle count it moves with them.
 const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), Vector2i(256, 128)]
 
-var _world: SpacesimWorld
+var _system: SpacesimSolarSystem
 var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
@@ -51,13 +51,13 @@ var _bodies_visible := true
 
 
 func _ready() -> void:
-	_world = SpacesimWorld.from_file(WORLD_PATH)
-	if _world == null:
-		push_error("cannot load %s" % WORLD_PATH)
+	_system = SpacesimSolarSystem.from_file(SYSTEM_PATH)
+	if _system == null:
+		push_error("cannot load %s" % SYSTEM_PATH)
 		return
-	_world.build(self)
+	_system.build(self)
 	_ship = PlayerShip.create()
-	PlayerShip.place(_world, _ship)
+	PlayerShip.place(_system, _ship)
 	_markers = SpacesimMarkers.new()
 	_markers.name = "Markers"
 	add_child(_markers)
@@ -67,10 +67,10 @@ func _ready() -> void:
 	_set_detail(_detail)
 	_build_hud()
 
-	# The session comes up after the world has real frames, because restoring where the player was
+	# The session comes up after the system has real frames, because restoring where the player was
 	# means putting the ship into one of them.
-	_session = Session.for_world(_world.name)
-	var brought_up := _session.start(_world)
+	_session = Session.for_world(_system.name)
+	var brought_up := _session.start(_system)
 	if not brought_up["ok"]:
 		push_error("cannot open the world's repository: %s" % brought_up["reason"])
 	_player = _session.player
@@ -81,7 +81,7 @@ func _ready() -> void:
 	_settings_screen.exit_requested.connect(_on_exit_requested)
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
-	_player_screen.configure(_player, _session, _world)
+	_player_screen.configure(_player, _session, _system)
 	# A load, a switch or a new story all move the player, and the ship is where the player is.
 	_player_screen.session_reloaded.connect(_place_observer_from_session)
 	_register_screen(_player_screen, "Player")
@@ -121,7 +121,7 @@ func _handle_key(event: InputEventKey) -> void:
 
 	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.bodies_toggle"))):
 		_bodies_visible = not _bodies_visible
-		for body_mesh in _world.meshes():
+		for body_mesh in _system.meshes():
 			body_mesh.visible = _bodies_visible
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
@@ -200,7 +200,7 @@ func _set_detail(index: int) -> void:
 	_detail = clampi(index, 0, DETAIL_LEVELS.size() - 1)
 	var level: Vector2i = DETAIL_LEVELS[_detail]
 	_triangles = 0
-	for body_mesh in _world.meshes():
+	for body_mesh in _system.meshes():
 		var sphere: SphereMesh = body_mesh.mesh
 		sphere.radial_segments = level.x
 		sphere.rings = level.y
@@ -211,7 +211,7 @@ func _set_detail(index: int) -> void:
 ## Selection is the input half of targeting, and the smallest stand-in for the navigation we
 ## have not designed yet: cycle the significant bodies and hold the choice.
 func _cycle_target() -> void:
-	var targets := _world.significant_nodes()
+	var targets := _system.significant_nodes()
 	if targets.is_empty():
 		return
 	_selected_index = (_selected_index + 1) % targets.size()
@@ -277,9 +277,9 @@ func _physics_process(delta: float) -> void:
 	_look = Vector2.ZERO
 
 	_ship.step(delta, input)
-	_world.frame_tree.evaluate()
+	_system.frame_tree.evaluate()
 	_sync_player_location()
-	_world.aim_sun_at(_ship.global_position)
+	_system.aim_sun_at(_ship.global_position)
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_update_hud()
@@ -294,23 +294,23 @@ func _sync_player_location() -> void:
 		_session.player.location = Location.new(frame.frame_id, _ship.position)
 
 
-## Put the ship where the session says the player is. Said out loud when the world no longer has the
+## Put the ship where the session says the player is. Said out loud when the system no longer has the
 ## frame a save named, because the ship has then been placed somewhere the save did not choose.
 func _place_observer_from_session() -> void:
 	if not _player.location.is_set():
 		return
-	if not _world.place_observer(_player.location):
+	if not _system.place_observer(_player.location):
 		push_warning("the saved location's frame is gone; placed at the nearest frame that remains")
 
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and
 ## stop mattering once you are busy landing on one of them.
 func _update_markers(camera: Camera3D) -> void:
-	var frame: Frame = _world.frame_tree.active_frame
+	var frame: Frame = _system.frame_tree.active_frame
 	var in_space: bool = frame.kind == Frame.Kind.SPACE or frame.kind == Frame.Kind.ORBITAL
 	var context: Array[Node3D] = []
 	if in_space:
-		context = _world.significant_nodes()
+		context = _system.significant_nodes()
 	_markers.context_targets = context
 	_markers.refresh(camera)
 
@@ -319,7 +319,7 @@ func _update_markers(camera: Camera3D) -> void:
 ## reverse-Z (Godot 4.3+) absorbs a lot — but this is a "measure it for artefacts" item, not a
 ## settled number.
 func _update_camera(camera: Camera3D) -> void:
-	var frame: Frame = _world.frame_tree.active_frame
+	var frame: Frame = _system.frame_tree.active_frame
 	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
 	camera.near = range_for_frame.x
 	camera.far = range_for_frame.y
@@ -370,7 +370,7 @@ func _build_hud() -> void:
 ## The limit is shown alongside the speed, not instead of it: a limit the player cannot see
 ## reads as a bug.
 func _update_hud() -> void:
-	var frame: Frame = _world.frame_tree.active_frame
+	var frame: Frame = _system.frame_tree.active_frame
 	var length: float = _ship.travel_length
 	var fraction := 0.0
 	if length > 0.0:
@@ -384,9 +384,9 @@ func _update_hud() -> void:
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
-				"world       %s" % _world.name,
+				"system      %s" % _system.name,
 				"player      %s   in %s" % [_player.display_name(), _session.repo.current_history()],
-				"date        %s" % _world.format_time(_session.world_time),
+				"date        %s" % _system.format_time(_session.world_time),
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),

@@ -114,21 +114,21 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 Speed is *derived*, never integrated: there is no speed to desync and no way to arrive too
 fast, because the limit falls with the remaining distance by construction.
 
-## World
+## Solar system
 
-`addons/spacesim/world/` — a world loaded from data, and the scene it builds. **Content, not
-engine:** the file says what exists; the engine builds the frames, geometry, scale bodies and
-transition rules from it. A different world file should not require engine changes.
+`addons/spacesim/system/` — a solar system loaded from data, and the scene it builds. **Content,
+not engine:** the file says what exists; the engine builds the frames, geometry, scale bodies and
+transition rules from it. A different system file should not require engine changes.
 
-### World file
+### System file
 
-JSON, in `worlds/`. `worlds/playground.json` is the placeholder system. On-disk formats are part of
-the public interface, so the format is versioned (`format_version`).
+JSON, in `systems/`. `systems/playground.json` is the placeholder system. On-disk formats are part
+of the public interface, so the format is versioned (`format_version`).
 
 | Field | |
 |---|---|
 | `format_version` | int |
-| `name` | world name, shown in the game's readout |
+| `name` | system name, shown in the game's readout |
 | `frames` | `system_band`, `atmosphere_band`, `surface_band` ([min, max] metres), `atmosphere_altitude`, `surface_altitude` (metres), `pad_size` |
 | `start` | `body` (an id) and `altitude` (metres above that body's surface) |
 | `bodies[]` | `id`, `name`, `kind`, `radius`, `position` (system frame, metres), `color`, `landable`, `significant` |
@@ -139,7 +139,7 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 universe will add `seed` and `generator_version` here; the playground is hand-authored and has
 neither.
 
-### `SpacesimWorldBody` — `RefCounted`
+### `SpacesimSystemBody` — `RefCounted`
 
 The data half comes from the file; the node half is filled in by `build()`.
 
@@ -152,30 +152,30 @@ The data half comes from the file; the node half is filled in by `build()`.
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
-| `static from_dictionary(data) -> SpacesimWorldBody` | |
+| `static from_dictionary(data) -> SpacesimSystemBody` | |
 
-### `SpacesimWorld` — `RefCounted`
+### `SpacesimSolarSystem` — `RefCounted`
 
 | Member | |
 |---|---|
-| `static from_file(path) -> SpacesimWorld` | null on a read or parse failure |
-| `static from_dictionary(data) -> SpacesimWorld` | |
-| `build(parent) -> SpacesimWorld` | builds the scene; the observer is the caller's business |
-| `name`, `bodies: Array[SpacesimWorldBody]` | |
+| `static from_file(path) -> SpacesimSolarSystem` | null on a read or parse failure |
+| `static from_dictionary(data) -> SpacesimSolarSystem` | |
+| `build(parent) -> SpacesimSolarSystem` | builds the scene; the observer is the caller's business |
+| `name`, `bodies: Array[SpacesimSystemBody]` | |
 | `container: Node3D`, `system_frame: SpacesimFrame`, `frame_tree: SpacesimFrameTree` | built |
-| `body_by_id(id) -> SpacesimWorldBody` | |
+| `body_by_id(id) -> SpacesimSystemBody` | |
 | `scale_bodies() -> Array[SpacesimScaleBody]` | every body, for the travel unit |
 | `meshes() -> Array[MeshInstance3D]` | every body's mesh, for the hide/detail debug keys |
-| `ship_start() -> Vector3` | the world's start position |
-| `star() -> SpacesimWorldBody` | |
+| `ship_start() -> Vector3` | the system's start position |
+| `star() -> SpacesimSystemBody` | |
 | `aim_sun_at(position) -> void` | aims the star's light at a position |
-| `body_for_surface_frame(frame) -> SpacesimWorldBody` | |
+| `body_for_surface_frame(frame) -> SpacesimSystemBody` | |
 | `place_landing_zone(body, point) -> void` | puts a body's landing zone on the surface under `point` |
 
 **Landing zone.** A surface frame's origin is wherever the ship came down, not one fixed site —
 otherwise landing anywhere else would leave the ship millions of metres from its own frame's
-origin, which defeats the frame. On entering a surface frame the world moves that body's zone
-under the observer and then puts the observer back where it was: the frame moves, the world does
+origin, which defeats the frame. On entering a surface frame the system moves that body's zone
+under the observer and then puts the observer back where it was: the frame moves, the ship does
 not.
 
 **Lighting.** A single directional light cannot light a whole system from its star, so
@@ -436,7 +436,7 @@ them is; and the browser:
 
 | Member | |
 |---|---|
-| `configure(player, session, world)` | it hosts saving, so it needs all three |
+| `configure(player, session, system)` | it hosts saving, so it needs all three |
 | `session_reloaded` | signal: a load, a switch or a new story moved the player, so whoever is flying the ship has to be told |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
@@ -547,11 +547,11 @@ only place that knows a save is the player, the clock and the world.**
 | Member | |
 |---|---|
 | `static for_world(name) -> SpacesimSession` | under `$XDG_DATA_HOME/spacesim/worlds/` |
-| `start(world) -> Dictionary` | brings the repository up, loads the last save, or starts the first story |
+| `start(system) -> Dictionary` | brings the repository up, loads the last save, or starts the first story |
 | `load_last() -> bool` | the state at HEAD; no git operation, because HEAD already *is* the last save |
 | `load(hash) -> Dictionary` | the do-over |
-| `save(world) -> Dictionary`, `label(world) -> String` | |
-| `new_story(name, world, player_name)` | branches from the trunk; history and player named separately |
+| `save(system) -> Dictionary`, `label(system) -> String` | |
+| `new_story(name, system, player_name)` | branches from the trunk; history and player named separately |
 | `saves()`, `affected_saves(hash)`, `preview(hash)`, `delete_save(hash)` | deletions are tombstones |
 | `world_time: float`, `message: String`, `player`, `repo` | |
 
@@ -568,8 +568,8 @@ runs backwards — a machine clock that is ahead does not take the world back wi
 
 ### `SpacesimLocation` — `RefCounted`
 
-Where something is: a frame, and a position in it. Turned into words by `SpacesimWorld.describe()`,
-because saying "landed on Nix" needs the world's names and the player's assets — and `coordinate/`
+Where something is: a frame, and a position in it. Turned into words by `SpacesimSolarSystem.describe()`,
+because saying "landed on Nix" needs the system's names and the player's assets — and `coordinate/`
 should depend on neither.
 
 | Member | |
@@ -578,14 +578,14 @@ should depend on neither.
 | `is_set() -> bool` | |
 | `to_dictionary()`, `static from_dictionary(data)` | unreadable data gives an *unset* location, not an error |
 
-`SpacesimFrame` gains `frame_id` (and `SYSTEM_ID` for the one frame every world has).
+`SpacesimFrame` gains `frame_id` (and `SYSTEM_ID` for the one frame every system has).
 `SpacesimFrameTree` gains `register(frame)`, `frame_by_id(id)`, `place_in_frame(subject, frame,
 position)` — which *sets* the transform rather than preserving it, because a save says where
 something is — and `resolve_frame(id)` — resolving the **longest existing prefix**, so a save naming
-a frame the world no longer has is placed at the frame that remains, at its origin, rather than
+a frame the system no longer has is placed at the frame that remains, at its origin, rather than
 refused.
 
-### `SpacesimWorld` additions
+### `SpacesimSolarSystem` additions
 
 | Member | |
 |---|---|
@@ -594,7 +594,7 @@ refused.
 | `format_time(seconds) -> String` | the world clock as a Terran date and time, e.g. "512-05-02 14:33" |
 | `describe(location, assets) -> String` | the location chain as prose, innermost first |
 | `place_observer(location) -> bool` | puts the observer back where a save says it was; false when the frame had to fall back |
-| `start_time: float` | the clock a story begins at, from the world file's `start.world_time` |
+| `start_time: float` | the clock a story begins at, from the system file's `start.world_time` |
 
 **A surface location restores the distance from the surface and the frame, not the tangential
 offset** — and that is not a shortfall. A surface frame's placement is *derived*: the locale moves
@@ -618,10 +618,10 @@ calendar is a thing to build when a story does.
 
 ## The game
 
-`game/main.*` — fly around the playground system and land on planets. The world comes from a world
-file; the scene adds input, the camera's render range, the two screens and a readout.
+`game/main.*` — fly around the playground system and land on planets. The solar system comes from a
+system file; the scene adds input, the camera's render range, the two screens and a readout.
 `game/player_ship.gd` builds and places the player's ship, so the headless tests fly the identical
-world and ship.
+system and ship.
 
 | Key | |
 |---|---|
