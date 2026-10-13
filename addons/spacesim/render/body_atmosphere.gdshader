@@ -111,8 +111,16 @@ vec3 sky_color(vec3 r, vec3 r0, vec3 pSun) {
 	//     of those ran the whole march backwards.
 	float start = max(span.x, 0.0);
 	float end = span.y;
+	// **A miss and a hit have to be told apart properly, and `x > 0` does not do it.** `ray_sphere`
+	// signals "no intersection" with the sentinel `x > y`, and its `x` is **1e5** — a *positive*
+	// number, which a `> 0.0` test happily accepts as a planet hit. So every ray that misses the
+	// planet was clamped to a march of **100 km**, and only the first 100 km of air along it was ever
+	// integrated: about a third of the column at two degrees of elevation, and less the lower you
+	// looked. It presents exactly as *"a view distance"*, which is how it was spotted.
+	//
+	// A real intersection must both exist (`x <= y`) and lie ahead of the camera (`x > 0`).
 	vec2 planet_span = ray_sphere(r0, r, planet_radius);
-	if (planet_span.x > 0.0) {
+	if (planet_span.x <= planet_span.y && planet_span.x > 0.0) {
 		end = min(end, planet_span.x);
 	}
 	float span_length = end - start;
