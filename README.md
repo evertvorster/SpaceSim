@@ -67,10 +67,12 @@ the planets placed where JPL says they were at J2000. **W/S** throttle, **mouse*
 the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
 **`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
 than guessed at. **Tab** opens the personal data screen and **Alt+C** the settings screen; both
-pause the game. On the personal data screen the player's own values and each thing they hold are
-edited there, **Save** and **New Story** act on the world, and **right-clicking a row** offers what
-can be done with it — playing, renaming or deleting a history, loading or deleting a save, renaming
-something you hold. Loading always says first which saves it discards.
+pause the game. On the personal data screen **Save** and **New Story** act on the world, and the
+histories and their saves are browsed and acted on there — playing, renaming or deleting a history,
+loading or deleting a save. **Only names are editable**: the player's own, each thing they hold, and
+a history's. A name of the player's waits for **Save**, a history's **Rename** happens at once
+because it is a `git branch -m`, and every other value belongs to the game rather than to a field.
+Loading always says first which saves it would remove.
 
 Movement keys and the screen hotkeys are **bindings** in the settings file, so they can be changed
 there without a rebuild.
