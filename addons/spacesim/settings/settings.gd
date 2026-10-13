@@ -85,8 +85,12 @@ const REGISTRY := {
 		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01)
 	},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
-	"markers.font_size": {"default": 20, "scope": Scope.PLAYER, "min": 8, "max": 72},
-	"markers.margin": {"default": 100.0, "scope": Scope.PLAYER, "min": 0.0, "max": 400.0},
+	# Sized to the HUD's own 17, so the markers read as part of the screen rather than as something
+	# laid over it.
+	"markers.font_size": {"default": 17, "scope": Scope.PLAYER, "min": 8, "max": 72},
+	# Breathing room at the viewport edge. It was 100 when a pointer was clamped there and its own
+	# width decided the clearance; labels are placed inside the bounds now, so it is only a margin.
+	"markers.margin": {"default": 24.0, "scope": Scope.PLAYER, "min": 0.0, "max": 400.0},
 	"frames.system_band": {"default": Vector2(1.0e4, 1.0e11), "scope": Scope.WORLD},
 	"frames.atmosphere_band": {"default": Vector2(2.0e3, 4.0e5), "scope": Scope.WORLD},
 	"frames.surface_band": {"default": Vector2(1.0e2, 5.0e3), "scope": Scope.WORLD},

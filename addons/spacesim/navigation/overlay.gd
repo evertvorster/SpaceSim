@@ -1,0 +1,106 @@
+class_name SpacesimOverlay
+extends Control
+## The navigation overlay: a ring where each object is, and a line from the ring to its label.
+##
+## Drawn in **one pass** rather than as a node each. Twelve markers would otherwise be twelve
+## Controls to build, place and hide every frame — and none of them would know about the others,
+## which is exactly what placing a label clear of the others needs to know.
+##
+## **The ring is where the object actually is, and may be off screen.** It is the *label* that stays
+## in view, so a ring over the edge leaves its line running in from the edge — which is the direction
+## the object lies in, and the one fact the marker has to carry when the object itself cannot be
+## seen. That is the whole reason the ring is not simply clamped to the viewport with it.
+
+const RING_RADIUS := 10.0
+const RING_WIDTH := 1.0
+const LINE_WIDTH := 1.0
+
+## How much clear space a label keeps from its own ring, and from another label.
+const GAP := 12.0
+
+const RING_SEGMENTS := 24
+
+const COLOR := Color(0.85, 0.92, 1.0, 0.9)
+const SELECTED_COLOR := Color(1.0, 0.85, 0.42, 0.95)
+
+## One entry per marker, set by [SpacesimMarkers] each frame:
+## `{"circle": Vector2, "start": Vector2, "end": Vector2, "color": Color}` — or without `start`
+## and `end` for a ring that carries no label, which is what a moon gives up.
+var marks: Array[Dictionary] = []
+
+
+func _ready() -> void:
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+func _draw() -> void:
+	for mark in marks:
+		var colour: Color = mark["color"]
+		if mark.has("start"):
+			draw_line(mark["start"], mark["end"], colour, LINE_WIDTH, true)
+		# After the line, so the ring sits on top of it.
+		draw_arc(mark["circle"], RING_RADIUS, 0.0, TAU, RING_SEGMENTS, colour, RING_WIDTH, true)
+
+
+# --- placement -------------------------------------------------------------------------------------
+
+## Where a label goes: **as near its ring as it can be without landing on another label**, and
+## always inside `bounds`.
+##
+## Candidates are a ring round the anchor — eight directions at four growing distances — and the
+## first that fits and collides with nothing wins. Labels are placed nearest-first, so what matters
+## most picks its spot first and the rest arrange themselves around it, which is what keeps a screen
+## full of them readable instead of a pile at the edge.
+##
+## A last-resort fallback is returned when nothing is free, so a label is never silently dropped:
+## an overlapping label still says where something is, and a missing one does not.
+static func place_label(
+	anchor: Vector2, label_size: Vector2, taken: Array[Rect2], bounds: Rect2
+) -> Rect2:
+	var reach := maxf(label_size.x, label_size.y) * 0.5 + RING_RADIUS + GAP
+	var radii: Array[float] = [reach, reach * 1.7, reach * 2.6, reach * 3.7]
+	for radius in radii:
+		for step in 8:
+			var angle := TAU * float(step) / 8.0
+			var at := anchor + Vector2(cos(angle), sin(angle)) * radius
+			var box := fitted(Rect2(at - label_size * 0.5, label_size), bounds)
+			if free_of(box, taken):
+				return box
+	return fitted(Rect2(anchor - label_size * 0.5, label_size), bounds)
+
+
+## A rect slid the smallest distance that puts it inside `bounds`. One bigger than the bounds is left
+## where it is rather than squashed — a label that does not fit is a font-size problem, not a
+## placement one.
+static func fitted(box: Rect2, bounds: Rect2) -> Rect2:
+	var moved := box
+	if box.size.x <= bounds.size.x:
+		moved.position.x = clampf(box.position.x, bounds.position.x, bounds.end.x - box.size.x)
+	if box.size.y <= bounds.size.y:
+		moved.position.y = clampf(box.position.y, bounds.position.y, bounds.end.y - box.size.y)
+	return moved
+
+
+static func free_of(box: Rect2, taken: Array[Rect2]) -> bool:
+	for other in taken:
+		if other.intersects(box):
+			return false
+	return true
+
+
+## The point where the border of `rect` is crossed on the way to `towards`, seen from its centre.
+##
+## The one piece of geometry the overlay needs twice: a leader line should meet a label's box rather
+## than run under its text, and a ring that is off screen should put its line on the viewport edge.
+static func border_point(rect: Rect2, towards: Vector2) -> Vector2:
+	var centre := rect.get_center()
+	var delta := towards - centre
+	if delta.length_squared() < 0.000001:
+		return centre
+	var reach := INF
+	if absf(delta.x) > 0.0001:
+		reach = minf(reach, (rect.size.x * 0.5) / absf(delta.x))
+	if absf(delta.y) > 0.0001:
+		reach = minf(reach, (rect.size.y * 0.5) / absf(delta.y))
+	return centre + delta * reach

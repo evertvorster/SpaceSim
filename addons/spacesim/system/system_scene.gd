@@ -156,6 +156,26 @@ func meshes() -> Array[MeshInstance3D]:
 
 
 ## The bodies worth marking, in file order. Content decides which those are.
+## For every **moon**, the body it orbits — keyed by the moon's node, so the navigation overlay can
+## tell a moon's marker from a planet's without knowing anything about the system's structure.
+##
+## **Moons only.** A planet's own `parent_id` is its star, and "hidden by the thing you orbit" is not
+## the same claim at all there: a star's disc is a fraction of a pixel from any distance, so the rule
+## would hide planets for being roughly in the Sun's direction — which is where they spend half of
+## every orbit. A moon is the case where the parent really does dominate what you can see.
+##
+## A fact about the system rather than about a frame, so it is built once.
+func orbit_parents() -> Dictionary:
+	var parents := {}
+	for body in bodies:
+		if body.kind != "moon" or body.node == null:
+			continue
+		var parent := body_by_id(body.parent_id)
+		if parent != null and parent.node != null:
+			parents[body.node] = parent
+	return parents
+
+
 func significant_nodes() -> Array[Node3D]:
 	var list: Array[Node3D] = []
 	for body in bodies:

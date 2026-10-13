@@ -373,16 +373,19 @@ That script needs a window (`xvfb-run` counts), which is why it is not part of `
 
 ## Navigation
 
-`addons/spacesim/navigation/` — navigation markers: a name and distance for the objects that
-matter right now.
+`addons/spacesim/navigation/` — navigation markers: **a ring where each object is, a line, and a
+label**. The beginning of the HUD's navigation overlay.
 
-Two presentations, one projection. **On screen:** a `Label3D` at the object's position,
-billboarded and at a constant screen size, depth tested — because it sits at the object's *centre*,
-the object's own projected area eats it, so it needs no distance or size test and no fade.
-**Off screen:** a `Label` in a `CanvasLayer`, clamped to the viewport edge in the direction that
-would bring the object into view.
+- **The ring** is the object's own screen position, and **may be off screen**. It is the label that
+  stays in view, so an object over the edge leaves its line running in from the edge, pointing at
+  where it is — the one fact a marker has to carry when the object cannot be seen. That is why the
+  ring is not clamped along with the label.
+- **The line** runs from the ring's edge to the label's box, which is what makes a label in the
+  middle of a crowded screen still belong to something. It leaves a *visible* ring at the ring's
+  edge rather than its middle, so it does not run across the circle it belongs to.
+- **The label** is a name and a distance, placed clear of every other label and of the HUD.
 
-The set is rebuilt every frame and the nodes are **pooled, not allocated**; the pool size is the
+The set is rebuilt every frame and the labels are **pooled, not allocated**; the pool size is the
 screen-space budget in one place.
 
 ### `SpacesimMarkers` — `Node3D`
@@ -393,11 +396,50 @@ screen-space budget in one place.
 | `pool_size: int` | the cap, and the screen-space budget |
 | `context_targets`, `mission_targets: Array[Node3D]` | ambient group, then mission objectives |
 | `selected: Node3D` | the selected target, or null |
-| `refresh(camera) -> void` | rebuild the set and draw it; call once a frame |
+| `refresh(camera) -> void` | rebuild the set, place its labels, hand the rings to the overlay; call once a frame |
+| `reserved: Array[Rect2]` | rectangles no label may be placed over — the HUD, handed in by the caller |
+| `orbits: Dictionary` | moon node → the [SpacesimSceneBody] it orbits; handed in once, a fact about the system |
 | `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame |
 | `static clamp_to_edge(point, size, margin) -> Vector2` | the smallest turn that brings a point into view |
 | `static screen_direction(camera, target) -> Vector2` | viewport direction, valid behind the camera |
+| `static leader_start(circle, towards, viewport) -> Vector2` | the ring's edge, or where the line crosses the viewport edge |
 | `static format_distance(metres) -> String` | `1.50 Gm`, `2.5 km`, `12 m` |
+
+### `SpacesimOverlay` — `Control`
+
+Draws every ring and leader line in **one `_draw()` pass** rather than as a node each. Twelve markers
+would otherwise be twelve Controls to build, place and hide every frame — and none of them would know
+about the others, which is exactly what placing a label clear of the others needs to know.
+
+| Member | |
+|---|---|
+| `marks: Array[Dictionary]` | one per marker, set each frame; a mark with no `start` is a ring with no label |
+| `RING_RADIUS`, `RING_WIDTH`, `LINE_WIDTH` | 10 px across, 1 px strokes |
+| `COLOR`, `SELECTED_COLOR` | `SELECTED_COLOR` is the amber of a target |
+| `static place_label(anchor, label_size, taken, bounds) -> Rect2` | **the overlap avoidance** |
+| `static fitted(box, bounds)`, `free_of(box, taken)` | the two halves of it |
+| `static border_point(rect, towards) -> Vector2` | where a rect's border is crossed on the way to a point |
+
+**`place_label` is the whole of the label placement.** Candidates are a ring round the anchor — eight
+directions at four growing distances — and the first that fits inside `bounds` and collides with
+nothing already in `taken` wins. Labels are placed nearest-first, so what matters most picks its spot
+first and the rest arrange themselves around it. A last-resort fallback is returned when nothing is
+free: an overlapping label still says where something is, and a missing one does not.
+
+### A moon gives up its label, not its ring
+
+**Io is a pixel from Jupiter and Luna a pixel from Earth from anywhere short of close approach**, so
+two names a pixel apart say no more than one — and the parent's is the one that stays, because the
+planet is what tells you where you are. A moon is drawn only when it is the **target**.
+
+It is a fact about the two *labels*, and says nothing about whether the moon is there: the ring is
+still drawn, with no line and nothing written beside it. The parent has to be marked at all, or there
+is nothing to give way to.
+
+The map it uses is `SpacesimSystemScene.orbit_parents()`, which is **moons only**. A planet's own
+`parent_id` is its star, and "hidden by the thing you orbit" is not the same claim there — a star's
+disc is a fraction of a pixel from any distance, so the rule would hide planets for being roughly in
+the Sun's direction, which is where they spend half of every orbit.
 
 **The set is keyed, prioritised and capped.** One marker per object — a body that is both a
 mission target and in the ambient group gets one label, not two stacked on it. Priority decides
@@ -487,8 +529,8 @@ on change (`camera.fov`, the marker pool and font size).
 | `camera.fov` | player | 70.0 |
 | `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on |
 | `markers.pool_size` | player | 12 |
-| `markers.font_size` | player | 20 |
-| `markers.margin` | player | 100.0 |
+| `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
+| `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
 | `frames.system_band` / `_atmosphere_band` / `_surface_band` | world | `Vector2(1e4, 1e11)` and so on |
 | `frames.atmosphere_altitude` / `_surface_altitude` / `_pad_size` | world | 100000.0 / 2000.0 / 4000.0 |
 
