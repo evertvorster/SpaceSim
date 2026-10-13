@@ -113,6 +113,55 @@ static func temperature_at(
 	return maxf(surface_temperature - lapse * maxf(height, 0.0), tropopause_temperature)
 
 
+## The **grey infrared optical depth** of the whole column, top to surface: `sum(kappa_i * column_i)`.
+##
+## Each species' column mass is `x_i * (M_i / m-bar) * (p_surface / g)` — mole fraction turned into a
+## mass fraction and multiplied by the total column `p/g` — so this needs nothing that is not already
+## derived. `kappa` is the material table's `greenhouse[0]`, and it is **zero** for the gases that are
+## transparent in the infrared rather than absent, so "known transparent" and "not known" do not look
+## alike.
+static func greenhouse_optical_depth(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	gravity: float
+) -> float:
+	if atmosphere == null or materials == null or gravity <= 0.0:
+		return 0.0
+	var molar := mean_molar_mass(atmosphere, materials)
+	if molar <= 0.0:
+		return 0.0
+	var column := atmosphere.surface_pressure / gravity ## kg/m2, the whole air
+	var depth := 0.0
+	for key in atmosphere.species:
+		var material := materials.by_name(String(key))
+		if material == null or material.greenhouse.is_empty():
+			continue
+		var mass_fraction := float(atmosphere.species[key]) * material.molar_mass / molar
+		depth += material.greenhouse[0] * mass_fraction * column
+	return depth
+
+
+## **The surface temperature, with the greenhouse.** The grey-atmosphere result, which is textbook:
+##
+##     T_surface = T_eff * (1 + 3 * tau / 4) ^ (1/4)
+##
+## An atmosphere that is transparent in the infrared (`tau = 0`) leaves the surface at `T_eff`, which
+## is the right answer for an airless body and for Titan's nearly-clear methane. As `tau` grows the
+## surface warms, and **Venus is why this is worth having**: 92 bar of CO2 gives `tau` of 142 and a
+## surface 508 K above its equilibrium temperature, out of the column mass alone. No cloud term is
+## needed for that — the sulphuric-acid deck is already in the albedo, and the two agree.
+static func surface_temperature(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	gravity: float,
+	equilibrium: float
+) -> float:
+	if equilibrium <= 0.0:
+		return equilibrium
+	var depth := greenhouse_optical_depth(atmosphere, materials, gravity)
+	return equilibrium * pow(1.0 + 0.75 * depth, 0.25)
+
+
 ## The temperature a purely radiative atmosphere would hold at its top: `2^-1/4 * T_eff`, the
 ## grey-atmosphere skin temperature. Below this the profile is the adiabat instead.
 static func tropopause_temperature(equilibrium: float) -> float:

@@ -34,6 +34,7 @@ func run(h, root: Node) -> void:
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_shells_reach_the_right_height(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
+	_test_the_greenhouse(h, scene)
 	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
@@ -300,6 +301,86 @@ func _test_the_temperature_profile(h, scene: SpacesimSystemScene, sol: SpacesimS
 		"above the tropopause the profile is flat, not still falling")
 	h.check(SpacesimAtmosphereModel.temperature_at(0.0, surface, lapse, tropopause) == surface,
 		"and at the surface it is the surface temperature")
+
+
+## **Stage B: the greenhouse, and the measured surface temperatures it reproduces.**
+##
+## This is §3.6's hardest test. Each of the three absorbers is fixed against one measured surface
+## temperature, and the point of the table below is that the *other* two bodies come out right with
+## nothing tuned for them — Mars and Triton are untouched checks, and Triton is transparent to a
+## rounding error, which is what an airless body should be.
+func _test_the_greenhouse(h, scene: SpacesimSystemScene) -> void:
+	var materials := SpacesimMaterialTable.engine_table()
+	var star := scene.star()
+	var luminosity := SpacesimStarModel.luminosity(star.content)
+
+	for entry in [
+		{"id": "planet:earth", "tau": 0.857, "surface": 288.0, "measured": 288.0},
+		{"id": "planet:venus", "tau": 141.6, "surface": 737.0, "measured": 737.0},
+		{"id": "moon:titan", "tau": 0.693, "surface": 94.0, "measured": 94.0},
+		{"id": "planet:mars", "tau": 0.022, "surface": 212.9, "measured": 210.0},
+		# Triton is the airless-shaped check: the profile is there, the greenhouse is zero.
+		{"id": "moon:triton", "tau": 0.0, "surface": 41.5, "measured": 38.0},
+	]:
+		var body := scene.body_by_id(String(entry["id"]))
+		var air := body.content.atmosphere
+		var gravity := SpacesimAtmosphereModel.surface_gravity(body.content)
+		# **At the mean orbital distance**, because the measured figure being compared against is a
+		# mean. The model itself is given the body's *actual* position by the scene, so the derived
+		# temperature moves with the orbit — which is a season, and it is checked a little lower down.
+		# **A moon's orbit is relative to its planet**, so its own semi-major axis says nothing about how
+		# far it is from the star — Titan's would have put it 2,889 K. The mean distance is the parent's
+		# orbit; only a body orbiting the star uses its own.
+		var mean := body.content.orbit.semi_major_axis
+		var parent := scene.body_by_id(body.content.parent_id)
+		if parent != null and parent.kind != "star":
+			mean = parent.content.orbit.semi_major_axis
+		if mean <= 0.0:
+			mean = body.position.distance_to(star.position)
+		var equilibrium := SpacesimAtmosphereModel.equilibrium_temperature(
+			body.content, materials, luminosity, mean)
+		var depth := SpacesimAtmosphereModel.greenhouse_optical_depth(air, materials, gravity)
+		h.check(absf(depth - float(entry["tau"])) < 0.5,
+			"%s: the column's infrared optical depth is %.3f" % [entry["id"], depth])
+		var surface := SpacesimAtmosphereModel.surface_temperature(air, materials, gravity, equilibrium)
+		h.check(absf(surface - float(entry["measured"])) < 4.0,
+			"its surface comes out %.1f K against a measured %.0f, from %.1f K of insolation alone"
+				% [surface, entry["measured"], equilibrium])
+
+	# **A season, and it is free.** The insolation is a function of `t`, so a body on an eccentric orbit
+	# is warmer nearer its star — Earth by a couple of kelvin, Mars by about twelve. Nothing models this;
+	# it falls out of evaluating the orbit at the current time, which is what §4 asks for.
+	var earth := scene.body_by_id("planet:earth")
+	var earth_mean := SpacesimAtmosphereModel.equilibrium_temperature(
+		earth.content, materials, luminosity, earth.content.orbit.semi_major_axis)
+	var near := SpacesimAtmosphereModel.equilibrium_temperature(
+		earth.content, materials, luminosity, earth.content.orbit.semi_major_axis * (1.0 - 0.0167))
+	var far := SpacesimAtmosphereModel.equilibrium_temperature(
+		earth.content, materials, luminosity, earth.content.orbit.semi_major_axis * (1.0 + 0.0167))
+	h.check(far < near and near - far > 3.0,
+		"Earth swings %.1f K between perihelion and aphelion" % (near - far))
+	# And the planet's own temperature follows the orbit rather than the mean.
+	var here := SpacesimAtmosphereModel.equilibrium_temperature(
+		earth.content, materials, luminosity, earth.position.distance_to(star.position))
+	h.check(absf(here - earth_mean) > 0.5,
+		"and at the epoch it sits at %.1f K, %.1f K from its own mean" % [here, here - earth_mean])
+
+	# **The physical checks that are not targets.** Nitrogen, oxygen, argon, helium and hydrogen are
+	# transparent in the infrared, and that is why Earth is warmed by 1% water vapour rather than by the
+	# nitrogen that is 78% of its air. The ordering of the absorbers is a real result too: water vapour
+	# far stronger per kilogram than methane, methane than CO2.
+	for transparent in ["nitrogen", "oxygen", "argon", "helium", "hydrogen"]:
+		var material := materials.by_name(transparent)
+		h.check(material.greenhouse.size() == 1 and material.greenhouse[0] == 0.0,
+			"%s is transparent in the infrared" % transparent)
+	var water := materials.by_name("water_vapour").greenhouse[0]
+	var methane := materials.by_name("methane").greenhouse[0]
+	var carbon := materials.by_name("carbon_dioxide").greenhouse[0]
+	h.check(water > 50.0 * methane and methane > carbon,
+		"and the absorbers are ordered as physics says: H2O %.5f, CH4 %.5f, CO2 %.5f"
+			% [water, methane, carbon])
+	h.check(absf(carbon - 0.0001397) < 1.0e-7 and absf(methane - 0.0001961) < 1.0e-7,
+		"both within the range of published broadband infrared absorptivities")
 
 
 func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:
