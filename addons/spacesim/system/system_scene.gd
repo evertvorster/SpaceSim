@@ -41,7 +41,8 @@ var start_time: float = 0.0
 var _framing: SpacesimFraming
 ## World-clock seconds at which the orbital elements are stated — the content's `epoch`.
 var _epoch_time: float = 0.0
-var _sun_light: DirectionalLight3D
+## The star as a light source; null until build(). The node is `star_light.light`.
+var star_light: SpacesimStarLight
 
 
 static func from_file(path: String) -> SpacesimSystemScene:
@@ -156,25 +157,19 @@ func ship_start() -> Vector3:
 	return body.node.global_position + Vector3(body.radius + start_altitude, 0.0, 0.0)
 
 
-## Point the star's light correctly for something at `position`. A single directional light
-## cannot light a whole system from a star, so it is aimed at wherever the player is: the
-## planet you are at is lit from the right side, and a planet on the far side of the star is
-## lit from its own side rather than the near one.
+## Point the star's light correctly for something at `position`, and set its strength for that
+## distance. A single directional light cannot light a whole system from a star, so it lights
+## wherever the player is: the planet you are at is lit from the right side, and a planet on the far
+## side of the star is lit from its own side rather than the near one. That is also the only distance
+## whose illuminance is worth computing, because it is the only one the player can see.
 func aim_sun_at(position: Vector3) -> void:
-	if _sun_light == null:
+	if star_light == null:
 		return
-	var star := star()
-	var direction := Vector3.BACK
-	if star != null and star.node != null:
-		direction = (position - star.node.global_position).normalized()
-	if direction.length() < 0.5:
-		return # standing on the star
-	var up := Vector3.UP
-	if absf(direction.dot(up)) > 0.999:
-		up = Vector3.RIGHT
-	_sun_light.global_transform = _sun_light.global_transform.looking_at(
-		_sun_light.global_position + direction, up
-	)
+	var star_body := star()
+	var origin := Vector3.ZERO
+	if star_body != null and star_body.node != null:
+		origin = star_body.node.global_position
+	star_light.aim_at(position, origin)
 
 
 func star() -> SpacesimSceneBody:
@@ -383,17 +378,24 @@ func _build_body(body: SpacesimSceneBody) -> void:
 
 
 func _add_lighting() -> void:
-	_sun_light = DirectionalLight3D.new()
-	_sun_light.name = "StarLight"
-	_sun_light.light_energy = 1.4
-	container.add_child(_sun_light)
+	# The star is a real light source: its luminosity and the distance to the observer give an
+	# illuminance in lux, and the camera exposes for that. Nothing is hand-tuned per location, so the
+	# same code lights Mercury and Neptune correctly — which a fixed energy cannot, since they differ
+	# by 6,000:1.
+	var luminosity := 0.0
+	var temperature := 0.0
+	var star_body := star()
+	if star_body != null and star_body.content != null:
+		luminosity = SpacesimStarModel.luminosity(star_body.content)
+		temperature = SpacesimStarModel.effective_temperature(luminosity, star_body.radius)
+	star_light = SpacesimStarLight.new()
+	star_light.create(container, luminosity, temperature)
 
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color(0.01, 0.012, 0.02)
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.07, 0.07, 0.09)
-	environment.ambient_light_energy = 1.0
+	# Ambient is a small floor rather than physics — see SpacesimExposure. Space has almost none.
+	SpacesimExposure.configure(environment, Color(0.07, 0.07, 0.09))
 	var world_environment := WorldEnvironment.new()
 	world_environment.name = "Environment"
 	world_environment.environment = environment

@@ -29,6 +29,9 @@ static func create(ship_name := "Ship") -> Node3D:
 	camera.name = "Camera"
 	camera.position = CAMERA_OFFSET
 	camera.fov = 70.0
+	# Exposure is a camera property, not a world one: the star's light is physical (lux), and the
+	# camera is what keeps that range readable instead of black or white.
+	camera.attributes = SpacesimExposure.camera_attributes()
 	ship.add_child(camera)
 
 	return ship

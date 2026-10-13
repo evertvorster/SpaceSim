@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://addons/spacesim/system/content/orbit.gd" id="orbit"]
 [ext_resource type="Script" path="res://addons/spacesim/system/content/atmosphere.gd" id="atmosphere"]
 [ext_resource type="Script" path="res://addons/spacesim/system/content/surface.gd" id="surface"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/overrides.gd" id="overrides"]
 
 ; SOL — the development and calibration system.
 ;
@@ -62,6 +63,11 @@ surface_altitude = 2000.0
 pad_size = 4000.0
 
 ; ---------- layers ----------
+
+[sub_resource type="Resource" id="Ov_sol"]
+script = ExtResource("overrides")
+set = PackedStringArray("luminosity")
+luminosity = 3.828e+26
 
 [sub_resource type="Resource" id="L_sol"]
 script = ExtResource("layer")
@@ -672,6 +678,7 @@ kind = 0
 primary = true
 radius = 695700000.0
 mass = 1.9884e+30
+overrides = SubResource("Ov_sol")
 rotation_period = 2192832.0
 axial_tilt = 7.25
 layers = Array[ExtResource("layer")]([SubResource("L_sol")])

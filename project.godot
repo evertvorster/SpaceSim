@@ -21,3 +21,7 @@ SpacesimSettings="*res://addons/spacesim/settings/settings.gd"
 [rendering]
 
 renderer/rendering_method="forward_plus"
+; Lights are specified in physical units — lux for a directional light — rather than as a hand-tuned
+; energy multiplier. Required by SpacesimStarLight: with this off, Godot ignores
+; light_intensity_lux entirely and a star set from its real illuminance does nothing at all.
+lights_and_shadows/use_physical_light_units=true

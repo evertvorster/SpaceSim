@@ -237,6 +237,51 @@ not.
 `aim_sun_at()` re-aims it at wherever the player is. The planet you are at is lit correctly; the
 one on the far side of the star is lit from its own side rather than the near one.
 
+## Lighting
+
+`addons/spacesim/lighting/` — the star as a physical light source, and the camera that exposes for it.
+
+A fixed light energy cannot work across a solar system: Mercury to Neptune is **6,000:1**, about 12.6
+stops, before surface albedo. So the star's light is set in **lux** and the camera exposes. The same
+code lights every distance; nothing is hand-tuned per location.
+
+**Requires `rendering/lights_and_shadows/use_physical_light_units = true`** in `project.godot`. With
+it off, Godot ignores `light_intensity_lux` entirely and every number below is correct and invisible.
+
+### `SpacesimStarLight` — `RefCounted`
+
+| Member | |
+|---|---|
+| `LUMINOUS_EFFICACY` | 94 lm/W for sunlight; a constant, with a Planck-derived value as a later refinement |
+| `luminosity`, `light: DirectionalLight3D` | |
+| `create(parent, luminosity, temperature) -> DirectionalLight3D` | sets `light_temperature` and the Sun's 0.533° `light_angular_distance`, so a terminator reads as one |
+| `static irradiance(luminosity, distance) -> float` | W/m² — the solar constant, 1361, at 1 au |
+| `static illuminance(luminosity, distance) -> float` | lux — 128,000 at 1 au |
+| `aim_at(observer_position, star_position) -> void` | aims the light and sets its strength for that distance |
+
+### `SpacesimExposure` — `RefCounted`
+
+**Auto-exposure is on `CameraAttributes`, not on the `Environment`** — probed on 4.7.2. The
+Environment owns only the tone curve, which is convenient: a camera is re-exposed without touching
+the world.
+
+| Member | |
+|---|---|
+| `MIN_EXPOSURE_EV`, `MAX_EXPOSURE_EV` | -6 to 16: 22 stops, wider than the ~16 the system spans |
+| `ADAPTATION_SPEED` | 0.6 — slow, because fast exposure pumps while you fly past something |
+| `AMBIENT_ENERGY` | 0.02 — a floor so a night side is dark rather than a hole, and so auto-exposure is not driven to its ceiling by an almost-empty frame. **Not physics**: space has almost no ambient |
+| `static camera_attributes() -> CameraAttributesPhysical` | auto-exposure on plus the EV clamp; assign to `Camera3D.attributes` |
+| `static configure(environment, ambient_color)` | the AgX tone curve, `tonemap_white`, ambient, and the star's glare via `glow_*` — the star's disk rolls off instead of dominating the exposure histogram |
+
+### `SpacesimStarModel` — `RefCounted`
+
+`addons/spacesim/system/model/` — the first of the derivation.
+
+| Member | |
+|---|---|
+| `static luminosity(body) -> float` | what content pinned, or the piecewise mass–luminosity relation |
+| `static effective_temperature(luminosity, radius) -> float` | Stefan-Boltzmann. **A check on the data, not a restatement of it**: L and R are measured independently, and the Sun's give 5772 K |
+
 ## Navigation
 
 `addons/spacesim/navigation/` — navigation markers: a name and distance for the objects that
