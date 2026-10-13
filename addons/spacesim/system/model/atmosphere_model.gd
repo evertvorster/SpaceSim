@@ -8,8 +8,12 @@ extends RefCounted
 ## render the air, and it comes from the same data the rest of the model reads.
 
 ## Earth at one atmosphere is the reference. Fog density is not a physical unit in Godot, so this is
-## a mapping constant rather than physics — named so it can be found.
-const DENSITY_AT_ONE_BAR := 0.03
+## a mapping constant rather than physics — named so it can be found, and scaled live by the
+## `air.density` setting.
+##
+## Small on purpose: it multiplies the whole shell, so it is the difference between haze and a
+## whiteout. The first attempt was 25x larger and Evert could see nothing at all through it.
+const DENSITY_AT_ONE_BAR := 0.0012
 const REFERENCE_PRESSURE := 101325.0
 
 

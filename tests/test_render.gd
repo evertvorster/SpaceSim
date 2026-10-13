@@ -57,8 +57,27 @@ func _test_the_air_is_a_shell(h, scene: SpacesimSystemScene, sol: SpacesimSolarS
 	h.check(not earth.air_volume.visible, "hidden until the observer is inside it")
 
 	var air: FogMaterial = earth.air_volume.material
-	h.check(air.height_falloff > 0.0,
-		"with a falloff, so it thins with height instead of filling the shell evenly")
+	# The falloff is a **density texture**, not `height_falloff`, which measures height in world space —
+	# and a sphere's height above its own surface is a radius, not a Y. Left to height_falloff it
+	# measured uniform: "keeps the same thickness all the way up".
+	h.check(air.height_falloff == 0.0, "the falloff is not left to height_falloff, which measures world space")
+	h.check(air.density_texture != null, "but lives in a density texture, sampled in the volume's own space")
+	h.check(air.density < 0.01, "and the density is small enough to see through (%.4f)" % air.density)
+	h.check(scene.environment != null and scene.environment.volumetric_fog_density == 0.0,
+		"while the environment's own global fog is off, so the shell is the only fog there is")
+
+	# And the profile is a function of radius: full at the surface, thinning logarithmically, and
+	# almost gone exactly where the atmosphere is declared to end.
+	var top: float = sol.framing.atmosphere_altitude
+	var scale := top * SpacesimBodyRenderer.AIR_SCALE_FRACTION
+	h.check_near(SpacesimBodyRenderer.air_profile(earth.radius, earth.radius, scale), 1.0,
+		"the air is at full density at the surface", 1.0e-9)
+	var at_top := SpacesimBodyRenderer.air_profile(earth.radius + top, earth.radius, scale)
+	h.check_near(at_top, exp(-6.0), "and down to %.4f at the top, where space begins" % at_top, 1.0e-6)
+	var halfway := SpacesimBodyRenderer.air_profile(earth.radius + top * 0.5, earth.radius, scale)
+	h.check(halfway < 0.1 and halfway > 0.0,
+		"halfway up it is %.4f — thinned, and never actually zero" % halfway)
+
 	h.check(air.albedo.b >= air.albedo.r,
 		"and pale blue air, from the nitrogen and oxygen that make it (%.2f, %.2f, %.2f)"
 			% [air.albedo.r, air.albedo.g, air.albedo.b])

@@ -307,6 +307,11 @@ func _update_air() -> void:
 	for body in _system.bodies:
 		if body.air_volume != null:
 			body.air_volume.visible = body == air_body
+	if air_body != null and air_body.air_volume != null:
+		# Read per frame so it stays hot: a tuning knob that needs a rebuild is not a tuning knob.
+		var material := air_body.air_volume.material as FogMaterial
+		material.density = SpacesimAtmosphereModel.density(air_body.content) \
+			* float(SpacesimSettings.get_value("air.density"))
 	if _system.environment != null:
 		_system.environment.volumetric_fog_enabled = air_body != null
 
