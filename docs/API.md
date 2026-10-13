@@ -221,8 +221,12 @@ have no derived mass yet, so a moon of one stands still.
 | `meshes() -> Array[MeshInstance3D]` | every body's mesh, for the hide/detail debug keys |
 | `ship_start() -> Vector3` | the system's start position |
 | `star() -> SpacesimSceneBody` | |
+| `illuminance_at(position) -> float` | the light at a position, in lux |
 | `aim_sun_at(position) -> void` | aims the star's light at a position |
 | `body_for_surface_frame(frame) -> SpacesimSceneBody` | |
+| `air_body(frame) -> SpacesimSceneBody` | the body whose air that frame is inside — its atmosphere or surface frame — or null in space |
+| `sky_reach(frame) -> float` | **how far the sky can be, in metres** — `sqrt(2) * sqrt(outer^2 - planet^2)`, or 0 in space. See **The far plane** below |
+| `update_atmospheres(observer) -> void` | points every air shell at the observer and at its star. Called once a frame, like `aim_sun_at()` |
 | `place_landing_zone(body, point) -> void` | puts a body's landing zone on the surface under `point` |
 
 **Placement.** Bodies go down in dependency order rather than file order — a moon is placed relative
@@ -238,6 +242,29 @@ not.
 **Lighting.** A single directional light cannot light a whole system from its star, so
 `aim_sun_at()` re-aims it at wherever the player is. The planet you are at is lit correctly; the
 one on the far side of the star is lit from its own side rather than the near one.
+
+**The far plane. The `camera.range_*` settings are floors, not ceilings.** They exist for depth
+precision, and a far plane that small clips whatever is further away — which was `1e11` for space,
+*less than one au*, so every body past 0.67 au and the star itself went undrawn. `_update_camera`
+therefore raises `far` to cover what must be visible: the system in space, and **inside a body's air
+both the sky and the system**, because a sky has the star and the other bodies in it.
+
+The sky is much further away than it looks, which is why `sky_reach()` exists. The air is a *thin
+skin* — 100 km over a 6,371 km planet — so the distance out to the shell is ~100 km straight up and
+~1,130 km at the horizon. **And the longest ray is not the horizontal one:** for an observer at
+radius `r`, `t(elevation) = -r*sin(e) + sqrt((r*sin(e))^2 + outer^2 - r^2)` and `dt/de` is negative
+everywhere, so `t` is maximised by the most negative elevation that still misses the planet — the ray
+that **grazes the limb and then climbs out**:
+
+```
+t_max = sqrt(r^2 - planet^2)  +  sqrt(outer^2 - r^2)
+        the horizon distance      the horizon exit
+```
+
+Worst case over any altitude inside the air is `sqrt(2) * sqrt(outer^2 - planet^2)` — **Earth 1,603
+km**. With the surface range's 200 km default the sky was drawn above 29° of elevation and everything
+from there down to the horizon fell outside the plane and drew nothing: a black ring around the
+observer, gone one frame up where the range changes.
 
 ### Derivation — `model/`
 
@@ -352,6 +379,12 @@ computed *in the shader* (a spatial shader cannot read the depth buffer). The de
 the occlusion for free: from outside, the far side is depth-rejected wherever the planet covers it, so
 only the ring around the limb is shaded; from inside, the far side **is** the sky dome.
 
+**So a body's air is drawn from outside it as well as from within** — the limb is a real scattering
+ring standing off the planet, warm near the terminator. That was the thing the earlier fog shell could
+not do at all, and it is the one place the two regimes differ: the haze over the planet's *disk* seen
+from outside is not drawn, because the shell's far side is behind the planet there. The limb is what
+reads from a distance; if the disk haze is ever wanted it needs a second pass over the near face.
+
 | | |
 |---|---|
 | `rayleigh_coefficient` | the derivation's `kRlh`, per channel — blue scattering most is the whole reason the sky is blue |
@@ -360,11 +393,16 @@ only the ring around the limb is shaded; from inside, the far side **is** the sk
 | `sun_intensity` | `SKY_INTENSITY * illuminance / REFERENCE_LUX`, so the sky keeps its proportion to the surface the star lights instead of brightening with distance |
 | `eye_offset`, `sun_direction` | **refreshed per frame, as offsets.** Bodies sit at ~1.5e11 m and a GLSL float has ~7 digits, so a world coordinate would arrive with ~16 km of resolution against an air 100 km deep |
 
-What it does **not** draw: the haze over the planet's *disk* seen from outside — the shell's far side is
-behind the planet there. The limb is the part that reads.
+**The march starts at the camera, and that is not incidental.** `glsl-atmosphere`'s own example has
+the eye *outside* the atmosphere, where both roots of the ray-sphere test lie ahead of it; from
+inside, the near root is **behind** the camera and comes back negative. Two bugs lived in that one
+fact — a step size thousands of times too large, and a planet clamp that ran the march backwards — and
+the shader now says so where the span is computed.
 
 Cost: 16 primary steps with an 8-step sun ray, so **128 samples per pixel** on every pixel the shell
-covers. The heaviest shader in the project, and the frame-rate loop owes a measurement.
+covers, spaced quadratically so they crowd toward the camera where the air is densest. The heaviest
+shader in the project — measured at **120 fps / 8.3 ms** at 9.8 km over Earth, which is where the
+standing frame-rate question was answered for this case at least.
 
 ### Checking a shader
 
@@ -559,7 +597,7 @@ on change (`camera.fov`, the marker pool and font size).
 | `video.window_size` | player | `Vector2i(1280, 720)` — the windowed window, remembered |
 | `mouse.sensitivity` | player | 0.0015 |
 | `camera.fov` | player | 70.0 |
-| `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on |
+| `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on — **floors, not ceilings**: `_update_camera` raises the far plane to cover the sky and the system. See **The far plane** |
 | `markers.pool_size` | player | 12 |
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |

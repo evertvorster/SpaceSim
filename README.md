@@ -9,8 +9,9 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 ## Status
 
 **Early, but real.** Sol and the player are the game now, not a demo: coordinate
-frames, the travel unit, a data-driven system, navigation markers, settings, and a player who can be
-saved, loaded and browsed. There is no terrain, no physics and no simulation.
+frames, the travel unit, a data-driven system, navigation markers, settings, a player who can be
+saved, loaded and browsed, and **a clear sky** — Rayleigh and Mie scattering on every body with air,
+drawn from inside it and from space. There is no terrain, no physics and no simulation.
 
 ## Saves
 
