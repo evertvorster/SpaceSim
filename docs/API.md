@@ -544,6 +544,10 @@ a choice *is* depends on the setting: an enum's value is its word, a screen's is
 the position in the list is the screen index. A `Vector2i` row — a resolution — is a pair of integer
 fields, so an arrow key offers whole pixels rather than 1279.7.
 
+**A resolution row also carries a `MenuButton` of presets** beside its two fields, filled when the
+menu opens rather than when the row is built. Picking one fills the fields, which is a staged edit
+like any other: it changes nothing until **Apply**, and **Close** throws it away.
+
 | `SpacesimSettingsEdit` — `RefCounted` | |
 |---|---|
 | `static editable_keys() -> Array` | the player-scope keys, in registry order |
@@ -618,6 +622,7 @@ more world rather than from distortion.
 | `mode_of(name)` / `aspect_of(name)` | a setting's word to the engine's enum; anything unknown lands on the safe default |
 | `render_scale(render_height, drawn_height) -> float` | pure, and clamped to the range the engine allows |
 | `screen_names() -> Array` | the monitors, as `"1: 2560 x 1440  (primary)"` |
+| `resolution_presets() -> Array` | what the menu beside a resolution row offers, as `{"label", "size"}` — built on demand, because the window and the monitors move |
 
 **Through the window, not the display server.** `DisplayServer.window_set_size` changes what the
 display server says the size is and leaves the root `Window` — and so the viewport that is actually
@@ -626,9 +631,16 @@ the window reported `1280x800` while the root viewport stayed `1152x648`, and th
 was worked out against a window that was no longer there. Only `window_set_current_screen` has no
 window equivalent, because the list of screens is the display server's.
 
-A resize re-fits the 3D immediately and remembers the window size **after the resizing stops** —
-a drag emits an event per frame, and a write per event is a file write per frame. It writes nothing
-when the size has not moved, so applying the settings cannot feed back into itself.
+A resize re-fits the 3D and **writes nothing**. Every `video.*` value is committed by the settings
+screen's **Apply** and discarded by **Close**, with no third route — no "it remembered on its own"
+case to reconcile with the staged screen. To make the window's current size the one the game starts
+at, pick *This window* from the resolution menu and press Apply.
+
+**Godot cannot enumerate the resolutions a monitor supports.** The display server's whole screen API
+is `get_screen_count`, `screen_get_size` (the mode it is *in*), `screen_get_usable_rect`,
+`screen_get_position`, `screen_get_scale`, `screen_get_max_scale`, `screen_get_dpi`,
+`screen_get_refresh_rate` and `screen_get_orientation` — there is no mode list to ask for. So the
+menu offers each monitor's current resolution, this window's, and a curated list of common ones.
 
 ## Screens
 

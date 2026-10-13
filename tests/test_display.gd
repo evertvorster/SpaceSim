@@ -7,6 +7,7 @@ extends RefCounted
 
 const Display := preload("res://addons/spacesim/settings/display.gd")
 const Settings := preload("res://addons/spacesim/settings/settings.gd")
+const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
 
@@ -20,7 +21,10 @@ func run(h, root: Node) -> void:
 	_test_aspect_names(h)
 	_test_the_render_scale(h)
 	_test_a_screen_that_is_gone(h)
+	_test_the_resolution_presets(h, root)
+	_test_the_picker_stages_and_apply_commits(h, root)
 	_test_the_three_sizes_are_separate(h, root)
+	_test_nothing_is_written_without_apply(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -95,6 +99,116 @@ func _test_a_screen_that_is_gone(h) -> void:
 	display.free()
 
 
+## What the menu beside a resolution row offers.
+func _test_the_resolution_presets(h, root: Node) -> void:
+	var settings := _fixture.open()
+	# Before the display is in the tree, since its `_ready` applies the settings — which includes
+	# putting the window at the size the setting says.
+	settings.set_value("video.window_size", Vector2i(1366, 768))
+	var window := Window.new()
+	var display = Display.new()
+	display.use(settings)
+	window.add_child(display)
+	root.add_child(window)
+
+	var presets := display.resolution_presets()
+	h.check(presets.size() > Display.COMMON_RESOLUTIONS.size(), "the menu offers more than the common list")
+	h.check(
+		presets[0]["label"] == "This window" and presets[0]["size"] == Vector2i(1366, 768),
+		"starting with the size this window is right now (%s)" % str(presets[0]["size"])
+	)
+
+	# Godot cannot enumerate the resolutions a monitor supports — the display server has no such
+	# call — so what is offered for a monitor is the one it is currently in.
+	var from_monitors := 0
+	for preset in presets:
+		if String(preset["label"]).begins_with("Screen"):
+			from_monitors += 1
+	h.check(from_monitors == DisplayServer.get_screen_count(), "and one for each monitor (%d)" % from_monitors)
+
+	var missing: Array[String] = []
+	for size in Display.COMMON_RESOLUTIONS:
+		if not presets.any(func(p: Dictionary) -> bool: return p["size"] == size):
+			missing.append(str(size))
+	h.check(missing.is_empty(), "with every common one in it%s" % Fixture.detail(missing))
+
+	# A preset the store would refuse must never be offered, or picking it would silently do nothing.
+	var refused: Array[String] = []
+	for preset in presets:
+		for key in ["video.canvas_resolution", "video.render_resolution", "video.window_size"]:
+			if not Settings.is_acceptable(key, preset["size"]):
+				refused.append("%s for %s" % [str(preset["size"]), key])
+	h.check(refused.is_empty(), "and nothing in it that the store would refuse%s" % Fixture.detail(refused))
+	window.free()
+
+
+## The picker, through its real wiring: the row builds a menu, picking stages, and **Apply is what
+## commits**.
+func _test_the_picker_stages_and_apply_commits(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var settings := _fixture.open()
+	var panel := SettingsPanel.new()
+	panel.configure(settings)
+	layer.add_child(panel)
+
+	var menus := _menus(panel, [])
+	h.check(menus.size() == 3, "each of the three resolution rows has a menu beside it (%d)" % menus.size())
+	if menus.is_empty():
+		layer.free()
+		return
+
+	# What the screen does when the menu is opened.
+	var menu: PopupMenu = menus[0].get_popup()
+	menu.about_to_popup.emit()
+	h.check(menu.item_count > 3, "and the menu fills when it opens (%d items)" % menu.item_count)
+
+	var wanted := Vector2i(1600, 900)
+	var picked := -1
+	for index in menu.item_count:
+		if menu.get_item_metadata(index) == wanted:
+			picked = index
+	if picked < 0:
+		h.check(false, "the menu offers %s to pick" % str(wanted))
+		layer.free()
+		return
+
+	# Which row the first menu belongs to is the registry's business, so the check is about the
+	# value: nothing is applied until Apply.
+	var before: Dictionary = {}
+	for key in Settings.declared_keys():
+		before[key] = settings.get_value(key)
+	menu.index_pressed.emit(picked)
+
+	var changed_early: Array[String] = []
+	for key in before:
+		if settings.get_value(key) != before[key]:
+			changed_early.append(key)
+	h.check(
+		changed_early.is_empty(),
+		"picking a preset applies nothing on its own%s" % Fixture.detail(changed_early)
+	)
+
+	panel.actions.get_child(0).pressed.emit()
+	var committed: Array[String] = []
+	for key in before:
+		if settings.get_value(key) != before[key]:
+			committed.append("%s = %s" % [key, str(settings.get_value(key))])
+	h.check(
+		committed == ["video.canvas_resolution = (1600, 900)"],
+		"and Apply is what commits it (%s)" % ", ".join(committed)
+	)
+	layer.free()
+
+
+static func _menus(node: Node, into: Array) -> Array:
+	if node is MenuButton:
+		into.append(node)
+	for child in node.get_children():
+		_menus(child, into)
+	return into
+
+
 ## The whole point of three settings rather than one: they are not each other.
 func _test_the_three_sizes_are_separate(h, root: Node) -> void:
 	var settings := _fixture.open()
@@ -145,5 +259,44 @@ func _test_the_three_sizes_are_separate(h, root: Node) -> void:
 		1.0,
 		"and the render resolution is read each time, not remembered from startup",
 		0.0001
+	)
+	window.free()
+
+
+## **Nothing is preserved without Apply.** A resize is not an edit made in the settings screen, so
+## it must not reach the file — the size the game starts at is the one Apply committed.
+func _test_nothing_is_written_without_apply(h, root: Node) -> void:
+	var settings := _fixture.open()
+	var window := Window.new()
+	var display = Display.new()
+	display.use(settings)
+	window.add_child(display)
+	root.add_child(window)
+
+	settings.set_value("video.window_size", Vector2i(1024, 768))
+	settings.set_value("video.render_resolution", Vector2i(1536, 768))
+	display.apply()
+	h.check(window.size == Vector2i(1024, 768), "the window is where the setting says")
+
+	# Dragging the window. This is a real resize: `size_changed` fires from here.
+	window.size = Vector2i(900, 700)
+	h.check(window.size == Vector2i(900, 700), "the window goes where it is dragged")
+	h.check(
+		settings.get_value("video.window_size") == Vector2i(1024, 768),
+		"and the setting is untouched by it, because that is what Apply is for"
+	)
+	# What a resize *does* have to do: the 3D is drawn into a differently-shaped buffer now.
+	h.check_near(
+		window.scaling_3d_scale,
+		Display.render_scale(768, 700.0),
+		"but the 3D is re-fitted to the window it is actually in (%.3f)" % window.scaling_3d_scale,
+		0.0001
+	)
+
+	# What the player does instead: take this window's size, which stages it, and commit that.
+	settings.set_value("video.window_size", window.size)
+	h.check(
+		settings.get_value("video.window_size") == Vector2i(900, 700),
+		"taking this window's size and applying it is how a resize is kept"
 	)
 	window.free()

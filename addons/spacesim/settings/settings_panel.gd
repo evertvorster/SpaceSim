@@ -95,10 +95,25 @@ func _build_editors(key: String) -> Array[Control]:
 			pair.add_theme_constant_override("separation", 6)
 			pair.add_child(_number_field(key, default, row, 0))
 			pair.add_child(_number_field(key, default, row, 1))
+			# A resolution is a pair of numbers nobody remembers, so the pair is offered one.
+			if typeof(default) == TYPE_VECTOR2I:
+				pair.add_child(_resolution_menu(key))
 			editors.append(pair)
 		TYPE_STRING:
 			editors.append(_text_field(key))
 	return editors
+
+
+## The display autoload, or null.
+##
+## Through the main loop rather than `get_tree()`: these rows are built when the panel is configured,
+## which can be before it has been added to the tree — and `get_tree()` is an error, not a null, in
+## that state.
+func _display() -> Node:
+	var loop := Engine.get_main_loop()
+	if not (loop is SceneTree):
+		return null
+	return (loop as SceneTree).root.get_node_or_null("SpacesimDisplay")
 
 
 ## The list a row offers, or an empty one when it offers none. `"screens"` is a reserved name for
@@ -111,16 +126,55 @@ func _choices(row: Dictionary) -> Array:
 		return declared
 	if String(declared) != "screens":
 		return []
-	# The main loop rather than `get_tree()`: these rows are built when the panel is configured,
-	# which can be before it has been added to the tree — and `get_tree()` is an error, not a null,
-	# in that state.
-	var loop := Engine.get_main_loop()
-	if not (loop is SceneTree):
-		return []
-	var display := (loop as SceneTree).root.get_node_or_null("SpacesimDisplay")
+	var display := _display()
 	if display == null:
 		return []
 	return display.screen_names()
+
+
+## A menu of resolutions beside a resolution row. **The list is built when the menu opens**, not when
+## the row is: this window's size and the monitors' resolutions both move underneath it, and a list
+## made at startup would already be wrong.
+func _resolution_menu(key: String) -> MenuButton:
+	var button := MenuButton.new()
+	button.text = "Presets"
+	button.tooltip_text = "Common resolutions, this window's size, and the resolution each monitor is in."
+	var menu := button.get_popup()
+	menu.about_to_popup.connect(func() -> void: _fill_resolution_menu(menu))
+	menu.index_pressed.connect(
+		func(index: int) -> void: _stage_resolution(key, menu.get_item_metadata(index))
+	)
+	return button
+
+
+func _fill_resolution_menu(menu: PopupMenu) -> void:
+	menu.clear()
+	var display := _display()
+	if display == null:
+		return
+	var separated := false
+	for preset in display.resolution_presets():
+		var label: String = preset["label"]
+		var size: Vector2i = preset["size"]
+		var text := "%d x %d" % [size.x, size.y]
+		if label.is_empty():
+			if not separated:
+				# Everything from here on is a plain resolution, with nothing to say about where it
+				# came from.
+				menu.add_separator()
+				separated = true
+		else:
+			text = "%s   %s" % [label, text]
+		menu.add_item(text)
+		menu.set_item_metadata(menu.item_count - 1, size)
+
+
+## Picking one fills the two fields, which is a staged edit like any other: Apply commits it and
+## Close throws it away. A preset the registry would refuse is not staged, so it cannot look as
+## though it worked.
+func _stage_resolution(key: String, size: Variant) -> void:
+	if typeof(size) == TYPE_VECTOR2I:
+		_edit.stage(key, size)
 
 
 ## A list to choose from. What a choice *is* depends on the setting: an enum's value is its word, a

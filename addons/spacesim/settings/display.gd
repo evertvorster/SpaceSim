@@ -24,6 +24,13 @@ extends Node
 ##
 ## Settings are read through [SpacesimSettings] and **never cached** — a display setting is as hot as
 ## a camera one.
+##
+## ## This module never writes a setting
+##
+## A window setting is committed by the settings screen's **Apply** and discarded by **Close**, with
+## no third route. Dragging the window resizes it and writes nothing — to make that the size the game
+## starts at, pick *This window* from the resolution menu and press Apply. So there is no "it
+## remembered on its own" case to reconcile with the staged screen.
 
 const SETTING_MODE := "video.mode"
 const SETTING_SCREEN := "video.screen"
@@ -32,17 +39,27 @@ const SETTING_CANVAS := "video.canvas_resolution"
 const SETTING_RENDER := "video.render_resolution"
 const SETTING_WINDOW := "video.window_size"
 
-## A window being dragged emits a resize event per frame. The size is written back once the resizing
-## stops, so a drag is one write rather than a hundred.
-const SETTLE_SECONDS := 0.5
-
 ## Godot clamps `scaling_3d_scale` to this, so the arithmetic is held to the same range rather than
 ## being silently clamped by the engine.
 const SCALE_MIN := 0.25
 const SCALE_MAX := 2.0
 
+## What the resolution menu offers beyond this machine's own: the shapes people actually have, 16:9
+## first and the taller and wider ones after. Godot cannot enumerate the resolutions a monitor
+## *supports* — the display server has no such call — so the monitor's own entry is the one it is
+## currently in.
+const COMMON_RESOLUTIONS := [
+	Vector2i(1280, 720),
+	Vector2i(1600, 900),
+	Vector2i(1920, 1080),
+	Vector2i(1920, 1200),
+	Vector2i(2560, 1440),
+	Vector2i(2560, 1600),
+	Vector2i(3440, 1440),
+	Vector2i(3840, 2160),
+]
+
 var _settings: Node
-var _settle: Timer
 
 ## Set while this is putting the window where the settings say it should be. A change it makes itself
 ## would otherwise come back round as a change worth reacting to.
@@ -61,12 +78,6 @@ func _ready() -> void:
 	if _settings == null:
 		push_warning("display: no settings autoload; leaving the window alone")
 		return
-
-	_settle = Timer.new()
-	_settle.one_shot = true
-	_settle.wait_time = SETTLE_SECONDS
-	_settle.timeout.connect(_remember_window_size)
-	add_child(_settle)
 
 	var window := get_window()
 	if window != null:
@@ -136,24 +147,13 @@ static func render_scale(render_height: int, drawn_height: float) -> float:
 	return clampf(float(render_height) / maxf(drawn_height, 1.0), SCALE_MIN, SCALE_MAX)
 
 
-## A resize re-fits the 3D and, once the player has stopped, is what the window remembers being.
+## A window of a different shape draws the 3D into a different buffer, so the scale is worked out
+## again. **Nothing is written**: a resize is not an edit, and the size the game starts at is the one
+## Apply committed.
 func _on_window_resized() -> void:
-	var window := get_window()
-	if _applying or window == null or window.mode != Window.MODE_WINDOWED:
+	if _applying:
 		return
 	_apply_render_resolution()
-	_settle.start()
-
-
-func _remember_window_size() -> void:
-	var window := get_window()
-	if window == null or window.mode != Window.MODE_WINDOWED:
-		return
-	# Not a write when nothing moved: applying the settings can resize the window, and writing that
-	# back would be this reacting to itself.
-	if window.size == _settings.get_value(SETTING_WINDOW):
-		return
-	_settings.set_value(SETTING_WINDOW, window.size)
 
 
 func _on_setting_changed(key: String, _value: Variant) -> void:
@@ -199,3 +199,27 @@ func screen_names() -> Array:
 			"%d: %d x %d%s" % [index, size.x, size.y, "  (primary)" if index == primary else ""]
 		)
 	return names
+
+
+## Every resolution the menu beside a resolution row should offer, in the order to show them:
+## `{"label": String, "size": Vector2i}`. An empty label is a plain resolution with nothing to say
+## about where it came from, and is where the menu draws its separator.
+##
+## Built when the menu opens rather than when the row is, because both the window and the monitors
+## move underneath it.
+func resolution_presets() -> Array:
+	var presets: Array = []
+	var window := get_window()
+	if window != null:
+		presets.append({"label": "This window", "size": window.size})
+	var primary := DisplayServer.get_primary_screen()
+	for index in DisplayServer.get_screen_count():
+		presets.append(
+			{
+				"label": "Screen %d%s" % [index, "  (primary)" if index == primary else ""],
+				"size": DisplayServer.screen_get_size(index),
+			}
+		)
+	for size in COMMON_RESOLUTIONS:
+		presets.append({"label": "", "size": size})
+	return presets
