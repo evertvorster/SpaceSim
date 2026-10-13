@@ -27,6 +27,8 @@ var mesh: MeshInstance3D
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody
+## The cloud deck's own sphere, above the surface; null when the body has no deck.
+var cloud_mesh: MeshInstance3D
 
 ## What a body with nothing to derive from is drawn in — visibly a placeholder rather than a
 ## plausible-looking guess. Lives with the derivation that replaces it.

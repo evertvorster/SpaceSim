@@ -138,12 +138,15 @@ func scale_bodies() -> Array[SpacesimScaleBody]:
 	return list
 
 
-## Every mesh in the system, so a debug key can hide or re-tessellate all of it.
+## Every mesh in the system, so a debug key can hide or re-tessellate all of it. The cloud decks are
+## included: hiding the bodies but leaving their clouds behind would look like a bug.
 func meshes() -> Array[MeshInstance3D]:
 	var list: Array[MeshInstance3D] = []
 	for body in bodies:
 		if body.mesh != null:
 			list.append(body.mesh)
+		if body.cloud_mesh != null:
+			list.append(body.cloud_mesh)
 	return list
 
 
@@ -322,8 +325,11 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.set_meta("spacesim_body", body.id)
 	system_frame.add_child(body.node)
 
-	body.mesh = _add_sphere(body.node, body.radius, body.color)
+	body.mesh = _add_sphere(
+		body.node, body.radius, SpacesimBodyRenderer.surface_material(body), "%sSurface" % body.name
+	)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
+	_add_cloud_shell(body)
 
 	if not body.landable:
 		return
@@ -408,22 +414,32 @@ func _add_lighting() -> void:
 	container.add_child(world_environment)
 
 
-func _add_sphere(parent: Node3D, radius: float, color: Color) -> MeshInstance3D:
+## The cloud deck, on its own sphere a little above the surface. Its own mesh rather than a second
+## material on the surface, so it can carry alpha and draw over the surface instead of fighting it.
+func _add_cloud_shell(body: SpacesimSceneBody) -> void:
+	var material := SpacesimBodyRenderer.cloud_material(body)
+	if material == null:
+		return
+	body.cloud_mesh = _add_sphere(
+		body.node, body.radius * SpacesimBodyRenderer.CLOUD_SHELL, material, "%sClouds" % body.name
+	)
+
+
+func _add_sphere(
+	parent: Node3D, radius: float, material: Material, mesh_name: String
+) -> MeshInstance3D:
 	var sphere := SphereMesh.new()
 	sphere.radius = radius
 	sphere.height = radius * 2.0
 	sphere.radial_segments = 128
 	sphere.rings = 64
 
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	# No triplanar or world_vertex_coords: neither gets the double-precision vertex transform
-	# emulation, and both jitter at planet scale.
-
 	var mesh := MeshInstance3D.new()
-	mesh.name = "%sSurface" % parent.name
+	mesh.name = mesh_name
 	mesh.mesh = sphere
 	mesh.material_override = material
+	# No triplanar or world_vertex_coords: neither gets the double-precision vertex transform
+	# emulation, and both jitter at planet scale.
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mesh)
 	return mesh

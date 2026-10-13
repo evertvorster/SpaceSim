@@ -32,6 +32,7 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
     content/       the authored content as Godot Resources — bodies, orbits, layers, species
     model/         the derivation: what a body's numbers are, from what it is made of
   lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
+  render/          what a body looks like: the surface and cloud-deck shader layers
   player/          the player's own state (attributes and assets) and the screen for it
   navigation/      navigation markers (targets, off-screen pointers)
   settings/        declared defaults in code, one machine-written file for what differs

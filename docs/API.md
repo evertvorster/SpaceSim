@@ -302,6 +302,35 @@ the world.
 Luminosity and effective temperature come from `SpacesimStarModel` — see **Derivation — `model/`**
 under Solar system above.
 
+## Render layers
+
+`addons/spacesim/render/` — what a body looks like. Everything these shaders are given comes from **the
+derivation**, so a shader cannot quietly disagree with the model.
+
+| | |
+|---|---|
+| `body_surface.gdshader` | the surface layer: a height field from Godot's own 3D noise, colour as a two-stop gradient, relief from the field's gradient projected onto the surface |
+| `body_clouds.gdshader` | the cloud deck, on its own sphere: **the authored `fraction` is the coverage** — it sets the noise threshold, so a body content calls 60% covered comes out 60% covered |
+| `SpacesimBodyRenderer` | `body_renderer.gd` — builds the materials from the derived values, owns the one shared `NoiseTexture3D`, and gives each body a stable offset from its id |
+
+The gradient's two stops are the derived colour **darkened and lightened**, not two hand-picked colours,
+so a world keeps its identity while gaining structure. Roughness, specularity and relief strength are
+constants in the renderer because the material table does not carry them yet — named there rather than
+buried in the shader, so they can be found when the picture is wrong.
+
+### Checking a shader
+
+**Headless Godot does not compile shaders.** `load()` returns a valid `Shader` with a syntax error
+sitting inside it, and `--import` reports nothing — verified 2026-10-13 by breaking one deliberately
+and watching both say it was fine. So `tests/run.sh` cannot check them, and `test_render.gd` checks the
+**wiring** rather than the compile.
+
+```
+./tests/shader_check.sh        # xvfb-run + a real compile; catches SHADER ERROR
+```
+
+That script needs a window (`xvfb-run` counts), which is why it is not part of `run.sh`.
+
 ## Navigation
 
 `addons/spacesim/navigation/` — navigation markers: a name and distance for the objects that
