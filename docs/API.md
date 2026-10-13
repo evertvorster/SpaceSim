@@ -300,9 +300,20 @@ physics says (H₂O ≫ CH₄ > CO₂), and N₂, O₂, Ar, He and H₂ are zero
 4.2 K between perihelion and aphelion and sits 2.2 K above its own mean at J2000. Nothing models a
 season — it falls out of asking the orbit for a position.
 
-**Two named limitations.** The adiabat is **dry**, so Earth's tropopause comes out 4 km low (moist
-convection is the fix; cloud *bases* are unaffected). And the sky is **single-scattering only**, which
-is why Venus renders nearly dark at an optical depth of 16.6 — see the plan doc.
+**Three named limitations, and the third is not the atmosphere's fault.**
+
+1. The adiabat is **dry**, so Earth's tropopause comes out 4 km low. Moist convection is the fix;
+   cloud *bases* are unaffected.
+2. The sky is **single-scattering only**, which is why **Venus renders nearly black** at an optical
+   depth of 16.6. The real surface is a diffuse **3-3.5 klux** orange dome — about **2.5%** of the
+   sunlight gets through 92 bar of CO₂, per the Venera landers. One scattering event cannot make that
+   dome; multiple scattering is the fix.
+3. **`illuminance_at()` does not subtract the air**, so the camera exposes for the light at the *top*
+   of the atmosphere rather than at the observer. On Venus that is a factor of forty: the surface
+   renders ~40x too dark *whatever the sky shader does*. The whole point of computing the exposure is
+   to expose for **the light that is actually there**, and the light at a surface is not the light
+   above it. This is the smallest of the three to fix, and the one to do first — see
+   `Notes/Projects/Programming/SpaceSim/Lighting and Exposure.md` §3a.
 
 | `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static scale_height(...)` (`kT/(m-bar g)`), `static shell_reach(...)` (**how many scale heights of air to draw** — see **The sky**), `static surface_gravity(body)`, `static reference_temperature(...)` (what content **pinned**, or equilibrium temperature), `static equilibrium_temperature(...)` (§3.6's first row, the placeholder), and `static coverage(...)` |
 
