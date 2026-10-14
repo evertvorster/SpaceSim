@@ -10,8 +10,16 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 
 **Early, but real.** Sol and the player are the game now, not a demo: coordinate
 frames, the travel unit, a data-driven system, navigation markers, settings, a player who can be
-saved, loaded and browsed, and **a clear sky** — Rayleigh and Mie scattering on every body with air,
-drawn from inside it and from space. There is no terrain, no physics and no simulation.
+saved, loaded and browsed, **a clear sky** — Rayleigh and Mie scattering on every body with air, drawn
+from inside it and from space — and **the stars**: the real sky above Sol, from the HYG catalogue,
+with an exposure that can be tuned to the observer rather than metered from the frame. There is no
+terrain, no physics and no simulation.
+
+**The star data is third-party and is licensed separately from the code.** `addons/spacesim/sky/`
+holds HYG v4.4 (Hipparcos + Yale Bright Star + Gliese) under **CC BY-SA 4.0**, which is compatible
+with this repository's GPL-3.0 because the data and the code are separate works. Attribution, the
+exact source, the file format and the calibration are in `addons/spacesim/sky/PROVENANCE.md`, and the
+reduction is reproducible with `tools/build_star_catalogue.py`.
 
 ## Saves
 

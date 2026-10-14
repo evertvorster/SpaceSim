@@ -75,6 +75,14 @@ const MIN_SOLID_ANGLE := 9.6e-6
 ## **The sky's brightness follows the resolution and the field; this does not.** Evert chose that on
 ## 2026-10-14: a higher resolution concentrates the same flux into a smaller angle and the stars get
 ## brighter, which is what a larger aperture does to a point source.
+##
+## **SUSPECT, and the value is knowingly wrong.** Evert measured the correction needed at
+## `sky.star_gain` 2.1, which is 10^2.1 = **126x** — so this derivation is 126 times off somewhere. One
+## candidate is in the derivation itself: it assumes a 37.8 degree field, while `camera.fov` defaults
+## to **70** and nothing overrides it. Radiance goes as tan^2(half fov), so that alone is 4.18x of it,
+## leaving ~30 unexplained. Do not treat the 8000 as settled, and do not absorb the remainder into
+## this number without finding it -- a correction we do not understand comes back wearing another hat.
+## The audit, with the numbers, is in the vault: `SpaceSim/Sky and Backgrounds.md` §9.
 const DARK_ADAPTED_MULTIPLIER := 8000.0
 
 var attributes: CameraAttributesPhysical
