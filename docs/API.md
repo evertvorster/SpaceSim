@@ -367,13 +367,31 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 | Member | |
 |---|---|
 | `REFERENCE_LUX` | 100,000 — Godot's own default for `light_intensity_lux`, so a multiplier of 1.0 means "the light Godot considers normal" |
-| `MAX_MULTIPLIER` | the clamp: past this, a very dark or very bright body keeps some of its own character instead of every body rendering alike |
+| `MAX_MULTIPLIER` | 100,000 — the clamp, and it **must sit above `DARK_ADAPTED_MULTIPLIER`** or it silences the sky it exists to show. It was 4096, twelve stops, and that was the reason the far planets showed a handful of stars |
+| `DARK_ADAPTED_MULTIPLIER` | 8,000 — **the exposure's resting state when nothing bright is in front of the eye.** See below: `target_multiplier` cannot serve a star field |
 | `ADAPTATION_RATE` | how fast exposure follows a change, per second |
-| `AMBIENT_ENERGY` | 0.02 — a floor, so a shadowed side reads as dark rather than as a hole. **Not physics**: space has almost no ambient |
 | `attributes: CameraAttributesPhysical` | **auto-exposure off**; assign to `Camera3D.attributes` |
 | `static target_multiplier(lux) -> float` | 0.78 at one au (128,000 lux), 707 at Neptune (141 lux) — the 9.8 stops between them is derived, not tuned |
-| `update(lux, delta)` / `snap_to(lux)` | follow the light, or land on it at once |
-| `static configure(environment, ambient_color)` | AgX, `tonemap_white`, the ambient floor, `glow_*` |
+| `update(lux, delta)` / `update_to(target, delta)` / `snap_to(lux)` | follow a light level, follow a multiplier, or land on it at once |
+| `static configure(environment)` | AgX, `tonemap_white`, the ambient, `glow_*` |
+
+**Why a star field needs its own anchor.** `target_multiplier()` exposes a lit *surface*, which has a
+mean luminance the eye adapts to. A star field has no mean luminance — it is point sources on black —
+so there is nothing there to adapt to. What an observer has instead is a *range*, and dark adaptation
+opens that range onto the sky. So the anchor is the observer, not the scene: the multiplier that puts
+the brightest star at the top of the display. Derived in the constant, at 1920x1080 and a 37.8° field:
+Sirius is 9.568e-6 lux, one pixel is 4.020e-7 sr, so its radiance is 23.80 lux/sr; in Godot's units
+that is 7.477e-4, and AGX's white point is 6.0, giving **8,025**.
+
+**The sky's brightness follows the resolution and the field; this constant does not.** That is
+deliberate (Evert, 2026-10-14): a higher resolution concentrates the same flux into a smaller angle
+and the stars get brighter, which is what a larger aperture does to a point source.
+
+**The ambient is the SKY, not a colour** — `AMBIENT_SOURCE_BG`. That deletes an authored constant
+rather than moving it: `AMBIENT_SOURCE_COLOR` with a look-value energy was a number that could
+silently disagree with the sky above it. Because a sky of point sources has almost no mean radiance,
+a night side now goes genuinely black — the physical answer, and the vault's own note is that a
+physical floor *removes* the fake one.
 
 **The star is a source, not a reflector**: it cannot be brought into range without making everything
 else black, so it is allowed to clip and `glow_*` handles how that reads. Nothing here exposes for it.
@@ -407,6 +425,53 @@ texture holds, not from how often it is wrapped. `VERTEX` inside `fragment()` is
 model-space position is captured in `vertex()` and passed as a varying.
 
 ### The sky
+
+**The background is the real sky** — the stars visible from Sol, drawn from the HYG v4.4 catalogue. It
+replaced a flat `BG_COLOR` look value, which the exposure multiplier scaled like everything else, so
+empty space rendered bright blue at outer-system distances (measured 0.655, 0.733, 0.890 at Saturn)
+and outshone every atmospheric limb.
+
+| | |
+|---|---|
+| `sky_stars.gdshader` | a `shader_type sky` material on a `Sky` resource, `background_mode = BG_SKY`. One pixel a star, carrying its whole flux |
+| `sky/star_catalogue.gd` | `SpacesimStarCatalogue` — loads `sky/hyg_v44.stars` into three textures |
+| `sky/star_sky.gd` | `SpacesimStarSky` — owns the `Sky` and hands the shader its host plumbing |
+| `sky/PROVENANCE.md` | where the data came from, its licence, its format, and the calibration |
+| `sky/hyg_v44.stars` | 119,613 stars, 1.5 MB, CC BY-SA 4.0 (see below) |
+| `tools/build_star_catalogue.py` | the reduction, and the check that reproduces the calibration |
+
+**A `Sky` and not a sphere mesh.** No mesh to keep centred on the camera, an infinite background cannot
+be clipped by the far plane, and `EYEDIR` is already a **world-space direction** — verified by rolling
+the camera, not assumed — so the `CAMERA_POSITION_WORLD − centre` subtraction `body_atmosphere` needs,
+against a GLSL float's seven significant digits, cannot arise. **`return` is not allowed in a Godot
+`sky()` function**; the body lives inside a guard instead.
+
+**A star is one pixel**, found by a box test in normalized device coordinates. NDC and not a lattice,
+because the pixels tile the screen: a star belongs to the pixel whose centre is nearest, so every star
+lands in exactly one, none can fall between two, and none can be drawn twice. The pixel's value is its
+illuminance over its **own** solid angle — the gnomonic element, so a star near the frame corner is not
+over-brightened — which makes the sum of a star's pixels its light. It also means a higher resolution
+or a narrower field makes stars brighter, which is what an aperture does to a point source.
+
+**The shader is an INPUT, not an answer.** It reports radiance in the engine's units and nothing in it
+knows what the exposure is. Every star field that came before was display referred — an exposure
+already baked in — which is why none of them could respond to a varying EV: a fixed picture multiplied
+by a variable exposure is a different picture, not the same one seen differently. The conversion into
+engine units is `UNIT_LUX_PER_SR = 100,000/pi` — **a unit conversion, not a gain factor**.
+
+**The catalogue is Sol calibration data, not shipped content** ([[SpaceSim/Cosmos and Discovery|Cosmos
+and Discovery]] §2). It is licensed **CC BY-SA 4.0**, which is compatible with this repository's GPL-3.0
+because the data and the code are separate works; `PROVENANCE.md` carries the attribution. Its depth is
+swept by `sky.star_depth`; the catalogue is a *complete* sky to magnitude 8 and a diminishing fraction
+beyond (0.99 at 8, 0.69 at 9), so the setting belongs in 6.5 to 8.0 with 9.5 a soft ceiling.
+
+**The light path.** `SpacesimSystemScene.update_sky(camera)` points the sky at the camera once a frame,
+and `scene_illuminance_at(observer, forward, half_angle)` answers **what the eye receives from what is
+in front of it** — which is not `illuminance_at()`, the light falling on a surface. At 1 au that answer
+is 128,000 lux whether you are looking at the Sun or at empty sky; an eye stops down at the Sun and
+opens up at a dark sky. **Zero means "nothing bright is in front of the eye"**, and the exposure then
+rests at `DARK_ADAPTED_MULTIPLIER` — which is what lets the stars appear at all. A lit body in the view
+cone is the next term to add; it is not in yet.
 
 A body with an atmosphere gets a second sphere reaching `radius + sky_top`, drawn
 with `body_atmosphere.gdshader` — **Rayleigh and Mie scattering**, and the one shader here that is not

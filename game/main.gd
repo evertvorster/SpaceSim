@@ -297,8 +297,25 @@ func _physics_process(delta: float) -> void:
 	# The sky follows the **camera**, not the ship: it is the eye that scattering is seen from, and
 	# nothing about it depends on which body the player is attached to.
 	_system.update_atmospheres(_camera.global_position)
-	# Exposed for the light that is actually where the player is, not for the average of the frame.
-	_exposure.update(_system.illuminance_at(_ship.global_position), delta)
+	_system.update_sky(_camera)
+	# Exposed for the light **in front of the eye**, not for the light falling on a surface where the
+	# player happens to be — see SpacesimSystemScene.scene_illuminance_at. The cone is half the view's
+	# DIAGONAL, because it is the corners of the frame that decide what is in it.
+	var half_angle := deg_to_rad(_camera.fov * 0.5)
+	var view_size := _camera.get_viewport().get_visible_rect().size
+	if view_size.y > 0.0:
+		var aspect: float = view_size.x / view_size.y
+		half_angle = atan(tan(half_angle) * sqrt(1.0 + aspect * aspect))
+	var scene_lux := _system.scene_illuminance_at(
+		_ship.global_position, -_camera.global_transform.basis.z, half_angle
+	)
+	# Nothing bright in front of the eye: the exposure rests at the dark-adapted state, which is what
+	# lets the stars appear at all. Anything else would be exposing for a light the eye is not
+	# responding to.
+	var target := SpacesimExposure.DARK_ADAPTED_MULTIPLIER
+	if scene_lux > 0.0:
+		target = SpacesimExposure.target_multiplier(scene_lux)
+	_exposure.update_to(target, delta)
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_update_hud()

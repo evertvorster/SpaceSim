@@ -42,6 +42,9 @@ var start_time: float = 0.0
 
 ## The environment the scene built, so the game can turn its volumetric fog on and off.
 var environment: Environment
+## The background sky: the real star field. Null when the catalogue did not load, in which case the
+## environment keeps a flat background colour rather than rendering a black sky that reads as a bug.
+var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
 ## World-clock seconds at which the orbital elements are stated — the content's `epoch`.
 var _epoch_time: float = 0.0
@@ -513,10 +516,22 @@ func _add_lighting() -> void:
 	star_light.create(container, luminosity, temperature)
 
 	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color(0.01, 0.012, 0.02)
-	# Ambient is a small floor rather than physics — see SpacesimExposure. Space has almost none.
-	SpacesimExposure.configure(environment, Color(0.07, 0.07, 0.09))
+	# **The background is the real sky.** It used to be `BG_COLOR` with `Color(0.01, 0.012, 0.02)` — a
+	# *look* value, and the exposure multiplier scaled it like everything else, so empty space
+	# rendered bright blue at outer-system distances (measured 0.655, 0.733, 0.890 at Saturn) and
+	# outshone every atmospheric limb. A star field is black where there are no stars, so multiplying
+	# it by the exposure is *correct* — that is what dark adaptation is, and it needs no carve-out.
+	star_sky = SpacesimStarSky.new()
+	if star_sky.create():
+		environment.background_mode = Environment.BG_SKY
+		environment.sky = star_sky.sky
+	else:
+		# Said out loud, because a missing catalogue would otherwise look like a broken shader.
+		push_warning("the star catalogue did not load; the sky is a flat colour")
+		star_sky = null
+		environment.background_mode = Environment.BG_COLOR
+		environment.background_color = Color(0.01, 0.012, 0.02)
+	SpacesimExposure.configure(environment)
 	self.environment = environment
 	var world_environment := WorldEnvironment.new()
 	world_environment.name = "Environment"
@@ -571,6 +586,61 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 ## has ~7 significant digits, so a world coordinate would arrive with ~16 km of resolution — against
 ## an air 100 km deep. Computed here in double precision, the difference is ~6.4e6 m and arrives with
 ## sub-metre resolution.
+## Point the sky at the camera and set how deep it is drawn.
+##
+## Called once a frame, like `update_atmospheres()`: the sky follows the **camera**, not the ship,
+## because it is the eye that sees it and nothing about it depends on which body the player is
+## attached to. The depth is read from settings every frame rather than cached, so it is hot by
+## construction like every other setting.
+func update_sky(camera: Camera3D) -> void:
+	if star_sky == null or camera == null:
+		return
+	star_sky.set_limit_magnitude(float(SpacesimSettings.get_value("sky.star_depth")))
+	# The manual brightness scaler, in DECADES. Read every frame so it is hot by construction and can
+	# be dragged while flying.
+	star_sky.set_gain(pow(10.0, float(SpacesimSettings.get_value("sky.star_gain"))))
+	star_sky.update(camera)
+
+
+## The illuminance the **eye** receives from what is in front of it — which is what the exposure must
+## follow, and is NOT the same thing as the light falling on a surface.
+##
+## `illuminance_at()` answers "how brightly is a surface here lit", and at 1 au that answer is
+## 128,000 lux whether you are looking at the Sun or at empty sky. An eye does not work that way:
+## point it at the Sun and it stops down until the stars are gone; point it at a dark sky and it opens
+## up until they appear. Evert described exactly that on 2026-10-14, and it is why the far planets
+## showed a handful of stars where they should show a sky full of them.
+##
+## **Zero means "nothing bright is in front of the eye"**, which the caller reads as the dark-adapted
+## state rather than as no light. A lit body in the view cone is the next term to add; it is not in
+## yet, so at present the star and a lit sky are what stop the exposure down.
+func scene_illuminance_at(observer: Vector3, forward: Vector3, half_angle: float) -> float:
+	var star_body := star()
+	if star_body == null or star_body.node == null or star_light == null:
+		return 0.0
+	var star_position := star_body.node.global_position
+
+	# The air's own scattered daylight, from inside it and on the lit side. Answered before the star,
+	# because it is the one case that does not depend on which way you are looking: inside a lit
+	# atmosphere there is a bright sky in every direction you can point.
+	var active := frame_tree.active_frame
+	var air: SpacesimSceneBody = air_body(active) if active != null else null
+	if air != null and air.node != null:
+		var up := observer - air.node.global_position
+		var to_star_from_body := star_position - air.node.global_position
+		if up.length() > 0.0 and to_star_from_body.length() > 0.0 \
+				and up.normalized().dot(to_star_from_body.normalized()) > 0.0:
+			return SpacesimExposure.DAYLIGHT_SKY_LUX
+
+	var to_star := star_position - observer
+	var distance := to_star.length()
+	if distance <= 0.0:
+		return 0.0
+	if forward.dot(to_star / distance) < cos(half_angle):
+		return 0.0
+	return star_light.lux_at(distance)
+
+
 func update_atmospheres(observer: Vector3) -> void:
 	var star_body := star()
 	if star_body == null or star_body.node == null:

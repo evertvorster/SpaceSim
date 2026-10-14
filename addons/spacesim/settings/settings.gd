@@ -82,6 +82,22 @@ const REGISTRY := {
 		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01)
 	},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
+	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
+	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a
+	# rebuild, and going deeper can only ADD stars. The catalogue is a COMPLETE sky to magnitude 8 and
+	# a diminishing fraction beyond (0.99 at 8, 0.69 at 9), so this belongs in 6.5 to 8.0; the
+	# naked-eye limit is 6.5 and 9.5 is a soft ceiling. See `sky/PROVENANCE.md` for the measurements.
+	"sky.star_depth": {"default": 6.5, "scope": Scope.PLAYER, "min": 3.0, "max": 9.5},
+	# --- the star field's brightness, **in DECADES** (the multiplier is 10^this). A hand tuner, because
+	# settling the absolute level by argument proved slower than settling it by eye. Placed in decades
+	# so a linear slider can cross orders of magnitude; 0 is the derived brightness, and the range runs
+	# from a thousandth of it to ten thousand times it.
+	#
+	# **It is a calibration knob and not a fudge factor to leave in.** If the value that looks right is
+	# far from 0, the distance is a fact about the model worth chasing -- the two candidates are the
+	# exposure resting multiplier, and whether the Sun's *illuminance* should ever be used to expose
+	# for a sky at all, since an irradiance is not a scene luminance.
+	"sky.star_gain": {"default": 0.0, "scope": Scope.PLAYER, "min": -6.0, "max": 8.0},
 	# Sized to the HUD's own 17, so the markers read as part of the screen rather than as something
 	# laid over it.
 	"markers.font_size": {"default": 17, "scope": Scope.PLAYER, "min": 8, "max": 72},

@@ -31,6 +31,7 @@ func run(h, root: Node) -> void:
 
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_star_is_a_source(h, scene)
+	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_shells_reach_the_right_height(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
@@ -38,6 +39,66 @@ func run(h, root: Node) -> void:
 	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
+
+
+## **The background is the real sky, and it must not become the light.**
+##
+## Both halves matter. The sky replaced a flat look-value colour that the exposure multiplier turned
+## bright blue at outer-system distances (measured 0.655, 0.733, 0.890 at Saturn), and it is drawn
+## from the real catalogue rather than generated — which is the whole point of a calibration fixture.
+##
+## The ambient half is the one that would fail silently: Godot's default ambient source IS the
+## background, so wiring a sky quietly changes how every body is lit. Here that is deliberate
+## (Evert, 2026-10-14: *"The sky should be the ambient light source"*), which is why it is asserted
+## rather than left to whoever notices the night side looking different.
+func _test_the_background_is_the_real_sky(h, scene: SpacesimSystemScene) -> void:
+	var environment := scene.environment
+	h.check(environment != null, "the scene built an environment")
+	if environment == null:
+		return
+	h.check(environment.background_mode == Environment.BG_SKY,
+		"the background is a sky, not a flat colour")
+	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_BG,
+		"and the SKY is the ambient light source, so a night side is lit by the stars that are there")
+
+	var sky := scene.star_sky
+	h.check(sky != null, "with a star sky behind it")
+	if sky == null:
+		return
+	h.check(sky.catalogue != null and sky.catalogue.count > 100000,
+		"loaded from the real catalogue (%d stars)" % (sky.catalogue.count if sky.catalogue else 0))
+	var material := sky.material
+	h.check(material != null and material.shader != null, "with a material")
+	if material == null or material.shader == null:
+		return
+	var code := material.shader.code
+	h.check(code.contains("shader_type sky"),
+		"of the sky kind, so EYEDIR is a world direction and no mesh has to be centred on the camera")
+	# The shader is an INPUT: it reports radiance, and the exposure decides what is seen. If it ever
+	# grows a tone curve of its own it has become display referred, which is what made every earlier
+	# star field unable to respond to a varying EV.
+	#
+	# Checked as `aces(` and not as `aces`: the first version of this matched the bare word, which is
+	# inside "Spacesim" and "surfaces", so it failed for a reason that had nothing to do with tone
+	# curves. A substring scan over source is blunt enough that it needs to be aimed.
+	h.check(not code.contains("aces(") and not code.contains("0.4545"),
+		"and returns linear HDR: no tone curve in the shader, or the exposure cannot reach it")
+	h.check(code.contains("UNIT_LUX_PER_SR"),
+		"converted into the engine's units, which is a unit conversion and not a gain")
+
+	# The depth tunable must reach the shader, since sweeping it is how the sky gets iterated on.
+	sky.set_limit_magnitude(7.25)
+	h.check_near(material.get_shader_parameter("u_limit_mag"), 7.25,
+		"and the depth tunable is a uniform, so it costs a write rather than a rebuild", 1e-6)
+
+	# The whole naked-eye sky is 2e-4 lux, which is the measured figure the calibration was checked
+	# against -- so this is the calibration asserted, not a shape assertion.
+	# GDScript's `%` has no `%e` (a runtime error, not a formatting surprise), so the number is scaled
+	# into units and printed with `%f`, which is the documented workaround.
+	var naked_eye := sky.illuminance(6.5)
+	h.check(naked_eye > 1.5e-4 and naked_eye < 2.7e-4,
+		"and the naked-eye sky it holds comes to %.3f e-4 lux against a measured 2.0e-4"
+			% (naked_eye * 1e4))
 
 
 ## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own
