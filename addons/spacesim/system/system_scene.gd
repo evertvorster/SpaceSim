@@ -244,63 +244,7 @@ func aim_sun_at(position: Vector3) -> void:
 	var origin := Vector3.ZERO
 	if star_body != null and star_body.node != null:
 		origin = star_body.node.global_position
-	star_light.aim_at(position, origin, sun_transmission(position, origin, star_body))
-
-
-## **How much of the Sun a body is standing in front of**, from `position`: 1.0 in the open, 0.0 in an
-## umbra, and the covered fraction of the Sun's disc in between.
-##
-## Evert, 2026-10-15: *"it does not appear that the planets cast shadows… when my ship is fully lit
-## when there is a planet between me and Sol."* He is right, and `SpacesimStarLight.solar_transmission`
-## carries the reason it is arithmetic rather than a shadow map. This is the loop that feeds it.
-##
-## **Cost is not why it is shaped this way; it is why it stays cheap.** The first line of
-## `solar_transmission` rejects any body whose disc cannot touch the Sun's, so the bodies worth asking
-## about are those within `sun_angle + body_angle` of the star — under a degree for anything distant,
-## and never many for anything near, because nothing can be near everything at once. The loop then
-## bails the moment the transmission reaches zero, which in practice is one body deep: being in an
-## umbra is decided by one body. The remaining work is a dot product and an `acos` per body, and Sol
-## has sixteen.
-##
-## **The product over bodies is the standard approximation** when two of their discs overlap in the
-## sky. What it cannot be is local: one directional light means one transmission for the whole scene,
-## so when the player is in shadow everything they can see dims with them. That is the same shape as
-## *"one directional light cannot light a whole system, so it lights wherever the player is"* — the
-## price of the design rather than a fault in this function. The atmosphere shader is the other place
-## the same fact is needed: `sun_intensity` is its own uniform, so a lit sky does not dim in an
-## eclipse. Left alone deliberately; the vault records it.
-func sun_transmission(
-	observer: Vector3, star_position: Vector3, star_body: SpacesimSceneBody
-) -> float:
-	var to_star := star_position - observer
-	var star_distance := to_star.length()
-	if star_distance <= 0.0:
-		return 1.0
-	var direction := to_star / star_distance
-	var star_radius := star_body.radius if star_body != null else 0.0
-	var sun_angle := asin(clampf(star_radius / star_distance, 0.0, 1.0))
-	var transmission := 1.0
-	for body in bodies:
-		if body.node == null or body == star_body:
-			continue
-		var to_body := body.node.global_position - observer
-		var distance := to_body.length()
-		if distance <= body.radius:
-			continue # inside it
-		# **The body you are standing on is not an occluder, it is the ground.** Inside its air the local
-		# horizon is what hides the Sun, and the surface shader's own `NdotL` is what puts it under that
-		# horizon. A flat-disc model of a body 88 degrees wide is outside what the overlap formula is
-		# for, and it would cut the direct sun about 1.4 degrees early — five minutes before sunset,
-		# against a terminator the surface already draws correctly. The frame tree uses this same
-		# altitude to decide containment, so the two agree about what "on the body" means.
-		if distance <= body.radius + _framing.atmosphere_altitude:
-			continue
-		var body_angle := asin(clampf(body.radius / distance, 0.0, 1.0))
-		var separation := acos(clampf(direction.dot(to_body / distance), -1.0, 1.0))
-		transmission *= SpacesimStarLight.solar_transmission(sun_angle, body_angle, separation)
-		if transmission <= 0.0:
-			return 0.0
-	return transmission
+	star_light.aim_at(position, origin)
 
 
 func star() -> SpacesimSceneBody:

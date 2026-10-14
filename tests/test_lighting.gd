@@ -192,59 +192,6 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 		h.check(scene.star_light.light.global_transform.basis.z.dot(to_star) > 0.99,
 			"and it shines from the star toward the observer")
 
-	# --- the eclipse, which Godot does not do for us ------------------------------------------------
-	# **Godot never asks what is in the way of a light.** A directional light gives a fragment a
-	# direction, a colour and an energy, and the shader's `NdotL` is the whole test — which is why a ship
-	# behind a planet is lit. So the eclipse is arithmetic, and it is checked against the values the
-	# geometry is *defined* by rather than against itself.
-	h.check_near(SpacesimStarLight.solar_transmission(0.0046, 0.02, 0.0046 + 0.02), 1.0,
-		"discs that only graze leave the Sun whole", 1.0e-9)
-	h.check_near(SpacesimStarLight.solar_transmission(0.0046, 0.02, 0.0), 0.0,
-		"a body covering the Sun whole is an umbra", 1.0e-9)
-	# A limb across the Sun's centre covers half of it, to the accuracy of a tangent-plane model — the
-	# residual is `sun_angle / body_angle`, so a planet is the good case and it is written down in the
-	# function rather than hidden in a tolerance.
-	h.check_near(SpacesimStarLight.solar_transmission(0.0046, 1.0, 1.0), 0.5,
-		"a limb across the Sun's centre covers half of it", 1.0e-3)
-	h.check_near(SpacesimStarLight.solar_transmission(0.1, 0.01, 0.0), 1.0 - pow(0.01 / 0.1, 2.0),
-		"and a body smaller than the Sun only removes the area it covers", 1.0e-9)
-
-	# **The umbra's tip, against a published number.** It is where the body's angular radius has fallen
-	# to the Sun's: `R / sin(sun_angle)`, and `sin(sun_angle)` is `star_radius / AU` — so this is the
-	# geometry checked against a measurement rather than restated. Earth's umbra is about 1.38 Gm.
-	var earth_radius := 6.371e6
-	var umbra := earth_radius * AU / star_node.radius
-	h.check_near(umbra, 1.38e9, "and Earth's umbra reaches %.3f Gm against a published 1.38"
-		% (umbra * 1.0e-9), 2.0e7)
-
-	# End to end, with the real bodies. The shadow is cast *away* from the star, so `axis` from Earth
-	# toward the star reversed is the direction to walk along to get behind it.
-	var earth_position: Vector3 = lit_earth.node.global_position
-	var star_position: Vector3 = star_node.node.global_position
-	var axis := (earth_position - star_position).normalized()
-	var sideways := axis.cross(Vector3.UP)
-	if sideways.length() < 0.5:
-		sideways = axis.cross(Vector3.RIGHT)
-	sideways = sideways.normalized()
-	var behind := earth_position + axis * 1.0e8
-	h.check(scene.sun_transmission(behind, star_position, star_node) == 0.0,
-		"1e8 m behind Earth is inside its umbra, which reaches 1.37 Gm")
-	var aside := behind + sideways * 1.0e8
-	h.check(scene.sun_transmission(aside, star_position, star_node) == 1.0,
-		"and 1e8 m to the side is in the open — Earth is only 6,371 km wide")
-	var day_side := earth_position + (star_position - earth_position).normalized() * (earth_radius + 2000.0)
-	h.check(scene.sun_transmission(day_side, star_position, star_node) > 0.99,
-		"while Earth's day side is lit: the body you are standing on is the ground, not an occluder")
-
-	# And the strength of the light is where it has to land, or none of the above is wired up.
-	scene.aim_sun_at(behind)
-	h.check(scene.star_light.light.light_intensity_lux == 0.0,
-		"the star light actually goes out in the umbra, which is the thing that was missing")
-	scene.aim_sun_at(day_side)
-	h.check(scene.star_light.light.light_intensity_lux > 1000.0,
-		"and is at full strength on the day side (%.0f lux)"
-			% scene.star_light.light.light_intensity_lux)
-
 	# **Evert's test of the dark end**, 2026-10-15: *"the shadow side of earth, with no moonlight or
 	# other source of light but starlight should be barely visible, a little above black."* That is a
 	# statement about the ANCHOR and it is arithmetic — the surface renders at the ratio between the
