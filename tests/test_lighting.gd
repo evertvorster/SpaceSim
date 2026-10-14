@@ -130,12 +130,26 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check_near(a, b, "so radiance x multiplier — what actually lands on the screen — is the same "
 		+ "at 30 degrees as at 110 (%.1f against %.1f)" % [a, b], 0.01 * a)
 
+	# **The clamp must sit above the anchor at the WIDEST field the settings allow**, not merely at the
+	# reference one, because the anchor goes as tan^2(half fov): 140 degrees — `camera.fov`'s own maximum
+	# in `settings.gd` — is 64x its reference value. Checked at the widest field rather than at the 70
+	# the game runs at, since that is where it would fail, and the clamp is now derived from the anchor
+	# so that it keeps holding the next time the anchor moves, which it has now done once.
+	var widest := SpacesimExposure.dark_adapted_multiplier(140.0)
+	h.check(widest < SpacesimExposure.MAX_MULTIPLIER,
+		"the clamp sits above the dark-adapted anchor even at the widest field (%s against %s)"
+			% [widest, SpacesimExposure.MAX_MULTIPLIER])
+	h.check(widest * 10.0 < SpacesimExposure.MAX_MULTIPLIER,
+		"with real headroom rather than a coincidence")
+
 	# **AgX ignores `tonemap_white`**, and the engine says so outright: *"tonemap_agx_white will be
 	# used instead when using the TONE_MAPPER_AGX tonemapper"*. The derivation this file is built on
-	# is done against a white point of **6.0**, so setting only `tonemap_white` left the curve at its
-	# own default of 16.29 and rendered the sky 2.72x dimmer than the arithmetic said — which reads
-	# exactly like a scale error and is not one. Checked as an equality between the two rather than
-	# against a second constant, so they cannot drift apart again.
+	# is done against a white point of **6.0**, so setting only `tonemap_white` left the curve running
+	# at its own default of 16.29 — a curve the exposure's arithmetic was never written against.
+	# Checked as an equality between the two rather than against a second constant, so they cannot
+	# drift apart again. (The magnitude of the fix is small — the white parameter shapes the shoulder
+	# only, and Sirius moves about 4% — but a constant and a curve that disagree about white is a trap
+	# for the next person either way.)
 	var environment := Environment.new()
 	SpacesimExposure.configure(environment)
 	h.check(environment.tonemap_mode == Environment.TONE_MAPPER_AGX,

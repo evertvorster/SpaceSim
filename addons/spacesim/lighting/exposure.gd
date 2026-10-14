@@ -25,7 +25,13 @@ const REFERENCE_LUX := 100000.0
 
 ## How far we will correct. It has to be **above `DARK_ADAPTED_MULTIPLIER`**, or the cap would
 ## silence the sky it exists to show — 4096 did exactly that, thirty years of stops short.
-const MAX_MULTIPLIER := 100000.0
+##
+## It is defined as a **thousand times the dark-adapted anchor at its reference field**, which is the
+## trap the sentence above names made structural rather than remembered: the anchor has moved once
+## already and this clamp had to move with it. The margin that has to hold is the *widest* field the
+## settings allow (140 degrees), where the anchor is 64x its reference value — so a thousand is
+## comfortable. Pinned by test.
+const MAX_MULTIPLIER := DARK_ADAPTED_MULTIPLIER * 1000.0
 
 ## How fast exposure follows a change. Slow on purpose: what you notice about a night side is that it
 ## stays dark, and a hard cut when flying between planets looks like a bug.
@@ -56,21 +62,40 @@ const DAYLIGHT_SKY_LUMINANCE := 8000.0
 const MIN_SOLID_ANGLE := 9.6e-6
 
 ## The multiplier a fully dark-adapted eye corresponds to — the exposure's resting state when there
-## is nothing bright in front of it.
+## is nothing bright in front of it, and the whole of what "a night sky" means on screen.
 ##
 ## **`target_multiplier()` above cannot serve for a star field, and the reason is worth stating.**
 ## That rule exposes a lit *surface*, which has a mean luminance the eye adapts to. A star field has
 ## no mean luminance — it is point sources on black — so there is nothing there to adapt to. What an
 ## observer has instead is a RANGE, and dark adaptation opens that range onto the sky. So the anchor
-## is the observer, not the scene: **the multiplier that puts the brightest star at the top of the
-## display**, which is what a fully dark-adapted eye sees.
+## is the observer, not the scene.
+##
+## **Anchored at the FAINT end, and that was the bug** (Evert, 2026-10-15). The first derivation put
+## the *brightest* star at the display's white point — and the naked-eye range is Sirius at V = -1.44
+## down to the 6.5th magnitude, which is **7.94 magnitudes, or 1,502:1**. Anchoring the top of that at
+## white puts the bottom 3.18 decades below it, under the display's own floor. The picture that
+## produces is a handful of stars, which is exactly what it showed.
+##
+## Anchored at the faint end it is the dark-adapted eye instead: **the 6.5th magnitude — by definition
+## the faintest thing a fully dark-adapted eye can see — sits at the faintest thing the display shows**, 
+## and the whole range above it is visible at once, with the brightest stars saturating. Evert, on what
+## he is asking for: *"I want to re-create the relative brightness as if you took a long exposure shot,
+## as cameras can't naturally step down to what a human eye is capable of."* A long exposure is the same
+## statement: the top blows out and the faint field appears.
 ##
 ## Derived, at the reference the sky is judged at (1920x1080, a 37.8 degree field):
-##     Sirius, V = -1.44               2.54e-6 * 10^0.576        = 9.568e-6 lux
-##     one pixel's solid angle          4 * tan18.9 * tan18.9*1.778 / (1920*1080) = 4.020e-7 sr
-##     its radiance                     9.568e-6 / 4.020e-7      = 23.80 lux/sr
-##     in Godot's units                 23.80 / (100000/pi)       = 7.477e-4
-##     to the white point               AGX white is 6.0 -> 6.0 / 7.477e-4 = 8025
+##     mag 6.5, the naked-eye limit      2.54e-6 * 10^(-0.4 * 6.5)   = 6.375e-9 lux
+##     one pixel's solid angle          4 * tan18.9^2 * 1.778 / (1920*1080) = 4.020e-7 sr
+##     its radiance                     6.375e-9 / 4.020e-7          = 1.586e-2 lux/sr
+##     in Godot's units                 1.586e-2 / (100000/pi)       = 4.984e-7
+##     to the display's floor           ~0.05 -> 0.05 / 4.984e-7     = 1.0e5
+##
+## **The one number in that chain that is not physics is the display's floor**, and it is why this is
+## 800,000 rather than 100,000: the floor is not a property of the sky, it is a property of the screen
+## and the room it is looked at in, and Evert measured it at **10^2** — the same correction the old
+## `sky.star_gain` 2.1 was carrying all along, now placed where it belongs instead of in a fudge on the
+## field. Anchoring at the faint end is the fix; the exact height of the floor is the free parameter,
+## and it is the one thing here that a person's eye decides rather than a measurement.
 ##
 ## **The sky's brightness follows the resolution and the field; this does not.** Evert chose that on
 ## 2026-10-14: a higher resolution concentrates the same flux into a smaller angle and the stars get
@@ -81,13 +106,7 @@ const MIN_SOLID_ANGLE := 9.6e-6
 ## `(height / tan(half vfov))^2` and a constant derived at one field is wrong at every other.
 const DARK_ADAPTED_REFERENCE_FOV := 37.8
 
-## **SUSPECT, and the value is knowingly wrong.** Evert measured the correction needed at
-## `sky.star_gain` 2.1, which is 10^2.1 = **126x** — so the derivation below is 126 times off
-## somewhere, and this number is only the value at `DARK_ADAPTED_REFERENCE_FOV`. Do not treat 8000 as
-## settled, and do not absorb the remainder into it without finding it: a correction we do not
-## understand comes back wearing another hat. The audit, with the numbers, is in the vault:
-## `SpaceSim/Sky and Backgrounds.md` §9.
-const DARK_ADAPTED_MULTIPLIER := 8000.0
+const DARK_ADAPTED_MULTIPLIER := 800000.0
 
 
 ## The dark-adapted multiplier **for the field of view actually in use**.
@@ -186,11 +205,17 @@ static func configure(environment: Environment) -> void:
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
 	# **Both white points, and that is not belt-and-braces.** AgX IGNORES `tonemap_white` — the engine
 	# says so in as many words, *"tonemap_agx_white will be used instead when using the
-	# TONE_MAPPER_AGX tonemapper"* — and the derivation above is done against **6.0**. Setting only
-	# `tonemap_white` therefore left the curve at its own default of **16.29**, so the sky rendered
-	# 2.72x dimmer than the arithmetic predicted, and a wrong tone curve reads exactly like a wrong
-	# scale. Set together so a mode change cannot move the curve out from under the exposure, and
-	# pinned by test so the two cannot drift apart again.
+	# TONE_MAPPER_AGX tonemapper"* — and the derivation of `DARK_ADAPTED_MULTIPLIER` is done against
+	# **6.0**. Setting only `tonemap_white` therefore left the curve running at its own default of
+	# **16.29**, which is not the value the arithmetic above was written against.
+	#
+	# **What this does and does not buy, measured rather than assumed.** The white parameter shapes the
+	# curve's shoulder only — the toe is independent of it — so on our numbers Sirius moves from
+	# 245/255 to 254/255 and the faint half of the field does not move at all. It is a correctness fix,
+	# not a brightness one, and it is worth having because the constant and the curve have to be
+	# talking about the same white. (The first version of this comment claimed 2.72x, from the
+	# semantics of `tonemap_white` as described in the class reference. That was wrong, and the
+	# magnitude is recorded here so nobody re-derives it from the same description.)
 	environment.tonemap_white = 6.0
 	environment.tonemap_agx_white = 6.0
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_BG

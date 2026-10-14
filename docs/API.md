@@ -367,8 +367,8 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 | Member | |
 |---|---|
 | `REFERENCE_LUX` | 100,000 — Godot's own default for `light_intensity_lux`, so a multiplier of 1.0 means "the light Godot considers normal" |
-| `MAX_MULTIPLIER` | 100,000 — the clamp, and it **must sit above `DARK_ADAPTED_MULTIPLIER`** or it silences the sky it exists to show. It was 4096, twelve stops, and that was the reason the far planets showed a handful of stars |
-| `DARK_ADAPTED_MULTIPLIER` | 8,000 — **the exposure's resting state when nothing extended is in view**, and a *ceiling* rather than a floor: it is also what keeps the sky's brightness from depending on how far away the star is |
+| `MAX_MULTIPLIER` | **a thousand times `DARK_ADAPTED_MULTIPLIER`** — derived rather than written down, so it cannot fall below the anchor it exists to protect. It has to hold at the **widest field**, 140°, where the anchor is 64× its reference value. It was 100,000 when the anchor was 8,000, and 4096 before that — twelve stops, and the reason the far planets showed a handful of stars |
+| `DARK_ADAPTED_MULTIPLIER` | 800,000 — **the exposure's resting state when nothing extended is in view**, and a *ceiling* rather than a floor: it is also what keeps the sky's brightness from depending on how far away the star is. **Anchored at the faint end**, see below |
 | `MIN_SOLID_ANGLE` | 9.6e-6 sr — **the eye's own pooling scale**, a disk 0.2° across. Below it a source cannot be resolved as a surface, so it has no surface brightness to adapt to and can only glare. This one number is what makes looking at the Sun mean different things at 1 au and at Saturn |
 | `DAYLIGHT_SKY_LUMINANCE` | 8,000 lux/sr — a clear sky's own luminance (Schlyter's 25,000 lux on the ground is `pi*L`) |
 | `ADAPTATION_RATE` | how fast exposure follows a change, per second |
@@ -379,11 +379,14 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 | `static configure(environment)` | AgX, **both** white points, the ambient, `glow_*` |
 
 **The white point is set twice, and that is not belt-and-braces.** AgX *ignores* `tonemap_white` —
-the engine says so in as many words — so the derivation's 6.0 was being compared against a curve
-running at its own default of **16.29**: the sky rendered 2.72x dimmer than the arithmetic said, which
-reads exactly like a scale error and is not one. `tonemap_white` and `tonemap_agx_white` are both set,
-and a test asserts the two are equal, so a mode change cannot move the curve out from under the
-exposure silently.
+the engine says so in as many words — so the exposure's derivation was being written against a
+white of 6.0 while the curve ran at its own default of **16.29**. `tonemap_white` and
+`tonemap_agx_white` are both set, and a test asserts the two are equal, so a mode change cannot move
+the curve out from under the exposure silently. **The magnitude is small** and worth stating so nobody
+expected more: the white parameter shapes the curve's shoulder only, so on our numbers Sirius moves
+about 4% and the faint half of the field does not move at all. It is a consistency fix, not a
+brightness one — an earlier version of this paragraph claimed 2.72×, taken from the class reference's
+description of `tonemap_white`, and that is not what the shader does.
 
 **A luminance, not an irradiance — and that was a real bug.** `illuminance_at()` is a property of where
 the observer *is*; adaptation follows what the observer is *looking at*. Same difference, two symptoms:
@@ -395,10 +398,29 @@ source's radiance weighted by its share of the view, and `MIN_SOLID_ANGLE` is wh
 **Why a star field needs its own anchor.** `target_multiplier()` exposes a lit *surface*, which has a
 mean luminance the eye adapts to. A star field has no mean luminance — it is point sources on black —
 so there is nothing there to adapt to. What an observer has instead is a *range*, and dark adaptation
-opens that range onto the sky. So the anchor is the observer, not the scene: the multiplier that puts
-the brightest star at the top of the display. Derived in the constant, at 1920x1080 and a 37.8° field:
-Sirius is 9.568e-6 lux, one pixel is 4.020e-7 sr, so its radiance is 23.80 lux/sr; in Godot's units
-that is 7.477e-4, and AGX's white point is 6.0, giving **8,025**.
+opens that range onto the sky. So the anchor is the observer, not the scene.
+
+**Anchored at the FAINT end — the first one was at the wrong end, and that was the bug.** The original
+derivation put the *brightest* star at the display's white point. The naked-eye range is Sirius at
+V = −1.44 down to the 6.5th magnitude: **7.94 magnitudes, 1,502:1**. Anchoring the top of that at white
+puts the bottom **3.18 decades** below it, under the display's own floor — and the picture that
+produces is a handful of stars, which is exactly what it was showing (Evert, 2026-10-15: *“only a
+couple of stars”* at gain 0).
+
+The anchor is now the **dark-adapted eye**, stated at the faint end: the 6.5th magnitude — by
+definition the faintest thing a fully dark-adapted eye can see — sits at the faintest thing the display
+shows, and the whole range above it is visible at once with the brightest stars saturating. Evert, on
+the target: *“I want to re-create the relative brightness as if you took a long exposure shot, as
+cameras can't naturally step down to what a human eye is capable of… what a human eye would see at its
+most dark adapted state.”* A long exposure says the same thing: the top blows out and the faint field
+appears.
+
+Derived at 1920×1080 and a 37.8° field: mag 6.5 is 6.375e-9 lux over a 4.020e-7 sr pixel, so 1.586e-2
+lux/sr, which is **4.984e-7** in engine units; the multiplier that lifts that to the display's visible
+floor is the constant. **The display's floor is the one number in the chain that is not physics** — it
+belongs to the screen and the room, not to the sky — and Evert measured it at **10²**. That 10² is the
+same correction `sky.star_gain` 2.1 was carrying all along, now placed where it belongs instead of in a
+fudge on the field.
 
 **The sky's brightness follows the resolution and the field; this constant does not.** That is
 deliberate (Evert, 2026-10-14): a higher resolution concentrates the same flux into a smaller angle
