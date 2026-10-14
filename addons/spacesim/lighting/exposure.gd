@@ -31,14 +31,29 @@ const MAX_MULTIPLIER := 100000.0
 ## stays dark, and a hard cut when flying between planets looks like a bug.
 const ADAPTATION_RATE := 0.6
 
-## A clear blue sky's own light, in lux — Schlyter's "full daylight, not direct sun" is 10,000-25,000.
-## The measured 128,000 lux of direct sunlight is the *star's*, and is a different thing.
+## A clear blue sky's own **luminance**, in lux per steradian (the same number as cd/m²). Schlyter's
+## "full daylight, not direct sun" is 10,000-25,000 lux *on a horizontal surface*, and a uniform sky of
+## luminance L gives pi*L on the ground — so L = 25,000/pi = 8,000, which is the order a real clear sky
+## measures.
 ##
 ## It matters because **you do not have to look at the Sun to lose the stars.** Stand in a lit
-## atmosphere with the Sun behind you and the sky in front of you is still daylight. Without this term
-## the exposure rests at the dark-adapted multiplier and that sky blows out to solid white — which is
-## exactly what the first cut did, measured at 100% of the frame lit, 5 km above Saturn.
-const DAYLIGHT_SKY_LUX := 25000.0
+## atmosphere with the Sun behind you and the sky in front of you is still daylight.
+const DAYLIGHT_SKY_LUMINANCE := 8000.0
+
+## The solid angle below which a source is a **POINT** and does not set adaptation: about 9.6e-6 sr,
+## a disk 0.2 degrees across.
+##
+## That is the eye's own pooling scale — the vault's note is that a dark-adapted eye sums over roughly
+## 0.2 degrees — and it is the whole reason a star field behaves differently from a planet. Below it a
+## source cannot be resolved as a surface, so there is no surface brightness for the eye to adapt to;
+## it can only dazzle.
+##
+## **It is what makes "looking at the Sun" mean different things in different places**, which was the
+## bug it fixes. The Sun's disk is 0.53 degrees at 1 au — five times the pooling scale, so it is a sky
+## you adapt to and the stars go. At Saturn it is 0.053 degrees, ten times *smaller* than the scale, so
+## it is a glare source and no more, and the sky must be left alone. Evert reported exactly that on
+## 2026-10-14, and it is why the exposure was anchored to the wrong thing.
+const MIN_SOLID_ANGLE := 9.6e-6
 
 ## The multiplier a fully dark-adapted eye corresponds to — the exposure's resting state when there
 ## is nothing bright in front of it.
@@ -84,6 +99,18 @@ static func target_multiplier(lux: float) -> float:
 	if lux <= 0.0:
 		return MAX_MULTIPLIER
 	return clampf(REFERENCE_LUX / lux, 1.0 / MAX_MULTIPLIER, MAX_MULTIPLIER)
+
+
+## The multiplier that puts a scene of mean **luminance** at middle grey.
+##
+## A luminance and an illuminance differ by pi for a Lambertian surface, so this is the rule above with
+## that factor folded in — and the two agree, which is the point: `target_multiplier(E)` and
+## `target_multiplier_for_luminance(E/pi)` are the same number.
+##
+## It is the *luminance* form that a scene wants, because adaptation follows what the eye is looking
+## at, not the light arriving at the observer. See `SpacesimSystemScene.view_luminance_at`.
+static func target_multiplier_for_luminance(lux_per_sr: float) -> float:
+	return target_multiplier(lux_per_sr * PI)
 
 
 ## Follow the light. `delta` is seconds since the last update.

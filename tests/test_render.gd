@@ -32,6 +32,7 @@ func run(h, root: Node) -> void:
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
+	_test_the_exposure_follows_the_view(h, scene)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_shells_reach_the_right_height(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
@@ -99,6 +100,69 @@ func _test_the_background_is_the_real_sky(h, scene: SpacesimSystemScene) -> void
 	h.check(naked_eye > 1.5e-4 and naked_eye < 2.7e-4,
 		"and the naked-eye sky it holds comes to %.3f e-4 lux against a measured 2.0e-4"
 			% (naked_eye * 1e4))
+
+
+## **The exposure is anchored to what the eye is looking at, not to the light arriving at the
+## observer.** Both faults Evert reported come from that difference and both are arithmetic, so they
+## are checked here without a GPU:
+##
+##   * looking at Sol from Saturn's distance faded the whole sky 122x, which it must not — a point
+##     source has no surface brightness to adapt to;
+##   * flying close to Saturn was blown out, because nothing in the frame could affect the exposure.
+##
+## The instrument is `MIN_SOLID_ANGLE`, the eye's ~0.2 degree pooling scale. The Sun's disk is 0.53
+## degrees at 1 au — above it, so it is a sky you adapt to — and 0.053 at Saturn, ten times below, so
+## it is a glare source and no more. That is the whole fix, in one number.
+func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
+	var sun := scene.body_by_id("star:sol")
+	if sun == null or sun.node == null:
+		return
+	# A 37.8 degree vertical field at 16:9, which is what the game runs at.
+	var tan_half := Vector2(tan(deg_to_rad(18.9)) * (16.0 / 9.0), tan(deg_to_rad(18.9)))
+	var sun_position := sun.node.global_position
+	var au := 1.495978707e11
+
+	# --- empty space, far from every body --------------------------------------------------------
+	# 25 au out, where the Sun is 0.021 degrees across. Nothing else is anywhere near.
+	var empty := sun_position + Vector3(0.0, 0.0, 25.0 * au)
+	var to_sun := (sun_position - empty).normalized()
+	h.check(scene.view_luminance_at(empty, to_sun, tan_half) == 0.0,
+		"25 au out the Sun is ten times under the eye's pooling scale, so it is a glare source and "
+		+ "nothing more — looking at it from there leaves the sky alone, which is the bug this fixes")
+	h.check(scene.view_luminance_at(empty, -to_sun, tan_half) == 0.0,
+		"and looking away from it there is nothing at all, which is the dark-adapted case")
+
+	# --- at 1 au the Sun IS a sky you adapt to ----------------------------------------------------
+	# Placed 0.9 au out rather than on top of a planet, so that the body the observer would otherwise
+	# be sitting on cannot be what the check is really measuring.
+	var near := sun_position + Vector3(0.0, 0.0, 0.9 * au)
+	var at_sun := (sun_position - near).normalized()
+	var looking: float = scene.view_luminance_at(near, at_sun, tan_half)
+	h.check(looking > 0.0,
+		"at 1 au the Sun's disk is five times the pooling scale, so it is a sky you adapt to "
+		+ "(%.1f e5 lux/sr)" % (looking * 1e-5))
+	var at_one_au := SpacesimExposure.target_multiplier_for_luminance(looking)
+	h.check(at_one_au < SpacesimExposure.DARK_ADAPTED_MULTIPLIER,
+		"so staring at the Sun stops the exposure down to %.1f from %.0f"
+			% [at_one_au, SpacesimExposure.DARK_ADAPTED_MULTIPLIER])
+
+	# --- a planet filling the frame ---------------------------------------------------------------
+	# On the SUB-SOLAR side, so it is fully lit and its phase is 1. The first version of this placed the
+	# observer on the night side, which measured 0.0 — correctly — and read as a broken body term.
+	var saturn := scene.body_by_id("planet:saturn")
+	if saturn == null or saturn.node == null:
+		return
+	var toward_sun := (sun_position - saturn.node.global_position).normalized()
+	var close := saturn.node.global_position + toward_sun * (saturn.radius + 4.0e5)
+	var down := (saturn.node.global_position - close).normalized()
+	var body: float = scene.view_luminance_at(close, down, tan_half)
+	h.check(body > 0.0,
+		"a lit body filling the frame is what the exposure follows now (%.1f lux/sr)" % body)
+	h.check(SpacesimExposure.target_multiplier_for_luminance(body)
+			< SpacesimExposure.DARK_ADAPTED_MULTIPLIER,
+		"so flying close to Saturn stops the exposure down instead of blowing out")
+	h.check(scene.view_luminance_at(close, -down, tan_half) == 0.0,
+		"while looking away from it at the same place is empty sky again")
 
 
 ## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own

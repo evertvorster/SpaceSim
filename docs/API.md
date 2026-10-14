@@ -368,12 +368,22 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 |---|---|
 | `REFERENCE_LUX` | 100,000 — Godot's own default for `light_intensity_lux`, so a multiplier of 1.0 means "the light Godot considers normal" |
 | `MAX_MULTIPLIER` | 100,000 — the clamp, and it **must sit above `DARK_ADAPTED_MULTIPLIER`** or it silences the sky it exists to show. It was 4096, twelve stops, and that was the reason the far planets showed a handful of stars |
-| `DARK_ADAPTED_MULTIPLIER` | 8,000 — **the exposure's resting state when nothing bright is in front of the eye.** See below: `target_multiplier` cannot serve a star field |
+| `DARK_ADAPTED_MULTIPLIER` | 8,000 — **the exposure's resting state when nothing extended is in view**, and a *ceiling* rather than a floor: it is also what keeps the sky's brightness from depending on how far away the star is |
+| `MIN_SOLID_ANGLE` | 9.6e-6 sr — **the eye's own pooling scale**, a disk 0.2° across. Below it a source cannot be resolved as a surface, so it has no surface brightness to adapt to and can only glare. This one number is what makes looking at the Sun mean different things at 1 au and at Saturn |
+| `DAYLIGHT_SKY_LUMINANCE` | 8,000 lux/sr — a clear sky's own luminance (Schlyter's 25,000 lux on the ground is `pi*L`) |
 | `ADAPTATION_RATE` | how fast exposure follows a change, per second |
 | `attributes: CameraAttributesPhysical` | **auto-exposure off**; assign to `Camera3D.attributes` |
 | `static target_multiplier(lux) -> float` | 0.78 at one au (128,000 lux), 707 at Neptune (141 lux) — the 9.8 stops between them is derived, not tuned |
+| `static target_multiplier_for_luminance(lux_per_sr) -> float` | **the form a scene wants**, and the two agree: `target_multiplier(E)` and `target_multiplier_for_luminance(E/pi)` are the same number |
 | `update(lux, delta)` / `update_to(target, delta)` / `snap_to(lux)` | follow a light level, follow a multiplier, or land on it at once |
 | `static configure(environment)` | AgX, `tonemap_white`, the ambient, `glow_*` |
+
+**A luminance, not an irradiance — and that was a real bug.** `illuminance_at()` is a property of where
+the observer *is*; adaptation follows what the observer is *looking at*. Same difference, two symptoms:
+looking at Sol from Saturn's distance faded the whole sky 122×, and there was no body term at all, so a
+planet filling the frame did not stop the exposure down and flying close to Saturn was blown out.
+`SpacesimSystemScene.view_luminance_at` integrates what is actually in front of the eye, as each
+source's radiance weighted by its share of the view, and `MIN_SOLID_ANGLE` is what excludes points.
 
 **Why a star field needs its own anchor.** `target_multiplier()` exposes a lit *surface*, which has a
 mean luminance the eye adapts to. A star field has no mean luminance — it is point sources on black —
@@ -466,12 +476,17 @@ swept by `sky.star_depth`; the catalogue is a *complete* sky to magnitude 8 and 
 beyond (0.99 at 8, 0.69 at 9), so the setting belongs in 6.5 to 8.0 with 9.5 a soft ceiling.
 
 **The light path.** `SpacesimSystemScene.update_sky(camera)` points the sky at the camera once a frame,
-and `scene_illuminance_at(observer, forward, half_angle)` answers **what the eye receives from what is
-in front of it** — which is not `illuminance_at()`, the light falling on a surface. At 1 au that answer
-is 128,000 lux whether you are looking at the Sun or at empty sky; an eye stops down at the Sun and
-opens up at a dark sky. **Zero means "nothing bright is in front of the eye"**, and the exposure then
-rests at `DARK_ADAPTED_MULTIPLIER` — which is what lets the stars appear at all. A lit body in the view
-cone is the next term to add; it is not in yet.
+and `view_luminance_at(observer, forward, tan_half)` answers **what the eye is looking at** — a mean
+luminance over the view, weighted by each source's share of it. It is not `illuminance_at()`, which is
+the light falling on a surface: at 1 au that answer is 128,000 lux whether you are looking at the Sun
+or at empty sky. **Zero means "nothing extended is in front of the eye"**, and the exposure then rests
+at `DARK_ADAPTED_MULTIPLIER` — which is what lets the stars appear at all.
+
+**Two ways for a bright object to hide the stars, and only one is built.** This one is *global and slow*:
+the exposure stops down when something extended fills the view. The other is **veiling glare** — the
+local lift a bright source puts under everything near it, which is what hides faint stars beside the
+Sun without touching the rest of the sky. That is a separate mechanism and is **not built**; the vault
+already records the distinction (*filtering, not collecting*).
 
 A body with an atmosphere gets a second sphere reaching `radius + sky_top`, drawn
 with `body_atmosphere.gdshader` — **Rayleigh and Mie scattering**, and the one shader here that is not

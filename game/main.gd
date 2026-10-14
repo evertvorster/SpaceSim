@@ -298,23 +298,24 @@ func _physics_process(delta: float) -> void:
 	# nothing about it depends on which body the player is attached to.
 	_system.update_atmospheres(_camera.global_position)
 	_system.update_sky(_camera)
-	# Exposed for the light **in front of the eye**, not for the light falling on a surface where the
-	# player happens to be — see SpacesimSystemScene.scene_illuminance_at. The cone is half the view's
-	# DIAGONAL, because it is the corners of the frame that decide what is in it.
-	var half_angle := deg_to_rad(_camera.fov * 0.5)
+	# Exposed for **what the eye is looking at**, not for the light falling on a surface where the player
+	# happens to be — see SpacesimSystemScene.view_luminance_at. A luminance, because adaptation follows
+	# the scene; an irradiance is a property of where you are and cannot tell the Sun from empty sky.
+	var tan_y := tan(deg_to_rad(_camera.fov * 0.5))
 	var view_size := _camera.get_viewport().get_visible_rect().size
+	var tan_half := Vector2(tan_y, tan_y)
 	if view_size.y > 0.0:
-		var aspect: float = view_size.x / view_size.y
-		half_angle = atan(tan(half_angle) * sqrt(1.0 + aspect * aspect))
-	var scene_lux := _system.scene_illuminance_at(
-		_ship.global_position, -_camera.global_transform.basis.z, half_angle
+		tan_half.x = tan_y * view_size.x / view_size.y
+	var luminance := _system.view_luminance_at(
+		_ship.global_position, -_camera.global_transform.basis.z, tan_half
 	)
-	# Nothing bright in front of the eye: the exposure rests at the dark-adapted state, which is what
-	# lets the stars appear at all. Anything else would be exposing for a light the eye is not
-	# responding to.
+	# The dark-adapted value is a **ceiling, not a floor**: nothing can adapt you better than darkness,
+	# and a bright object can only stop you down from there. That is also what keeps the sky's brightness
+	# from depending on how far away the star is, which it must not — your eye adapts to what it is
+	# looking at, not to the distance to a lamp.
 	var target := SpacesimExposure.DARK_ADAPTED_MULTIPLIER
-	if scene_lux > 0.0:
-		target = SpacesimExposure.target_multiplier(scene_lux)
+	if luminance > 0.0:
+		target = minf(target, SpacesimExposure.target_multiplier_for_luminance(luminance))
 	_exposure.update_to(target, delta)
 	_update_markers(_camera)
 	_update_camera(_camera)

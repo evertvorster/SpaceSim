@@ -602,27 +602,92 @@ func update_sky(camera: Camera3D) -> void:
 	star_sky.update(camera)
 
 
-## The illuminance the **eye** receives from what is in front of it — which is what the exposure must
-## follow, and is NOT the same thing as the light falling on a surface.
+## **What the eye is looking at**, as a mean luminance over the view — which is what the exposure must
+## follow, and is emphatically NOT the light falling on a surface where the observer is.
 ##
-## `illuminance_at()` answers "how brightly is a surface here lit", and at 1 au that answer is
-## 128,000 lux whether you are looking at the Sun or at empty sky. An eye does not work that way:
-## point it at the Sun and it stops down until the stars are gone; point it at a dark sky and it opens
-## up until they appear. Evert described exactly that on 2026-10-14, and it is why the far planets
-## showed a handful of stars where they should show a sky full of them.
+## `illuminance_at()` answers "how brightly is a surface here lit", and at 1 au the answer is 128,000
+## lux whether you are looking at the Sun or at empty sky. That is an **irradiance**: a property of
+## where you *are*. Adaptation follows a **luminance**: a property of what you are *looking at*. Two
+## faults Evert reported are the same mistake made in two directions — looking at Sol from Saturn's
+## distance faded the whole sky 122x, and flying close to Saturn was blown out because a planet
+## filling the frame contributed nothing at all.
 ##
-## **Zero means "nothing bright is in front of the eye"**, which the caller reads as the dark-adapted
-## state rather than as no light. A lit body in the view cone is the next term to add; it is not in
-## yet, so at present the star and a lit sky are what stop the exposure down.
-func scene_illuminance_at(observer: Vector3, forward: Vector3, half_angle: float) -> float:
+## So this integrates what is actually in front of the eye, as radiance weighted by each source's share
+## of the view:
+##
+## | looking at | share of the view | what it does |
+## |---|---|---|
+## | Sol at 1 au | 6.8e-5 sr, five times the eye's pooling scale | a sky you adapt to — the stars go |
+## | Sol at Saturn | 7.4e-7 sr, ten times *smaller* | a glare source and no more — the sky is left alone |
+## | a planet up close | large | stops the exposure down hard |
+## | a lit sky, from inside | fills the view | stops it down |
+## | empty sky | nothing extended at all | 0.0, which the caller reads as dark-adapted |
+##
+## **`MIN_SOLID_ANGLE` is the whole of the fix**, and `SpacesimExposure` carries the reasoning: a source
+## below the eye's 0.2 degree pooling scale cannot be resolved as a surface, so it has no surface
+## brightness to adapt to. `tan_half` is the field's tangent half-extents, the same pair the sky
+## shader is given.
+func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -> float:
 	var star_body := star()
 	if star_body == null or star_body.node == null or star_light == null:
 		return 0.0
 	var star_position := star_body.node.global_position
 
-	# The air's own scattered daylight, from inside it and on the lit side. Answered before the star,
-	# because it is the one case that does not depend on which way you are looking: inside a lit
-	# atmosphere there is a bright sky in every direction you can point.
+	# The view's own solid angle, exactly: a rectangular pyramid of tangent half-extents (X, Y) subtends
+	# 4*atan(X*Y / sqrt(1 + X^2 + Y^2)).
+	var view_omega := 4.0 * atan(tan_half.x * tan_half.y
+		/ sqrt(1.0 + tan_half.x * tan_half.x + tan_half.y * tan_half.y))
+	if view_omega <= 0.0:
+		return 0.0
+	var half_diagonal := atan(sqrt(tan_half.x * tan_half.x + tan_half.y * tan_half.y))
+
+	var total := 0.0
+
+	# --- the star -------------------------------------------------------------------------------
+	# Its surface radiance is its illuminance over its own solid angle, so its share of the view comes
+	# to `illuminance / view_omega` — the disc's own solid angle cancels. Which is exactly why the
+	# eye's pooling scale has to be applied first: without it the Sun's *radiance* dominates everything
+	# at every distance, because radiance does not fall off with distance even though its area does.
+	var to_star := star_position - observer
+	var star_distance := to_star.length()
+	if star_distance > star_body.radius:
+		var star_angle := asin(clampf(star_body.radius / star_distance, 0.0, 1.0))
+		var star_omega := 2.0 * PI * (1.0 - cos(star_angle))
+		if star_omega >= SpacesimExposure.MIN_SOLID_ANGLE \
+				and _in_view(forward, to_star / star_distance, half_diagonal, star_angle):
+			total += star_light.lux_at(star_distance) / view_omega
+
+	# --- every lit body in the view --------------------------------------------------------------
+	# A body's luminance is its albedo times the light falling on it over pi, weighted by how much of it
+	# is lit. Its share of the view is what makes "close" mean something: the same body a million
+	# kilometres away changes nothing, and filling half the frame changes everything.
+	for body in bodies:
+		if body.node == null or body == star_body:
+			continue
+		var to_body := body.node.global_position - observer
+		var distance := to_body.length()
+		if distance <= body.radius:
+			continue
+		var body_angle := asin(clampf(body.radius / distance, 0.0, 1.0))
+		var body_omega := 2.0 * PI * (1.0 - cos(body_angle))
+		if body_omega < SpacesimExposure.MIN_SOLID_ANGLE:
+			continue
+		if not _in_view(forward, to_body / distance, half_diagonal, body_angle):
+			continue
+		var to_observer := -to_body / distance
+		var to_body_star := star_position - body.node.global_position
+		var phase := clampf(to_observer.dot(to_body_star.normalized()), 0.0, 1.0)
+		if phase <= 0.0:
+			continue
+		var albedo := SpacesimSurfaceModel.bond_albedo(body.content, _materials())
+		if albedo <= 0.0:
+			continue
+		var luminance := star_light.lux_at(to_body_star.length()) * albedo * phase / PI
+		total += luminance * minf(body_omega / view_omega, 1.0)
+
+	# --- a lit sky, from inside it -----------------------------------------------------------------
+	# It fills the view, so its share is 1 and no solid angle is needed. Answered regardless of which way
+	# the camera points, because inside a lit atmosphere there is a bright sky in every direction.
 	var active := frame_tree.active_frame
 	var air: SpacesimSceneBody = air_body(active) if active != null else null
 	if air != null and air.node != null:
@@ -630,15 +695,16 @@ func scene_illuminance_at(observer: Vector3, forward: Vector3, half_angle: float
 		var to_star_from_body := star_position - air.node.global_position
 		if up.length() > 0.0 and to_star_from_body.length() > 0.0 \
 				and up.normalized().dot(to_star_from_body.normalized()) > 0.0:
-			return SpacesimExposure.DAYLIGHT_SKY_LUX
+			total += SpacesimExposure.DAYLIGHT_SKY_LUMINANCE
 
-	var to_star := star_position - observer
-	var distance := to_star.length()
-	if distance <= 0.0:
-		return 0.0
-	if forward.dot(to_star / distance) < cos(half_angle):
-		return 0.0
-	return star_light.lux_at(distance)
+	return total
+
+
+## Whether a source's centre lies in the frame, allowing for its own angular size — a body that fills
+## the view has its centre in view only by a technicality, and one just outside the corner is still
+## partly in frame.
+func _in_view(forward: Vector3, direction: Vector3, half_diagonal: float, angular_radius: float) -> bool:
+	return acos(clampf(forward.dot(direction), -1.0, 1.0)) <= half_diagonal + angular_radius
 
 
 func update_atmospheres(observer: Vector3) -> void:
