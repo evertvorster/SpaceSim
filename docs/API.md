@@ -427,11 +427,17 @@ fudge on the field.
 deliberate (Evert, 2026-10-14): a higher resolution concentrates the same flux into a smaller angle
 and the stars get brighter, which is what a larger aperture does to a point source.
 
-**The ambient is the SKY, not a colour** — `AMBIENT_SOURCE_BG`. That deletes an authored constant
-rather than moving it: `AMBIENT_SOURCE_COLOR` with a look-value energy was a number that could
-silently disagree with the sky above it. Because a sky of point sources has almost no mean radiance,
-a night side now goes genuinely black — the physical answer, and the vault's own note is that a
-physical floor *removes* the fake one.
+**The ambient is the star field's own light, summed from the catalogue** — `AMBIENT_SOURCE_COLOR`, with
+its energy set each time `sky.star_depth` changes from `SpacesimStarSky.illuminance()`. It is *not*
+`AMBIENT_SOURCE_BG`: Godot builds that ambient from a radiance **cubemap**, and a sky of point sources
+cannot be represented in one — the same reason the star shader contributes nothing there. The sky is
+still the light source; it is not asked to travel through a cubemap to say so. Evert, 2026-10-14:
+*"The sky should be the ambient light source."*
+
+**The energy is in `REFERENCE_LUX`'s units and that number was never measured.** The vault inferred the
+convention from Godot's old look-value floor, and Godot's own property hint gives `ambient_light_energy`
+a range of 0 to 16 where this wants 2e-9 — so if a night side comes out wrong, that factor is the
+suspect and it is the one number in this file with no measurement behind it.
 
 **The star is a source, not a reflector**: it cannot be brought into range without making everything
 else black, so it is allowed to clip and `glow_*` handles how that reads. Nothing here exposes for it.

@@ -59,8 +59,9 @@ func _test_the_background_is_the_real_sky(h, scene: SpacesimSystemScene) -> void
 		return
 	h.check(environment.background_mode == Environment.BG_SKY,
 		"the background is a sky, not a flat colour")
-	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_BG,
-		"and the SKY is the ambient light source, so a night side is lit by the stars that are there")
+	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_COLOR,
+		"and the ambient is the star field's own light, summed from the catalogue — the sky is still the "
+			+ "source, it is no longer asked to travel through a radiance cubemap to say so")
 
 	var sky := scene.star_sky
 	h.check(sky != null, "with a star sky behind it")

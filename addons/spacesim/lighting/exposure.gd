@@ -199,6 +199,25 @@ func update_to(target: float, delta: float) -> void:
 	attributes.exposure_multiplier = _multiplier
 
 
+## Set the ambient light from the star field's own illuminance, in lux.
+##
+## **The energy is in `REFERENCE_LUX`'s units, and that is what makes it consistent.** `REFERENCE_LUX`
+## is 100,000 lux, which is Godot's own reference for `light_intensity_lux` — the illuminance at which
+## a white surface renders as 1.0 — so an illuminance becomes an energy by dividing by it and nothing
+## else. The number handed in is the **whole naked-eye sky summed from the catalogue**, about 2e-4 lux,
+## which is what a night side is actually lit by.
+##
+## It moves with `sky.star_depth` by construction, because it is summed to that depth — so the ambient
+## and the sky above it cannot disagree, which was the whole point of taking it from the sky in the
+## first place.
+static func set_ambient_illuminance(environment: Environment, lux: float) -> void:
+	if environment == null:
+		return
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color.WHITE
+	environment.ambient_light_energy = maxf(lux, 0.0) / REFERENCE_LUX
+
+
 func multiplier() -> float:
 	return _multiplier
 
@@ -211,13 +230,29 @@ func multiplier() -> float:
 ## The tone curve is deliberately left alone in the same change as the exposure, so that if the
 ## picture improves we know which one did it.
 ##
-## **The ambient comes from the SKY now, not from a colour.** Evert, 2026-10-14: *"The sky should be
-## the ambient light source."* That does not move an authored constant so much as delete one: an
-## `AMBIENT_SOURCE_COLOR` with a look-value energy is a number that can silently disagree with the
-## sky above it. Taken from the background, a night side is lit by the stars that are actually
-## there — and because a sky of point sources has almost no mean radiance, a night side goes
-## genuinely black. That is the physical answer, not a regression: the vault's own note is that a
-## physical floor *removes* the fake one.
+## **The ambient comes from the catalogue, and not from the background.** Evert, 2026-10-14: *"The sky
+## should be the ambient light source."* That is still the intent — a night side is lit by the stars
+## that are actually there — but `AMBIENT_SOURCE_BG` could not deliver it, for two reasons and both of
+## them mine:
+##
+## 1. Godot builds that ambient from a radiance **cubemap**, and a sky of point sources cannot be
+##    represented in one. It is the wrong object for the light.
+## 2. The star shader's basis is the camera's, and Godot renders the cubemap by walking cube faces, so
+##    the field it integrated was placed by a mapping with no relationship to the face. The pixel size
+##    it measured could then collapse toward zero, and `radiance = lux / d_omega` went with it. That
+##    cubemap **is** the ambient: Evert's report is *"the ambient light is far too bright"*, with a
+##    body's night side rendering white.
+##
+## So the number is summed from the same catalogue, directly, by `SpacesimStarSky.illuminance()` and
+## handed over in `REFERENCE_LUX`'s units — the convention every other light here is set in. The sky is
+## still the light source; it is no longer asked to travel through a cubemap to say so.
+##
+## **Re-applied 2026-10-15 after a rollback, and this is the ambient half only.** Its companion change —
+## having the star shader stand down in the radiance pass — is *not* part of this and is not needed by
+## it: `AMBIENT_SOURCE_COLOR` takes the colour and never the cubemap, which is `update_ubo`'s own
+## `use_ambient_cubemap` flag. So the ambient and that stand-down are separable, and the stand-down's
+## history (a guard that tested `#ifdef` on a bool, which took the whole star field out of every pass)
+## does not come back with this.
 static func configure(environment: Environment) -> void:
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
 	# **Both white points, and that is not belt-and-braces.** AgX IGNORES `tonemap_white` — the engine
@@ -235,7 +270,11 @@ static func configure(environment: Environment) -> void:
 	# magnitude is recorded here so nobody re-derives it from the same description.)
 	environment.tonemap_white = 6.0
 	environment.tonemap_agx_white = 6.0
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_BG
+	# The source and the energy are set from the catalogue once a frame — see
+	# `set_ambient_illuminance`, and the note above on why it is not `AMBIENT_SOURCE_BG`.
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color.WHITE
+	environment.ambient_light_energy = 0.0
 	# The star's disk should roll off through the tonemapper rather than sit in the frame as the
 	# brightest thing in the exposure histogram.
 	environment.glow_enabled = true
