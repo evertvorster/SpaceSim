@@ -72,27 +72,27 @@ uniform vec2  u_tan_half = vec2(0.5, 0.5);   // tan(half fov) per axis
 // There is deliberately no viewport-size uniform. The pixel's own size is MEASURED below, from the
 // screen-space derivatives of the ray, so there is no number for the host to get wrong — see `sky()`.
 
-// ===== THE RADIANCE PASS =========================================================
+// **`AT_CUBEMAP_PASS` is a BOOL, not a preprocessor flag.** Godot's own sky shader does
+// `#define AT_CUBEMAP_PASS true` / `false`, so the identifier is *always* defined and `#ifdef` on it is
+// always true. The first version of this guard was `#ifdef AT_CUBEMAP_PASS` around a `const bool`, which
+// therefore set `RADIANCE_PASS = true` in every pass — the star field was drawn nowhere at all, screen
+// included, and the sky was black. The engine's own pattern is to test the value, so this does too.
+//
 // Godot renders this material a second time, into a radiance **cubemap** — that is what
-// `AMBIENT_SOURCE_BG` and sky reflections are built from. **This shader has nothing to say in that
-// pass, and said something wrong instead.**
+// `AMBIENT_SOURCE_BG`, `AMBIENT_SOURCE_SKY` and sky reflections are built from. **This shader has
+// nothing to say in that pass, and said something wrong instead.**
 //
 // A cube face is walked with `EYEDIR` while the basis uniforms above are the CAMERA's, so the star
-// field was placed by a mapping with no relationship to the face. Worse, the pixel size measured in
+// field would be placed by a mapping with no relationship to the face. Worse, the pixel size measured in
 // `sky()` below is taken from screen-space derivatives of a plane built from that mismatched basis —
 // and wherever the camera's axes run across the face's sweep that derivative **collapses**, driving
-// `d_omega` toward zero and the texel's radiance toward infinity. That cubemap IS the ambient, so
-// every night side in the game was lit by it. Evert, 2026-10-15: *"the ambient light is far too
-// bright"* — a body's night side rendered white.
+// `d_omega` toward zero and the texel's radiance toward infinity. That cubemap IS the ambient, so every
+// night side in the game was lit by it. Evert, 2026-10-15: *"the ambient light is far too bright"* — a
+// body's night side rendered white.
 //
 // Standing down costs nothing: a sky of point sources cannot be represented in a 256-texel cubemap in
 // the first place, and the ambient is now summed from the catalogue directly — see
 // `SpacesimExposure.set_ambient_illuminance`.
-#ifdef AT_CUBEMAP_PASS
-const bool RADIANCE_PASS = true;
-#else
-const bool RADIANCE_PASS = false;
-#endif
 
 // ===== PHYSICS ==================================================================
 // Measured, not chosen: a V=0 star delivers this much at the observer (Schlyter).
@@ -187,9 +187,9 @@ void sky() {
 
 	// **No early `return` is allowed in a `sky()` function** — Godot rejects it outright ("Using
 	// 'return' in the 'sky' processor function is incorrect"), so the whole body lives inside the
-	// guard instead. Cost of the guard: nothing, since a ray pointing behind the camera, or a frame the
-	// radiance pass is drawing, draws nothing anyway.
-	if (!RADIANCE_PASS && dz > 1e-9 && measured) {
+	// guard instead. Cost of the guard: nothing, since a ray pointing behind the camera, or a pass the
+	// radiance cubemap is using, draws nothing anyway.
+	if (!AT_CUBEMAP_PASS && dz > 1e-9 && measured) {
 		// This pixel, in the same coordinates a star is measured in.
 		vec2 ndc = plane / u_tan_half;
 
