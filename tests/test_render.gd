@@ -177,6 +177,28 @@ func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
 	h.check(scene.view_luminance_at(close, -down, tan_half) == 0.0,
 		"while looking away from it at the same place is empty sky again")
 
+	# --- a source the planet is standing in front of -------------------------------------------------
+	# The Sun is *in the frame* from Earth's night side whenever the camera points at the ground — which
+	# it does by pointing at the planet's centre, and the Sun is behind that. Counting it as a sky you
+	# adapt to stopped the exposure down 75,000x (measured) for a Sun that cannot be seen, and took the
+	# whole sky with it for as long as the adaptation takes to come back.
+	var earth := scene.body_by_id("planet:earth")
+	if earth != null and earth.node != null:
+		var earth_position: Vector3 = earth.node.global_position
+		var to_sun_from_earth: Vector3 = (sun_position - earth_position).normalized()
+		var night := earth_position - to_sun_from_earth * (earth.radius + 2000.0)
+		h.check(scene.view_luminance_at(night, to_sun_from_earth, tan_half) == 0.0,
+			"the planet hides the Sun from its night side, so looking down at the ground is not a sky "
+			+ "you adapt to — it is a Sun that cannot be seen")
+		h.check(scene.view_luminance_at(night, -to_sun_from_earth, tan_half) == 0.0,
+			"and looking up at the actual night sky leaves the exposure dark-adapted")
+
+		# The control, and it is the half that matters: with the same geometry on the **lit** side the Sun
+		# is overhead and must still count. Without it, discarding the term would pass the checks above.
+		var day := earth_position + to_sun_from_earth * (earth.radius + 2000.0)
+		h.check(scene.view_luminance_at(day, to_sun_from_earth, tan_half) > 0.0,
+			"while on the day side it is overhead and counts, as it must — occlusion is not a deleted term")
+
 
 ## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own
 ## light — which travels from the star toward the observer, so its near face was back-lit and came out

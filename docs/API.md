@@ -497,6 +497,13 @@ the light falling on a surface: at 1 au that answer is 128,000 lux whether you a
 or at empty sky. **Zero means "nothing extended is in front of the eye"**, and the exposure then rests
 at `DARK_ADAPTED_MULTIPLIER` — which is what lets the stars appear at all.
 
+**"In front of the eye" includes being behind the planet.** `_in_view` is a cone test, so on a
+planet's night side the Sun is in the frame *through the planet* whenever the camera looks at the
+ground — and counting it stopped the exposure down **75,000x** (measured) for a Sun nobody can see,
+taking the sky with it. `_occluded` is a point-to-segment test against every body's sphere, applied to
+the star and to each body; it clamps the projection at the observer, which is what keeps the planet
+under the player's feet from occluding it and lets a Sun just below the horizon stay unoccluded.
+
 **Two ways for a bright object to hide the stars, and only one is built.** This one is *global and slow*:
 the exposure stops down when something extended fills the view. The other is **veiling glare** — the
 local lift a bright source puts under everything near it, which is what hides faint stars beside the

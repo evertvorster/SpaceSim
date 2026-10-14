@@ -623,6 +623,13 @@ func update_sky(camera: Camera3D) -> void:
 ## | a lit sky, from inside | fills the view | stops it down |
 ## | empty sky | nothing extended at all | 0.0, which the caller reads as dark-adapted |
 ##
+## **Nothing here counts a source that is behind something.** `_in_view` asks whether a source is in
+## the frame, and on a planet's night side the Sun is in the frame *through the planet*: it is 180
+## degrees from the local zenith, and a fraction of a degree from the direction the camera points when
+## the player looks down at the ground. Measured, that counted: the exposure stopped down 75,000x for
+## a Sun that could not be seen, and took the whole sky with it for as long as the adaptation takes to
+## come back. `_occluded` is that fix, and it applies to every body as well as to the star.
+##
 ## **`MIN_SOLID_ANGLE` is the whole of the fix**, and `SpacesimExposure` carries the reasoning: a source
 ## below the eye's 0.2 degree pooling scale cannot be resolved as a surface, so it has no surface
 ## brightness to adapt to. `tan_half` is the field's tangent half-extents, the same pair the sky
@@ -654,7 +661,8 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 		var star_angle := asin(clampf(star_body.radius / star_distance, 0.0, 1.0))
 		var star_omega := 2.0 * PI * (1.0 - cos(star_angle))
 		if star_omega >= SpacesimExposure.MIN_SOLID_ANGLE \
-				and _in_view(forward, to_star / star_distance, half_diagonal, star_angle):
+				and _in_view(forward, to_star / star_distance, half_diagonal, star_angle) \
+				and not _occluded(observer, star_position, star_body):
 			total += star_light.lux_at(star_distance) / view_omega
 
 	# --- every lit body in the view --------------------------------------------------------------
@@ -673,6 +681,8 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 		if body_omega < SpacesimExposure.MIN_SOLID_ANGLE:
 			continue
 		if not _in_view(forward, to_body / distance, half_diagonal, body_angle):
+			continue
+		if _occluded(observer, body.node.global_position, body):
 			continue
 		var to_observer := -to_body / distance
 		var to_body_star := star_position - body.node.global_position
@@ -705,6 +715,36 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 ## partly in frame.
 func _in_view(forward: Vector3, direction: Vector3, half_diagonal: float, angular_radius: float) -> bool:
 	return acos(clampf(forward.dot(direction), -1.0, 1.0)) <= half_diagonal + angular_radius
+
+
+## **Whether a body is standing in front of the source.** `_in_view` asks only whether something is
+## inside the frame's cone, which says nothing about whether it can be seen: from a planet's night
+## side the Sun is in that cone whenever the camera points at the ground, because pointing at the
+## ground points at the Sun *through the planet*.
+##
+## A point-to-segment test rather than a ray cast — the bodies are spheres and the span is short, so
+## the closed form is exact and needs no physics query. `source` is the body being looked at, which
+## cannot occlude itself; for the star that is the star.
+##
+## **The clamp at `t = 0.0` is what keeps the planet under the observer from occluding it.** Standing on
+## a surface, the closest point of the segment is the observer's own feet, and those are
+## `radius + altitude` from the centre — outside it. So a Sun above the local horizon has a negative
+## projection and is never occluded, one just below it is grazing and still is not, and only one that
+## is genuinely behind the body is. Nothing here models refraction, which makes the real Sun visible
+## for another half a degree below the horizon.
+func _occluded(observer: Vector3, target: Vector3, source: SpacesimSceneBody) -> bool:
+	var span := target - observer
+	var span_length_squared := span.length_squared()
+	if span_length_squared <= 0.0:
+		return false
+	for body in bodies:
+		if body.node == null or body == source:
+			continue
+		var offset: Vector3 = body.node.global_position - observer
+		var t := clampf(offset.dot(span) / span_length_squared, 0.0, 1.0)
+		if offset.distance_squared_to(span * t) < body.radius * body.radius:
+			return true
+	return false
 
 
 func update_atmospheres(observer: Vector3) -> void:
