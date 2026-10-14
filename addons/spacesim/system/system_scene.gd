@@ -46,6 +46,9 @@ var environment: Environment
 ## environment keeps a flat background colour rather than rendering a black sky that reads as a bug.
 var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
+## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
+## summing it walks the whole catalogue, so it is recomputed when this changes rather than every frame.
+var _ambient_depth := -1.0
 ## World-clock seconds at which the orbital elements are stated — the content's `epoch`.
 var _epoch_time: float = 0.0
 ## The star as a light source; null until build(). The node is `star_light.light`.
@@ -532,6 +535,12 @@ func _add_lighting() -> void:
 		environment.background_mode = Environment.BG_COLOR
 		environment.background_color = Color(0.01, 0.012, 0.02)
 	SpacesimExposure.configure(environment)
+	# **The ambient is the star field's own light, and it is set here as well as once a frame.** Here, so
+	# that a night side is lit before the first frame and a scene built by a test is complete; once a
+	# frame, so it follows `sky.star_depth` — see `update_sky`.
+	if star_sky != null:
+		_ambient_depth = float(SpacesimSettings.get_value("sky.star_depth"))
+		SpacesimExposure.set_ambient_illuminance(environment, star_sky.illuminance(_ambient_depth))
 	self.environment = environment
 	var world_environment := WorldEnvironment.new()
 	world_environment.name = "Environment"
@@ -600,6 +609,15 @@ func update_sky(camera: Camera3D) -> void:
 	# be dragged while flying.
 	star_sky.set_gain(pow(10.0, float(SpacesimSettings.get_value("sky.star_gain"))))
 	star_sky.update(camera)
+
+	# **The ambient is that same star field, summed from the catalogue.** Recomputed only when the depth
+	# changes, because the sum walks all 119,613 stars and this runs every frame — a float compare once
+	# a frame is the price of the depth being hot. Nothing else can make it disagree with the sky above
+	# it, which is the whole reason the ambient is taken from the sky rather than authored.
+	var depth := float(SpacesimSettings.get_value("sky.star_depth"))
+	if not is_equal_approx(depth, _ambient_depth):
+		_ambient_depth = depth
+		SpacesimExposure.set_ambient_illuminance(environment, star_sky.illuminance(depth))
 
 
 ## **What the eye is looking at**, as a mean luminance over the view — which is what the exposure must
@@ -686,7 +704,13 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 			continue
 		var to_observer := -to_body / distance
 		var to_body_star := star_position - body.node.global_position
-		var phase := clampf(to_observer.dot(to_body_star.normalized()), 0.0, 1.0)
+		# **The disc-averaged illuminated fraction, not a clamped cosine.** The cosine is zero for
+		# everything past the half moon, so a crescent — which is most of what you see of a planet
+		# from anywhere interesting — was dropped from the sum and the exposure stayed dark-adapted
+		# with that planet filling the frame. See `SpacesimSurfaceModel.lambert_phase`.
+		var phase := SpacesimSurfaceModel.lambert_phase(
+			acos(clampf(to_observer.dot(to_body_star.normalized()), -1.0, 1.0))
+		)
 		if phase <= 0.0:
 			continue
 		var albedo := SpacesimSurfaceModel.bond_albedo(body.content, _materials())
