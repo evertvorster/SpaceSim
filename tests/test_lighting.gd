@@ -130,6 +130,22 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check_near(a, b, "so radiance x multiplier — what actually lands on the screen — is the same "
 		+ "at 30 degrees as at 110 (%.1f against %.1f)" % [a, b], 0.01 * a)
 
+	# **AgX ignores `tonemap_white`**, and the engine says so outright: *"tonemap_agx_white will be
+	# used instead when using the TONE_MAPPER_AGX tonemapper"*. The derivation this file is built on
+	# is done against a white point of **6.0**, so setting only `tonemap_white` left the curve at its
+	# own default of 16.29 and rendered the sky 2.72x dimmer than the arithmetic said — which reads
+	# exactly like a scale error and is not one. Checked as an equality between the two rather than
+	# against a second constant, so they cannot drift apart again.
+	var environment := Environment.new()
+	SpacesimExposure.configure(environment)
+	h.check(environment.tonemap_mode == Environment.TONE_MAPPER_AGX,
+		"the tone curve is AgX, the one built for a wide range without ACES' highlight colour shifts")
+	h.check_near(environment.tonemap_agx_white, environment.tonemap_white,
+		"and the white point actually in force is the one the arithmetic uses (%.2f)"
+			% environment.tonemap_agx_white, 1.0e-6)
+	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_BG,
+		"with the sky as the ambient source, so a night side is lit by the stars that are there")
+
 	# And the light is aimed from the star through the observer, with the strength for that distance.
 	var scene := SpacesimSystemScene.from_content(sol)
 	h.check(scene != null, "a scene wraps Sol")

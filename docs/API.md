@@ -376,7 +376,14 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 | `static target_multiplier(lux) -> float` | 0.78 at one au (128,000 lux), 707 at Neptune (141 lux) — the 9.8 stops between them is derived, not tuned |
 | `static target_multiplier_for_luminance(lux_per_sr) -> float` | **the form a scene wants**, and the two agree: `target_multiplier(E)` and `target_multiplier_for_luminance(E/pi)` are the same number |
 | `update(lux, delta)` / `update_to(target, delta)` / `snap_to(lux)` | follow a light level, follow a multiplier, or land on it at once |
-| `static configure(environment)` | AgX, `tonemap_white`, the ambient, `glow_*` |
+| `static configure(environment)` | AgX, **both** white points, the ambient, `glow_*` |
+
+**The white point is set twice, and that is not belt-and-braces.** AgX *ignores* `tonemap_white` —
+the engine says so in as many words — so the derivation's 6.0 was being compared against a curve
+running at its own default of **16.29**: the sky rendered 2.72x dimmer than the arithmetic said, which
+reads exactly like a scale error and is not one. `tonemap_white` and `tonemap_agx_white` are both set,
+and a test asserts the two are equal, so a mode change cannot move the curve out from under the
+exposure silently.
 
 **A luminance, not an irradiance — and that was a real bug.** `illuminance_at()` is a property of where
 the observer *is*; adaptation follows what the observer is *looking at*. Same difference, two symptoms:

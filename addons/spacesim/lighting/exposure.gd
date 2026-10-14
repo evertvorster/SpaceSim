@@ -184,7 +184,15 @@ func multiplier() -> float:
 ## physical floor *removes* the fake one.
 static func configure(environment: Environment) -> void:
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
+	# **Both white points, and that is not belt-and-braces.** AgX IGNORES `tonemap_white` — the engine
+	# says so in as many words, *"tonemap_agx_white will be used instead when using the
+	# TONE_MAPPER_AGX tonemapper"* — and the derivation above is done against **6.0**. Setting only
+	# `tonemap_white` therefore left the curve at its own default of **16.29**, so the sky rendered
+	# 2.72x dimmer than the arithmetic predicted, and a wrong tone curve reads exactly like a wrong
+	# scale. Set together so a mode change cannot move the curve out from under the exposure, and
+	# pinned by test so the two cannot drift apart again.
 	environment.tonemap_white = 6.0
+	environment.tonemap_agx_white = 6.0
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_BG
 	# The star's disk should roll off through the tonemapper rather than sit in the frame as the
 	# brightest thing in the exposure histogram.
