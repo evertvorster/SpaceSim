@@ -147,8 +147,8 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	# EV range to 32."* The floor being below 1.0 is the check that it is a *state* and not a guess: a
 	# sunlit surface at middle grey is 1.0, and "as bright as the eye still adapts to" is a sunlit
 	# surface that is BRIGHTER than middle grey, so the multiplier is smaller.
-	var range_stops := log(SpacesimExposure.MAX_MULTIPLIER / SpacesimExposure.MIN_MULTIPLIER) / log(2.0)
-	h.check_near(range_stops, 32.0, "the exposure can swing 32 stops (%.2f)" % range_stops, 0.01)
+	var stops := log(SpacesimExposure.MAX_MULTIPLIER / SpacesimExposure.MIN_MULTIPLIER) / log(2.0)
+	h.check_near(stops, 32.0, "the exposure can swing 32 stops (%.2f)" % stops, 0.01)
 	h.check(SpacesimExposure.MIN_MULTIPLIER < 1.0 and SpacesimExposure.MIN_MULTIPLIER > 0.0,
 		"with the floor under middle grey and above zero (%.4f)" % SpacesimExposure.MIN_MULTIPLIER)
 
@@ -167,9 +167,8 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check_near(environment.tonemap_agx_white, environment.tonemap_white,
 		"and the white point actually in force is the one the arithmetic uses (%.2f)"
 			% environment.tonemap_agx_white, 1.0e-6)
-	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_COLOR,
-		"with the ambient set from the catalogue's starlight rather than from the sky's radiance cubemap "
-			+ "— a point-source sky cannot be represented in one, and the shader has no frame in that pass")
+	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_BG,
+		"with the sky as the ambient source, so a night side is lit by the stars that are there")
 
 	# And the light is aimed from the star through the observer, with the strength for that distance.
 	var scene := SpacesimSystemScene.from_content(sol)

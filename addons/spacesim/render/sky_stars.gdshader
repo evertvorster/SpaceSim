@@ -72,28 +72,6 @@ uniform vec2  u_tan_half = vec2(0.5, 0.5);   // tan(half fov) per axis
 // There is deliberately no viewport-size uniform. The pixel's own size is MEASURED below, from the
 // screen-space derivatives of the ray, so there is no number for the host to get wrong — see `sky()`.
 
-// **`AT_CUBEMAP_PASS` is a BOOL, not a preprocessor flag.** Godot's own sky shader does
-// `#define AT_CUBEMAP_PASS true` / `false`, so the identifier is *always* defined and `#ifdef` on it is
-// always true. The first version of this guard was `#ifdef AT_CUBEMAP_PASS` around a `const bool`, which
-// therefore set `RADIANCE_PASS = true` in every pass — the star field was drawn nowhere at all, screen
-// included, and the sky was black. The engine's own pattern is to test the value, so this does too.
-//
-// Godot renders this material a second time, into a radiance **cubemap** — that is what
-// `AMBIENT_SOURCE_BG`, `AMBIENT_SOURCE_SKY` and sky reflections are built from. **This shader has
-// nothing to say in that pass, and said something wrong instead.**
-//
-// A cube face is walked with `EYEDIR` while the basis uniforms above are the CAMERA's, so the star
-// field would be placed by a mapping with no relationship to the face. Worse, the pixel size measured in
-// `sky()` below is taken from screen-space derivatives of a plane built from that mismatched basis —
-// and wherever the camera's axes run across the face's sweep that derivative **collapses**, driving
-// `d_omega` toward zero and the texel's radiance toward infinity. That cubemap IS the ambient, so every
-// night side in the game was lit by it. Evert, 2026-10-15: *"the ambient light is far too bright"* — a
-// body's night side rendered white.
-//
-// Standing down costs nothing: a sky of point sources cannot be represented in a 256-texel cubemap in
-// the first place, and the ambient is now summed from the catalogue directly — see
-// `SpacesimExposure.set_ambient_illuminance`.
-
 // ===== PHYSICS ==================================================================
 // Measured, not chosen: a V=0 star delivers this much at the observer (Schlyter).
 const float LUX_PER_MAG0 = 2.54e-6;
@@ -174,22 +152,19 @@ void sky() {
 	//
 	// The division is clamped because Godot also renders this material into the radiance cubemap,
 	// where a ray can point behind the camera; the clamp keeps the derivative finite rather than
-	// letting it become a NaN that reaches the ambient light. The `measured` test is the same concern
-	// seen as a range check — one pixel is a small fraction of NDC, at any resolution, and the floor is
-	// what a frame 65,536 pixels across would give. **An upper bound alone was not enough:** a step
-	// that collapses to nearly zero gives a `d_omega` of nearly zero and a radiance of nearly infinity,
-	// which is exactly how the ambient above became far too bright.
+	// letting it become a NaN that reaches the ambient light. The `measured` test below is the same
+	// concern seen as a range check — one pixel is a small fraction of NDC, at any resolution.
 	vec2 plane = vec2(dot(d, u_right), dot(d, u_up)) / max(dz, 1e-6);
 	vec2 ndc_step = vec2(abs(dFdx(plane.x)), abs(dFdy(plane.y))) / u_tan_half;
-	bool measured = ndc_step.x > 1e-5 && ndc_step.y > 1e-5
+	bool measured = ndc_step.x > 1e-9 && ndc_step.y > 1e-9
 		&& ndc_step.x < 0.5 && ndc_step.y < 0.5;
 	vec2 half_pixel = ndc_step * 0.5;
 
 	// **No early `return` is allowed in a `sky()` function** — Godot rejects it outright ("Using
 	// 'return' in the 'sky' processor function is incorrect"), so the whole body lives inside the
-	// guard instead. Cost of the guard: nothing, since a ray pointing behind the camera, or a pass the
-	// radiance cubemap is using, draws nothing anyway.
-	if (!AT_CUBEMAP_PASS && dz > 1e-9 && measured) {
+	// guard instead. Cost of the guard: nothing, since a ray pointing behind the camera draws nothing
+	// anyway.
+	if (dz > 1e-9 && measured) {
 		// This pixel, in the same coordinates a star is measured in.
 		vec2 ndc = plane / u_tan_half;
 
