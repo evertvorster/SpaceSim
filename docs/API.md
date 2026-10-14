@@ -430,9 +430,14 @@ and the stars get brighter, which is what a larger aperture does to a point sour
 **The ambient is the star field's own light, summed from the catalogue** — `AMBIENT_SOURCE_COLOR`, with
 its energy set each time `sky.star_depth` changes from `SpacesimStarSky.illuminance()`. It is *not*
 `AMBIENT_SOURCE_BG`: Godot builds that ambient from a radiance **cubemap**, and a sky of point sources
-cannot be represented in one — the same reason the star shader contributes nothing there. The sky is
-still the light source; it is not asked to travel through a cubemap to say so. Evert, 2026-10-14:
-*"The sky should be the ambient light source."*
+cannot be represented in one. The sky is still the light source; it is not asked to travel through a
+cubemap to say so. Evert, 2026-10-14: *"The sky should be the ambient light source."*
+
+**This is re-applied, not new.** It went in with `97d802d` and was rolled back the same day, then put
+back on its own in `a09ccff`; the two changes that travelled with it — the Lambert phase function and a
+stand-down in the star shader's radiance pass — are **not** in the tree. The stand-down was never needed
+by this: `AMBIENT_SOURCE_COLOR` does not read the cubemap, which is `update_ubo`'s own
+`use_ambient_cubemap` flag.
 
 **The energy is in `REFERENCE_LUX`'s units and that number was never measured.** The vault inferred the
 convention from Godot's old look-value floor, and Godot's own property hint gives `ambient_light_energy`
