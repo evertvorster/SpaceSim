@@ -350,7 +350,15 @@ it off, Godot ignores `light_intensity_lux` entirely and every number below is c
 | `create(parent, luminosity, temperature) -> DirectionalLight3D` | sets `light_temperature` and the Sun's 0.533° `light_angular_distance`, so a terminator reads as one |
 | `static irradiance(luminosity, distance) -> float` | W/m² — the solar constant, 1361, at 1 au |
 | `static illuminance(luminosity, distance) -> float` | lux — 128,000 at 1 au |
-| `aim_at(observer_position, star_position) -> void` | aims the light and sets its strength for that distance |
+| `static solar_transmission(sun_angle, body_angle, separation) -> float` | **the eclipse.** Fraction of the Sun's disc still visible, from the two-circle overlap — 1 in the open, 0 in an umbra, half with a limb across the Sun's centre. A tangent-plane model, so its residual goes as the ratio of the discs: 0.1% high for a 57°-wide body, and a planet is always the good case |
+| `aim_at(observer_position, star_position, transmission := 1.0) -> void` | aims the light and sets its strength for that distance, **times the transmission**. In the argument list rather than a setter because the strength *is* the illuminance times it — one factor, no ordering to get wrong |
+
+**Godot casts nothing, so the eclipse is arithmetic.** A directional light hands a fragment a direction, a
+colour and an energy, and the shader's `NdotL` is the whole test — which is why a ship behind a planet is
+lit. `shadow_enabled` is the engine's only occlusion and it is a shadow *map*: camera-relative,
+`directional_shadow_max_distance` 100 m by default, and unable to resolve a penumbra that is 0.06% of a
+planet wide. One disc covering another has a closed form, so it is computed instead. See
+`SpacesimSystemScene.sun_transmission` for the loop and what it cannot do.
 
 ### `SpacesimExposure` — `RefCounted`
 
