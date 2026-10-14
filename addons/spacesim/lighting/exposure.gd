@@ -23,15 +23,32 @@ extends RefCounted
 ## a fraction of a stop and one fewer constant to explain.
 const REFERENCE_LUX := 100000.0
 
-## How far we will correct. It has to be **above `DARK_ADAPTED_MULTIPLIER`**, or the cap would
-## silence the sky it exists to show — 4096 did exactly that, thirty years of stops short.
+## The brightest **scene luminance a human eye adapts to rather than only squints at** — sunlit snow,
+## which is as bright as a surface gets on Earth. It is the light-adapted end of the eye's range, and
+## the only place the exposure's floor comes from.
+const LIGHT_ADAPTED_LUMINANCE := 100000.0
+
+## **The exposure's range, and both ends of it are states of the eye** rather than numbers chosen to
+## be far apart.
 ##
-## It is defined as a **thousand times the dark-adapted anchor at its reference field**, which is the
-## trap the sentence above names made structural rather than remembered: the anchor has moved once
-## already and this clamp had to move with it. The margin that has to hold is the *widest* field the
-## settings allow (140 degrees), where the anchor is 64x its reference value — so a thousand is
-## comfortable. Pinned by test.
-const MAX_MULTIPLIER := DARK_ADAPTED_MULTIPLIER * 1000.0
+## `MIN_MULTIPLIER` is **fully light-adapted**: past a scene luminance of `LIGHT_ADAPTED_LUMINANCE`
+## the eye has nowhere left to go, and that ceiling on adaptation is what being dazzled IS. Rendering
+## darker than that models a state that does not exist — and it is the shape that takes the whole
+## frame away from you because one bright thing is in it, when the eye would still be seeing the
+## rest. It comes to 1/pi. A sunlit surface filling the view (12,730 lux/sr) lands at 2.5 and the day
+## sky with the Sun in it (71,368) at 0.45, both inside the floor; **the Sun starts to dazzle inside
+## about 0.83 au** (its disc over the view is 69,000 lux/sr at one au, and the floor is 100,000), so
+## Venus and Mercury reach it and nothing further out does. That is the behaviour the floor exists
+## for: past it the picture saturates rather than the exposure continuing to chase a light the eye
+## has already given up on.
+##
+## `MAX_MULTIPLIER` is the other end, and the range between them is **32 stops** (Evert,
+## 2026-10-15: *"open the EV range to 32"*) — `2^32` times the floor, which is the wide end of what a
+## human eye spans. It is nowhere near a state of anything on its own; what it has to do is sit above
+## `DARK_ADAPTED_MULTIPLIER` at the **widest field the settings allow** (140 degrees, where the anchor
+## is 64x its reference value), and it does so with a 26x margin. Pinned by test.
+const MIN_MULTIPLIER := REFERENCE_LUX / (LIGHT_ADAPTED_LUMINANCE * PI)
+const MAX_MULTIPLIER := MIN_MULTIPLIER * 4294967296.0 ## 2^32: the range is 32 stops
 
 ## How fast exposure follows a change. Slow on purpose: what you notice about a night side is that it
 ## stays dark, and a hard cut when flying between planets looks like a bug.
@@ -148,7 +165,7 @@ func _init() -> void:
 static func target_multiplier(lux: float) -> float:
 	if lux <= 0.0:
 		return MAX_MULTIPLIER
-	return clampf(REFERENCE_LUX / lux, 1.0 / MAX_MULTIPLIER, MAX_MULTIPLIER)
+	return clampf(REFERENCE_LUX / lux, MIN_MULTIPLIER, MAX_MULTIPLIER)
 
 
 ## The multiplier that puts a scene of mean **luminance** at middle grey.
@@ -177,7 +194,7 @@ func snap_to(lux: float) -> void:
 ## Follow a target MULTIPLIER rather than a light level, for the case where the light level is not
 ## what the eye is responding to. `update()` is the special case of this.
 func update_to(target: float, delta: float) -> void:
-	var clamped := clampf(target, 1.0 / MAX_MULTIPLIER, MAX_MULTIPLIER)
+	var clamped := clampf(target, MIN_MULTIPLIER, MAX_MULTIPLIER)
 	_multiplier = lerpf(_multiplier, clamped, clampf(ADAPTATION_RATE * delta, 0.0, 1.0))
 	attributes.exposure_multiplier = _multiplier
 

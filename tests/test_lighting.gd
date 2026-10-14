@@ -142,6 +142,16 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check(widest * 10.0 < SpacesimExposure.MAX_MULTIPLIER,
 		"with real headroom rather than a coincidence")
 
+	# **The range is 32 stops, and both ends of it are states of the eye** — the floor is fully
+	# light-adapted, the ceiling is the dark-adapted anchor's headroom. Evert, 2026-10-15: *"open the
+	# EV range to 32."* The floor being below 1.0 is the check that it is a *state* and not a guess: a
+	# sunlit surface at middle grey is 1.0, and "as bright as the eye still adapts to" is a sunlit
+	# surface that is BRIGHTER than middle grey, so the multiplier is smaller.
+	var stops := log(SpacesimExposure.MAX_MULTIPLIER / SpacesimExposure.MIN_MULTIPLIER) / log(2.0)
+	h.check_near(stops, 32.0, "the exposure can swing 32 stops (%.2f)" % stops, 0.01)
+	h.check(SpacesimExposure.MIN_MULTIPLIER < 1.0 and SpacesimExposure.MIN_MULTIPLIER > 0.0,
+		"with the floor under middle grey and above zero (%.4f)" % SpacesimExposure.MIN_MULTIPLIER)
+
 	# **AgX ignores `tonemap_white`**, and the engine says so outright: *"tonemap_agx_white will be
 	# used instead when using the TONE_MAPPER_AGX tonemapper"*. The derivation this file is built on
 	# is done against a white point of **6.0**, so setting only `tonemap_white` left the curve running
@@ -180,5 +190,29 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 		var to_star := (star_node.node.global_position - lit_earth.node.global_position).normalized()
 		h.check(scene.star_light.light.global_transform.basis.z.dot(to_star) > 0.99,
 			"and it shines from the star toward the observer")
+
+	# **Evert's test of the dark end**, 2026-10-15: *"the shadow side of earth, with no moonlight or
+	# other source of light but starlight should be barely visible, a little above black."* That is a
+	# statement about the ANCHOR and it is arithmetic — the surface renders at the ratio between the
+	# exposure in force and the exposure that would put it at middle grey:
+	#
+	#     rendered = dark_adapted_multiplier(fov) / target_multiplier_for_luminance(albedo * sky_lux / pi)
+	#
+	# The whole naked-eye star field is the only light there, so `sky_lux` is the sky's own integrated
+	# illuminance — the number the calibration was checked against, not a constant chosen here.
+	if scene.star_sky != null:
+		var materials := SpacesimMaterialTable.engine_table()
+		var albedo := SpacesimSurfaceModel.bond_albedo(lit_earth.content, materials)
+		var sky_lux := scene.star_sky.illuminance(6.5)
+		var ground_luminance := albedo * sky_lux / PI
+		var rendered := SpacesimExposure.dark_adapted_multiplier(70.0) \
+			/ SpacesimExposure.target_multiplier_for_luminance(ground_luminance)
+		# A band and not a point: "barely visible" is a person's judgement, and the band is what a
+		# factor of five either way looks like. Through the tone curve's toe, 2e-3 lands near 2/255.
+		h.check(rendered > 5.0e-4 and rendered < 5.0e-3,
+			"starlight alone on a shadowed surface is barely visible, a little above black (%s)"
+				% rendered)
+		h.check(scene.star_sky.illuminance(6.5) > 1.0e-4,
+			"because the field lighting it is the real one (%.2f e-4 lux)" % (sky_lux * 1.0e4))
 
 	scene.container.free()
