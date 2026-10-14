@@ -31,16 +31,21 @@ check() {
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
 
+# The suite is **streamed as well as logged**: with the output only redirected, a run that stalls looks
+# like a frozen terminal for as long as the timeout, which is exactly how a broken suite used to read.
+# The runner now reports a suite that will not load instead of stalling on it (`run_tests.gd`), and this
+# is the belt to that braces.
+#
+# Run it under `timeout`, and **never into a `grep`**: a killed run loses whatever is in the pipe, and
+# the error is in the part a filter throws away.
 timeout "${TEST_TIMEOUT:-300}" "$GODOT" --headless --path "$REPO_ROOT" \
-	res://tests/run_tests.tscn >"$LOG" 2>&1
+	res://tests/run_tests.tscn 2>&1 | tee "$LOG"
 status=$?
-cat "$LOG"
 check "the test suite" "$LOG" "$status"
 
 timeout "${SMOKE_TIMEOUT:-60}" "$GODOT" --headless --path "$REPO_ROOT" --quit-after 120 \
-	>"$LOG" 2>&1
+	2>&1 | tee "$LOG"
 status=$?
-cat "$LOG"
 check "the demo scene" "$LOG" "$status"
 
 exit "$FAILED"

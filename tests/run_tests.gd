@@ -14,22 +14,30 @@ const Harness := preload("res://tests/harness.gd")
 ## Every suite, in the order they run. The playground flight test drives ~120000 steps, so the whole
 ## run takes minutes — `SPACESIM_TESTS=save,session tests/run.sh` runs only the suites whose path
 ## contains one of those words, which is what makes iterating on one module quick.
-var suites: Array = [
-	preload("res://tests/test_frame_transition.gd"),
-	preload("res://tests/test_solar_system.gd"),
-	preload("res://tests/test_sol.gd"),
-	preload("res://tests/test_surface.gd"),
-	preload("res://tests/test_render.gd"),
-	preload("res://tests/test_lighting.gd"),
-	preload("res://tests/test_travel_scale.gd"),
-	preload("res://tests/test_markers.gd"),
-	preload("res://tests/test_settings.gd"),
-	preload("res://tests/test_settings_ui.gd"),
-	preload("res://tests/test_display.gd"),
-	preload("res://tests/test_player.gd"),
-	preload("res://tests/test_save.gd"),
-	preload("res://tests/test_session.gd"),
-	preload("res://tests/test_space_to_surface.gd"),
+## **The suite paths, and deliberately not `preload`ed.** `preload` is resolved when *this* file is
+## parsed, so a suite containing a syntax error took the runner down with it: the scene would not
+## load, `_ready` never ran, `quit()` was never reached, and `run.sh` sat there until its timeout —
+## which reads as the suite being slow, and is not. `--check-only` on the suite by hand was the only
+## way to see the error, and the guard below — whose whole purpose is to survive this — could never
+## fire. Loaded at run time, a broken suite comes back null and is reported by name.
+##
+## A path here is also checked: a missing file is the same failure and deserves the same report.
+var suite_paths: Array = [
+	"res://tests/test_frame_transition.gd",
+	"res://tests/test_solar_system.gd",
+	"res://tests/test_sol.gd",
+	"res://tests/test_surface.gd",
+	"res://tests/test_render.gd",
+	"res://tests/test_lighting.gd",
+	"res://tests/test_travel_scale.gd",
+	"res://tests/test_markers.gd",
+	"res://tests/test_settings.gd",
+	"res://tests/test_settings_ui.gd",
+	"res://tests/test_display.gd",
+	"res://tests/test_player.gd",
+	"res://tests/test_save.gd",
+	"res://tests/test_session.gd",
+	"res://tests/test_space_to_surface.gd",
 ]
 
 
@@ -37,14 +45,15 @@ func _ready() -> void:
 	print("SpaceSim tests  (", Engine.get_version_info()["string"], ")")
 	var harness := Harness.new()
 	var wanted := _wanted_suites()
-	for suite in suites:
-		var path: String = suite.resource_path if suite is Resource else ""
-		if not wanted.is_empty() and not _matches(path, wanted):
+	for path in suite_paths:
+		if not wanted.is_empty() and not _matches(String(path), wanted):
 			continue
 		# A suite that failed to compile must not take the run down with it: report and carry on,
-		# so the runner always reaches quit() instead of hanging.
+		# so the runner always reaches quit() instead of hanging. This is the guard that could not
+		# fire while the list was `preload`ed — see the comment on `suite_paths`.
+		var suite: Variant = load(String(path))
 		if not (suite is GDScript) or not suite.can_instantiate():
-			print("  FAIL  suite did not compile: ", suite.resource_path if suite is Resource else suite)
+			print("  FAIL  suite did not compile: ", path)
 			harness.failures += 1
 			continue
 		suite.new().run(harness, self)
