@@ -313,7 +313,10 @@ func _physics_process(delta: float) -> void:
 	# and a bright object can only stop you down from there. That is also what keeps the sky's brightness
 	# from depending on how far away the star is, which it must not — your eye adapts to what it is
 	# looking at, not to the distance to a lamp.
-	var target := SpacesimExposure.DARK_ADAPTED_MULTIPLIER
+	#
+	# Derived from the field of view in use, because a star's radiance goes as `tan(half fov)` squared
+	# and a constant derived at one field is wrong at every other — see `dark_adapted_multiplier`.
+	var target := SpacesimExposure.dark_adapted_multiplier(_camera.fov)
 	if luminance > 0.0:
 		target = minf(target, SpacesimExposure.target_multiplier_for_luminance(luminance))
 	_exposure.update_to(target, delta)

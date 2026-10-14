@@ -76,14 +76,37 @@ const MIN_SOLID_ANGLE := 9.6e-6
 ## 2026-10-14: a higher resolution concentrates the same flux into a smaller angle and the stars get
 ## brighter, which is what a larger aperture does to a point source.
 ##
+## The field of view the value below was derived at. It is REFERENCE ONLY — the multiplier that is
+## actually used comes from `dark_adapted_multiplier(fov)`, because a star's rendered radiance goes as
+## `(height / tan(half vfov))^2` and a constant derived at one field is wrong at every other.
+const DARK_ADAPTED_REFERENCE_FOV := 37.8
+
 ## **SUSPECT, and the value is knowingly wrong.** Evert measured the correction needed at
-## `sky.star_gain` 2.1, which is 10^2.1 = **126x** — so this derivation is 126 times off somewhere. One
-## candidate is in the derivation itself: it assumes a 37.8 degree field, while `camera.fov` defaults
-## to **70** and nothing overrides it. Radiance goes as tan^2(half fov), so that alone is 4.18x of it,
-## leaving ~30 unexplained. Do not treat the 8000 as settled, and do not absorb the remainder into
-## this number without finding it -- a correction we do not understand comes back wearing another hat.
-## The audit, with the numbers, is in the vault: `SpaceSim/Sky and Backgrounds.md` §9.
+## `sky.star_gain` 2.1, which is 10^2.1 = **126x** — so the derivation below is 126 times off
+## somewhere, and this number is only the value at `DARK_ADAPTED_REFERENCE_FOV`. Do not treat 8000 as
+## settled, and do not absorb the remainder into it without finding it: a correction we do not
+## understand comes back wearing another hat. The audit, with the numbers, is in the vault:
+## `SpaceSim/Sky and Backgrounds.md` §9.
 const DARK_ADAPTED_MULTIPLIER := 8000.0
+
+
+## The dark-adapted multiplier **for the field of view actually in use**.
+##
+## Evert's idea, 2026-10-14: *"can't we use the FOV for the dark adapted multiplier?"* It is the right
+## correction, and it fixes a self-inconsistency rather than papering over one — the shader's output
+## goes as `(height / tan(half vfov))^2`, so a multiplier derived at one field cannot be right at
+## another. Deriving it also *chooses a behaviour*: with this, the sky is **independent of the field of
+## view and still dependent on the resolution**, which is the consistent reading of Evert's choice that
+## stars should brighten with more pixels. A narrower field stops changing brightness; a bigger frame
+## still does.
+##
+## Number to check it against: at 70 degrees this is 4.18x the reference value, because
+## `(tan 35 / tan 18.9)^2 = (0.7002 / 0.3424)^2`.
+static func dark_adapted_multiplier(fov_degrees: float) -> float:
+	var tan_reference := tan(deg_to_rad(DARK_ADAPTED_REFERENCE_FOV * 0.5))
+	var tan_now := tan(deg_to_rad(clampf(fov_degrees, 1.0, 179.0) * 0.5))
+	var scale := tan_now / tan_reference
+	return DARK_ADAPTED_MULTIPLIER * scale * scale
 
 var attributes: CameraAttributesPhysical
 var _multiplier := 1.0

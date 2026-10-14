@@ -106,6 +106,30 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check(exposure.multiplier() < at_neptune and exposure.multiplier() > at_one_au,
 		"while one 16 ms step only moves part of the way (%.1f)" % exposure.multiplier())
 
+	# The dark-adapted multiplier follows the FIELD OF VIEW, because a star's rendered radiance goes as
+	# `(height / tan(half vfov))^2` and a constant derived at one field is wrong at every other. Evert's
+	# idea, 2026-10-14, and the point of checking it is that it *chooses a behaviour*: the sky becomes
+	# independent of the field and stays dependent on the resolution.
+	var reference := SpacesimExposure.DARK_ADAPTED_MULTIPLIER
+	h.check_near(SpacesimExposure.dark_adapted_multiplier(SpacesimExposure.DARK_ADAPTED_REFERENCE_FOV),
+		reference, "at its reference field it is the reference value", 1.0)
+	var wide := SpacesimExposure.dark_adapted_multiplier(70.0)
+	h.check_near(wide / reference, 4.18,
+		"and at the game's 70 degrees it is %.2fx that, because (tan35/tan18.9)^2 = 4.18"
+			% (wide / reference), 0.05)
+	h.check(SpacesimExposure.dark_adapted_multiplier(20.0) < reference,
+		"a narrower field needs LESS, since the same flux is already concentrated into a smaller angle")
+
+	# The invariant the whole thing rests on. A star's rendered radiance goes as 1/tan^2(half fov) and
+	# this multiplier goes as tan^2(half fov), so it is their PRODUCT that is field-independent — which
+	# is another way of saying what lands on the screen does not change when the field does. The first
+	# version of this check had the ratio the wrong way up, and the two numbers were three orders of
+	# magnitude apart, which is what made the mistake obvious rather than subtle.
+	var a := SpacesimExposure.dark_adapted_multiplier(30.0) / pow(tan(deg_to_rad(15.0)), 2.0)
+	var b := SpacesimExposure.dark_adapted_multiplier(110.0) / pow(tan(deg_to_rad(55.0)), 2.0)
+	h.check_near(a, b, "so radiance x multiplier — what actually lands on the screen — is the same "
+		+ "at 30 degrees as at 110 (%.1f against %.1f)" % [a, b], 0.01 * a)
+
 	# And the light is aimed from the star through the observer, with the strength for that distance.
 	var scene := SpacesimSystemScene.from_content(sol)
 	h.check(scene != null, "a scene wraps Sol")
