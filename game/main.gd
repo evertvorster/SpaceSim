@@ -302,7 +302,10 @@ func _physics_process(delta: float) -> void:
 	# happens to be — see SpacesimSystemScene.view_luminance_at. A luminance, because adaptation follows
 	# the scene; an irradiance is a property of where you are and cannot tell the Sun from empty sky.
 	var tan_y := tan(deg_to_rad(_camera.fov * 0.5))
-	var view_size := _camera.get_viewport().get_visible_rect().size
+	# The **render target's** size, not `get_visible_rect()`: that is the canvas rect, which has the
+	# canvas's aspect rather than the 3D buffer's once `video.aspect` is set to keep. The camera's
+	# horizontal field follows the buffer, so this is the aspect the view's solid angle is built from.
+	var view_size := Vector2(_camera.get_viewport().size)
 	var tan_half := Vector2(tan_y, tan_y)
 	if view_size.y > 0.0:
 		tan_half.x = tan_y * view_size.x / view_size.y

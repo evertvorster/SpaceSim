@@ -87,6 +87,19 @@ func _test_the_background_is_the_real_sky(h, scene: SpacesimSystemScene) -> void
 	h.check(code.contains("UNIT_LUX_PER_SR"),
 		"converted into the engine's units, which is a unit conversion and not a gain")
 
+	# **The pixel's size is measured in the shader, not sent from the host.** Godot draws a sky as a
+	# fullscreen triangle whose vertices ARE the NDC corners, so NDC is affine in the fragment
+	# coordinate and the screen-space derivative is exactly one pixel, at whatever resolution the 3D
+	# is drawn at. The host alternative is `Viewport.get_visible_rect()`, which is the CANVAS rect —
+	# right only while the render resolution's height equals the canvas's, and wrong by its SQUARE at
+	# every other. A wrong solid angle is a wrong star brightness and a wrong half-pixel is a star in
+	# the wrong pixel, and neither announces itself. Both halves are checked, because either one alone
+	# would look perfectly reasonable in a diff.
+	h.check(code.contains("dFdx") and code.contains("dFdy"),
+		"and MEASURES its own pixel size, so the star's solid angle cannot be a square law in disguise")
+	h.check(not code.contains("u_inv_viewport"),
+		"with no viewport size handed in for the shader and the host to disagree about")
+
 	# The depth tunable must reach the shader, since sweeping it is how the sky gets iterated on.
 	sky.set_limit_magnitude(7.25)
 	h.check_near(material.get_shader_parameter("u_limit_mag"), 7.25,

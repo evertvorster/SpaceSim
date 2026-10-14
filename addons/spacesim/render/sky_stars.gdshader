@@ -69,7 +69,8 @@ uniform vec3  u_right = vec3(1.0, 0.0, 0.0);
 uniform vec3  u_up = vec3(0.0, 1.0, 0.0);
 uniform vec3  u_fwd = vec3(0.0, 0.0, -1.0);
 uniform vec2  u_tan_half = vec2(0.5, 0.5);   // tan(half fov) per axis
-uniform vec2  u_inv_viewport = vec2(0.001, 0.001);  // 1/render size; half a pixel, in NDC
+// There is deliberately no viewport-size uniform. The pixel's own size is MEASURED below, from the
+// screen-space derivatives of the ray, so there is no number for the host to get wrong — see `sky()`.
 
 // ===== PHYSICS ==================================================================
 // Measured, not chosen: a V=0 star delivers this much at the observer (Schlyter).
@@ -136,21 +137,42 @@ void sky() {
 	vec3 d = normalize(EYEDIR);
 	vec3 acc = vec3(0.0);
 
+	float dz = dot(d, u_fwd);
+
+	// **The pixel's size, measured from the pipeline rather than told.** Godot draws a sky as a
+	// fullscreen triangle whose vertex positions ARE the NDC corners, so NDC is an affine function of
+	// the fragment coordinate and the forward difference across one fragment is exactly one pixel at
+	// the resolution the 3D is actually drawn at. Derivatives therefore *measure* the size.
+	//
+	// Taking it from the host instead was a silent square law: the obvious answer,
+	// `Viewport.get_visible_rect()`, is the **canvas** rect — right only while the render resolution's
+	// height equals the canvas resolution's, and wrong by its square at every other. A wrong pixel
+	// solid angle is a wrong star brightness, and a wrong half-pixel is a star drawn in the wrong
+	// pixel. Neither announces itself.
+	//
+	// The division is clamped because Godot also renders this material into the radiance cubemap,
+	// where a ray can point behind the camera; the clamp keeps the derivative finite rather than
+	// letting it become a NaN that reaches the ambient light. The `measured` test below is the same
+	// concern seen as a range check — one pixel is a small fraction of NDC, at any resolution.
+	vec2 plane = vec2(dot(d, u_right), dot(d, u_up)) / max(dz, 1e-6);
+	vec2 ndc_step = vec2(abs(dFdx(plane.x)), abs(dFdy(plane.y))) / u_tan_half;
+	bool measured = ndc_step.x > 1e-9 && ndc_step.y > 1e-9
+		&& ndc_step.x < 0.5 && ndc_step.y < 0.5;
+	vec2 half_pixel = ndc_step * 0.5;
+
 	// **No early `return` is allowed in a `sky()` function** — Godot rejects it outright ("Using
 	// 'return' in the 'sky' processor function is incorrect"), so the whole body lives inside the
 	// guard instead. Cost of the guard: nothing, since a ray pointing behind the camera draws nothing
 	// anyway.
-	float dz = dot(d, u_fwd);
-	if (dz > 1e-9) {
+	if (dz > 1e-9 && measured) {
 		// This pixel, in the same coordinates a star is measured in.
-		vec2 plane = vec2(dot(d, u_right), dot(d, u_up)) / dz;   // tangent-plane offsets
 		vec2 ndc = plane / u_tan_half;
 
-		// The pixel's own solid angle, exactly: the gnomonic element dx*dy / (1+|p|^2)^(3/2). Using
-		// the centre value instead would over-brighten every star toward the corners of the frame.
+		// The pixel's own solid angle, exactly: the gnomonic element dx*dy / (1+|p|^2)^(3/2) times
+		// the pixel's own NDC extent. Using the centre value instead would over-brighten every star
+		// toward the corners of the frame.
 		float r2 = 1.0 + dot(plane, plane);
-		float d_omega = 4.0 * u_tan_half.x * u_tan_half.y
-			* u_inv_viewport.x * u_inv_viewport.y / (r2 * sqrt(r2));
+		float d_omega = u_tan_half.x * u_tan_half.y * ndc_step.x * ndc_step.y / (r2 * sqrt(r2));
 
 		vec2 cell_data = texelFetch(u_cells, texel_of(cell_of(d, u_grid), u_cells_size), 0).rg;
 		int offset = int(cell_data.x + 0.5);
@@ -167,9 +189,9 @@ void sky() {
 			if (sz <= 1e-9) continue;
 
 			vec2 sndc = vec2(dot(sd, u_right), dot(sd, u_up)) / (sz * u_tan_half);
-			// The box: half a pixel, in NDC. `u_inv_viewport` is exactly that.
-			if (abs(sndc.x - ndc.x) > u_inv_viewport.x) continue;
-			if (abs(sndc.y - ndc.y) > u_inv_viewport.y) continue;
+			// The box: half a pixel, in NDC — measured above, not sent in.
+			if (abs(sndc.x - ndc.x) > half_pixel.x) continue;
+			if (abs(sndc.y - ndc.y) > half_pixel.y) continue;
 
 			float lux = LUX_PER_MAG0 * pow(10.0, -0.4 * s.w);
 			float bv = texelFetch(u_star_colour, texel_of(index, u_colour_size), 0).r;

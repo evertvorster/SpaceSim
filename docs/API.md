@@ -470,6 +470,14 @@ illuminance over its **own** solid angle — the gnomonic element, so a star nea
 over-brightened — which makes the sum of a star's pixels its light. It also means a higher resolution
 or a narrower field makes stars brighter, which is what an aperture does to a point source.
 
+**The pixel's size is measured in the shader, not sent from the host.** Godot draws a sky as a
+fullscreen triangle whose vertex positions *are* the NDC corners, so NDC is an affine function of the
+fragment coordinate and `dFdx`/`dFdy` give exactly one pixel — at whatever resolution the 3D is
+actually drawn at. The host alternative was `Viewport.get_visible_rect()`, which is the **canvas** rect:
+correct only while `video.render_resolution`'s height equals the canvas resolution's, and wrong by its
+**square** at every other setting, which would have made stars too dim *and* put them in the wrong
+pixels. `u_tan_half` still comes over, because the field and the aspect are the camera's to state.
+
 **The shader is an INPUT, not an answer.** It reports radiance in the engine's units and nothing in it
 knows what the exposure is. Every star field that came before was display referred — an exposure
 already baked in — which is why none of them could respond to a varying EV: a fixed picture multiplied

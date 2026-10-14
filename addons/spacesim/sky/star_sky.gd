@@ -74,17 +74,21 @@ func set_gain(gain: float) -> void:
 
 ## Point the sky at a camera.
 ##
-## The size comes from the camera's own viewport, which was MEASURED to be the number the shader
-## wants: `uPxPerDir` computed from it matched the expected value to eight significant figures. The
-## `video.render_resolution` setting is a different quantity (it is what the Display system asks
-## for), so it is deliberately not used here.
+## Only the **camera basis, the field and the aspect** are handed over. The pixel count is deliberately
+## not: the shader measures its own pixel size from screen-space derivatives, which is exact at whatever
+## resolution the 3D is drawn at, so there is no host number for the two to disagree about. See
+## `sky_stars.gdshader` for what that replaced and why.
 func update(camera: Camera3D) -> void:
 	if material == null or camera == null:
 		return
 	var viewport := camera.get_viewport()
 	if viewport == null:
 		return
-	var size := viewport.get_visible_rect().size
+	# The **render target's** size in pixels — `viewport.size`, and not `get_visible_rect()`, which is
+	# the CANVAS rect in screen coordinates. The two agree under the default `expand` aspect and part
+	# company the moment the aspect is kept, where the canvas is letterboxed over a full-width 3D
+	# buffer; the camera's horizontal field follows the buffer.
+	var size := Vector2(viewport.size)
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
 
@@ -95,11 +99,7 @@ func update(camera: Camera3D) -> void:
 
 	# Godot's `fov` is the VERTICAL one (keep height), so the horizontal tangent follows the aspect.
 	var tan_y := tan(deg_to_rad(camera.fov * 0.5))
-	var aspect := size.x / size.y
-	material.set_shader_parameter("u_tan_half", Vector2(tan_y * aspect, tan_y))
-
-	# Half a pixel, in NDC: NDC spans 2 across the frame, so one pixel is 2/size and half is 1/size.
-	material.set_shader_parameter("u_inv_viewport", Vector2(1.0 / size.x, 1.0 / size.y))
+	material.set_shader_parameter("u_tan_half", Vector2(tan_y * size.x / size.y, tan_y))
 
 
 ## The sky's own light, in lux — the sum of every star at or above the depth limit.
