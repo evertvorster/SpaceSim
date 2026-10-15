@@ -695,7 +695,7 @@ func update_sky(camera: Camera3D) -> void:
 ## | a lit sky, from inside | fills the view | stops it down |
 ## | empty sky | nothing extended at all | 0.0, which the caller reads as dark-adapted |
 ##
-## **Nothing here counts a source that is behind something.** `_in_view` asks whether a source is in
+## **Nothing here counts a source that is behind something.** `SpacesimLuminance.in_view` asks whether a source is in
 ## the frame, and on a planet's night side the Sun is in the frame *through the planet*: it is 180
 ## degrees from the local zenith, and a fraction of a degree from the direction the camera points when
 ## the player looks down at the ground. Measured, that counted: the exposure stopped down 75,000x for
@@ -712,13 +712,13 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 		return 0.0
 	var star_position := star_body.node.global_position
 
-	# The view's own solid angle, exactly: a rectangular pyramid of tangent half-extents (X, Y) subtends
-	# 4*atan(X*Y / sqrt(1 + X^2 + Y^2)).
-	var view_omega := 4.0 * atan(tan_half.x * tan_half.y
-		/ sqrt(1.0 + tan_half.x * tan_half.x + tan_half.y * tan_half.y))
+	# The view's own solid angle, and the cone a source has to be inside. **Both are arithmetic in
+	# `SpacesimLuminance`** — the shape `SpacesimLod` established: the maths is pure and testable on its
+	# own, and what stays here is the policy (which bodies count, and what can occlude what).
+	var view_omega := SpacesimLuminance.pyramid_solid_angle(tan_half)
 	if view_omega <= 0.0:
 		return 0.0
-	var half_diagonal := atan(sqrt(tan_half.x * tan_half.x + tan_half.y * tan_half.y))
+	var half_diagonal := SpacesimLuminance.half_diagonal(tan_half)
 
 	var total := 0.0
 
@@ -731,9 +731,11 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 	var star_distance := to_star.length()
 	if star_distance > star_body.radius:
 		var star_angle := SpacesimLod.angular_radius(star_body.radius, star_distance)
-		var star_omega := 2.0 * PI * (1.0 - cos(star_angle))
+		var star_omega := SpacesimLuminance.cone_solid_angle(star_angle)
 		if star_omega >= SpacesimExposure.MIN_SOLID_ANGLE \
-				and _in_view(forward, to_star / star_distance, half_diagonal, star_angle) \
+				and SpacesimLuminance.in_view(
+					forward, to_star / star_distance, half_diagonal, star_angle
+				) \
 				and not _occluded(observer, star_position, star_body):
 			total += star_light.lux_at(star_distance) / view_omega
 
@@ -749,10 +751,10 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 		if distance <= body.radius:
 			continue
 		var body_angle := SpacesimLod.angular_radius(body.radius, distance)
-		var body_omega := 2.0 * PI * (1.0 - cos(body_angle))
+		var body_omega := SpacesimLuminance.cone_solid_angle(body_angle)
 		if body_omega < SpacesimExposure.MIN_SOLID_ANGLE:
 			continue
-		if not _in_view(forward, to_body / distance, half_diagonal, body_angle):
+		if not SpacesimLuminance.in_view(forward, to_body / distance, half_diagonal, body_angle):
 			continue
 		if _occluded(observer, body.node.global_position, body):
 			continue
@@ -776,39 +778,14 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 	return total
 
 
-## Whether a source's centre lies in the frame, allowing for its own angular size — a body that fills
-## the view has its centre in view only by a technicality, and one just outside the corner is still
-## partly in frame.
-func _in_view(forward: Vector3, direction: Vector3, half_diagonal: float, angular_radius: float) -> bool:
-	return acos(clampf(forward.dot(direction), -1.0, 1.0)) <= half_diagonal + angular_radius
-
-
-## **Whether a body is standing in front of the source.** `_in_view` asks only whether something is
-## inside the frame's cone, which says nothing about whether it can be seen: from a planet's night
-## side the Sun is in that cone whenever the camera points at the ground, because pointing at the
-## ground points at the Sun *through the planet*.
-##
-## A point-to-segment test rather than a ray cast — the bodies are spheres and the span is short, so
-## the closed form is exact and needs no physics query. `source` is the body being looked at, which
-## cannot occlude itself; for the star that is the star.
-##
-## **The clamp at `t = 0.0` is what keeps the planet under the observer from occluding it.** Standing on
-## a surface, the closest point of the segment is the observer's own feet, and those are
-## `radius + altitude` from the centre — outside it. So a Sun above the local horizon has a negative
-## projection and is never occluded, one just below it is grazing and still is not, and only one that
-## is genuinely behind the body is. Nothing here models refraction, which makes the real Sun visible
-## for another half a degree below the horizon.
+## **Whether a body is standing in front of the source.** The test itself is
+## `SpacesimLuminance.occluded`; **what stays here is the policy** — which bodies may occlude, which is
+## every body with a node except the source being looked at, since a body cannot occlude itself.
 func _occluded(observer: Vector3, target: Vector3, source: SpacesimSceneBody) -> bool:
-	var span := target - observer
-	var span_length_squared := span.length_squared()
-	if span_length_squared <= 0.0:
-		return false
 	for body in bodies:
 		if body.node == null or body == source:
 			continue
-		var offset: Vector3 = body.node.global_position - observer
-		var t := clampf(offset.dot(span) / span_length_squared, 0.0, 1.0)
-		if offset.distance_squared_to(span * t) < body.radius * body.radius:
+		if SpacesimLuminance.occluded(observer, target, body.node.global_position, body.radius):
 			return true
 	return false
 
@@ -1114,16 +1091,14 @@ func body_luminance(body: SpacesimSceneBody, observer: Vector3, star_position: V
 	var to_body_star := star_position - body.node.global_position
 	if to_body_star.length_squared() <= 0.0:
 		return 0.0
-	# **The disc-averaged illuminated fraction, not a clamped cosine** — see `lambert_phase`.
-	var phase := SpacesimSurfaceModel.lambert_phase(
-		acos(clampf((-to_body).normalized().dot(to_body_star.normalized()), -1.0, 1.0))
-	)
-	if phase <= 0.0:
-		return 0.0
+	# The phase, the albedo and the light are gathered here; the expression itself is
+	# `SpacesimLuminance.disc_luminance`, because the exposure and the point of light must be **the same
+	# number** and a second copy of the arithmetic is how they would drift.
+	var phase := SpacesimLuminance.phase_angle(body.node.global_position, observer, star_position)
 	var albedo := SpacesimSurfaceModel.bond_albedo(body.content, _materials())
-	if albedo <= 0.0:
-		return 0.0
-	return star_light.lux_at(to_body_star.length()) * albedo * phase / PI
+	return SpacesimLuminance.disc_luminance(
+		star_light.lux_at(to_body_star.length()), albedo, phase
+	)
 
 
 ## Triangles the bodies and air shells are currently drawn with, summed over the levels in use.
