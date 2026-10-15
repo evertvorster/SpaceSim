@@ -26,17 +26,16 @@ const ASSET_FRAME_PREFIX := "asset:"
 ## spray of 20-triangle spheres.
 const INITIAL_MESH_LEVEL := 2
 
-## The air shells' level is **the body's own**, not a constant of their own.
+## How much larger an air shell's error budget is than a body's.
 ##
-## The plan first fixed the shells at a coarse level on the argument that a fill-bound shader's cost is
-## per *pixel*, so tessellation barely matters. That is true of their **cost** and false of their
-## **silhouette**: what a shell contributes from outside is its limb ring, and the error in the ring's
-## outer edge is the same `sagitta * screen_radius` a body's own mesh has — with a radius only 1.6%
-## larger at Earth, so **the same level gives the same error, to within a level**. Evert, 2026-10-15:
-## *"we can also reduce the number of facets in a similar way as the planets when we get close."*
+## **An atmosphere is soft** (Evert, 2026-10-15): its outer edge is where the density reaches nothing, so
+## there is no hard line for a facet to break, and a silhouette error several times a planet's is not
+## visible on one. The shell therefore uses the same law with a looser budget rather than a different
+## mechanism — and the budget still follows the trim, so one number keeps governing both.
 ##
-## So a shell wears the level its body wears, which needs no second policy, no second hysteresis and no
-## second budget — and it is the same statement as "a shell is a body's air, seen at the body".
+## **Suspected at 4, not measured.** The way to judge it is to fly out from a body and watch where its
+## limb ring starts to read as a polygon; the ring is the only hard-ish edge the shell has.
+const SHELL_BUDGET_SOFTNESS := 4.0
 
 ## The screen thickness, in pixels, at which an air shell's **limb ring** is too thin to be worth
 ## drawing.
@@ -632,6 +631,7 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 		SpacesimAtmosphereModel.surface_gravity(body.content)
 	)
 	body.sky_top = maxf(shell_reach, _framing.atmosphere_altitude)
+	body.shell_level = INITIAL_MESH_LEVEL
 	var material := SpacesimBodyRenderer.atmosphere_material(
 		body, _materials(), body.sky_top, temperature,
 		SpacesimStarLight.illuminance(luminosity, distance)
@@ -639,7 +639,7 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	if material == null:
 		return
 	body.atmosphere_mesh = _add_body_mesh(
-		body.node, body.radius + body.sky_top, material, "%sAir" % body.name, body.mesh_level
+		body.node, body.radius + body.sky_top, material, "%sAir" % body.name, body.shell_level
 	)
 
 
@@ -922,6 +922,10 @@ func update_lod(camera: Camera3D) -> void:
 		if is_point:
 			_place_point(body, observer, energy, distance, pixel)
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
+			# A point still has a shell to price — an air so thin it is not drawn costs nothing, and one
+			# whose ring survives does, which is rare but real at a body just under the tier.
+			if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
+				total += SpacesimLod.triangles_at(body.shell_level)
 			continue
 		if body.mesh == null:
 			continue
@@ -929,16 +933,47 @@ func update_lod(camera: Camera3D) -> void:
 		if level != body.mesh_level:
 			body.mesh_level = level
 			body.mesh.mesh = SpacesimIcosphere.mesh_at(level)
-			# **The shell wears the body's level**, so its limb ring's outer edge carries the same error a
-			# planet's silhouette does. One policy instead of two, and nothing to keep in step.
-			if body.atmosphere_mesh != null:
-				body.atmosphere_mesh.mesh = SpacesimIcosphere.mesh_at(level)
 		# Counted from the law rather than from the meshes: `face_count` walks `get_faces()`, which
 		# allocates, and this runs once a frame for every body in the system.
 		total += SpacesimLod.triangles_at(body.mesh_level)
-		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
-			total += SpacesimLod.triangles_at(body.mesh_level)
+		# **The shell is judged on its own metric and its own looser budget.** Its edge is soft, and from
+		# inside it there is no edge at all — see `_shell_screen_radius`. It keeps its own level and its
+		# own hysteresis for that reason, rather than borrowing the body's.
+		if body.atmosphere_mesh != null:
+			var shell_screen := _shell_screen_radius(body, distance, pixel)
+			var shell_level := SpacesimLod.level_with_hysteresis(
+				body.shell_level, shell_screen, epsilon * SHELL_BUDGET_SOFTNESS
+			)
+			if shell_level != body.shell_level:
+				body.shell_level = shell_level
+				body.atmosphere_mesh.mesh = SpacesimIcosphere.mesh_at(shell_level)
+			if body.atmosphere_mesh.visible:
+				total += SpacesimLod.triangles_at(body.shell_level)
 	_triangles = total
+
+
+## The screen radius an air shell's tessellation should be judged at.
+##
+## **From outside** the shell's visible edge is its outer limb, so it is the ordinary silhouette:
+## `tan(asin(R/d)) / p` at `radius + sky_top`, where the ring ends.
+##
+## **From inside there is no edge at all** — the whole frame is the shell — and what tessellation moves is
+## not a boundary but the *direction of every ray the shader casts*: `body_atmosphere` takes
+## `normalize(VERTEX)`, the interpolated position on the triangle, as its ray, so a facet's deviation of
+## `s` radians tilts every ray by that much and moves where the air meets the ground by it too. `s`
+## radians is `s / p` pixels **anywhere on screen**, so the honest screen radius for it is `1 / p` — a
+## radian's worth of pixels.
+##
+## This is what keeps the sky dome off the maximum level. Without it an observer inside the shell has
+## `radius / d > 1`, which `angular_radius` clamps, and the law reads the clamp as a body filling the
+## frame and asks for the finest level there is — 81,920 triangles for a dome whose error is a direction,
+## not an edge.
+func _shell_screen_radius(body: SpacesimSceneBody, distance: float, pixel: float) -> float:
+	if distance < body.radius + body.sky_top:
+		return 1.0 / pixel
+	return SpacesimLod.screen_radius_pixels(
+		SpacesimLod.angular_radius(body.radius + body.sky_top, distance), pixel
+	)
 
 
 ## Whether a body's air shell can be seen at all from here.

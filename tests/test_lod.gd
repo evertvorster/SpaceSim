@@ -280,8 +280,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		if body.mesh != null and body.mesh.visible:
 			drawn += SpacesimIcosphere.face_count(body.mesh_level)
 		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
-			# The shell wears the body's level, so it is counted at that level.
-			drawn += SpacesimIcosphere.face_count(body.mesh_level)
+			drawn += SpacesimIcosphere.face_count(body.shell_level)
 	h.check(scene.triangles() == drawn,
 		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 
@@ -426,8 +425,31 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		# radius only ~2% larger, so the same level gives the same error to within a level.
 		_place_at_screen_radius(camera, venus, to_star_from_luna, 400.0, pixel)
 		scene.update_lod(camera)
-		h.check(venus.atmosphere_mesh.mesh == SpacesimIcosphere.mesh_at(venus.mesh_level),
-			"and it wears the same icosphere level the body's own mesh does (level %d)" % venus.mesh_level)
+		# **And its level is its own**, judged on its own metric and a looser budget: an atmosphere's
+		# edge is soft, so it may carry an error a planet's could not.
+		h.check(venus.atmosphere_mesh.mesh == SpacesimIcosphere.mesh_at(venus.shell_level),
+			"and it has a level of its own, which its mesh wears (level %d)" % venus.shell_level)
+		h.check(venus.shell_level <= venus.mesh_level,
+			"and that level is never finer than the body's own, because its budget is the looser one (%d vs %d)"
+				% [venus.shell_level, venus.mesh_level])
+
+	# --- what the dome costs from inside, and why it is not the finest level ---------------------------
+	# **From inside there is no silhouette at all**, so the law's input is a *direction* error rather than
+	# an edge: `body_atmosphere` casts its ray along `normalize(VERTEX)`, the interpolated position on the
+	# triangle, so a facet's deviation tilts every ray by `s` radians — which is `s / p` pixels anywhere on
+	# screen. The honest screen radius for it is therefore `1 / p`, and using the clamped angular size
+	# instead asks for the finest level there is.
+	var inside_distance := venus.radius + venus.sky_top * 0.5
+	h.check(venus.atmosphere_mesh.mesh == SpacesimIcosphere.mesh_at(venus.shell_level),
+		"inside the shell its mesh is still its own level")
+	var from_inside := SpacesimLod.level_with_hysteresis(
+		0, 1.0 / pixel, float(SpacesimSettings.get_value("lod.error_budget")) * 4.0)
+	h.check(venus.shell_level == from_inside,
+		"and that level is the one the direction error earns, not the clamped angular size (%d, so the "
+			% venus.shell_level
+			+ "dome is %d triangles rather than 81,920)" % SpacesimLod.triangles_at(venus.shell_level))
+	h.check(venus.shell_level < SpacesimLod.MAX_LEVEL,
+		"which is what keeps a sky dome off the maximum level")
 
 	scene.container.free()
 	camera.queue_free()

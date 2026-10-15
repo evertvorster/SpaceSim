@@ -31,6 +31,10 @@ var point: MeshInstance3D
 ## The icosphere level `mesh` is currently drawn at, so a level change is a comparison rather than a
 ## lookup and hysteresis has something to hold on to. Set by `SpacesimSystemScene.update_lod`.
 var mesh_level: int = 0
+## The icosphere level the **air shell** is drawn at. Its own, not the body's: a shell is judged on its own
+## metric (its ring's outer limb from outside, the tilt of every ray from inside) and on a looser budget,
+## because an atmosphere's edge is soft. See `SpacesimSystemScene.update_lod`.
+var shell_level: int = 0
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody

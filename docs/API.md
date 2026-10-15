@@ -182,6 +182,7 @@ lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes liv
 | `parent_id: String`, `fixed_position: Vector3`, `orbit: SpacesimOrbit` | |
 | `node: Node3D`, `mesh: MeshInstance3D` | built |
 | `mesh_level: int` | the icosphere level `mesh` is drawn at, so a level change is a comparison and hysteresis has something to hold on to. Set by `update_lod` |
+| `shell_level: int` | the icosphere level the **air shell** is drawn at — its own, not the body's, because a shell is judged on its own metric and a looser budget |
 | `point: MeshInstance3D` | the **point of light** this body becomes once it is too small to be a disc: a camera-facing quad sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as geometry |
 | `atmosphere_mesh: MeshInstance3D` | built — the air, on its own unit sphere **scaled on the node** to `radius + sky_top`; null when the body has no atmosphere. The mesh is shared, so the body's size is the transform |
 | `sky_top: float` | **how far above the surface this body's air is worth drawing**, metres — derived from the air's own scale height, floored by `frames.atmosphere_altitude`. The camera's far plane needs it (`sky_reach()`); zero for a body with no air |
@@ -232,6 +233,8 @@ have no derived mass yet, so a moon of one stands still.
 | `triangles() -> int` | triangles the bodies, air shells and points are currently drawn with, summed over the levels in place — the instrument for "the picture is unchanged and so is the cost", which means the policy is not being consulted |
 | `INITIAL_MESH_LEVEL`, `POINT_TIER_SCREEN_RADIUS`, `ATMOSPHERE_RING_MIN_PIXELS` | consts: the level a scene is built at before any camera exists, the screen radius below which a body becomes a point of light (**suspected at 4, not measured**), and the screen thickness below which an air shell's limb ring is not drawn (**suspected at 1 px, not measured**) |
 | `_shell_is_visible(body, observer, pixel) -> bool` | **whether an air shell can be seen at all** — the observer inside it, or its limb ring at least `ATMOSPHERE_RING_MIN_PIXELS` thick. A fill-bound shader's LOD is draw-or-not; this is also the answer to `Atmospheres` §10. **The inside case needs no branch**: the outer radius clamps to the horizon and the "ring" spans the screen |
+| `_shell_screen_radius(body, distance, pixel) -> float` | **what an air shell's tessellation is judged at** — its own outer limb from outside, and **`1 / p`** from inside, where there is no edge at all and what a facet moves is the *direction* of every ray `body_atmosphere` casts (`normalize(VERTEX)`, the interpolated position on the triangle), i.e. `s / p` pixels anywhere on screen. This is what keeps a sky dome off the maximum level |
+| `SHELL_BUDGET_SOFTNESS` | how much larger the shells' error budget is than a body's, **because an atmosphere's edge is soft** — same law, looser budget, and the trim still governs both. **Suspected at 4, not measured** |
 | `orbit_parents() -> Dictionary` | for every **moon**, the body it orbits, keyed by the moon's node — what the navigation overlay's crowding rule uses. Moons only |
 | `significant_nodes() -> Array[Node3D]` | the bodies worth marking, in file order. Content decides which those are |
 | `aim_sun_at(position) -> void` | aims the star's light at a position |
