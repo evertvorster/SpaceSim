@@ -12,10 +12,9 @@ extends RefCounted
 ## to the body's screen radius. Which is "draw what is resolvable", as a formula, out of four inputs the
 ## engine already has: the body's angular size, the field of view, the render height, and a budget.
 ##
-## **A scaling law, not a count.** The constant in [constant TRIANGLES_PER_SCREEN_RADIUS] is approximate
-## on purpose — it comes from the inscribed-polygon deviation of the rim, `n ~ pi / acos(1 - epsilon /
-## r_px)`, with the count going as `n^2` — and the real value of `epsilon` is a judgement that only a
-## render settles. Numbers here choose a level; they are not defended to a third digit.
+## **A scaling law, not a count.** The constant in [constant TRIANGLES_PER_SCREEN_RADIUS] is measured,
+## not derived, and the real value of `epsilon` is a judgement that only a render settles. Numbers here
+## choose a level; they are not defended to a third digit.
 ##
 ## **The silhouette is the only thing the mesh carries.** A sphere with per-vertex radial normals
 ## interpolates its normals *exactly* along facet edges — interpolation runs linearly between two correct
@@ -32,8 +31,18 @@ extends RefCounted
 const ICO_BASE_TRIANGLES := 20
 const MAX_LEVEL := 6
 
-## The constant in `N ~ 5 * screen_radius / epsilon`. See the class comment: approximate on purpose.
-const TRIANGLES_PER_SCREEN_RADIUS := 5.0
+## The constant in `N ~ c * screen_radius / epsilon`, and **it is measured from the built mesh rather
+## than derived.** A level's relative sagitta times its triangle count converges to **5.8355** — 5.7963
+## at level 3, 5.8334 at level 5 — and that product is exactly what makes the law honour the budget: at
+## the screen radius where a level is chosen, its error comes to `epsilon` rather than a multiple of it.
+##
+## The derivation in the class comment gets the *shape* right and the constant wrong: it takes a facet's
+## angular width from its solid angle, `phi = sqrt(4*pi/N)`, and the real width is about **1.93x** that,
+## because a facet is a triangle whose corners lie on the sphere rather than a spherical cap. `5` was
+## the first estimate of this and put the drawn error **1.17x over** the budget at every level — the
+## sort of thing `tests/test_icosphere.gd` exists to catch, since it measures the product against the
+## geometry and so cannot drift from this number.
+const TRIANGLES_PER_SCREEN_RADIUS := 5.836
 
 
 ## A pixel's angular size in radians, at the **centre** of a perspective frame.

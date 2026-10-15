@@ -84,14 +84,17 @@ func run(h, root: Node) -> void:
 
 	# --- the boundaries, and the direction of travel -------------------------------------------------
 	# A level change is a **crossing**, so the boundary is where the policy is wrong if it is wrong
-	# anywhere. Level 0 to 1 sits where `5 * r_px / 4` reaches 20 triangles: 16 px exactly, and the
-	# comparison is `>=` on the count, so 16 lands on level 0 and 16 plus a hair on level 1.
-	h.check(SpacesimLod.level_for_screen_radius(16.0, 4.0) == 0,
-		"16 px needs exactly level 0's 20 triangles, so it stays on level 0")
-	h.check(SpacesimLod.level_for_screen_radius(16.01, 4.0) == 1,
-		"and a hundredth of a pixel past it crosses to level 1")
-	h.check(SpacesimLod.level_for_screen_radius(64.0, 4.0) == 1, "64 px is level 1's own boundary")
-	h.check(SpacesimLod.level_for_screen_radius(256.0, 4.0) == 2, "256 px is level 2's")
+	# anywhere. Level 0 to 1 sits at `20 * 4 / 5.836` = 13.708 px and level 1 to 2 at 54.832, so these
+	# straddle them by a tenth of a pixel rather than a hundredth — the comparison is `>=` on a float
+	# count, and a boundary test that only passes by rounding is not testing the boundary.
+	h.check(SpacesimLod.level_for_screen_radius(13.6, 4.0) == 0,
+		"13.6 px needs level 0's 20 triangles, so it stays on level 0")
+	h.check(SpacesimLod.level_for_screen_radius(13.8, 4.0) == 1,
+		"and a fifth of a pixel past that boundary crosses to level 1")
+	h.check(SpacesimLod.level_for_screen_radius(54.7, 4.0) == 1, "54.7 px is still level 1")
+	h.check(SpacesimLod.level_for_screen_radius(54.9, 4.0) == 2, "and 54.9 has crossed to level 2")
+	h.check(SpacesimLod.level_for_screen_radius(219.3, 4.0) == 2, "219.3 px is still level 2")
+	h.check(SpacesimLod.level_for_screen_radius(219.4, 4.0) == 3, "and 219.4 has crossed to level 3")
 
 	# Monotonic in both directions, which is the property the crossing behaviour depends on: more screen
 	# means never fewer triangles, and a more generous budget means never more.
