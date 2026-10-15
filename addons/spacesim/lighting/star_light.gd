@@ -19,10 +19,10 @@ extends RefCounted
 ## refinement.
 const LUMINOUS_EFFICACY := 94.0
 
-## The Sun's disk is **derived, not stated** — see `SpacesimStarModel.angular_radius`, which this
-## feeds into Godot's `light_angular_distance` as the angular *diameter* it wants. It follows the
-## observer exactly as the strength does, and for the same reason: a value fixed at 1 au is 2.6x too
-## small at Mercury and 30x too large at Neptune.
+## The Sun's disk is **derived, not stated** — see `SpacesimLod.angular_radius`, which this feeds into
+## Godot's `light_angular_distance` as the angular *diameter* it wants. It follows the observer exactly
+## as the strength does, and for the same reason: a value fixed at 1 au is 2.6x too small at Mercury
+## and 30x too large at Neptune.
 
 var luminosity: float = 0.0
 ## The star's own radius in metres, so its angular size can be derived at whatever distance the
@@ -83,4 +83,4 @@ func aim_at(observer_position: Vector3, star_position: Vector3) -> void:
 		up = Vector3.RIGHT
 	light.global_transform = light.global_transform.looking_at(light.global_position + direction, up)
 	light.light_intensity_lux = lux_at(distance)
-	light.light_angular_distance = rad_to_deg(2.0 * SpacesimStarModel.angular_radius(radius, distance))
+	light.light_angular_distance = rad_to_deg(2.0 * SpacesimLod.angular_radius(radius, distance))

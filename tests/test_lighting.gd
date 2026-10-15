@@ -79,14 +79,14 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	# 30x too large at Neptune. The star's radius is read from the content rather than restated, so a
 	# wrong radius in `sol.tres` fails here too.
 	var sun_radius: float = sol.star().radius
-	h.check_near(rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, AU)), 0.266,
+	h.check_near(rad_to_deg(SpacesimLod.angular_radius(sun_radius, AU)), 0.266,
 		"the Sun's angular radius at one au is the 0.533-degree disk halved", 0.001)
-	h.check_near(rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, 0.39 * AU)), 0.683,
+	h.check_near(rad_to_deg(SpacesimLod.angular_radius(sun_radius, 0.39 * AU)), 0.683,
 		"at Mercury it is 2.6x that, which a constant fixed at 1 au could not have carried", 0.002)
-	h.check_near(rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, 30.07 * AU)), 0.0089,
+	h.check_near(rad_to_deg(SpacesimLod.angular_radius(sun_radius, 30.07 * AU)), 0.0089,
 		"and at Neptune it is 30x the other way (%.4f degrees)"
-			% rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, 30.07 * AU)), 0.0005)
-	h.check(SpacesimStarModel.angular_radius(0.0, AU) == 0.0,
+			% rad_to_deg(SpacesimLod.angular_radius(sun_radius, 30.07 * AU)), 0.0005)
+	h.check(SpacesimLod.angular_radius(0.0, AU) == 0.0,
 		"and a body with no radius has no angular size, rather than a division by nothing")
 
 	# The exposure that puts a lit body at middle grey is arithmetic, not a measurement. Godot's

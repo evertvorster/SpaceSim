@@ -680,7 +680,7 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 	var to_star := star_position - observer
 	var star_distance := to_star.length()
 	if star_distance > star_body.radius:
-		var star_angle := SpacesimStarModel.angular_radius(star_body.radius, star_distance)
+		var star_angle := SpacesimLod.angular_radius(star_body.radius, star_distance)
 		var star_omega := 2.0 * PI * (1.0 - cos(star_angle))
 		if star_omega >= SpacesimExposure.MIN_SOLID_ANGLE \
 				and _in_view(forward, to_star / star_distance, half_diagonal, star_angle) \
@@ -698,7 +698,7 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 		var distance := to_body.length()
 		if distance <= body.radius:
 			continue
-		var body_angle := asin(clampf(body.radius / distance, 0.0, 1.0))
+		var body_angle := SpacesimLod.angular_radius(body.radius, distance)
 		var body_omega := 2.0 * PI * (1.0 - cos(body_angle))
 		if body_omega < SpacesimExposure.MIN_SOLID_ANGLE:
 			continue

@@ -41,6 +41,7 @@ var suite_paths: Array = [
 	"res://tests/test_save.gd",
 	"res://tests/test_session.gd",
 	"res://tests/test_space_to_surface.gd",
+	"res://tests/test_lod.gd",
 ]
 
 
