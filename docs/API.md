@@ -223,7 +223,7 @@ have no derived mass yet, so a moon of one stands still.
 | `ship_start() -> Vector3` | the system's start position |
 | `star() -> SpacesimSceneBody` | |
 | `illuminance_at(position) -> float` | the light falling on a surface at a position, in lux (irradiance × efficacy). **Not what the camera exposes for** — `view_luminance_at` is, because adaptation follows what the eye is *looking at* |
-| `view_luminance_at(observer, forward, tan_half) -> float` | **what the eye is looking at** — the view integrated as each source's radiance weighted by its share of it. Zero means dark-adapted. The exposure follows this |
+| `view_luminance_at(observer, forward, tan_half) -> float` | **what the eye is looking at** — the view integrated as each source's radiance weighted by its share of it. A body's share is weighted by its **disc-averaged illuminated fraction**, `SpacesimSurfaceModel.lambert_phase`, not by a clamped cosine. Zero means dark-adapted. The exposure follows this |
 | `update_sky(camera) -> void` | points the sky at the camera, hands it the depth and the gain, and re-sums the ambient when the depth changes. Called once a frame |
 | `orbit_parents() -> Dictionary` | for every **moon**, the body it orbits, keyed by the moon's node — what the navigation overlay's crowding rule uses. Moons only |
 | `significant_nodes() -> Array[Node3D]` | the bodies worth marking, in file order. Content decides which those are |
@@ -279,7 +279,7 @@ is what makes the authored Sol a calibration target rather than a fixture.
 | Class | |
 |---|---|
 | `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
-| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck was drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey. The split outlives the drawn deck, and should: the reflectance is physics and the colour is a picture |
+| `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. `static lambert_phase(phase_angle)` is the **disc-averaged illuminated fraction** used to weight a body's share of the view: `(sin a + (pi - a)*cos a)/pi`, 1 at full, 1/pi at half, and 0 only at new — so a crescent contributes, where a clamped cosine returns exactly zero for everything past the half moon. **It is Bond-albedo normalised** (its phase integral is 3/2), which is why no geometric albedo is needed anywhere. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck was drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey. The split outlives the drawn deck, and should: the reflectance is physics and the colour is a picture |
 ### Temperature
 
 | | |
@@ -437,11 +437,12 @@ its energy set each time `sky.star_depth` changes from `SpacesimStarSky.illumina
 cannot be represented in one. The sky is still the light source; it is not asked to travel through a
 cubemap to say so. Evert, 2026-10-14: *"The sky should be the ambient light source."*
 
-**This is re-applied, not new.** It went in with `97d802d` and was rolled back the same day, then put
-back on its own in `a09ccff`; the two changes that travelled with it — the Lambert phase function and a
-stand-down in the star shader's radiance pass — are **not** in the tree. The stand-down was never needed
-by this: `AMBIENT_SOURCE_COLOR` does not read the cubemap, which is `update_ubo`'s own
-`use_ambient_cubemap` flag.
+**The ambient is re-applied, not new**, and the Lambert phase function travelled back with it. The
+ambient went in with `97d802d` and was rolled back the same day, then put back on its own in `a09ccff`;
+the phase function was restored on its own later (phase 1a of the mesh LOD work) — so of the two changes
+that travelled with that rollback, **only the stand-down in the star shader's radiance pass is still not
+in the tree.** The stand-down was never needed by this in any case: `AMBIENT_SOURCE_COLOR` does not read
+the cubemap, which is `update_ubo`'s own `use_ambient_cubemap` flag.
 
 **The energy is in `REFERENCE_LUX`'s units and that number was never measured.** The vault inferred the
 convention from Godot's old look-value floor, and Godot's own property hint gives `ambient_light_energy`

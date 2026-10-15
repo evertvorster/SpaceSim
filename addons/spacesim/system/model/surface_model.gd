@@ -27,6 +27,31 @@ static func bond_albedo(body: SpacesimSystemBody, materials: SpacesimMaterialTab
 	return cover * deck + (1.0 - cover) * surface_albedo(body, materials)
 
 
+## The **Lambert phase function**: the disc-averaged radiance of a lit sphere relative to a fully-lit
+## one, as a function of the phase angle.
+##
+##     f(a) = (sin a + (pi - a) * cos a) / pi
+##
+## 1 at full, **1/pi at half**, 0 only at new, and smooth across the half moon. That smoothness is the
+## point. `view_luminance_at` used `cos(a)` clamped at zero, which is not a worse approximation but a
+## different statement: **it deletes every body past the half moon.** At 122 degrees — near the
+## terminator, a crescent — the dot product is -0.53, so the body was dropped from the sum entirely,
+## the exposure rested at the dark-adapted ceiling with that body filling the frame, and the lit part
+## blew out. The true disc average there is 0.098, and it is never zero until the body is exactly new.
+##
+## It is better on the gibbous side too, where the disc average includes the bright limb: at 60
+## degrees it is 0.609 against a cosine of 0.5.
+##
+## **Bond and geometric albedo are different quantities related through the phase integral** (which is
+## 3/2 for this function). This codebase uses **Bond** throughout, so this normalises the disc average
+## and no geometric albedo has to be reconciled with it. The function itself is a model — exact for a
+## perfectly diffuse sphere. Airless rock backscatters harder, so Lambert makes its crescents slightly
+## too bright, and a cloudy body scatters forward, so Venus is brighter as a crescent than this says.
+static func lambert_phase(phase_angle: float) -> float:
+	var a := clampf(phase_angle, 0.0, PI)
+	return (sin(a) + (PI - a) * cos(a)) / PI
+
+
 ## The surface alone, with no cloud over it. An airless body's whole answer.
 static func surface_albedo(body: SpacesimSystemBody, materials: SpacesimMaterialTable) -> float:
 	if body.surface == null:

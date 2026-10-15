@@ -706,7 +706,13 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 			continue
 		var to_observer := -to_body / distance
 		var to_body_star := star_position - body.node.global_position
-		var phase := clampf(to_observer.dot(to_body_star.normalized()), 0.0, 1.0)
+		# **The disc-averaged illuminated fraction, not a clamped cosine.** The cosine is zero for
+		# everything past the half moon, so a crescent — which is most of what you see of a planet
+		# from anywhere interesting — was dropped from the sum and the exposure stayed dark-adapted
+		# with that planet filling the frame. See `SpacesimSurfaceModel.lambert_phase`.
+		var phase := SpacesimSurfaceModel.lambert_phase(
+			acos(clampf(to_observer.dot(to_body_star.normalized()), -1.0, 1.0))
+		)
 		if phase <= 0.0:
 			continue
 		var albedo := SpacesimSurfaceModel.bond_albedo(body.content, _materials())

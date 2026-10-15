@@ -188,10 +188,15 @@ func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
 		var earth_position: Vector3 = earth.node.global_position
 		var to_sun_from_earth: Vector3 = (sun_position - earth_position).normalized()
 		var night := earth_position - to_sun_from_earth * (earth.radius + 2000.0)
-		h.check(scene.view_luminance_at(night, to_sun_from_earth, tan_half) == 0.0,
+		# A **bound** rather than zero, and the reason is a consequence of the phase fix: a crescent Luna
+		# now contributes where the clamped cosine dropped it. The Sun's own term is what this is about,
+		# and without the occlusion test this value is 71,356 lux/sr — so four orders of margin, and the
+		# check no longer depends on where Luna happens to be.
+		var night_ground := scene.view_luminance_at(night, to_sun_from_earth, tan_half)
+		h.check(night_ground < 100.0,
 			"the planet hides the Sun from its night side, so looking down at the ground is not a sky "
-			+ "you adapt to — it is a Sun that cannot be seen")
-		h.check(scene.view_luminance_at(night, -to_sun_from_earth, tan_half) == 0.0,
+			+ "you adapt to — a Sun that cannot be seen is not 71,356 lux/sr (%.1f)" % night_ground)
+		h.check(scene.view_luminance_at(night, -to_sun_from_earth, tan_half) < 1.0,
 			"and looking up at the actual night sky leaves the exposure dark-adapted")
 
 		# The control, and it is the half that matters: with the same geometry on the **lit** side the Sun
@@ -199,6 +204,20 @@ func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
 		var day := earth_position + to_sun_from_earth * (earth.radius + 2000.0)
 		h.check(scene.view_luminance_at(day, to_sun_from_earth, tan_half) > 0.0,
 			"while on the day side it is overhead and counts, as it must — occlusion is not a deleted term")
+
+	# --- the phase function, against the values it is defined by ------------------------------------
+	# Three points of the Lambert phase function are fixed rather than fitted, and the fourth is the
+	# regression: the clamped cosine this replaced returned **exactly zero** for every body past the
+	# half moon, so a crescent planet filling the frame was dropped from the sum and the exposure rested
+	# at the dark-adapted ceiling while the lit part blew out.
+	h.check_near(SpacesimSurfaceModel.lambert_phase(0.0), 1.0,
+		"a fully lit disc reflects all of it", 1.0e-6)
+	h.check_near(SpacesimSurfaceModel.lambert_phase(PI * 0.5), 1.0 / PI,
+		"a half moon is 1/pi of a full one", 1.0e-6)
+	h.check_near(SpacesimSurfaceModel.lambert_phase(PI), 0.0, "and a new one none", 1.0e-6)
+	var crescent := SpacesimSurfaceModel.lambert_phase(deg_to_rad(122.0))
+	h.check(crescent > 0.09 and crescent < 0.11,
+		"while a crescent is a tenth of the disc and not zero (%.3f at 122 degrees)" % crescent)
 
 
 ## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own
