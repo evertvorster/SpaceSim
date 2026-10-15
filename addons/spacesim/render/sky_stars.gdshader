@@ -82,9 +82,20 @@ const float LUX_PER_MAG0 = 2.54e-6;
 // comes out too dim or too bright, what is wrong is the exposure or the physics, never this.
 const float UNIT_LUX_PER_SR = 100000.0 / 3.14159265358979;
 
-// The worst cell in the catalogue holds 17 stars; the loop bound is a constant because a dynamic
-// bound costs more than the break. If a finer grid is ever needed this can come down.
-const int MAX_PER_CELL = 24;
+// **The bound is the worst cell in the catalogue**, printed by `tools/build_star_catalogue.py` and
+// CHECKED against the asset by `tests/test_render.gd`, because a grid change moves the worst cell and
+// nothing else would notice. At GRID 32 it is 70.
+//
+// It is only a bound: the loop leaves early on the depth filter below, since the tool writes each
+// cell's stars in ascending magnitude order.
+// **The bound is the worst cell in the catalogue, and it is checked rather than trusted.**
+// `tools/build_star_catalogue.py` prints it (`stars a cell: median .., 99th .., worst ..`) and
+// `tests/test_render.gd` reads this constant and asserts it covers the asset's worst cell, so a grid
+// change cannot silently start dropping the stars in the densest cell. At GRID 32 the worst is 70.
+//
+// It is only a *bound*: the loop leaves early on the magnitude filter below, because the tool writes
+// each cell's stars in ascending magnitude order.
+const int MAX_PER_CELL = 80;
 
 
 int cell_of(vec3 d, int grid) {
@@ -182,7 +193,17 @@ void sky() {
 			if (i >= count) break;
 			int index = offset + i;
 			vec4 s = texelFetch(u_stars, texel_of(index, u_stars_size), 0);
-			if (s.w > u_limit_mag) continue;
+			// **`break`, not `continue`, and that depends on the catalogue being sorted.**
+			// `tools/build_star_catalogue.py` sorts every star by magnitude before it buckets them, so a
+			// cell's stars are in ascending magnitude order and everything after a star past the depth
+			// limit is past it too. This is the second piece of arithmetic that has to agree across the
+			// language boundary — the first is `cell_of` — and it is what makes a COARSE grid cheap rather
+			// than expensive: at GRID 32 a cell holds 18 stars on average and **1.45 of them are visible at
+			// the default depth**, so the loop runs less than it did at GRID 84 (2.83), where it walked
+			// every star in the cell to reject it.
+			// (A star within half a milli-magnitude of the limit can be dropped rather than kept, because
+			// the stored magnitude is rounded. That is the whole of the difference, and it is a hair.)
+			if (s.w > u_limit_mag) break;
 
 			vec3 sd = normalize(s.xyz);
 			float sz = dot(sd, u_fwd);

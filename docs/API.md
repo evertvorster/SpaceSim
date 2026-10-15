@@ -507,7 +507,7 @@ and outshone every atmospheric limb.
 | `sky/star_catalogue.gd` | `SpacesimStarCatalogue` — loads `sky/hyg_v44.stars` into three textures |
 | `sky/star_sky.gd` | `SpacesimStarSky` — owns the `Sky` and hands the shader its host plumbing |
 | `sky/PROVENANCE.md` | where the data came from, its licence, its format, and the calibration |
-| `sky/hyg_v44.stars` | 119,613 stars, 1.5 MB, CC BY-SA 4.0 (see below) |
+| `sky/hyg_v44.stars` | 119,613 stars, 1.2 MB, CC BY-SA 4.0 (see below). Bucketed into a **cube-face grid of GRID x GRID cells a face**, and **every cell's stars are in ascending magnitude order** — which is what lets the shader's depth filter `break` instead of `continue`, so the per-pixel loop costs the *visible* stars in the cell rather than all of them. The one piece of arithmetic that must agree across the language boundary is `cell_of` (and now that ordering, which is the second); `tests/test_render.gd` checks the shader's `MAX_PER_CELL` covers the asset's worst cell, so a grid change cannot silently start dropping the densest cell's stars |
 | `tools/build_star_catalogue.py` | the reduction, and the check that reproduces the calibration |
 
 **A `Sky` and not a sphere mesh.** No mesh to keep centred on the camera, an infinite background cannot

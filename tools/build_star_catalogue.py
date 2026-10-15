@@ -26,7 +26,18 @@ against the pointer's oid, which is what FETCHED_SHA256 is.
 
 A flat, BUCKETED binary: the stars grouped by the cube-face cell they fall in, then the cell table.
 The shader cannot test 119,613 stars a pixel; it finds the one cell its ray lands in and tests the
-handful of stars there -- one to three, at this depth.
+stars there. **Every cell is written in ascending magnitude order**, which is what lets the shader
+leave its loop early rather than walking stars it will never draw -- and that in turn is what makes a
+coarse grid cheap: at GRID 32 a cell holds 18 stars on average and 1.5 of them are visible at the
+default depth.
+
+**Coarser is better for correctness, and the reason is a lattice mismatch.** The shader admits a star by
+the CELL it falls in but covers it by the PIXEL lattice, and a star within half a pixel of a cell
+boundary has its one covering pixel across that boundary -- already filtered out -- so no pixel draws
+it. At GRID 84 a cell is ~16 px at 1080p and 70 degrees, which leaves a blind band of ~3% a star; at
+GRID 32 it is 1.2%. GRID 84 was chosen for a *loop bound* that the magnitude ordering has since made
+irrelevant, so a finer grid buys nothing now. The residual is what a 3x3 cell gather, or duplicating
+the stars near a boundary into the neighbouring cell, would remove.
 
     magic      8 bytes    "SPSSSKY1"
     version    uint32     format version
@@ -74,7 +85,7 @@ CELL = struct.Struct("<II")         # offset, count
 ## Cells per cube-face edge. 6 * 84^2 = 42,336 cells, so an average cell is 0.97 square degrees:
 ## about one star at magnitude 8 and three at the full depth of the catalogue. Finer would cost the
 ## same per pixel -- the lookup is one cell either way -- and only shrink the per-cell star list.
-GRID = 84
+GRID = 32
 
 
 def cell_of(x, y, z, grid):
@@ -214,7 +225,7 @@ def write_asset(stars, path):
           % (cell_count, 41252.961 / cell_count, occupied, 100.0 * occupied / cell_count))
     print("  stars a cell: median %d, 99th %d, worst %d"
           % (sizes[len(sizes) // 2], sizes[int(len(sizes) * 0.99)], sizes[-1]))
-    print("  (the worst cell bounds the shader's loop bound; a large one wants a finer grid)")
+    print("  (the worst cell bounds the shader's loop bound, MAX_PER_CELL in sky_stars.gdshader)")
     return os.path.getsize(path)
 
 
@@ -265,7 +276,10 @@ def main():
 
     if args.fetch or not args.csv:
         args.csv = fetch(args.gz)
-    elif args.csv.endswith(".gz"):
+    # **Not an `elif` — the fetch path is a `.gz` too, and this used to be skipped for it.** The
+    # documented usage (`--fetch --out ...`) therefore handed a gzipped file to the CSV reader and died
+    # on a UnicodeDecodeError, so the tool could only be run from an already-plain CSV.
+    if args.csv.endswith(".gz"):
         with gzip.open(args.csv, "rt", newline="") as f:
             plain = args.csv[:-3]
             with open(plain, "w") as g:

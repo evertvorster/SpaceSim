@@ -96,6 +96,31 @@ func _test_the_background_is_the_real_sky(h, scene: SpacesimSystemScene) -> void
 	# every other. A wrong solid angle is a wrong star brightness and a wrong half-pixel is a star in
 	# the wrong pixel, and neither announces itself. Both halves are checked, because either one alone
 	# would look perfectly reasonable in a diff.
+	# **The shader's per-cell loop bound must cover the worst cell in the catalogue, or the stars in the
+	# densest cell are silently dropped.** The build tool prints the number it wrote to ("stars a cell:
+	# median .., 99th .., worst ..") and this reads it back from the asset — the same kind of
+	# cross-language constant as `cell_of`, which the tool already guards, and worth a check for the same
+	# reason: a grid change moves the worst cell and nothing else would notice.
+	var bound := 0
+	var declaration := RegEx.new()
+	declaration.compile("MAX_PER_CELL\\s*=\\s*([0-9]+)")
+	var found := declaration.search(code)
+	if found != null:
+		bound = int(found.get_string(1))
+	h.check(bound > 0, "the shader declares a per-cell loop bound (%d)" % bound)
+	var cell_image: Image = sky.catalogue.cells_texture.get_image()
+	var worst_cell := 0
+	var empty_cells := 0
+	for i in sky.catalogue.cell_count:
+		var held := int(cell_image.get_pixel(i % cell_image.get_width(), i / cell_image.get_width()).g)
+		worst_cell = maxi(worst_cell, held)
+		if held == 0:
+			empty_cells += 1
+	h.check(bound >= worst_cell,
+		"and it covers the catalogue's worst cell, so the bound drops no star (bound %d, worst %d, "
+			% [bound, worst_cell]
+			+ "%d cells empty of %d)" % [empty_cells, sky.catalogue.cell_count])
+
 	h.check(code.contains("dFdx") and code.contains("dFdy"),
 		"and MEASURES its own pixel size, so the star's solid angle cannot be a square law in disguise")
 	h.check(not code.contains("u_inv_viewport"),
