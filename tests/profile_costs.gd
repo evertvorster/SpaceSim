@@ -22,6 +22,23 @@ extends SceneTree
 ## **It cannot name `SpacesimSettings`.** A `--script` script is compiled *before* the autoloads are
 ## registered, so the identifier does not exist at compile time — the same reason `--check-only`
 ## reports it as "Identifier not found" and exits 0. The autoload is fetched from the tree instead.
+##
+## **`COST_MODE=frames` is the faithful mode, and the loop mode is not.** Timing a function by calling
+## it N times back to back puts it in an environment no frame ever gives it: anything that queues
+## rendering-server work never gets drained between calls, so the mean can be inflated several times
+## over. `COST_MODE=frames` measures instead **the marginal cost of one extra call per REAL frame**, by
+## the frame time it adds:
+##
+##     phase 0  baseline                the frame as it is
+##     phase 1  baseline again          so the noise floor is MEASURED, not assumed
+##     phase 2  an extra null call      so "adding a call" is shown not to perturb by itself
+##     phase 3  an extra _update_view
+##     phase 4  an extra update_lod
+##
+## The two baselines are not ceremony: this instrument was used once without them, four bisect
+## experiments failed to move a 10 ms number whose run-to-run spread was ±1 ms, and the spread turned
+## out to be the same order as the effect being looked for. **Measure the floor before believing a
+## difference, and prefer a median over a mean when frames are this variable.**
 
 const MAIN_SCENE := "res://game/main.tscn"
 const SETTLE_FRAMES := 60
@@ -31,6 +48,12 @@ const VIEW_CALLS := 100
 
 var _frames := 0
 var _done := false
+
+## `COST_MODE=frames` state: five phases of `FRAMES_PER_PHASE` frames, each reported as a median.
+const FRAMES_PER_PHASE := 120
+var _phase := 0
+var _phase_frames: Array[float] = []
+var _medians: Array[float] = []
 
 
 func _initialize() -> void:
@@ -42,13 +65,70 @@ func _initialize() -> void:
 	get_root().add_child(packed.instantiate())
 
 
-func _process(_delta: float) -> bool:
+func _process(delta: float) -> bool:
 	_frames += 1
 	if _frames < SETTLE_FRAMES or _done:
 		return _done
+	if OS.has_environment("COST_MODE") and OS.get_environment("COST_MODE") == "frames":
+		return _frames_mode(delta)
 	_done = true
 	_run()
 	return true
+
+
+## One extra call per real frame, and the frame time it adds. See the header for why this shape is the
+## faithful one and the loop mode is not.
+func _frames_mode(delta: float) -> bool:
+	var main: Node = get_root().get_node_or_null("Main")
+	if main == null:
+		print("COST: no Main node")
+		return true
+	match _phase:
+		1:
+			pass # a second baseline: the floor is measured rather than assumed
+		2:
+			main._sync_player_location() # a null extra — ~0.7 us, so it should perturb nothing
+		3:
+			main._update_view(1.0 / 60.0)
+		4:
+			var camera: Camera3D = _find_camera(main)
+			if camera != null:
+				main._system.update_lod(camera)
+
+	_phase_frames.append(delta)
+	if _phase_frames.size() < FRAMES_PER_PHASE:
+		return false
+	_medians.append(_median(_phase_frames))
+	_phase_frames = []
+	_phase += 1
+	if _phase <= 4:
+		return false
+	_report_frames()
+	return true
+
+
+func _report_frames() -> void:
+	var labels := [
+		"baseline 1", "baseline 2", "+ a null call", "+ one _update_view", "+ one update_lod",
+	]
+	var baseline := (_medians[0] + _medians[1]) * 0.5
+	print("COST-FRAMES: median frame time, %d frames a phase" % FRAMES_PER_PHASE)
+	for i in _medians.size():
+		print("COST-FRAMES:   %-20s %8.2f ms" % [labels[i], 1000.0 * _medians[i]])
+	print("COST-FRAMES:   %-20s %8.2f ms" % ["NOISE FLOOR (1 vs 2)",
+		1000.0 * absf(_medians[0] - _medians[1])])
+	print("COST-FRAMES: **marginal cost of one extra call per real frame:**")
+	for i in range(2, _medians.size()):
+		print("COST-FRAMES:   %-20s %8.2f ms" % [labels[i], 1000.0 * (_medians[i] - baseline)])
+
+
+## A median, because frames this variable make a mean a poor estimator of the middle.
+func _median(values: Array[float]) -> float:
+	if values.is_empty():
+		return 0.0
+	var sorted := values.duplicate()
+	sorted.sort()
+	return sorted[sorted.size() / 2]
 
 
 func _run() -> void:
