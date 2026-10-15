@@ -19,7 +19,6 @@ const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 ## Frame ids an asset owns, so the player can be *inside* something they own. Nothing can be entered
 ## yet; the ids exist so a location can name one when it can.
 const ASSET_FRAME_PREFIX := "asset:"
-const INTERIOR_SUFFIX := "/interior"
 
 ## The authored content this scene was built from.
 var content: SpacesimSolarSystem
@@ -219,9 +218,12 @@ func view_distance() -> float:
 	return system_frame.travel_length_max
 
 
-## The illuminance at a position, in lux: the light the camera should expose for. Computed from the
-## same distance the star light uses, so the light and the exposure can never disagree about how far
-## away the star is.
+## The illuminance at a position, in lux: the light falling on a surface there.
+##
+## **This is not what the camera exposes for.** Adaptation follows what the eye is *looking at*, which
+## is `view_luminance_at()` — and the two are genuinely different quantities (an irradiance versus a
+## luminance), which was a real bug when they were conflated. This one is used for the one-time
+## `snap_to()` at startup and for the atmosphere's own inputs.
 func illuminance_at(position: Vector3) -> float:
 	if star_light == null:
 		return 0.0
@@ -765,6 +767,12 @@ func _occluded(observer: Vector3, target: Vector3, source: SpacesimSceneBody) ->
 	return false
 
 
+## Point every atmosphere at the observer and at its star.
+##
+## **Both are handed over as offsets, not positions.** Our bodies sit at ~1.5e11 m and a GLSL float
+## has ~7 significant digits, so a world coordinate would arrive with ~16 km of resolution — against
+## an air 100 km deep. Computed here in double precision, the difference is ~6.4e6 m and arrives with
+## sub-metre resolution.
 func update_atmospheres(observer: Vector3) -> void:
 	var star_body := star()
 	if star_body == null or star_body.node == null:

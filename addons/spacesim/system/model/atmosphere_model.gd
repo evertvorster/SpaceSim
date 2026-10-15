@@ -2,9 +2,10 @@ class_name SpacesimAtmosphereModel
 extends RefCounted
 ## A body's air: the numbers the sky shader needs, derived from what the atmosphere is made of.
 ##
-## This is §3.4 of [[SpaceSim/Solar Systems and the Physics Model]] — **the scattering row only**.
-## The profiles, retention and the greenhouse are not built; what is here is what a clear sky needs.
-## Everything is a pure function of content, so the renderer cannot disagree with the model.
+## This is §3.4 of [[SpaceSim/Solar Systems and the Physics Model]] **and §3.6's first two rows**:
+## the scattering coefficients the sky shader takes, the profiles, and the greenhouse. Retention
+## (Jeans escape) is the one part that is not built. Everything is a pure function of content, so the
+## renderer cannot disagree with the model.
 ##
 ## The sky itself is `body_atmosphere.gdshader`, which is `glsl-atmosphere` applied to a shell. Its
 ## inputs are exactly these numbers — see [[SpaceSim/Atmospheres]].
@@ -304,9 +305,10 @@ static func equilibrium_temperature(
 ## of them.
 ##
 ## **A named gap, not a silent one.** A species whose cross-section is not in the material table
-## contributes nothing to the sky, so this is what says whether the air is complete. Everything the
-## authored atmospheres use is covered except water vapour (1% of Earth) and hydrogen (a trace of
-## Titan); both are small enough to leave out until a body needs them.
+## contributes nothing to the sky, so this is what says whether the air is complete. **Water vapour
+## is the only remaining gap** — 1% of Earth's air — after hydrogen's cross-section was added for the
+## gas giants (computed from a literature (n−1) and checked against helium first). `test_render.gd`
+## asserts that Earth is the only body short of one.
 static func coverage(atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable) -> float:
 	if atmosphere == null or materials == null:
 		return 0.0

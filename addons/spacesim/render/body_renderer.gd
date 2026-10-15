@@ -7,7 +7,7 @@ extends RefCounted
 ## derived yet is named in the constants below rather than buried in the shader, because a hidden
 ## constant is one nobody can find when the picture is wrong.
 ##
-## **Nothing draws a cloud deck.** The shell that did was removed (commit pending): it stood at
+## **Nothing draws a cloud deck.** The shell that did was removed in `ffbc802`: it stood at
 ## `radius * 1.012` — 76 km up at Earth, seven times a real cloud top — which made it the outermost
 ## silhouette of every body, and it is what read as "an atmosphere" from space while the actual air
 ## was invisible. `SpacesimClouds` stays and is still read: `bond_albedo` needs it, and Earth's
@@ -63,6 +63,10 @@ static func noise_field() -> NoiseTexture3D:
 
 ## The air's material, or null when the body has none.
 ##
+## `shell_top` is how far above the surface the shell reaches — **derived** from the air's own scale
+## height and floored by the framing's altitude (`SpacesimSceneBody.sky_top`), not an authored
+## altitude. It used to be called `atmosphere_altitude`, which named the floor it is not.
+##
 ## **Every number here comes from `SpacesimAtmosphereModel`**, so the shader cannot disagree with the
 ## model: the coefficient and the scale height are the derivation's, and the Mie terms are named
 ## constants there rather than buried in the shader. `temperature` is the reference state the
@@ -70,17 +74,17 @@ static func noise_field() -> NoiseTexture3D:
 static func atmosphere_material(
 	body: SpacesimSceneBody,
 	materials: SpacesimMaterialTable,
-	atmosphere_altitude: float,
+	shell_top: float,
 	temperature: float,
 	illuminance: float
 ) -> ShaderMaterial:
 	var air := body.content.atmosphere if body.content != null else null
-	if air == null or atmosphere_altitude <= 0.0:
+	if air == null or shell_top <= 0.0:
 		return null
 	var material := ShaderMaterial.new()
 	material.shader = ATMOSPHERE_SHADER
 	material.set_shader_parameter("planet_radius", body.radius)
-	material.set_shader_parameter("atmosphere_radius", body.radius + atmosphere_altitude)
+	material.set_shader_parameter("atmosphere_radius", body.radius + shell_top)
 	material.set_shader_parameter(
 		"rayleigh_coefficient", SpacesimAtmosphereModel.rayleigh_coefficient(air, materials, temperature)
 	)

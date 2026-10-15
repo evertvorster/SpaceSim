@@ -77,9 +77,6 @@ func validate() -> PackedStringArray:
 		if body.axial_tilt < 0.0 or body.axial_tilt > 180.0:
 			problems.append("%s has an axial tilt outside [0, 180]" % body.id)
 
-		# Every body but the primary must orbit something: a body left without an orbit would
-		# silently stand at the system origin. The primary has no parent, so it is never checked
-		# against one.
 		# A body with no orbit does not move: it stands at its fixed position, and that is a perfectly
 		# good arrangement (a station, or a hand-placed placeholder) rather than an error. The
 		# primary is the exception — it is the centre of the system and must not orbit anything.

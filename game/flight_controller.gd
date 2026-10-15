@@ -1,9 +1,10 @@
 extends Node3D
-## Minimal flyable ship for the scale demo.
+## The flyable ship.
 ##
-## DEMO CODE, not engine. The flight model an episode uses is content, and the real one
-## arrives with physics; what is engine is the travel unit this applies. Input is fed in
-## as a dictionary so the same ship can be flown by a test without a keyboard.
+## It **applies the engine's travel unit**; the flight model an episode uses is content, and the
+## engine owns only the unit. (`game/` rather than `addons/` for that reason.) Input is fed in as a
+## dictionary so the same ship can be flown by a test without a keyboard — which is what lets the
+## headless suite fly the identical ship the game does.
 ##
 ##   throttle : 0..1, fraction of the local travel unit
 ##   aim      : world-space point to point the ship at (tests use this)

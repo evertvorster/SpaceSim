@@ -1,7 +1,10 @@
 extends Node
 ## Headless test runner.
 ##
-##     timeout 60 godot-double-mono --headless --path . res://tests/run_tests.tscn
+##     timeout 300 godot-double-mono --headless --path . res://tests/run_tests.tscn
+##
+## The playground flight test drives ~120,000 steps, so the whole run takes minutes — that is what
+## `run.sh` uses a 300 s deadline for, and why a 60 s example here would kill the run midway.
 ##
 ## Exits 0 when every check passes, 1 otherwise. Tests are synchronous: they build a scene tree,
 ## drive the code under test directly, and assert. Nothing waits on frames.

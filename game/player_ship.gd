@@ -1,9 +1,9 @@
 extends RefCounted
 ## Builds the player's ship and puts it into a system.
 ##
-## Demo code: the flight model is an episode's business, and what is engine is the travel unit
-## the controller applies. Shared by the demo scene and the headless tests so both fly the
-## same ship.
+## The ship itself is game code — the flight model is an episode's business, and what is engine is the
+## travel unit the controller applies. Shared by the game scene and the headless tests so both fly
+## the same ship.
 
 const FlightController := preload("res://game/flight_controller.gd")
 

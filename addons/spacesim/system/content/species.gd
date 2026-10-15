@@ -18,8 +18,11 @@ enum Domain { SOLID, LIQUID, GAS }
 ## numbers came from. Zero where a species has no measured cross-section yet; that gap is **named**
 ## rather than filled in with a plausible number.
 @export var rayleigh: Vector3 = Vector3.ZERO
-## Infrared band absorptivities for the greenhouse model. **Not yet populated** — the greenhouse is
-## not built, and a guessed absorptivity would be worse than an absent one.
+## Infrared band absorptivities for the greenhouse model, m²/kg **per band** — the array being where
+## more bands would go. Populated in `materials.tres`, and read by
+## [code]SpacesimAtmosphereModel.greenhouse_optical_depth()[/code], which is where Earth's 288 K and
+## Venus's 737 K come from. Each value is fixed against one measured surface temperature; N₂, O₂,
+## Ar, He and H₂ are explicitly **zero**, so "known transparent" and "not known" do not look alike.
 @export var greenhouse: PackedFloat32Array = []
 @export var condensation_temperature: float = 0.0 ## kelvin, 0 where it does not apply
 ## **Specific heat capacity at constant pressure**, J/(kg·K) — what sets the adiabatic lapse rate

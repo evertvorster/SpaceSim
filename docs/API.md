@@ -222,7 +222,11 @@ have no derived mass yet, so a moon of one stands still.
 | `meshes() -> Array[MeshInstance3D]` | every body's mesh, for the hide/detail debug keys |
 | `ship_start() -> Vector3` | the system's start position |
 | `star() -> SpacesimSceneBody` | |
-| `illuminance_at(position) -> float` | the light at a position, in lux |
+| `illuminance_at(position) -> float` | the light falling on a surface at a position, in lux (irradiance × efficacy). **Not what the camera exposes for** — `view_luminance_at` is, because adaptation follows what the eye is *looking at* |
+| `view_luminance_at(observer, forward, tan_half) -> float` | **what the eye is looking at** — the view integrated as each source's radiance weighted by its share of it. Zero means dark-adapted. The exposure follows this |
+| `update_sky(camera) -> void` | points the sky at the camera, hands it the depth and the gain, and re-sums the ambient when the depth changes. Called once a frame |
+| `orbit_parents() -> Dictionary` | for every **moon**, the body it orbits, keyed by the moon's node — what the navigation overlay's crowding rule uses. Moons only |
+| `significant_nodes() -> Array[Node3D]` | the bodies worth marking, in file order. Content decides which those are |
 | `aim_sun_at(position) -> void` | aims the star's light at a position |
 | `body_for_surface_frame(frame) -> SpacesimSceneBody` | |
 | `air_body(frame) -> SpacesimSceneBody` | the body whose air that frame is inside — its atmosphere or surface frame — or null in space |
@@ -783,10 +787,17 @@ holds that end.
 
 ### Scope
 
-A setting is either the player's business or the world's. World settings (`frames.*`) are read
-from the world's own file, travel with the world as content, and **are never written to the
-player's file** — a world value cannot be set by the player, and a player value cannot come from
-the world.
+A setting is either the player's business or the world's. **The player half is what is in use.**
+World settings (`frames.*`) were designed to be read from the world's own file, travel with the world
+as content, and **never be written to the player's file** — a world value cannot be set by the player,
+and a player value cannot come from the world.
+
+> **Wired but unused, 2026-10-15.** The mechanism is implemented (`Scope.WORLD`, `set_world_values`)
+> and has **no production caller** — only `test_settings.gd` exercises it. The six `frames.*` keys are
+> likewise **read by nothing**: the live bands and thresholds come from `SpacesimFraming` on the
+> **content resource** (`systems/*.tres`), which is what `SpacesimSystemScene.build()` reads.
+> `frames.system_band`'s default has already drifted from `SpacesimFraming`'s. Either wire the world
+> file up or remove the keys — see `Source Review/settings.gd.md` in the project notes.
 
 ### Hot by construction
 
@@ -815,8 +826,8 @@ on change (`camera.fov`, the marker pool and font size).
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
 | `markers.selected_color` | player | `Color(1.0, 0.9, 0.3)` — the one thing on the overlay that stands out, so it can be made to stand out against what it is seen against |
-| `frames.system_band` / `_atmosphere_band` / `_surface_band` | world | `Vector2(1e4, 1e11)` and so on |
-| `frames.atmosphere_altitude` / `_surface_altitude` / `_pad_size` | world | 100000.0 / 2000.0 / 4000.0 |
+| `frames.system_band` / `_atmosphere_band` / `_surface_band` | world | `Vector2(1e4, 1e11)` and so on — **not read by anything**; see § Scope. `SpacesimFraming` on the content resource is the live source |
+| `frames.atmosphere_altitude` / `_surface_altitude` / `_pad_size` | world | 100000.0 / 2000.0 / 4000.0 — likewise unused |
 
 ### Bindings
 
@@ -1076,17 +1087,19 @@ selection or a rename calls instead. Found by the tests, which said exactly that
 ## `SpacesimPlayer`
 
 `addons/spacesim/player/` — the player's own state: what they are and what they carry.
-Player-owned per the world/player boundary; a save will hold it, and nothing persists it yet.
+Player-owned per the world/player boundary; **a save holds it**, in `player/state.json`.
 
 ### `SpacesimPlayer` — `RefCounted`
 
 | Member | |
 |---|---|
-| `DEFAULT_NAME`, `DEFAULT_ATTRIBUTES`, `DEFAULT_ASSETS` | the placeholder starting state |
+| `DEFAULT_NAME`, `DEFAULT_ATTRIBUTES`, `DEFAULT_ASSETS` | the placeholder starting state, handed out as **copies** on `reset()` |
 | `attributes: Dictionary` | named values, starting with `Name`. Currency lives here too, being a quantity rather than a thing |
-| `assets: Array` | things held, each `{name, type, value}` — the shape leaves room for the rest of an asset |
-| `display_name() -> String` | |
-| `reset(player_name) -> void` | back to the starting state, as copies rather than the consts |
+| `assets: Array` | things held, each `{id, name, type, value, location}` — `id` is generated once and never edited, because a location refers to it and a name can change |
+| `location: SpacesimLocation` | where the player is; the player and their ships are separate, and coincide when the player is inside one |
+| `deleted: Array` | save tombstones, by hash — recorded in `player/deleted.json`, not in the state file |
+| `display_name()`, `reset(name)`, `add_asset(...)`, `asset_by_id(id)` | |
+| `to_dictionary()` / `from_dictionary(data)` | unknown keys ignored, so a newer save may carry more than this build knows |
 
 ## Save and load
 
@@ -1136,7 +1149,7 @@ envelope.
 | `histories() -> Array`, `current_history()`, `has_history(name)` | |
 | `create_history(name)`, `rename_history(from, to)`, `delete_history(name)`, `switch_history(name)` | all `{"ok", "reason"}` |
 | `TRUNK`, `STATE_FILE`, `DELETED_FILE`, `STATE_FORMAT_VERSION` | |
-| `static state_text(player_data, world_time)`, `static read_state(text)` | |
+| `static state_text(player_data, world_time, saved_realtime)`, `static read_state(text)` | |
 
 **The trunk and the history you are playing cannot be deleted** — a new story branches from the
 trunk, and git refuses a worktree's own branch anyway. Creating a history or switching first drops
@@ -1213,8 +1226,10 @@ under you as you land, so its origin is not saved and the saved position says wh
 your locale, not where on a globe. On a featureless sphere the locale is anonymous. Terrain is what
 makes the tangential part mean something, and then a surface will need a placement of its own.
 
-`SECONDS_PER_DAY` and `DAYS_PER_YEAR` are placeholder calendar constants — a world that needs its own
-calendar is a thing to build when a story does.
+The world clock is a Terran date and time (`format_time()`), carried by **Godot's own proleptic
+Gregorian date arithmetic** rather than a table of months and leap-year rules of ours: seconds are
+counted from the world's epoch, which reads as year 0, so a story can open in any year it likes. A
+world that wants a calendar of its own is a thing to build when a story needs one.
 
 ### `SpacesimPlayer` additions
 
@@ -1229,7 +1244,7 @@ calendar is a thing to build when a story does.
 
 ## The game
 
-`game/main.*` — fly around the playground system and land on planets. The solar system comes from a
+`game/main.*` — fly around **Sol** and land on planets. The solar system comes from a
 system file; the scene adds input, the camera's render range, the two screens and a readout.
 `game/player_ship.gd` builds and places the player's ship, so the headless tests fly the identical
 system and ship.

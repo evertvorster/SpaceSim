@@ -37,9 +37,6 @@ var atmosphere_mesh: MeshInstance3D
 ## otherwise. Zero for a body with no air.
 var sky_top: float = 0.0
 
-## What a body with nothing to derive from is drawn in — visibly a placeholder rather than a
-## plausible-looking guess. Lives with the derivation that replaces it.
-
 
 static func from_content(
 	content: SpacesimSystemBody, materials: SpacesimMaterialTable = null
