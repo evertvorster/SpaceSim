@@ -161,3 +161,69 @@ static func level_with_hysteresis(
 ## The triangles in a level. Exact, and an integer: each subdivision turns one triangle into four.
 static func triangles_at(level: int) -> int:
 	return ICO_BASE_TRIANGLES << (2 * clampi(level, 0, MAX_LEVEL))
+
+## How much larger an air shell's error budget is than a body's.
+##
+## **An atmosphere is soft** (Evert, 2026-10-15): its outer edge is where the density reaches nothing, so
+## there is no hard line for a facet to break, and a silhouette error several times a planet's is not
+## visible on one. The shell therefore uses the same law with a looser budget rather than a different
+## mechanism — and the budget still follows the trim, so one number keeps governing both.
+##
+## **Suspected at 4, not measured.** The way to judge it is to fly out from a body and watch where its
+## limb ring starts to read as a polygon; the ring is the only hard-ish edge the shell has.
+const SHELL_BUDGET_SOFTNESS := 4.0
+
+## The screen thickness, in pixels, at which an air shell's **limb ring** is too thin to be worth
+## drawing.
+##
+## A shell is a fill-bound shader — 128 samples per pixel it covers, the heaviest thing here — so its
+## LOD is *draw or not draw*, and the only question worth asking is whether it puts anything on the
+## screen. From outside, what it puts there is the ring between `radius` and `radius + sky_top`; below a
+## pixel of thickness that is a smear across one pixel rather than a ring, and it is bought with the
+## whole march. Earth's ring comes to 4.9 px at 19,000 km, 319 px at 400 km, and **0.05 px at 750 Mm**,
+## so the planet's own limb stops being drawn somewhere around 77,000 km — where its disc is 13 px and a
+## 0.2 px ring around it was never going to be seen.
+##
+## **Suspected at one pixel, not measured**, like the point tier's 4. It wants looking at in flight: the
+## trade it makes is a sub-pixel limb tint for the march, so the way to judge it is to fly out from a
+## body and watch where its ring stops reading.
+const ATMOSPHERE_RING_MIN_PIXELS := 1.0
+
+## The screen radius below which a body **stops being geometry and becomes a point of light**.
+##
+## Below a few pixels a shaded disc and a flat blob are indistinguishable, so a mesh buys nothing — and a
+## mesh *smaller than a pixel* aliases badly, appearing and disappearing as it crosses pixel centres.
+## **Four is a suspected number, not a measured one**: it is the value the mesh LOD plan's §3 proposes,
+## and it wants looking at in flight the way `lod.error_budget` did. Unlike the error budget it is not a
+## setting, because it is not a quality trim — it is where one representation gives way to another, and
+## a player who moved it would be moving a boundary rather than a budget.
+const POINT_TIER_SCREEN_RADIUS := 4.0
+
+
+## **The screen radius an air shell's tessellation is judged at.**
+##
+## **From outside** the shell's visible edge is its outer limb, so it is the ordinary silhouette:
+## `tan(asin(R/d)) / p` at `radius + sky_top`, where the ring ends.
+##
+## **From inside there is no edge at all** — the whole frame is the shell — and what tessellation moves
+## is not a boundary but the *direction of every ray the shader casts*: `body_atmosphere` takes
+## `normalize(VERTEX)`, the interpolated position on the triangle, as its ray. A facet's surface is flat
+## where the true shell curves, so the ray is off by the facet's tilt, and a shell that fills the frame
+## is worth tessellating for **direction** accuracy even though it has no silhouette to break. Returning
+## `1 / p` for that case is "unit angular size" — a radius of one radian — which the law reads as a body
+## filling the frame, and it asks for the finest level there is.
+static func shell_screen_radius(radius: float, sky_top: float, distance: float, pixel: float) -> float:
+	if distance < radius + sky_top:
+		return 1.0 / maxf(pixel, 1.0e-9)
+	return screen_radius_pixels(angular_radius(radius + sky_top, distance), pixel)
+
+
+## The air shell's visible **ring thickness** in pixels: its outer limb less the planet's own limb.
+##
+## This is the quantity [constant ATMOSPHERE_RING_MIN_PIXELS] is compared against, and it is the whole
+## of the shell's draw-or-not decision from outside — see that constant for why the ring is the only
+## thing that matters and what it measures at several distances.
+static func shell_ring_pixels(radius: float, sky_top: float, distance: float, pixel: float) -> float:
+	var outer := screen_radius_pixels(angular_radius(radius + sky_top, distance), pixel)
+	var inner := screen_radius_pixels(angular_radius(radius, distance), pixel)
+	return outer - inner

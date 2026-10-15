@@ -26,42 +26,6 @@ const ASSET_FRAME_PREFIX := "asset:"
 ## without a game is not a spray of 20-triangle spheres.
 const INITIAL_MESH_LEVEL := 2
 
-## How much larger an air shell's error budget is than a body's.
-##
-## **An atmosphere is soft** (Evert, 2026-10-15): its outer edge is where the density reaches nothing, so
-## there is no hard line for a facet to break, and a silhouette error several times a planet's is not
-## visible on one. The shell therefore uses the same law with a looser budget rather than a different
-## mechanism — and the budget still follows the trim, so one number keeps governing both.
-##
-## **Suspected at 4, not measured.** The way to judge it is to fly out from a body and watch where its
-## limb ring starts to read as a polygon; the ring is the only hard-ish edge the shell has.
-const SHELL_BUDGET_SOFTNESS := 4.0
-
-## The screen thickness, in pixels, at which an air shell's **limb ring** is too thin to be worth
-## drawing.
-##
-## A shell is a fill-bound shader — 128 samples per pixel it covers, the heaviest thing here — so its
-## LOD is *draw or not draw*, and the only question worth asking is whether it puts anything on the
-## screen. From outside, what it puts there is the ring between `radius` and `radius + sky_top`; below a
-## pixel of thickness that is a smear across one pixel rather than a ring, and it is bought with the
-## whole march. Earth's ring comes to 4.9 px at 19,000 km, 319 px at 400 km, and **0.05 px at 750 Mm**,
-## so the planet's own limb stops being drawn somewhere around 77,000 km — where its disc is 13 px and a
-## 0.2 px ring around it was never going to be seen.
-##
-## **Suspected at one pixel, not measured**, like the point tier's 4. It wants looking at in flight: the
-## trade it makes is a sub-pixel limb tint for the march, so the way to judge it is to fly out from a
-## body and watch where its ring stops reading.
-const ATMOSPHERE_RING_MIN_PIXELS := 1.0
-
-## The screen radius below which a body **stops being geometry and becomes a point of light**.
-##
-## Below a few pixels a shaded disc and a flat blob are indistinguishable, so a mesh buys nothing — and a
-## mesh *smaller than a pixel* aliases badly, appearing and disappearing as it crosses pixel centres.
-## **Four is a suspected number, not a measured one**: it is the value the mesh LOD plan's §3 proposes,
-## and it wants looking at in flight the way `lod.error_budget` did. Unlike the error budget it is not a
-## setting, because it is not a quality trim — it is where one representation gives way to another, and
-## a player who moved it would be moving a boundary rather than a budget.
-const POINT_TIER_SCREEN_RADIUS := 4.0
 
 ## The authored content this scene was built from.
 var content: SpacesimSolarSystem
@@ -899,7 +863,7 @@ func update_lod(camera: Camera3D) -> void:
 		var distance := observer.distance_to(body.node.global_position)
 		var energy := SpacesimLod.angular_radius(body.radius, distance)
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
-		var is_point: bool = screen < POINT_TIER_SCREEN_RADIUS
+		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
 		# **The air shell is a visibility question, not a tier.** Its limb ring is what it contributes from
@@ -927,12 +891,14 @@ func update_lod(camera: Camera3D) -> void:
 		# allocates, and this runs once a frame for every body in the system.
 		total += SpacesimLod.triangles_at(body.mesh_level)
 		# **The shell is judged on its own metric and its own looser budget.** Its edge is soft, and from
-		# inside it there is no edge at all — see `_shell_screen_radius`. It keeps its own level and its
+		# inside it there is no edge at all — see `SpacesimLod.shell_screen_radius`. It keeps its own level and its
 		# own hysteresis for that reason, rather than borrowing the body's.
 		if body.atmosphere_mesh != null:
-			var shell_screen := _shell_screen_radius(body, distance, pixel)
+			var shell_screen := SpacesimLod.shell_screen_radius(
+				body.radius, body.sky_top, distance, pixel
+			)
 			var shell_level := SpacesimLod.level_with_hysteresis(
-				body.shell_level, shell_screen, epsilon * SHELL_BUDGET_SOFTNESS
+				body.shell_level, shell_screen, epsilon * SpacesimLod.SHELL_BUDGET_SOFTNESS
 			)
 			if shell_level != body.shell_level:
 				body.shell_level = shell_level
@@ -958,14 +924,6 @@ func update_lod(camera: Camera3D) -> void:
 ## `radius / d > 1`, which `angular_radius` clamps, and the law reads the clamp as a body filling the
 ## frame and asks for the finest level there is — 81,920 triangles for a dome whose error is a direction,
 ## not an edge.
-func _shell_screen_radius(body: SpacesimSceneBody, distance: float, pixel: float) -> float:
-	if distance < body.radius + body.sky_top:
-		return 1.0 / pixel
-	return SpacesimLod.screen_radius_pixels(
-		SpacesimLod.angular_radius(body.radius + body.sky_top, distance), pixel
-	)
-
-
 ## Whether a body's air shell can be seen at all from here.
 ##
 ## **A fill-bound shader's LOD is draw-or-not, not resolution.** The shell's cost is per *pixel* it
@@ -988,13 +946,8 @@ func _shell_is_visible(body: SpacesimSceneBody, observer: Vector3, pixel: float)
 	if body.atmosphere_mesh == null or body.node == null or body.sky_top <= 0.0:
 		return false
 	var distance := observer.distance_to(body.node.global_position)
-	var outer := SpacesimLod.screen_radius_pixels(
-		SpacesimLod.angular_radius(body.radius + body.sky_top, distance), pixel
-	)
-	var inner := SpacesimLod.screen_radius_pixels(
-		SpacesimLod.angular_radius(body.radius, distance), pixel
-	)
-	return outer - inner >= ATMOSPHERE_RING_MIN_PIXELS
+	return SpacesimLod.shell_ring_pixels(body.radius, body.sky_top, distance, pixel) \
+		>= SpacesimLod.ATMOSPHERE_RING_MIN_PIXELS
 
 
 ## Size and colour a body's point of light.

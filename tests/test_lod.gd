@@ -308,7 +308,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 
 	# Just under the threshold: no geometry, a splat, and the splat is the size of the disc it replaces.
 	_place_at_screen_radius(camera, luna, to_star_from_luna,
-		SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.9, pixel)
+		SpacesimLod.POINT_TIER_SCREEN_RADIUS * 0.9, pixel)
 	scene.update_lod(camera)
 	h.check(not luna.mesh.visible, "under the threshold a body's mesh is not drawn")
 	h.check(luna.atmosphere_mesh == null or not luna.atmosphere_mesh.visible,
@@ -355,7 +355,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 
 	# Over the threshold the other way round, and the body is still a body the overlay can find.
 	_place_at_screen_radius(camera, luna, to_star_from_luna,
-		SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 10.0, pixel)
+		SpacesimLod.POINT_TIER_SCREEN_RADIUS * 10.0, pixel)
 	scene.update_lod(camera)
 	h.check(luna.mesh.visible, "over the threshold the mesh comes back")
 	h.check(luna.atmosphere_mesh == null or luna.atmosphere_mesh.visible, "with its air shell")
@@ -389,7 +389,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	if mars != null and mars.point != null:
 		var to_star := (star_node.node.global_position - mars.node.global_position).normalized()
 		_place_at_screen_radius(camera, mars, to_star,
-			SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
+			SpacesimLod.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
 		scene.update_lod(camera)
 		h.check(mars.point.visible, "a planet small enough is a point too")
 		# **`albedo_color` is sRGB-decoded by Godot**, so the value read back is the *encoded* one and has
@@ -512,7 +512,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		camera.attributes = attributes
 		attributes.exposure_multiplier = 1.0
 		_place_at_screen_radius(camera, venus, to_star_from_luna,
-			SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
+			SpacesimLod.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
 		scene.update_lod(camera)
 		# Decoded, because the stored value is sRGB-encoded — see `point_colour`. The *ratio* is what this
 		# checks, and it is only a ratio in linear terms.
