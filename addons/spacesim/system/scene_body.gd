@@ -24,6 +24,10 @@ var significant: bool
 # Built by SpacesimSystemScene.
 var node: Node3D
 var mesh: MeshInstance3D
+## The **point of light** this body becomes once it is too small to be a disc: a camera-facing quad,
+## sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as
+## geometry. Set by `SpacesimSystemScene.update_lod`.
+var point: MeshInstance3D
 ## The icosphere level `mesh` is currently drawn at, so a level change is a comparison rather than a
 ## lookup and hysteresis has something to hold on to. Set by `SpacesimSystemScene.update_lod`.
 var mesh_level: int = 0

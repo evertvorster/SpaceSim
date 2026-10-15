@@ -142,8 +142,12 @@ func _handle_key(event: InputEventKey) -> void:
 
 	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.bodies_toggle"))):
 		_bodies_visible = not _bodies_visible
-		for body_mesh in _system.meshes():
-			body_mesh.visible = _bodies_visible
+		# **On each body's own node, not on its meshes.** `update_lod` now decides a mesh's or a point's
+		# visibility once a frame, and two writers of one flag is a flicker — so the key sets the
+		# parent's, which composes with whatever the tier decided instead of fighting it.
+		for body in _system.bodies:
+			if body.node != null:
+				body.node.visible = _bodies_visible
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_down"))):

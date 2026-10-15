@@ -39,7 +39,22 @@ const DETAIL_SOFTNESS := 0.18
 ## walks out of the texture and repeats the whole pattern as a visible grid.
 const SURFACE_NOISE_SCALE := 1.0
 
+## lux/sr into the engine's units, which is what turns a radiance into something a shader can be handed.
+##
+## **It is the same number as `sky_stars.gdshader`'s `UNIT_LUX_PER_SR`** — 100000 / pi — and that is not
+## a coincidence to be maintained by discipline: the point of light a body becomes and the star field
+## behind it are the same kind of quantity, and two currencies for one quantity is how they come to
+## disagree. `tests/test_render.gd` checks the shader still carries this value, so a change in either
+## place fails rather than drifting.
+const UNIT_LUX_PER_SR := 100000.0 / PI
+
+## Triangles in the quad a point of light is drawn on. Counted in the HUD's total, because the HUD is
+## an instrument for "is anything actually being applied" and an instrument that ignores part of what is
+## drawn can only ever under-report.
+const POINT_TRIANGLES := 2
+
 static var _noise: NoiseTexture3D
+static var _point_quad: QuadMesh
 
 
 ## One 3D noise field, shared by every body and every layer. Each body gets its own **offset**, so
@@ -105,6 +120,45 @@ static func atmosphere_material(
 	return material
 
 
+## The quad every point of light is drawn on: **one resource, shared, scaled by the node** — the same
+## arrangement the icosphere uses, and for the same reason.
+static func point_quad() -> QuadMesh:
+	if _point_quad == null:
+		_point_quad = QuadMesh.new()
+		_point_quad.size = Vector2.ONE
+	return _point_quad
+
+
+## The material a **point of light** is drawn with: unshaded, additive, and always facing the eye.
+##
+## A body too small to be a disc is not geometry, it is its own light — so it is a camera-facing quad
+## whose colour is the body's mean radiance and whose size is the disc it would have had. `albedo_color`
+## can exceed 1: Godot passes an overbright albedo straight through, which is what lets a splat be
+## brighter than white and still be tone-mapped with everything else. Nothing here is exposure-corrected,
+## because a splat **reports radiance** and the environment decides what is seen.
+##
+## **It is in the 3D pass and not in the overlay, deliberately.** A `CanvasLayer` is composited *after*
+## the tonemap, so a splat drawn there would ignore the exposure entirely and could not be a body's
+## radiance at all — which is why the navigation overlay, for all that it already projects screen
+## positions, is the wrong home for this.
+##
+## **Depth is tested and not written.** Tested, so a splat behind a planet is hidden — per pixel, by the
+## depth buffer, which does that job better than a ray test against body centres could. Not written,
+## because one additive splat must not occlude another.
+static func point_material() -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	# Without this the billboard throws the node's scale away, and the scale is what sizes the splat.
+	material.billboard_keep_scale = true
+	material.disable_receive_shadows = true
+	material.albedo_color = Color(0.0, 0.0, 0.0, 1.0)
+	return material
+
+
 ## The material a body is drawn with.
 ##
 ## **A star is a source and everything else is a reflector**, so the choice is by kind rather than by
@@ -117,9 +171,10 @@ static func material_for(body: SpacesimSceneBody) -> Material:
 
 ## A star's own surface: unshaded, and coloured from its temperature.
 ##
-## Unshaded because it is a source — drawn with the ordinary surface material it was lit by *its own*
-## light, which travels from the star toward the observer, so its near face was back-lit and rendered
-## black. Which is exactly what it looked like.
+## **Unshaded because it is a source.** Drawn with the ordinary surface material it was lit by *its own*
+## light — which travels from the star toward the observer, so its near face was back-lit and came out
+## black, which is exactly what it looked like. Emissive well past the glow threshold, because a star is
+## supposed to glare.
 static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	var content := body.content
 	var luminosity := SpacesimStarModel.luminosity(content)

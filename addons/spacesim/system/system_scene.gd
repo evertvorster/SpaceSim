@@ -32,6 +32,16 @@ const INITIAL_MESH_LEVEL := 2
 ## plausible screen size, at 1,280 triangles against the 16,384 the lat-long shell stood at.
 const ATMOSPHERE_SHELL_LEVEL := 3
 
+## The screen radius below which a body **stops being geometry and becomes a point of light**.
+##
+## Below a few pixels a shaded disc and a flat blob are indistinguishable, so a mesh buys nothing — and a
+## mesh *smaller than a pixel* aliases badly, appearing and disappearing as it crosses pixel centres.
+## **Four is a suspected number, not a measured one**: it is the value the mesh LOD plan's §3 proposes,
+## and it wants looking at in flight the way `lod.error_budget` did. Unlike the error budget it is not a
+## setting, because it is not a quality trim — it is where one representation gives way to another, and
+## a player who moved it would be moving a boundary rather than a budget.
+const POINT_TIER_SCREEN_RADIUS := 4.0
+
 ## The authored content this scene was built from.
 var content: SpacesimSolarSystem
 
@@ -462,6 +472,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		body.node, body.radius, SpacesimBodyRenderer.material_for(body), "%sSurface" % body.name,
 		body.mesh_level
 	)
+	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_atmosphere_shell(body)
 
@@ -723,21 +734,9 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 			continue
 		if _occluded(observer, body.node.global_position, body):
 			continue
-		var to_observer := -to_body / distance
-		var to_body_star := star_position - body.node.global_position
-		# **The disc-averaged illuminated fraction, not a clamped cosine.** The cosine is zero for
-		# everything past the half moon, so a crescent — which is most of what you see of a planet
-		# from anywhere interesting — was dropped from the sum and the exposure stayed dark-adapted
-		# with that planet filling the frame. See `SpacesimSurfaceModel.lambert_phase`.
-		var phase := SpacesimSurfaceModel.lambert_phase(
-			acos(clampf(to_observer.dot(to_body_star.normalized()), -1.0, 1.0))
-		)
-		if phase <= 0.0:
+		var luminance := body_luminance(body, observer, star_position)
+		if luminance <= 0.0:
 			continue
-		var albedo := SpacesimSurfaceModel.bond_albedo(body.content, _materials())
-		if albedo <= 0.0:
-			continue
-		var luminance := star_light.lux_at(to_body_star.length()) * albedo * phase / PI
 		total += luminance * minf(body_omega / view_omega, 1.0)
 
 	# --- a lit sky, from inside it -----------------------------------------------------------------
@@ -838,16 +837,35 @@ func _add_body_mesh(
 	return mesh
 
 
+## The **point of light** a body becomes once it is too small to be a disc: a camera-facing quad, sized
+## to the disc it would have had and coloured by its radiance. Hidden until `update_lod` says otherwise.
+func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
+	var point := MeshInstance3D.new()
+	point.name = "%sPoint" % body_name
+	point.mesh = SpacesimBodyRenderer.point_quad()
+	point.material_override = SpacesimBodyRenderer.point_material()
+	point.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	point.visible = false
+	parent.add_child(point)
+	return point
+
+
 ## Hand every body the tessellation its angular size has earned, once a frame.
 ##
 ## **The level is a mesh assignment.** Levels are built once and shared, so a body crossing a boundary
 ## points at a different `ArrayMesh`; nothing is regenerated. Hysteresis holds a body that is sitting on
 ## a boundary still, because discrete levels changing on a continuous input is a flicker otherwise.
 ##
-## **A body that is not drawn still counts.** This reads `bodies`, and so does the exposure integral —
-## whether a body is drawn must never change what it contributes to the light, and the two are kept
-## uncoupled here deliberately. Culling is a later phase; this decides only how finely what is drawn is
-## drawn.
+## **And a body too small to be a disc stops being geometry at all**: its mesh and its air shell go, and
+## its point of light appears in their place. The two representations agree in brightness by
+## construction, because the splat's colour and the exposure's sum are the *same expression* —
+## `body_luminance` — so the handoff needs no cross-fade and no dead band. A body that stops being drawn
+## is still lit by, still marked, and still an effect on everything else: this reads `bodies`, and so
+## does `view_luminance_at`.
+##
+## **The star is exempt from the cull.** Its disc is a fraction of a pixel from any distance and that is
+## the standing decision — it is allowed to clip and `glow_*` handles how that reads, so culling it would
+## take the glare out of the sky.
 func update_lod(camera: Camera3D) -> void:
 	if camera == null:
 		return
@@ -860,14 +878,27 @@ func update_lod(camera: Camera3D) -> void:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
 	var observer := camera.global_position
+	var star_body := star()
 	var total := 0
 	for body in bodies:
-		if body.mesh == null or body.node == null:
+		if body.node == null:
 			continue
-		var screen := SpacesimLod.screen_radius_pixels(
-			SpacesimLod.angular_radius(body.radius, observer.distance_to(body.node.global_position)),
-			pixel
-		)
+		var distance := observer.distance_to(body.node.global_position)
+		var energy := SpacesimLod.angular_radius(body.radius, distance)
+		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
+		var is_point: bool = body != star_body and screen < POINT_TIER_SCREEN_RADIUS
+		if body.mesh != null:
+			body.mesh.visible = not is_point
+		if body.atmosphere_mesh != null:
+			body.atmosphere_mesh.visible = not is_point
+		if body.point != null:
+			body.point.visible = is_point
+		if is_point:
+			_place_point(body, observer, energy, distance, pixel)
+			total += SpacesimBodyRenderer.POINT_TRIANGLES
+			continue
+		if body.mesh == null:
+			continue
 		var level := SpacesimLod.level_with_hysteresis(body.mesh_level, screen, epsilon)
 		if level != body.mesh_level:
 			body.mesh_level = level
@@ -878,6 +909,62 @@ func update_lod(camera: Camera3D) -> void:
 		if body.atmosphere_mesh != null:
 			total += SpacesimLod.triangles_at(ATMOSPHERE_SHELL_LEVEL)
 	_triangles = total
+
+
+## Size and colour a body's point of light.
+##
+## **Sized to the disc, floored at one pixel** — not pinned at one pixel — so a body is one continuous
+## object from a distant dot, through a two-pixel disc, to the handover to a mesh. Below a pixel it
+## cannot shrink further, which is what stops a receding body flickering out.
+##
+## The colour is the body's mean radiance in the engine's units, which is the same quantity the exposure
+## weighs and the same scale the star field is drawn in. It is **not** exposure-corrected: a splat
+## reports radiance.
+func _place_point(
+	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float
+) -> void:
+	# The quad is a unit square, so its half-width is what a radius measures. One pixel is the floor it
+	# cannot shrink below.
+	body.point.scale = Vector3.ONE * (2.0 * distance * tan(maxf(pixel, angular)))
+	var material := body.point.material_override as StandardMaterial3D
+	if material == null:
+		return
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	var radiance := body_luminance(body, observer, star_body.node.global_position)
+	var level := radiance / SpacesimBodyRenderer.UNIT_LUX_PER_SR
+	material.albedo_color = Color(level, level, level, 1.0)
+
+
+## **What the eye sees of a body**, in lux/sr: the light falling on it, the fraction it reflects, and the
+## disc-averaged lit fraction.
+##
+##     L = illuminance_at_body * albedo * lambert_phase(phase) / pi
+##
+## **One expression, used by two things** — the exposure's sum in `view_luminance_at`, and the point of
+## light a body becomes when it is too small to be a disc. That is what makes the handoff at the mesh
+## threshold free: the splat and the disc agree in brightness there because they are the same number,
+## not because two arithmetics happen to coincide.
+func body_luminance(body: SpacesimSceneBody, observer: Vector3, star_position: Vector3) -> float:
+	if body.content == null or body.node == null or star_light == null:
+		return 0.0
+	var to_body := body.node.global_position - observer
+	if to_body.length_squared() <= 0.0:
+		return 0.0
+	var to_body_star := star_position - body.node.global_position
+	if to_body_star.length_squared() <= 0.0:
+		return 0.0
+	# **The disc-averaged illuminated fraction, not a clamped cosine** — see `lambert_phase`.
+	var phase := SpacesimSurfaceModel.lambert_phase(
+		acos(clampf((-to_body).normalized().dot(to_body_star.normalized()), -1.0, 1.0))
+	)
+	if phase <= 0.0:
+		return 0.0
+	var albedo := SpacesimSurfaceModel.bond_albedo(body.content, _materials())
+	if albedo <= 0.0:
+		return 0.0
+	return star_light.lux_at(to_body_star.length()) * albedo * phase / PI
 
 
 ## Triangles the bodies and air shells are currently drawn with, summed over the levels in use.

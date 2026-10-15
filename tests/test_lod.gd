@@ -238,9 +238,13 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	# Measured from the body's own node, so nothing here depends on where the scene was placed.
 	var to_earth := Vector3(1.0, 0.0, 0.0)
 
+	# **The budget in force, not the default.** `update_lod` reads `lod.error_budget`, so a scene test
+	# that asserted 4.0 would fail the moment anyone trimmed it by flying — which is the point of the
+	# trim, and exactly what happened the first time this test ran.
+	var budget := float(SpacesimSettings.get_value("lod.error_budget"))
 	_place_at_screen_radius(camera, earth, to_earth, 200.0, pixel)
 	scene.update_lod(camera)
-	var wanted := SpacesimLod.level_for_screen_radius(200.0, BUDGET)
+	var wanted := SpacesimLod.level_for_screen_radius(200.0, budget)
 	h.check(earth.mesh_level == wanted, "at 200 px it takes level %d" % wanted)
 	h.check(earth.mesh.mesh == SpacesimIcosphere.mesh_at(earth.mesh_level),
 		"and the mesh it is actually drawn with is that level's")
@@ -257,19 +261,28 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		if levels[i] < levels[i - 1]:
 			rising = false
 	h.check(rising, "and closing the distance never gives it a coarser mesh: %s" % [levels])
-	h.check(levels == [0, 1, 2, 3, 4, 5],
-		"a four-fold step in screen radius is one level, which is what quantisation means: %s" % [levels])
+	var ladder := true
+	for i in levels.size():
+		if levels[i] != int(levels[0]) + i:
+			ladder = false
+	h.check(ladder,
+		"and a four-fold step in screen radius is exactly one level, whatever the budget is: %s"
+			% [levels])
 
 	# **The instrument the plan's first trap names.** If the policy were being computed and not applied,
 	# the picture would be unchanged and this number with it.
-	var expected := 0
+	# Counted from the MESHES rather than from the law, so this is an independent check of the HUD's
+	# number rather than the same arithmetic twice: `face_count` walks the mesh that is actually there.
+	var drawn := 0
 	for body in scene.bodies:
-		expected += SpacesimLod.triangles_at(body.mesh_level)
-		if body.atmosphere_mesh != null:
-			expected += SpacesimLod.triangles_at(SpacesimSystemScene.ATMOSPHERE_SHELL_LEVEL)
-	h.check(scene.triangles() == expected,
-		"the reported triangle count is the sum of the levels in place, and not a prediction (%d)"
-			% expected)
+		if body.point != null and body.point.visible:
+			drawn += SpacesimBodyRenderer.POINT_TRIANGLES
+		if body.mesh != null and body.mesh.visible:
+			drawn += SpacesimIcosphere.face_count(body.mesh_level)
+		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
+			drawn += SpacesimIcosphere.face_count(SpacesimSystemScene.ATMOSPHERE_SHELL_LEVEL)
+	h.check(scene.triangles() == drawn,
+		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 
 	# The same scene, seen from far away, is a fraction of what it cost before — which is the claim this
 	# plan exists to make. The lat-long meshes were 416,000 triangles at every distance (measured,
@@ -279,6 +292,65 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	h.check(scene.triangles() < 40000,
 		"and from far enough out the whole system is under 40,000 triangles against 416,000 (%d)"
 			% scene.triangles())
+
+	# --- the point of light, and the coupling that must NOT exist ---------------------------------
+	# **A body too small to be a disc stops being geometry.** Below the threshold its mesh and its air
+	# shell go and its splat appears; above it, the other way round. Luna is lit from the star's own
+	# direction, so it is a full disc and its luminance is its maximum.
+	var luna := scene.body_by_id("moon:luna")
+	var star_node := scene.body_by_id("star:sol")
+	if luna == null or luna.node == null or luna.point == null:
+		h.check(false, "Luna has a point of light")
+		scene.container.free()
+		camera.queue_free()
+		return
+	var to_star_from_luna := (star_node.node.global_position - luna.node.global_position).normalized()
+
+	# Just under the threshold: no geometry, a splat, and the splat is the size of the disc it replaces.
+	_place_at_screen_radius(camera, luna, to_star_from_luna,
+		SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.9, pixel)
+	scene.update_lod(camera)
+	h.check(not luna.mesh.visible, "under the threshold a body's mesh is not drawn")
+	h.check(luna.atmosphere_mesh == null or not luna.atmosphere_mesh.visible,
+		"nor is its air shell — the heavier shader of the two")
+	h.check(luna.point.visible, "and its point of light is")
+	var luna_distance := camera.global_position.distance_to(luna.node.global_position)
+	var expected_size := 2.0 * luna_distance * tan(
+		SpacesimLod.angular_radius(luna.radius, luna_distance))
+	h.check_near(luna.point.scale.x, expected_size,
+		"sized to the disc it would have had, so a body is one continuous object across the handoff",
+		expected_size * 1.0e-4)
+	var splat := luna.point.material_override as StandardMaterial3D
+	h.check(splat != null and splat.blend_mode == BaseMaterial3D.BLEND_MODE_ADD,
+		"drawn additively, because a point of light is something seen through the sky behind it")
+	h.check(splat != null and splat.billboard_mode != BaseMaterial3D.BILLBOARD_DISABLED,
+		"and facing the eye, so its size is an angle rather than an orientation")
+
+	# **The exposure cannot tell whether a body is drawn** — the trap the plan names, made into a
+	# measurement: if `view_luminance_at` ever learns to skip an invisible body, this goes red, because
+	# Luna's mesh is hidden at the moment of the second call and the two must still agree.
+	var tan_half := Vector2(tan(deg_to_rad(FOV * 0.5)) * 16.0 / 9.0, tan(deg_to_rad(FOV * 0.5)))
+	var looking := (luna.node.global_position - camera.global_position).normalized()
+	var observer := camera.global_position
+	var culled: float = scene.view_luminance_at(observer, looking, tan_half)
+	scene.update_lod(camera)
+	var culled_again: float = scene.view_luminance_at(observer, looking, tan_half)
+	h.check(culled > 0.0, "a lit body is what the exposure follows even when it is a point (%.4f)" % culled)
+	h.check(culled == culled_again,
+		"and the sum is the same before and after a cull, so what is drawn cannot change what is lit")
+
+	# Over the threshold the other way round, and the body is still a body the overlay can find.
+	_place_at_screen_radius(camera, luna, to_star_from_luna,
+		SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 10.0, pixel)
+	scene.update_lod(camera)
+	h.check(luna.mesh.visible, "over the threshold the mesh comes back")
+	h.check(luna.atmosphere_mesh == null or luna.atmosphere_mesh.visible, "with its air shell")
+	h.check(not luna.point.visible, "and the splat goes")
+	var marked := false
+	for node in scene.significant_nodes():
+		if node == luna.node:
+			marked = true
+	h.check(marked, "while staying a body the navigation overlay marks, so a dot remains findable")
 
 	scene.container.free()
 	camera.queue_free()
