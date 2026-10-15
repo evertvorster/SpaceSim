@@ -273,12 +273,15 @@ func _capture_mouse() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var frames := Engine.get_frames_per_second()
 	if frames <= 0:
 		_fps.text = "-- fps"
-		return
-	_fps.text = "%d fps    %.1f ms" % [frames, 1000.0 / float(frames)]
+	else:
+		_fps.text = "%d fps    %.1f ms" % [frames, 1000.0 / float(frames)]
+	# A screen is open, so the world is frozen and there is nothing to redraw it against.
+	if _screen == null:
+		_update_view(delta)
 
 
 func _physics_process(delta: float) -> void:
@@ -310,6 +313,21 @@ func _physics_process(delta: float) -> void:
 	_ship.step(delta, input)
 	_system.frame_tree.evaluate()
 	_sync_player_location()
+
+
+## Everything that is **drawn** rather than simulated, and it runs once per drawn frame.
+##
+## **Presentation belongs here and not in `_physics_process`**, and two reasons point the same way.
+## The physics tick is pinned to `physics/common/physics_ticks_per_second` (60), so anything derived
+## there is quantised to it — the camera among them, and nothing interpolates it because
+## `physics/common/physics_interpolation` is off. And when a frame runs long Godot takes up to
+## `max_physics_steps_per_frame` (8) physics steps before drawing one frame, so every call below used
+## to run **up to eight times for a single frame** — the work multiplying exactly when there was the
+## least time for it. See vault `SpaceSim/Engine Review 2026-10-15 — Actions.md`.
+##
+## Nothing here feeds the simulation, which is what makes the split safe: the ship has already been
+## stepped and the frame tree already evaluated by the time this runs.
+func _update_view(delta: float) -> void:
 	_system.aim_sun_at(_ship.global_position)
 	# The sky follows the **camera**, not the ship: it is the eye that scattering is seen from, and
 	# nothing about it depends on which body the player is attached to.

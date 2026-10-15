@@ -21,9 +21,9 @@ const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 const ASSET_FRAME_PREFIX := "asset:"
 
 ## The icosphere level a body gets before anything has asked how big it is. A scene is built before it
-## has a camera, and `update_lod` corrects this on the first physics frame — which runs before the first
-## draw, so no wrong level is ever seen in the game. It exists so a scene built without a game is not a
-## spray of 20-triangle spheres.
+## has a camera, and `update_lod` corrects this on the first **drawn** frame — `_update_view` runs
+## before anything is rendered, so no wrong level is ever seen in the game. It exists so a scene built
+## without a game is not a spray of 20-triangle spheres.
 const INITIAL_MESH_LEVEL := 2
 
 ## How much larger an air shell's error budget is than a body's.
