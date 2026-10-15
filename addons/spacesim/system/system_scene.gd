@@ -863,9 +863,11 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## is still lit by, still marked, and still an effect on everything else: this reads `bodies`, and so
 ## does `view_luminance_at`.
 ##
-## **The star is exempt from the cull.** Its disc is a fraction of a pixel from any distance and that is
-## the standing decision — it is allowed to clip and `glow_*` handles how that reads, so culling it would
-## take the glare out of the sky.
+## **No body is exempt, the star included.** A star's disc is a fraction of a pixel from any distance,
+## so it spends almost all of its time as a point of light — and that is right: what it puts on the
+## screen is its own emission, over the same area, so its glare survives the handoff exactly as a
+## planet's brightness does. See `SpacesimBodyRenderer.point_colour` for the one by-kind difference
+## that remains, which is that a star **emits** and everything else reflects.
 func update_lod(camera: Camera3D) -> void:
 	if camera == null:
 		return
@@ -878,7 +880,6 @@ func update_lod(camera: Camera3D) -> void:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
 	var observer := camera.global_position
-	var star_body := star()
 	var total := 0
 	for body in bodies:
 		if body.node == null:
@@ -886,7 +887,7 @@ func update_lod(camera: Camera3D) -> void:
 		var distance := observer.distance_to(body.node.global_position)
 		var energy := SpacesimLod.angular_radius(body.radius, distance)
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
-		var is_point: bool = body != star_body and screen < POINT_TIER_SCREEN_RADIUS
+		var is_point: bool = screen < POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
 		if body.atmosphere_mesh != null:
@@ -917,9 +918,18 @@ func update_lod(camera: Camera3D) -> void:
 ## object from a distant dot, through a two-pixel disc, to the handover to a mesh. Below a pixel it
 ## cannot shrink further, which is what stops a receding body flickering out.
 ##
-## The colour is the body's mean radiance in the engine's units, which is the same quantity the exposure
-## weighs and the same scale the star field is drawn in. It is **not** exposure-corrected: a splat
-## reports radiance.
+## The colour is the body's mean radiance in the engine's units, **tinted by the body's own colour** — the
+## same quantity the exposure weighs and the same scale the star field is drawn in. It is **not**
+## exposure-corrected: a splat reports radiance.
+##
+## **Known defect, deliberately not fixed yet:** §5 of the plan has the splat carry the body's whole flux
+## into one pixel — `L * omega_disc / omega_px` — which for a disc under the floor falls as `1/d^2`,
+## because a point source on a fixed pixel gets fainter, and that is the correct behaviour. This carries
+## `L` alone, so **its value does not fall with the observer's distance at all** once the disc is under
+## the floor: a body at 0.077 px is about 170x brighter than the law says. Not applied yet because it
+## makes distant bodies *dimmer* and the flight test says they are already too dim, so this function's
+## currency against `sky_stars.gdshader`'s has to be reconciled first. Two renders — one body at 0.8 px
+## and the same body at 0.4 px — would measure it; there is an open loop for it.
 func _place_point(
 	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float
 ) -> void:
@@ -933,8 +943,7 @@ func _place_point(
 	if star_body == null or star_body.node == null:
 		return
 	var radiance := body_luminance(body, observer, star_body.node.global_position)
-	var level := radiance / SpacesimBodyRenderer.UNIT_LUX_PER_SR
-	material.albedo_color = Color(level, level, level, 1.0)
+	material.albedo_color = SpacesimBodyRenderer.point_colour(body, radiance)
 
 
 ## **What the eye sees of a body**, in lux/sr: the light falling on it, the fraction it reflects, and the

@@ -352,6 +352,42 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 			marked = true
 	h.check(marked, "while staying a body the navigation overlay marks, so a dot remains findable")
 
+	# --- a star is a body too -------------------------------------------------------------------------
+	# **No body is exempt, the star included** (Evert, 2026-10-15). Its disc is a fraction of a pixel from
+	# any distance, so it spends almost all of its time as a point — and it must not vanish there, which
+	# is exactly what the reflector formula would do to it: **a star has no albedo, so its luminance is
+	# zero.** A star EMITS, and that is the one by-kind difference left.
+	_place_at_screen_radius(camera, star_node, Vector3(0.0, 1.0, 0.0), 2.0, pixel)
+	scene.update_lod(camera)
+	h.check(not star_node.mesh.visible and star_node.point.visible,
+		"far enough out, the star is a point of light rather than a sphere, like any other body")
+	var sun_colour := (star_node.point.material_override as StandardMaterial3D).albedo_color
+	h.check(sun_colour.get_luminance() > 1.0,
+		"lit as the star it is — its own emission, not the zero a reflector's albedo would give (%.1f)"
+			% sun_colour.get_luminance())
+
+	# --- a planet's point keeps the planet's colour ---------------------------------------------------
+	# The splat carries the body's radiance **tinted by the body's own colour and normalised to unit
+	# luminance**, so tinting cannot change how bright it is. Without the normalisation the tint would
+	# multiply the brightness by the colour's own luminance (~0.3) — a plausible mistake, and the one
+	# this measures.
+	var mars := scene.body_by_id("planet:mars")
+	if mars != null and mars.point != null:
+		var to_star := (star_node.node.global_position - mars.node.global_position).normalized()
+		_place_at_screen_radius(camera, mars, to_star,
+			SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
+		scene.update_lod(camera)
+		h.check(mars.point.visible, "a planet small enough is a point too")
+		var spot := (mars.point.material_override as StandardMaterial3D).albedo_color
+		var expected_radiance := scene.body_luminance(mars, camera.global_position,
+			star_node.node.global_position) / SpacesimBodyRenderer.UNIT_LUX_PER_SR
+		h.check_near(spot.get_luminance(), expected_radiance,
+			"its brightness is the body's radiance, unchanged by the tint",
+			maxf(expected_radiance * 0.02, 1.0e-6))
+		h.check_near(spot.r / maxf(spot.g, 1.0e-6), mars.color.r / maxf(mars.color.g, 1.0e-6),
+			"while its HUE is the body's own, so a planet is a coloured point and not a white one",
+			1.0e-6)
+
 	scene.container.free()
 	camera.queue_free()
 

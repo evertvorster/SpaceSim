@@ -18,7 +18,8 @@ const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 const ATMOSPHERE_SHADER := preload("res://addons/spacesim/render/body_atmosphere.gdshader")
 
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
-## star at 1.0 is a bright dot, and a star is supposed to glare.
+## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
+## emitted at**, so the two cannot disagree.
 const STAR_INTENSITY := 24.0
 
 ## **Not derived, and deliberately visible here.** Roughness and specularity are per-material
@@ -169,6 +170,44 @@ static func material_for(body: SpacesimSceneBody) -> Material:
 	return surface_material(body)
 
 
+## The colour a **point of light** is drawn with: the body's own radiance, tinted by the body's own
+## colour.
+##
+## **A star is a source and everything else is a reflector** — the same by-kind distinction
+## `material_for` makes, and it has to be made here too, because the two are different quantities. A
+## planet's point is the light it reflects, `SpacesimBodyScene.body_luminance`, which is a scalar; a
+## star's is what its own surface emits, `star_color * STAR_INTENSITY`, which is what `body_star.gdshader`
+## puts in `ALBEDO`. Running the reflector formula on a star gives **zero** — a star has no albedo — which
+## is how a Sun with a sub-pixel disc would vanish from its own sky.
+##
+## **`radiance` is a scalar and the tint is normalised to unit luminance**, so tinting cannot change how
+## bright a splat is: the same quantity the exposure weighs stays the quantity that lands on the screen.
+## A saturated colour's components may exceed 1, which is fine for an additive splat.
+static func point_colour(body: SpacesimSceneBody, radiance: float) -> Color:
+	if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
+		return star_color_of(body) * STAR_INTENSITY
+	return _at_unit_luminance(body.color, radiance / UNIT_LUX_PER_SR)
+
+
+## A colour scaled so that its luminance is `level`, whatever its hue.
+static func _at_unit_luminance(colour: Color, level: float) -> Color:
+	var grey := colour.get_luminance()
+	if grey <= 0.0:
+		return Color(level, level, level, 1.0)
+	return Color(level * colour.r / grey, level * colour.g / grey, level * colour.b / grey, 1.0)
+
+
+## A star's own colour, from its temperature — **derived once**, because the surface shader and a point
+## of light both need it and two derivations would be two colours.
+static func star_color_of(body: SpacesimSceneBody) -> Color:
+	if body.content == null:
+		return Color.WHITE
+	var luminosity := SpacesimStarModel.luminosity(body.content)
+	return SpacesimStarModel.color(
+		SpacesimStarModel.effective_temperature(luminosity, body.content.radius)
+	)
+
+
 ## A star's own surface: unshaded, and coloured from its temperature.
 ##
 ## **Unshaded because it is a source.** Drawn with the ordinary surface material it was lit by *its own*
@@ -176,12 +215,9 @@ static func material_for(body: SpacesimSceneBody) -> Material:
 ## black, which is exactly what it looked like. Emissive well past the glow threshold, because a star is
 ## supposed to glare.
 static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
-	var content := body.content
-	var luminosity := SpacesimStarModel.luminosity(content)
-	var temperature := SpacesimStarModel.effective_temperature(luminosity, content.radius)
 	var material := ShaderMaterial.new()
 	material.shader = STAR_SHADER
-	material.set_shader_parameter("star_color", SpacesimStarModel.color(temperature))
+	material.set_shader_parameter("star_color", star_color_of(body))
 	material.set_shader_parameter("intensity", STAR_INTENSITY)
 	return material
 
