@@ -164,7 +164,7 @@ func _body() -> String:
 
 ## A save's label: the world's date and time, and where the player is. Never coordinate numbers.
 func label(system: SpacesimSystemScene) -> String:
-	return "%s   %s" % [system.format_time(world_time), system.describe(player.location, player.assets)]
+	return "%s   %s" % [SpacesimWorldTime.format(world_time), system.describe(player.location, player.assets)]
 
 
 ## The saves on this history, newest first, less the ones that have been deleted.

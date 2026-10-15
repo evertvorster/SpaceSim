@@ -153,7 +153,7 @@ func _mu_for(sol: SpacesimSolarSystem, body: SpacesimSystemBody) -> float:
 func _test_orbits_from_real_data(h, sol: SpacesimSolarSystem) -> void:
 	var star := sol.star()
 	var mu := SpacesimKepler.mu_of(star.mass)
-	var epoch := SpacesimSystemScene.clock_at_epoch(sol.epoch)
+	var epoch := SpacesimWorldTime.clock_at_epoch(sol.epoch)
 	h.check_near(epoch, 63113947200.0, "J2000 is 63,113,947,200 seconds after year zero", 1.0)
 
 	# The period is an independent check: it comes from the star's authored mass and the planet's

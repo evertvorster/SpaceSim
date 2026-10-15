@@ -256,11 +256,11 @@ func _test_reading_a_location(h, root: Node) -> void:
 		"and something inside a base names the base and where the base is"
 	)
 
-	h.check(system.format_time(0.0) == "0-01-01 00:00", "the world's epoch reads as year 0")
-	h.check(system.format_time(86400.0) == "0-01-02 00:00", "and a day later is a day later")
+	h.check(SpacesimWorldTime.format(0.0) == "0-01-01 00:00", "the world's epoch reads as year 0")
+	h.check(SpacesimWorldTime.format(86400.0) == "0-01-02 00:00", "and a day later is a day later")
 	# Not an exact year: the Terran year is 365.2425 days, so half a millennium of seconds lands on or
 	# beside 500-01-01. What matters is that it is there at all, and that it grows.
-	var later := system.format_time(31556952.0 * 500.0)
+	var later := SpacesimWorldTime.format(31556952.0 * 500.0)
 	h.check(int(later.split("-")[0]) >= 499, "and half a millennium later reads as a year near 500 ('%s')" % later)
 	system.container.free()
 

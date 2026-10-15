@@ -510,7 +510,7 @@ func _update_hud() -> void:
 			[
 				"system      %s" % _system.name,
 				"player      %s   in %s" % [_player.display_name(), _session.repo.current_history()],
-				"date        %s" % _system.format_time(_session.world_time),
+				"date        %s" % SpacesimWorldTime.format(_session.world_time),
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),

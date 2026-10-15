@@ -87,7 +87,7 @@ func opened() -> void:
 		"%s   %s   %s"
 		% [
 			_session.repo.current_history(),
-			_system.format_time(_session.world_time),
+			SpacesimWorldTime.format(_session.world_time),
 			_system.describe(_player.location, _player.assets),
 		]
 	)

@@ -214,7 +214,7 @@ have no derived mass yet, so a moon of one stands still.
 | `content: SpacesimSolarSystem` | the authored content it was built from |
 | `static from_file(path) -> SpacesimSystemScene` | loads a `.tres` and works on a **copy**, since a resource is shared and building hangs nodes off it |
 | `static from_content(content) -> SpacesimSystemScene` | |
-| `static clock_at_epoch(iso) -> float` | world-clock seconds for an ISO epoch; J2000 is 63,113,947,200 |
+| `SpacesimWorldTime.clock_at_epoch(iso) -> float` | world-clock seconds for an ISO epoch; J2000 is 63,113,947,200. **Moved out of the scene class** — see `save/world_time.gd` |
 | `build(parent) -> SpacesimSystemScene` | places the bodies, then builds; the observer is the caller's business |
 | `name` | read from the primary star |
 | `bodies: Array[SpacesimSceneBody]` | |
@@ -1236,7 +1236,7 @@ refused.
 |---|---|
 | `frame_phrase(frame_id) -> String` | "landed on Nix", "above Nix", empty for a frame it does not have |
 | `nearest_body_name(position) -> String` | |
-| `format_time(seconds) -> String` | the world clock as a Terran date and time, e.g. "512-05-02 14:33" |
+| `SpacesimWorldTime.format(seconds) -> String` | the world clock as a Terran date and time, e.g. "512-05-02 14:33". **In `save/world_time.gd`, not on the scene class** — a built scene knows about its bodies, and nothing about calendars |
 | `describe(location, assets) -> String` | the location chain as prose, innermost first |
 | `place_observer(location) -> bool` | puts the observer back where a save says it was; false when the frame had to fall back |
 | `start_time: float` | the clock a story begins at, from the system file's `start.world_time` |
@@ -1247,7 +1247,7 @@ under you as you land, so its origin is not saved and the saved position says wh
 your locale, not where on a globe. On a featureless sphere the locale is anonymous. Terrain is what
 makes the tangential part mean something, and then a surface will need a placement of its own.
 
-The world clock is a Terran date and time (`format_time()`), carried by **Godot's own proleptic
+The world clock is a Terran date and time (`SpacesimWorldTime.format()`), carried by **Godot's own proleptic
 Gregorian date arithmetic** rather than a table of months and leap-year rules of ours: seconds are
 counted from the world's epoch, which reads as year 0, so a story can open in any year it likes. A
 world that wants a calendar of its own is a thing to build when a story needs one.

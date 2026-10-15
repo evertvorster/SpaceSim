@@ -82,7 +82,7 @@ static func from_content(content: SpacesimSolarSystem) -> SpacesimSystemScene:
 	scene.content = content
 	scene.name = content.system_name()
 	scene._framing = content.framing if content.framing != null else SpacesimFraming.new()
-	scene._epoch_time = clock_at_epoch(content.epoch)
+	scene._epoch_time = SpacesimWorldTime.clock_at_epoch(content.epoch)
 	scene.start_body_id = content.start_body_id
 	scene.start_altitude = content.start_altitude
 	scene.start_direction = content.start_direction
@@ -102,14 +102,6 @@ static func _materials() -> SpacesimMaterialTable:
 ## than silent.
 func content_version() -> int:
 	return content.content_version if content != null else 0
-
-
-## World-clock seconds for an ISO 8601 epoch, on the same calendar [method format_time] reads. The
-## clock counts from year zero, so J2000 is a large positive number rather than a special case.
-static func clock_at_epoch(iso: String) -> float:
-	if iso.is_empty():
-		return 0.0
-	return float(Time.get_unix_time_from_datetime_string(iso)) - EPOCH_AT_YEAR_ZERO
 
 
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set
@@ -1089,16 +1081,6 @@ func _add_landing_site(surface: SpacesimFrame) -> void:
 		var angle := TAU * float(i) / 5.0
 		marker.position = Vector3(cos(angle) * 600.0, 20.5, sin(angle) * 600.0)
 		surface.add_child(marker)
-
-
-## The world clock as a **Terran** date and time — the calendar players already know, and Godot's own
-## (proleptic Gregorian) date arithmetic rather than a table of months of ours. Seconds are counted
-## from the world's epoch, which reads as year 0.
-const EPOCH_AT_YEAR_ZERO := -62167219200 ## the unix time of 0000-01-01
-
-func format_time(seconds: float) -> String:
-	var when := Time.get_datetime_dict_from_unix_time(int(seconds) + EPOCH_AT_YEAR_ZERO)
-	return "%d-%02d-%02d %02d:%02d" % [when["year"], when["month"], when["day"], when["hour"], when["minute"]]
 
 
 ## How a system frame reads: "landed on Nix", "above Nix". Empty for a frame this system does not
