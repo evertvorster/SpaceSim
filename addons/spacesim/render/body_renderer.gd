@@ -175,18 +175,35 @@ static func material_for(body: SpacesimSceneBody) -> Material:
 ##
 ## **A star is a source and everything else is a reflector** — the same by-kind distinction
 ## `material_for` makes, and it has to be made here too, because the two are different quantities. A
-## planet's point is the light it reflects, `SpacesimBodyScene.body_luminance`, which is a scalar; a
+## planet's point is the light it reflects, `SpacesimSystemScene.body_luminance`, which is a scalar; a
 ## star's is what its own surface emits, `star_color * STAR_INTENSITY`, which is what `body_star.gdshader`
 ## puts in `ALBEDO`. Running the reflector formula on a star gives **zero** — a star has no albedo — which
 ## is how a Sun with a sub-pixel disc would vanish from its own sky.
 ##
 ## **`radiance` is a scalar and the tint is normalised to unit luminance**, so tinting cannot change how
 ## bright a splat is: the same quantity the exposure weighs stays the quantity that lands on the screen.
-## A saturated colour's components may exceed 1, which is fine for an additive splat.
+##
+## **The planet's value is sRGB-ENCODED on the way out, and that is not belt-and-braces.** Godot's default
+## spatial material declares `uniform vec4 albedo : source_color` (`scene/resources/material.cpp`), so
+## `albedo_color` is **decoded from sRGB** as it is written — which for a *linear* radiance is `level^2.2`,
+## dimmer by `level^1.2` and non-linear, silently. The star field does not have this problem: it writes
+## `COLOR` in a **sky** shader, which is linear and untouched, so a splat without this encode is in a
+## different currency from the sky it is seen against. `linear_to_srgb()` is the exact inverse of what
+## Godot decodes, so what arrives in the shader is the radiance — see the round trip in
+## `tests/test_lod.gd`. **The clean alternative is a `ShaderMaterial` with a plain uniform, which asks
+## Godot to convert nothing; this is the one-liner that gets the same number without reimplementing the
+## billboard.**
+##
+## **The star's branch is deliberately NOT encoded**, because it goes into the same `source_color` property
+## the star's own disc does — the two must be converted *alike* for the handoff to stay free, whatever
+## that conversion is. That path converts twice (the disc's shader also declares `star_color`
+## `source_color`, and `SpacesimStarModel.color` already linearises), which is a real defect belonging to
+## the star's own colour and the lighting plan. It does not show here: both the disc and the splat clip at
+## 24x whatever the conversion does, which is also the only reason their handoff looks free.
 static func point_colour(body: SpacesimSceneBody, radiance: float) -> Color:
 	if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return star_color_of(body) * STAR_INTENSITY
-	return _at_unit_luminance(body.color, radiance / UNIT_LUX_PER_SR)
+	return _at_unit_luminance(body.color, radiance / UNIT_LUX_PER_SR).linear_to_srgb()
 
 
 ## A colour scaled so that its luminance is `level`, whatever its hue.

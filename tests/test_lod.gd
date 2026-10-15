@@ -378,15 +378,24 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 			SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
 		scene.update_lod(camera)
 		h.check(mars.point.visible, "a planet small enough is a point too")
+		# **`albedo_color` is sRGB-decoded by Godot**, so the value read back is the *encoded* one and has
+		# to be decoded to be comparable with a radiance. Verified in Godot's source: the default spatial
+		# material declares `uniform vec4 albedo : source_color` (`scene/resources/material.cpp`).
 		var spot := (mars.point.material_override as StandardMaterial3D).albedo_color
+		var decoded := spot.srgb_to_linear()
 		var expected_radiance := scene.body_luminance(mars, camera.global_position,
 			star_node.node.global_position) / SpacesimBodyRenderer.UNIT_LUX_PER_SR
-		h.check_near(spot.get_luminance(), expected_radiance,
-			"its brightness is the body's radiance, unchanged by the tint",
+		h.check_near(decoded.get_luminance(), expected_radiance,
+			"what arrives in the shader is the body's radiance, unchanged by the tint or the encode",
 			maxf(expected_radiance * 0.02, 1.0e-6))
-		h.check_near(spot.r / maxf(spot.g, 1.0e-6), mars.color.r / maxf(mars.color.g, 1.0e-6),
+		h.check_near(decoded.r / maxf(decoded.g, 1.0e-6), mars.color.r / maxf(mars.color.g, 1.0e-6),
 			"while its HUE is the body's own, so a planet is a coloured point and not a white one",
 			1.0e-6)
+		# And the round trip itself, which is what makes the line above meaningful rather than a
+		# coincidence of two curves that happen to meet.
+		var probe := Color(0.37, 0.37, 0.37, 1.0)
+		h.check_near(probe.linear_to_srgb().srgb_to_linear().r, probe.r,
+			"and the encode is the exact inverse of what Godot decodes, so the two cancel", 1.0e-6)
 
 	# --- the air shell's own rules --------------------------------------------------------------------
 	# **A shell's LOD is draw-or-not**, decided by the thickness of the air rather than by the body's
@@ -469,10 +478,12 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		_place_at_screen_radius(camera, venus, to_star_from_luna,
 			SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
 		scene.update_lod(camera)
-		var at_one := venus_material.albedo_color
+		# Decoded, because the stored value is sRGB-encoded — see `point_colour`. The *ratio* is what this
+		# checks, and it is only a ratio in linear terms.
+		var at_one := venus_material.albedo_color.srgb_to_linear()
 		attributes.exposure_multiplier = 8.0
 		scene.update_lod(camera)
-		var at_eight := venus_material.albedo_color
+		var at_eight := venus_material.albedo_color.srgb_to_linear()
 		h.check_near(at_eight.get_luminance(), at_one.get_luminance() * 8.0,
 			"a body's point of light scales with the exposure, so it steps with the sky and the surfaces",
 			maxf(at_one.get_luminance() * 0.05, 1.0e-9))
