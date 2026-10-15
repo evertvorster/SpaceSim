@@ -31,6 +31,16 @@ extends RefCounted
 const ICO_BASE_TRIANGLES := 20
 const MAX_LEVEL := 6
 
+## How far past a level's boundary a body must go before it changes level, as a fraction of that
+## boundary.
+##
+## **Needed because the levels are discrete and the input is continuous.** A body sitting on a boundary
+## whose screen radius is jittering by a pixel would swap meshes back and forth — a visible flicker and
+## a write per frame. This is the same idea as `SpacesimTransitionRule` for frame bands: a decision
+## boundary with a dead band. Ten percent is comfortably more than pixel jitter at the radii a boundary
+## sits at (13.7 px and up) and far less than the 4x step between levels.
+const HYSTERESIS_BAND := 0.1
+
 ## The constant in `N ~ c * screen_radius / epsilon`, and **it is measured from the built mesh rather
 ## than derived.** A level's relative sagitta times its triangle count converges to **5.8355** — 5.7963
 ## at level 3, 5.8334 at level 5 — and that product is exactly what makes the law honour the budget: at
@@ -116,6 +126,36 @@ static func level_for_screen_radius(screen_radius: float, epsilon: float) -> int
 	while level < MAX_LEVEL and float(triangles_at(level)) < wanted:
 		level += 1
 	return level
+
+
+## The screen radius at which a level **gives way to the next one** — where the finer level's triangle
+## count is first met, so it is the coarser level's own exit point. `level_exit(0, 4)` is 13.7 px, which
+## is where level 1 begins.
+static func level_exit(level: int, epsilon: float) -> float:
+	return float(triangles_at(level)) * epsilon / TRIANGLES_PER_SCREEN_RADIUS
+
+
+## `level_for_screen_radius` with a dead band, so a body sitting on a boundary does not flicker between
+## two meshes.
+##
+## A change of more than one level is taken at once — that is flying, not jitter, and stepping through
+## the levels one frame at a time would make a fast approach crawl. A single-level change is held off
+## until the screen radius is `band` past the crossing it crossed, and the crossing between two adjacent
+## levels is the **coarser** one's exit — `mini`, because the band has to be measured against the same
+## radius whichever direction the body is travelling in.
+static func level_with_hysteresis(
+	current: int, screen_radius: float, epsilon: float, band: float = HYSTERESIS_BAND
+) -> int:
+	var target := level_for_screen_radius(screen_radius, epsilon)
+	if absi(target - current) != 1:
+		return target
+	var crossing := level_exit(mini(target, current), epsilon)
+	if band > 0.0:
+		if target > current and screen_radius < crossing * (1.0 + band):
+			return current
+		if target < current and screen_radius > crossing * (1.0 - band):
+			return current
+	return target
 
 
 ## The triangles in a level. Exact, and an integer: each subdivision turns one triangle into four.

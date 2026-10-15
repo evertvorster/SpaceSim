@@ -81,6 +81,15 @@ const REGISTRY := {
 	"camera.range_interior": {
 		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01)
 	},
+	# --- levels of detail. The geometric error a body's mesh is allowed to show at its **silhouette**,
+	# in pixels on screen. One number decides the whole engine's mesh budget: a body's tessellation
+	# follows from this and its screen size, and body to body it is the difference between 20 triangles
+	# and 20,000. Read by `SpacesimSystemScene.update_lod`.
+	#
+	# Small is finer. It is a **trim**, the same shape as the star field's gain: it is meant to be tuned
+	# by eye while flying and then frozen to a constant once a render set justifies the number, at which
+	# point it stops being a setting and the value moves into `SpacesimLod`.
+	"lod.error_budget": {"default": 4.0, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a

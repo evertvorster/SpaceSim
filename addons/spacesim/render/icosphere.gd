@@ -30,7 +30,9 @@ const VERTICES := [
 	Vector3(PHI, 0, -1), Vector3(PHI, 0, 1), Vector3(-PHI, 0, -1), Vector3(-PHI, 0, 1),
 ]
 
-## Its 20 faces, wound **counter-clockwise seen from outside**, which each subdivision preserves.
+## Its 20 faces, wound counter-clockwise seen from outside — **the standard construction, NOT Godot's
+## convention**, which is clockwise. `_build` flips the winding once, when the indices are written, so
+## this list stays the well-known one and the flip is visible in one place.
 const FACES := [
 	[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
 	[1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
@@ -156,9 +158,17 @@ static func _build(level: int) -> ArrayMesh:
 
 	var indices := PackedInt32Array()
 	for face in faces:
+		# **Reversed, because Godot's front face is CLOCKWISE seen from outside** — which is what
+		# `SphereMesh` is wound as, and every material here was written against it: `body_surface`
+		# culls back faces and `body_atmosphere` culls front ones. The construction above is the
+		# standard counter-clockwise one, so the flip happens here, once, where it can be seen. Getting
+		# it wrong renders a planet inside out — and **an inside-out sphere still looks like a disc**, so
+		# it shows up as a sky that is black from inside and a body with no shading, not as an obvious
+		# inversion. `tests/test_icosphere.gd` measures the winding against `SphereMesh` so it cannot
+		# regress quietly.
 		indices.append(face[0])
-		indices.append(face[1])
 		indices.append(face[2])
+		indices.append(face[1])
 
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)

@@ -1,6 +1,6 @@
 extends RefCounted
-## The icosphere: levels built once, closed, outward-wound, and measured against the sphere they
-## approximate.
+## The icosphere: levels built once, closed, and measured against the sphere they approximate —
+## including its WINDING, which is the one property that fails invisibly.
 ##
 ## **The point of testing this headlessly is that the law can then be checked against real geometry.**
 ## `test_lod.gd` asserts the arithmetic; this asserts what the arithmetic was for — that a level's
@@ -31,7 +31,7 @@ func run(h, root: Node) -> void:
 	var vertex_counts := []
 	var closed := true
 	var on_sphere := true
-	var outward := true
+	var consistent := true
 	var counts_match := true
 	for level in 6:
 		var mesh: ArrayMesh = meshes[level]
@@ -66,8 +66,15 @@ func run(h, root: Node) -> void:
 			var a := points[indices[i]]
 			var b := points[indices[i + 1]]
 			var c := points[indices[i + 2]]
-			if a.dot((b - a).cross(c - a)) <= 0.0:
-				outward = false
+			# **All faces the SAME way round, whichever way that is** — the sign itself is not the
+			# invariant, because Godot's front face is clockwise and the standard icosahedron is not.
+			# Which way it lands is measured against `SphereMesh` below, since that is the mesh every
+			# material here was written for; this check is only that no triangle disagrees with its
+			# neighbours.
+			if signf(a.dot((b - a).cross(c - a))) != signf(points[indices[0]].dot(
+					(points[indices[1]] - points[indices[0]]).cross(
+						points[indices[2]] - points[indices[0]]))):
+				consistent = false
 
 	var wanted_counts := []
 	for level in 6:
@@ -79,8 +86,25 @@ func run(h, root: Node) -> void:
 	h.check(closed,
 		"and every edge belongs to exactly two triangles, so the surface is CLOSED — no seam, no crack, "
 		+ "which is what the midpoint cache is for")
-	h.check(outward,
-		"with every face wound counter-clockwise seen from outside, so nothing is inside out")
+	h.check(consistent,
+		"with every face wound the same way round, so no triangle is inside out relative to its neighbours")
+
+	# --- the winding, against the mesh every material here was written for ---------------------------
+	# **`body_surface` culls back faces and `body_atmosphere` culls front ones**, and both were written
+	# against Godot's own `SphereMesh`. A mesh wound the other way renders inside out — and a sphere seen
+	# inside out still looks like a disc, so the symptom does not announce itself. Measured by comparing
+	# the sign of the enclosed volume, because that is the one thing about winding that is measurable
+	# without a render.
+	var reference := SphereMesh.new()
+	reference.radius = 1.0
+	reference.height = 2.0
+	reference.radial_segments = 16
+	reference.rings = 8
+	var theirs := signed_volume(reference)
+	var ours := signed_volume(meshes[1])
+	print("    ---- winding: SphereMesh %.4f against icosphere %.4f ----" % [theirs, ours])
+	h.check(signf(theirs) == signf(ours),
+		"the icosphere is wound the SAME way as SphereMesh, which is the convention the materials assume")
 
 	# --- the approximation, measured -----------------------------------------------------------------
 	# The sagitta has to fall as the square of the facet width, which is what makes the whole law work:
@@ -142,3 +166,19 @@ func run(h, root: Node) -> void:
 	h.check(worst_ratio > 0.95,
 		"and not wastefully so: the constant is calibrated, so the error reaches the budget rather than "
 			+ "sitting under it (%.3f)" % worst_ratio)
+
+
+## The enclosed volume, signed by the triangles' winding. Positive for one convention, negative for the
+## other — which is the only thing about winding that can be measured without rendering.
+static func signed_volume(mesh: Mesh) -> float:
+	var arrays := mesh.surface_get_arrays(0)
+	var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var total := 0.0
+	if indices.is_empty():
+		for i in range(0, points.size(), 3):
+			total += points[i].dot(points[i + 1].cross(points[i + 2]))
+	else:
+		for i in range(0, indices.size(), 3):
+			total += points[indices[i]].dot(points[indices[i + 1]].cross(points[indices[i + 2]]))
+	return total / 6.0

@@ -280,11 +280,13 @@ func _test_the_sky_is_derived(
 	h.check(earth.atmosphere_mesh != null, "Earth has one")
 	if earth.atmosphere_mesh == null:
 		return
-	var shell := earth.atmosphere_mesh.mesh as SphereMesh
+	# **The shell's radius is on the NODE's scale, not on the mesh.** The mesh is a shared unit icosphere,
+	# so a body's size is its transform — which is what lets one mesh serve a moon and a gas giant.
+	var shell := earth.atmosphere_mesh
 	# **The shell's top is derived from the air's own scale height**, floored by the frame's
 	# transition altitude -- see SpacesimAtmosphereModel.shell_reach.
 	var top := earth.radius + earth.sky_top
-	h.check_near(shell.radius, top, "reaching where the body's own air ends", 1.0)
+	h.check_near(shell.scale.x, top, "reaching where the body's own air ends", 1.0)
 	# Earth's ten scale heights come to ~84 km, *under* the frame's 100 km floor, so the floor wins --
 	# which is the rule that stops a shell being shorter than the atmosphere the game puts you in.
 	h.check(SpacesimAtmosphereModel.shell_reach(

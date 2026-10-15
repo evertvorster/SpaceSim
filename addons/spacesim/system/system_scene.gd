@@ -20,6 +20,18 @@ const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
 ## yet; the ids exist so a location can name one when it can.
 const ASSET_FRAME_PREFIX := "asset:"
 
+## The icosphere level a body gets before anything has asked how big it is. A scene is built before it
+## has a camera, and `update_lod` corrects this on the first physics frame — which runs before the first
+## draw, so no wrong level is ever seen in the game. It exists so a scene built without a game is not a
+## spray of 20-triangle spheres.
+const INITIAL_MESH_LEVEL := 2
+
+## The air shells' level, **fixed rather than taken from the policy**. A fill-bound shader's cost is per
+## *pixel*, not per triangle, so tessellation is not the lever for it — draw or no-draw is, and that is
+## phase 6 of the mesh LOD plan. Level 3 holds the limb ring's silhouette to a couple of pixels at any
+## plausible screen size, at 1,280 triangles against the 16,384 the lat-long shell stood at.
+const ATMOSPHERE_SHELL_LEVEL := 3
+
 ## The authored content this scene was built from.
 var content: SpacesimSolarSystem
 
@@ -52,6 +64,9 @@ var _ambient_depth := -1.0
 var _epoch_time: float = 0.0
 ## The star as a light source; null until build(). The node is `star_light.light`.
 var star_light: SpacesimStarLight
+## Triangles in the geometry the last `update_lod` left in place — the instrument the plan's first trap
+## names: if this does not move when a body's screen size does, the policy is not being consulted.
+var _triangles := 0
 
 
 static func from_file(path: String) -> SpacesimSystemScene:
@@ -442,8 +457,10 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.set_meta("spacesim_body", body.id)
 	system_frame.add_child(body.node)
 
-	body.mesh = _add_sphere(
-		body.node, body.radius, SpacesimBodyRenderer.material_for(body), "%sSurface" % body.name
+	body.mesh_level = INITIAL_MESH_LEVEL
+	body.mesh = _add_body_mesh(
+		body.node, body.radius, SpacesimBodyRenderer.material_for(body), "%sSurface" % body.name,
+		body.mesh_level
 	)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_atmosphere_shell(body)
@@ -588,8 +605,8 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	)
 	if material == null:
 		return
-	body.atmosphere_mesh = _add_sphere(
-		body.node, body.radius + body.sky_top, material, "%sAir" % body.name
+	body.atmosphere_mesh = _add_body_mesh(
+		body.node, body.radius + body.sky_top, material, "%sAir" % body.name, ATMOSPHERE_SHELL_LEVEL
 	)
 
 
@@ -797,24 +814,75 @@ func update_atmospheres(observer: Vector3) -> void:
 		)
 
 
-func _add_sphere(
-	parent: Node3D, radius: float, material: Material, mesh_name: String
+## A body's geometry: a shared unit icosphere, scaled by the body's radius.
+##
+## **Levels are built once at unit radius and shared by every body**, which is the whole point of the
+## primitive: a level change is a pointer assignment, where `SphereMesh` re-tessellated on every
+## property change — and re-tessellating per body per crossing is what made adaptive detail look
+## unaffordable. The radius goes on the node's scale, so the mesh resources stay shared.
+##
+## No triplanar or `world_vertex_coords`: neither gets the double-precision vertex transform emulation,
+## and both jitter at planet scale. **A scaled unit mesh is a new case for that emulation**, and this
+## project has been bitten by render modes that skip it — so it is confirmed by a render at planet
+## scale rather than by reasoning.
+func _add_body_mesh(
+	parent: Node3D, radius: float, material: Material, mesh_name: String, level: int
 ) -> MeshInstance3D:
-	var sphere := SphereMesh.new()
-	sphere.radius = radius
-	sphere.height = radius * 2.0
-	sphere.radial_segments = 128
-	sphere.rings = 64
-
 	var mesh := MeshInstance3D.new()
 	mesh.name = mesh_name
-	mesh.mesh = sphere
+	mesh.mesh = SpacesimIcosphere.mesh_at(level)
+	mesh.scale = Vector3.ONE * radius
 	mesh.material_override = material
-	# No triplanar or world_vertex_coords: neither gets the double-precision vertex transform
-	# emulation, and both jitter at planet scale.
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mesh)
 	return mesh
+
+
+## Hand every body the tessellation its angular size has earned, once a frame.
+##
+## **The level is a mesh assignment.** Levels are built once and shared, so a body crossing a boundary
+## points at a different `ArrayMesh`; nothing is regenerated. Hysteresis holds a body that is sitting on
+## a boundary still, because discrete levels changing on a continuous input is a flicker otherwise.
+##
+## **A body that is not drawn still counts.** This reads `bodies`, and so does the exposure integral —
+## whether a body is drawn must never change what it contributes to the light, and the two are kept
+## uncoupled here deliberately. Culling is a later phase; this decides only how finely what is drawn is
+## drawn.
+func update_lod(camera: Camera3D) -> void:
+	if camera == null:
+		return
+	var viewport := camera.get_viewport()
+	if viewport == null:
+		return
+	# The **render target's** height, not the canvas rect's — see `SpacesimLod.pixel_angle`.
+	var pixel := SpacesimLod.pixel_angle(camera.fov, float(viewport.size.y))
+	if pixel <= 0.0:
+		return
+	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
+	var observer := camera.global_position
+	var total := 0
+	for body in bodies:
+		if body.mesh == null or body.node == null:
+			continue
+		var screen := SpacesimLod.screen_radius_pixels(
+			SpacesimLod.angular_radius(body.radius, observer.distance_to(body.node.global_position)),
+			pixel
+		)
+		var level := SpacesimLod.level_with_hysteresis(body.mesh_level, screen, epsilon)
+		if level != body.mesh_level:
+			body.mesh_level = level
+			body.mesh.mesh = SpacesimIcosphere.mesh_at(level)
+		# Counted from the law rather than from the meshes: `face_count` walks `get_faces()`, which
+		# allocates, and this runs once a frame for every body in the system.
+		total += SpacesimLod.triangles_at(body.mesh_level)
+		if body.atmosphere_mesh != null:
+			total += SpacesimLod.triangles_at(ATMOSPHERE_SHELL_LEVEL)
+	_triangles = total
+
+
+## Triangles the bodies and air shells are currently drawn with, summed over the levels in use.
+func triangles() -> int:
+	return _triangles
 
 
 ## Meter-scale references at the landing zone, so the scale is legible once you are down.

@@ -24,6 +24,9 @@ var significant: bool
 # Built by SpacesimSystemScene.
 var node: Node3D
 var mesh: MeshInstance3D
+## The icosphere level `mesh` is currently drawn at, so a level change is a comparison rather than a
+## lookup and hysteresis has something to hold on to. Set by `SpacesimSystemScene.update_lod`.
+var mesh_level: int = 0
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody

@@ -1,10 +1,14 @@
 extends RefCounted
 ## The LOD law: geometric error in pixels rather than a triangle count.
 ##
-## **All of it is pure arithmetic, so all of it is checkable with no GPU and no meshes** — which is the
-## reason to do it before there is an icosphere to point it at, and why the assertions below are values
-## and boundaries rather than pictures. What cannot be checked here is whether `epsilon` is the right
-## number: that is a render set and a judgement, and it comes later (phase 5 of the mesh LOD plan).
+## **The law itself is pure arithmetic**, so all of it is checkable with no GPU — which is the reason to
+## do it before there is an icosphere to point it at, and why the assertions are values and boundaries
+## rather than pictures. The second half checks the *application*: that a built scene hands its bodies
+## the levels the law asks for, that the meshes really are shared icosphere levels, and that a body
+## sitting on a crossing does not flicker. That part needs nodes but still no GPU.
+##
+## What neither half can check is whether `epsilon` is the right number. That is a render set and a
+## judgement, and it comes later (phase 5 of the mesh LOD plan).
 ##
 ## The numbers are the plan's own worked table (§2), recomputed. **Where the plan and the arithmetic
 ## disagree the arithmetic wins and the plan gets corrected** — the project's standing rule — and two
@@ -14,11 +18,18 @@ const RENDER_HEIGHT := 1080.0 ## The render target's height, which the law must 
 const FOV := 70.0 ## `camera.fov`'s default, and what the game runs at
 const EARTH_RADIUS := 6.371e6
 const AU := 1.495978707e11
+const SOL_PATH := "res://systems/sol.tres"
+const BUDGET := 4.0 ## `lod.error_budget`'s default, and what the headless suite sees
 const CENTRE_PIXEL_ANGLE := 1.2966806e-3 ## Radians subtended by the centre pixel of a 1080p 70-degree frame: 2*tan(35 deg)/1080
 
 
 func run(h, root: Node) -> void:
 	print("  lod")
+	_test_the_law(h)
+	_test_the_scene_applies_it(h, root)
+
+
+func _test_the_law(h) -> void:
 
 	var p := SpacesimLod.pixel_angle(FOV, RENDER_HEIGHT)
 
@@ -136,3 +147,147 @@ func run(h, root: Node) -> void:
 	h.check(SpacesimLod.screen_radius_pixels(0.5, 0.0) == 0.0, "as is a frame with no pixels")
 	h.check(SpacesimLod.angular_radius(EARTH_RADIUS, 1.0e3) == PI * 0.5,
 		"an observer inside the body is at the horizon, clamped rather than NaN")
+
+	# --- hysteresis, which is what makes a discrete level usable on a continuous input -----------------
+	# **A crossing is a place a body can sit.** Level 2 gives way to 3 at `320 * 4 / 5.836` = 219.33 px,
+	# and without a dead band a body hovering there — which is any body under manual throttle — swaps
+	# meshes on the frames its screen radius jitters across.
+	var crossing := SpacesimLod.level_exit(2, BUDGET)
+	h.check_near(crossing, 219.33, "level 2 gives way to level 3 at %.2f px" % crossing, 0.01)
+
+	# Climbing from level 2: held below the crossing plus the band, released past it.
+	h.check(SpacesimLod.level_with_hysteresis(2, crossing, BUDGET) == 2,
+		"a body at the crossing keeps the coarser level rather than flapping onto the finer one")
+	h.check(SpacesimLod.level_with_hysteresis(2, crossing * 1.05, BUDGET) == 2,
+		"and it is still held five percent past it")
+	h.check(SpacesimLod.level_with_hysteresis(2, crossing * 1.2, BUDGET) == 3,
+		"but twenty percent past, it has clearly grown and takes level 3")
+
+	# And descending, where the band is on the other side.
+	h.check(SpacesimLod.level_with_hysteresis(3, crossing * 0.95, BUDGET) == 3,
+		"coming back down, level 3 is kept five percent below the crossing")
+	h.check(SpacesimLod.level_with_hysteresis(3, crossing * 0.85, BUDGET) == 2,
+		"and released fifteen percent below it")
+
+	# **A jump of more than one level is flying, not jitter, and is taken at once** — stepping one level
+	# per frame would make a fast approach crawl through five levels over five frames of real time.
+	h.check(SpacesimLod.level_with_hysteresis(0, crossing * 1.05, BUDGET) == 3,
+		"a body two or more levels out takes the level it has earned immediately")
+	h.check(SpacesimLod.level_with_hysteresis(5, crossing * 0.1, BUDGET) == 1,
+		"in either direction — five levels down to one, at once")
+	h.check(SpacesimLod.level_with_hysteresis(2, crossing, BUDGET, 0.0)
+			== SpacesimLod.level_for_screen_radius(crossing, BUDGET),
+		"and a zero band is exactly the plain policy, so the dead band is not baked into the law")
+
+	# The property that matters in flight: shivering around a crossing moves nothing.
+	var held := true
+	var settled := 2
+	for i in 40:
+		var jitter := 1.0 + 0.02 * (1.0 if i % 2 == 0 else -1.0)
+		settled = SpacesimLod.level_with_hysteresis(settled, crossing * jitter, BUDGET)
+		if settled != 2:
+			held = false
+	h.check(held, "and forty alternating two-percent jitters around the crossing never move the level")
+
+
+## That a built scene hands its bodies the levels the law asks for — the wiring, not the arithmetic.
+##
+## **Headless, because a mesh assignment needs no GPU**: the scene is built, a camera is placed at a
+## computed distance, and what the body ends up drawn with is read back. What this cannot check is
+## whether a **scaled unit mesh renders correctly under the double-precision vertex emulation** — that is
+## a render, and it is the one thing this phase owes Evert's eyes.
+func _test_the_scene_applies_it(h, root: Node) -> void:
+	var sol: SpacesimSolarSystem = load(SOL_PATH)
+	h.check(sol != null, "Sol loads for the scene half")
+	if sol == null:
+		return
+	var scene := SpacesimSystemScene.from_content(sol)
+	h.check(scene != null, "a scene wraps it")
+	if scene == null:
+		return
+	scene.build(root)
+	var earth := scene.body_by_id("planet:earth")
+	if earth == null or earth.node == null:
+		h.check(false, "Earth is in it")
+		return
+
+	# A camera in the tree, because the pixel angle is measured from the render target rather than from
+	# the canvas rect.
+	var camera := Camera3D.new()
+	camera.fov = FOV
+	root.add_child(camera)
+	var viewport: Viewport = camera.get_viewport()
+	if viewport == null or viewport.size.y <= 0.0:
+		h.check(false, "a camera in a tree has a render target to measure")
+		camera.queue_free()
+		return
+	var pixel := SpacesimLod.pixel_angle(camera.fov, float(viewport.size.y))
+	h.check(pixel > 0.0, "and the pixel angle comes from that render target")
+
+	# **The geometry is a shared icosphere level, scaled by the body's radius** — which is the whole
+	# reason the levels are built at unit radius, and the reason one mesh can serve every body.
+	var mesh := earth.mesh
+	h.check(mesh.mesh is ArrayMesh and mesh.mesh == SpacesimIcosphere.mesh_at(earth.mesh_level),
+		"the body draws the SHARED icosphere mesh for its level")
+	h.check(mesh.scale.is_equal_approx(Vector3.ONE * earth.radius),
+		"scaled by its own radius, so one mesh of 20 triangles serves a moon and a gas giant alike")
+	h.check(not (mesh.mesh is SphereMesh), "and no lat-long sphere is left in the tree")
+
+	# A distance that puts Earth at a chosen screen radius, exactly:
+	#   tan(asin(R/d)) = r_px * p   ->   d = R / sin(atan(r_px * p))
+	# Measured from the body's own node, so nothing here depends on where the scene was placed.
+	var to_earth := Vector3(1.0, 0.0, 0.0)
+
+	_place_at_screen_radius(camera, earth, to_earth, 200.0, pixel)
+	scene.update_lod(camera)
+	var wanted := SpacesimLod.level_for_screen_radius(200.0, BUDGET)
+	h.check(earth.mesh_level == wanted, "at 200 px it takes level %d" % wanted)
+	h.check(earth.mesh.mesh == SpacesimIcosphere.mesh_at(earth.mesh_level),
+		"and the mesh it is actually drawn with is that level's")
+
+	# Closing the distance never gives a body a coarser mesh — and the ladder is the law's, not a guess:
+	# each step is four times the screen radius, which is one level.
+	var levels := []
+	for step in range(1, 7):
+		_place_at_screen_radius(camera, earth, to_earth, pow(4.0, float(step)), pixel)
+		scene.update_lod(camera)
+		levels.append(earth.mesh_level)
+	var rising := true
+	for i in range(1, levels.size()):
+		if levels[i] < levels[i - 1]:
+			rising = false
+	h.check(rising, "and closing the distance never gives it a coarser mesh: %s" % [levels])
+	h.check(levels == [0, 1, 2, 3, 4, 5],
+		"a four-fold step in screen radius is one level, which is what quantisation means: %s" % [levels])
+
+	# **The instrument the plan's first trap names.** If the policy were being computed and not applied,
+	# the picture would be unchanged and this number with it.
+	var expected := 0
+	for body in scene.bodies:
+		expected += SpacesimLod.triangles_at(body.mesh_level)
+		if body.atmosphere_mesh != null:
+			expected += SpacesimLod.triangles_at(SpacesimSystemScene.ATMOSPHERE_SHELL_LEVEL)
+	h.check(scene.triangles() == expected,
+		"the reported triangle count is the sum of the levels in place, and not a prediction (%d)"
+			% expected)
+
+	# The same scene, seen from far away, is a fraction of what it cost before — which is the claim this
+	# plan exists to make. The lat-long meshes were 416,000 triangles at every distance (measured,
+	# phase 0); a sub-pixel body now takes twenty.
+	_place_at_screen_radius(camera, earth, to_earth, 0.4, pixel)
+	scene.update_lod(camera)
+	h.check(scene.triangles() < 40000,
+		"and from far enough out the whole system is under 40,000 triangles against 416,000 (%d)"
+			% scene.triangles())
+
+	scene.container.free()
+	camera.queue_free()
+
+
+## Put the camera at the distance where a body's silhouette is `screen_radius` pixels across.
+func _place_at_screen_radius(
+	camera: Camera3D, body: SpacesimSceneBody, direction: Vector3, screen_radius: float, pixel: float
+) -> void:
+	var angular := atan(screen_radius * pixel)
+	var distance := body.radius / maxf(sin(angular), 1.0e-9)
+	camera.global_position = body.node.global_position + direction.normalized() * distance

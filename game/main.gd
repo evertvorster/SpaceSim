@@ -10,7 +10,8 @@ extends Node3D
 ##   A / D      roll
 ##   Esc        release the mouse    (click to take it back)
 ##   P          hide/show the bodies
-##   [ / ]      body tessellation, for attributing frame cost
+##   [ / ]      the mesh error budget (`lod.error_budget`), which is what sets every body's
+##              tessellation — the trim for judging a level's silhouette in flight
 ##
 ## The solar system comes from `systems/sol.tres`; this script only adds input, the camera's
 ## render range and a readout. A different system file should not need this script changed.
@@ -28,9 +29,15 @@ const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
 const THROTTLE_RATE := 0.7 ## per second
 
-## Body detail levels for cost attribution: if the frame rate tracks screen coverage it stays
-## flat across these, and if it tracks triangle count it moves with them.
-const DETAIL_LEVELS := [Vector2i(32, 16), Vector2i(64, 32), Vector2i(128, 64), Vector2i(256, 128)]
+## The mesh error budget, in pixels of silhouette error, as stops to step through rather than a
+## continuous number: it is a perceptual trim, so the useful question is "is this better or worse"
+## rather than "is 3.7 better than 3.9". **It is a setting and not a debug variable** — the same shape
+## the star field's gain established — so it is tuned by flying, and kept in the config until a render
+## set justifies freezing it into `SpacesimLod`.
+##
+## The index is read from the setting every time rather than cached, because a setting cached in a
+## variable is the one thing that turns it cold.
+const ERROR_BUDGET_STEPS := [32.0, 16.0, 8.0, 4.0, 2.0, 1.0, 0.5]
 
 var _system: SpacesimSystemScene
 var _session: SpacesimSession
@@ -52,8 +59,6 @@ var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
 var _skip_next_motion := false
-var _detail := 2 ## index into DETAIL_LEVELS
-var _triangles := 0
 var _bodies_visible := true
 
 
@@ -81,7 +86,6 @@ func _ready() -> void:
 	_exposure.snap_to(_system.illuminance_at(_ship.global_position))
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
-	_set_detail(_detail)
 	_build_hud()
 
 	# The session comes up after the system has real frames, because restoring where the player was
@@ -143,9 +147,9 @@ func _handle_key(event: InputEventKey) -> void:
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_down"))):
-		_set_detail(_detail - 1)
+		_set_error_budget(_error_budget_index() + 1)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_up"))):
-		_set_detail(_detail + 1)
+		_set_error_budget(_error_budget_index() - 1)
 	elif event.keycode == KEY_ESCAPE:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
@@ -211,18 +215,23 @@ func _held(binding_key: String) -> bool:
 	return code != KEY_NONE and Input.is_physical_key_pressed(code)
 
 
-## Change every body's tessellation. The count is measured here rather than per frame, because
-## get_faces() allocates.
-func _set_detail(index: int) -> void:
-	_detail = clampi(index, 0, DETAIL_LEVELS.size() - 1)
-	var level: Vector2i = DETAIL_LEVELS[_detail]
-	_triangles = 0
-	for body_mesh in _system.meshes():
-		var sphere: SphereMesh = body_mesh.mesh
-		sphere.radial_segments = level.x
-		sphere.rings = level.y
-		var faces := sphere.get_faces().size()
-		_triangles += floori(float(faces) / 3.0)
+## Which step of `ERROR_BUDGET_STEPS` the setting is nearest — so the keys pick up wherever the
+## settings screen or the config file left it, rather than from a remembered index.
+func _error_budget_index() -> int:
+	var budget := float(SpacesimSettings.get_value("lod.error_budget"))
+	var best := 0
+	for i in ERROR_BUDGET_STEPS.size():
+		if absf(ERROR_BUDGET_STEPS[i] - budget) < absf(ERROR_BUDGET_STEPS[best] - budget):
+			best = i
+	return best
+
+
+## Step the mesh error budget. **Written through the settings store**, so the settings screen sees the
+## change and it survives the session: it is a value being chosen by eye, which is what the store is
+## for, and a debug-only copy of it is how a trim becomes two numbers that disagree.
+func _set_error_budget(index: int) -> void:
+	var clamped := clampi(index, 0, ERROR_BUDGET_STEPS.size() - 1)
+	SpacesimSettings.set_value("lod.error_budget", ERROR_BUDGET_STEPS[clamped], true)
 
 
 ## Selection is the input half of targeting, and the smallest stand-in for the navigation we
@@ -302,6 +311,9 @@ func _physics_process(delta: float) -> void:
 	# nothing about it depends on which body the player is attached to.
 	_system.update_atmospheres(_camera.global_position)
 	_system.update_sky(_camera)
+	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
+	# the other things that depend on the eye rather than on the world.
+	_system.update_lod(_camera)
 	# Exposed for **what the eye is looking at**, not for the light falling on a surface where the player
 	# happens to be — see SpacesimSystemScene.view_luminance_at. A luminance, because adaptation follows
 	# the scene; an irradiance is a property of where you are and cannot tell the Sun from empty sky.
@@ -452,7 +464,7 @@ func _update_hud() -> void:
 				"state       %s" % contact,
 				"target      %s" % target,
 				"",
-				"bodies      %s, %d triangles" % [bodies, _triangles],
+				"bodies      %s, %d triangles" % [bodies, _system.triangles()],
 				"",
 				(
 					"%s/%s throttle    mouse look    %s/%s roll    Esc release mouse, click to take it back"
@@ -464,7 +476,7 @@ func _update_hud() -> void:
 					]
 				),
 				(
-					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s %s body detail"
+					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s %s mesh error"
 					% [
 						_binding("bindings.player_screen"),
 						_binding("bindings.settings_screen"),
