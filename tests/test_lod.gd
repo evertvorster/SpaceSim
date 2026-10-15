@@ -451,6 +451,48 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	h.check(venus.shell_level < SpacesimLod.MAX_LEVEL,
 		"which is what keeps a sky dome off the maximum level")
 
+	# --- the point of light must follow the exposure ---------------------------------------------------
+	# **Godot does not scale the frame by the camera's exposure; it bakes the factor into the sky and into
+	# the light energy.** So a material that is `unshaded` — no light, no sky — receives none of it, and a
+	# splat is the one such thing in the 3D pass that is not the star's own disc. Found by flight test:
+	# flying toward Venus with Sol entering and leaving the frame stepped the whole sky up and down and left
+	# the splat exactly where it was (Evert, 2026-10-15).
+	#
+	# Pinned here by measuring the ratio, because the symptom is invisible at a multiplier of about 1 —
+	# which is where the handoff comparison happened to be measured, and why it looked free.
+	var venus_point := venus.point
+	if venus_point != null:
+		var venus_material := venus_point.material_override as StandardMaterial3D
+		var attributes := CameraAttributesPractical.new()
+		camera.attributes = attributes
+		attributes.exposure_multiplier = 1.0
+		_place_at_screen_radius(camera, venus, to_star_from_luna,
+			SpacesimSystemScene.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
+		scene.update_lod(camera)
+		var at_one := venus_material.albedo_color
+		attributes.exposure_multiplier = 8.0
+		scene.update_lod(camera)
+		var at_eight := venus_material.albedo_color
+		h.check_near(at_eight.get_luminance(), at_one.get_luminance() * 8.0,
+			"a body's point of light scales with the exposure, so it steps with the sky and the surfaces",
+			maxf(at_one.get_luminance() * 0.05, 1.0e-9))
+		h.check(at_one.get_luminance() > 0.0,
+			"and it was not zero to begin with, so the ratio means something (%.6f)" % at_one.get_luminance())
+
+		# **And a star's point is deliberately not scaled**, because its own disc is not either — scaling
+		# only the splat would break the handoff the star keeps free.
+		attributes.exposure_multiplier = 1.0
+		_place_at_screen_radius(camera, star_node, Vector3(0.0, 1.0, 0.0), 2.0, pixel)
+		scene.update_lod(camera)
+		var sun_one := (star_node.point.material_override as StandardMaterial3D).albedo_color
+		attributes.exposure_multiplier = 8.0
+		scene.update_lod(camera)
+		var sun_eight := (star_node.point.material_override as StandardMaterial3D).albedo_color
+		h.check_near(sun_eight.get_luminance(), sun_one.get_luminance(),
+			"while a star's point is the same at either exposure, matching its own unshaded disc",
+			1.0e-6)
+		camera.attributes = null
+
 	scene.container.free()
 	camera.queue_free()
 

@@ -902,6 +902,13 @@ func update_lod(camera: Camera3D) -> void:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
 	var observer := camera.global_position
+	# **The exposure, read off the camera the frame is being drawn with.** This is the same object
+	# `SpacesimExposure` mutates, so there is no second source for it and nothing to keep in step — but
+	# Godot applies it per *path* rather than to the frame, so an unshaded material has to apply it
+	# itself. See `_place_point`.
+	var exposure := 1.0
+	if camera.attributes != null:
+		exposure = camera.attributes.exposure_multiplier
 	var total := 0
 	for body in bodies:
 		if body.node == null:
@@ -920,7 +927,7 @@ func update_lod(camera: Camera3D) -> void:
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
-			_place_point(body, observer, energy, distance, pixel)
+			_place_point(body, observer, energy, distance, pixel, exposure)
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 			# A point still has a shell to price — an air so thin it is not drawn costs nothing, and one
 			# whose ring survives does, which is rare but real at a body just under the tier.
@@ -1013,20 +1020,49 @@ func _shell_is_visible(body: SpacesimSceneBody, observer: Vector3, pixel: float)
 ## object from a distant dot, through a two-pixel disc, to the handover to a mesh. Below a pixel it
 ## cannot shrink further, which is what stops a receding body flickering out.
 ##
-## The colour is the body's mean radiance in the engine's units, **tinted by the body's own colour** — the
-## same quantity the exposure weighs and the same scale the star field is drawn in. It is **not**
-## exposure-corrected: a splat reports radiance.
+## The colour is the body's mean radiance in the engine's units, **tinted by the body's own colour** and
+## **multiplied by the exposure itself** — see below for why it has to be.
 ##
-## **Known defect, deliberately not fixed yet:** §5 of the plan has the splat carry the body's whole flux
-## into one pixel — `L * omega_disc / omega_px` — which for a disc under the floor falls as `1/d^2`,
-## because a point source on a fixed pixel gets fainter, and that is the correct behaviour. This carries
-## `L` alone, so **its value does not fall with the observer's distance at all** once the disc is under
-## the floor: a body at 0.077 px is about 170x brighter than the law says. Not applied yet because it
-## makes distant bodies *dimmer* and the flight test says they are already too dim, so this function's
-## currency against `sky_stars.gdshader`'s has to be reconciled first. Two renders — one body at 0.8 px
-## and the same body at 0.4 px — would measure it; there is an open loop for it.
+## **The exposure has to be applied here by hand, and that is Godot's doing rather than a choice.**
+## Godot does not scale the frame by the camera's exposure; it *bakes* the factor into specific paths:
+##
+##   * the **sky**, which is why the star field responds to the EV (`sky.glsl` says so in as many words
+##     — *"we also bake in the exposure value for the environment and camera"*);
+##   * the **light energy**, `light_data.energy *= exposure_normalization_factor` — which is why every
+##     lit surface responds, and which phase 1a measured as a planet view going 86.7 to 52.5;
+##   * and the **tonemap** uses the *Environment's* `tonemap_exposure` — which this project never sets,
+##     so it is 1.0.
+##
+## So a material that is **`unshaded`** — no light, no sky — receives **no exposure at all**, and this is
+## the only such material in the 3D pass that is not the star's own disc. Found by flight test: flying
+## toward Venus with Sol entering and leaving the frame stepped the whole sky up and down and left the
+## splat at exactly the same brightness (Evert, 2026-10-15). The handoff at the mesh threshold had looked
+## free because it was measured at a multiplier of about 1, where the two agree either way.
+##
+## **The engine's factor is `exposure_multiplier * exposure_normalization`, and only the first is readable**
+## from GDScript. The second is a constant here — the physical camera's aperture and shutter are left at
+## their defaults and nothing changes them — so this gets the *variation* exactly right, which is what the
+## flight test is about, and what remains is a constant. That constant belongs with the splat's absolute
+## brightness rather than with its response to the EV, and it is one of the reasons that level is still an
+## open question.
+##
+## **A star's point is deliberately NOT scaled, because its disc is not either.** `body_star.gdshader` is
+## `unshaded` too, so the Sun's own disc receives no exposure — for the same reason, and over the same
+## range of EVs. Scaling only the splat would break the very handoff this file works to keep free, so the
+## two are left consistent and the fact is recorded here instead. It is invisible while the star's emission
+## is 24x and clips whatever the exposure does; it would stop being invisible if the exposure ever
+## stopped the Sun out of the white point, and that belongs with the star's glare and bloom.
+##
+## **Still missing, and named rather than hidden:** §5 of the plan has the splat carry the body's whole
+## flux into one pixel — `L * omega_disc / omega_px` — which for a disc under the floor falls as `1/d^2`,
+## because a point source on a fixed pixel gets fainter and that is the correct behaviour. This carries
+## `L` alone, so its value does not fall with the observer's distance once the disc is under the floor: a
+## body at 0.077 px is about 170x brighter than the law says. Not applied yet because it makes distant
+## bodies *dimmer* and the flight test says they are already too dim, so the splat's absolute level has
+## to be settled first. Two renders — one body at 0.8 px and the same body at 0.4 px — would measure it.
 func _place_point(
-	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float
+	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float,
+	exposure: float
 ) -> void:
 	# The quad is a unit square, so its half-width is what a radius measures. One pixel is the floor it
 	# cannot shrink below.
@@ -1038,7 +1074,7 @@ func _place_point(
 	if star_body == null or star_body.node == null:
 		return
 	var radiance := body_luminance(body, observer, star_body.node.global_position)
-	material.albedo_color = SpacesimBodyRenderer.point_colour(body, radiance)
+	material.albedo_color = SpacesimBodyRenderer.point_colour(body, radiance * exposure)
 
 
 ## **What the eye sees of a body**, in lux/sr: the light falling on it, the fraction it reflects, and the
