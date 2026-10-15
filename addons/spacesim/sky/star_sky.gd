@@ -92,7 +92,9 @@ func update(camera: Camera3D) -> void:
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
 
-	var basis := camera.global_transform.basis
+	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type, so `:=`
+	# on it is the `INFERENCE_ON_VARIANT` error.
+	var basis: Basis = camera.get_global_transform_interpolated().basis
 	material.set_shader_parameter("u_right", basis.x)
 	material.set_shader_parameter("u_up", basis.y)
 	material.set_shader_parameter("u_fwd", -basis.z)

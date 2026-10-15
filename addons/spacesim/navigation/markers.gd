@@ -116,7 +116,7 @@ func refresh(camera: Camera3D) -> void:
 		Vector2(margin, margin), viewport_size - Vector2(margin, margin) * 2.0
 	)
 
-	var gathered := _candidates(camera.global_position)
+	var gathered := _candidates(camera.get_global_transform_interpolated().origin)
 	# Which bodies are marked at all, so a moon can tell whether the body it orbits is one of them.
 	# The set is not thinned by that: a moon that gives up its label is still marked.
 	var marked := {}
@@ -175,7 +175,7 @@ static func _in(entries: Array[Dictionary], node: Node3D) -> bool:
 ## An object's own screen position, **not clamped**: the ring marks where the thing is, and it is the
 ## label that stays in view.
 func _project(node: Node3D, camera: Camera3D, viewport_size: Vector2) -> Vector2:
-	if camera.is_position_behind(node.global_position):
+	if is_behind(camera, node.global_position):
 		# unproject_position mirrors for anything behind the camera, so that case is computed from
 		# the camera's own transform instead.
 		return viewport_size * 0.5 + screen_direction(camera, node.global_position) * OFF_SCREEN_REACH
@@ -345,10 +345,24 @@ static func clamp_to_edge(point: Vector2, size: Vector2, margin: float) -> Vecto
 	return Overlay.border_point(inner, point)
 
 
+## Whether a point is behind the camera, from the **interpolated** transform the frame is drawn with.
+##
+## `Camera3D.is_position_behind` reads `get_global_transform()` — the raw physics transform — while
+## `unproject_position`, called right next to it in [method _project], reads `get_camera_transform()`,
+## which is the *interpolated* one outside the physics frame. With `physics/common/physics_interpolation`
+## on those are two different cameras, and a marker near the screen edge could be classified by one and
+## projected by the other: it would flicker between its on-screen ring and its off-screen edge label,
+## and only sometimes. So the test is made here from the same transform the projection uses.
+static func is_behind(camera: Camera3D, target: Vector3) -> bool:
+	# Camera space looks down -Z, so anything with a positive z is behind the eye.
+	return (camera.get_global_transform_interpolated().affine_inverse() * target).z > 0.0
+
+
 ## Direction in viewport space towards a target, valid even when the target is behind the camera
 ## — which is the case unproject_position gets wrong.
 static func screen_direction(camera: Camera3D, target: Vector3) -> Vector2:
-	var local := camera.global_transform.affine_inverse() * target
+	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type.
+	var local: Vector3 = camera.get_global_transform_interpolated().affine_inverse() * target
 	# Camera space looks down -Z, and screen y grows downwards.
 	var direction := Vector2(local.x, -local.y)
 	if direction.length() < 0.0001:

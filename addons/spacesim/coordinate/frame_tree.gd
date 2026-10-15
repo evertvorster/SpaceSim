@@ -69,6 +69,10 @@ func place_in_frame(subject: Node3D, frame: SpacesimFrame, position: Vector3) ->
 		else:
 			subject.reparent(frame, false)
 	subject.position = position
+	# **A teleport, not motion.** A save says where something is, so without this the interpolator
+	# would render it gliding in from wherever it used to be. Called *after* moving, which is the order
+	# the engine asks for.
+	subject.reset_physics_interpolation()
 
 
 ## Move the observer into `frame` without consulting any rule. Used for the initial placement.
@@ -80,6 +84,10 @@ func enter_frame(frame: SpacesimFrame) -> void:
 		elif observer.get_parent() != frame:
 			# keep_global_transform: the observer does not move when its coordinate space changes.
 			observer.reparent(frame, true)
+			# The pose is preserved, but the interpolator holds a *global* transform across the change
+			# of parent, and `Node.reparent` warns that with `physics/common/physics_interpolation` on
+			# a reparent can be rendered as a glide to the new position.
+			observer.reset_physics_interpolation()
 	active_frame = frame
 	if previous != null and previous != frame:
 		frame_changed.emit(observer, previous, frame)

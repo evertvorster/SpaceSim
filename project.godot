@@ -23,6 +23,16 @@ SpacesimDisplay="*res://addons/spacesim/settings/display.gd"
 
 project/assembly_name="SpaceSim"
 
+[physics]
+
+; The ship is a hand-stepped `Node3D` moved in `_physics_process`, and everything drawn is derived
+; from it in `_process`. Without this the camera transform is quantised to the physics tick and the
+; rendered frame reuses the previous tick's camera — see the vault's Engine Review 2026-10-15.
+; **Anything that reads a transform outside `_physics_process` must read the interpolated one**
+; (`Node3D.get_global_transform_interpolated()`), or it would describe a different frame than the
+; one being drawn.
+common/physics_interpolation=true
+
 [rendering]
 
 lights_and_shadows/use_physical_light_units=true

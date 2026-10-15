@@ -43,4 +43,12 @@ static func place(system: SpacesimSystemScene, ship: Node3D) -> void:
 	system.frame_tree.observer = ship
 	system.system_frame.add_child(ship)
 	ship.global_position = system.ship_start()
+	# A starting position is a placement, not motion: without this the first frames would render the
+	# ship gliding in from wherever the node was created.
+	#
+	# The interpolated transform is read *first* on purpose. `get_global_transform_interpolated`
+	# creates the interpolation pump that the reset then talks to, and the engine asks for it to have
+	# been called at least once before a reset — otherwise a followed node can streak on first sight.
+	ship.get_global_transform_interpolated()
+	ship.reset_physics_interpolation()
 	system.frame_tree.enter_frame(system.system_frame)

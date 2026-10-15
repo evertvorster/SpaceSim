@@ -901,7 +901,13 @@ func update_lod(camera: Camera3D) -> void:
 	if pixel <= 0.0:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
-	var observer := camera.global_position
+	# **The interpolated eye**, because this runs once a drawn frame and `get_global_transform()` is
+	# only accurate to the most recent physics tick. It is the same transform the camera is drawn with,
+	# so the level chosen belongs to the frame on screen — see `game/main.gd::_update_view`.
+	#
+	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type, so `:=`
+	# here is the `INFERENCE_ON_VARIANT` error, and everything derived from the result with it.
+	var observer: Vector3 = camera.get_global_transform_interpolated().origin
 	# **The exposure, read off the camera the frame is being drawn with.** This is the same object
 	# `SpacesimExposure` mutates, so there is no second source for it and nothing to keep in step — but
 	# Godot applies it per *path* rather than to the frame, so an unshaded material has to apply it
@@ -1071,7 +1077,7 @@ func _place_point(
 	# points back at the eye, and its own scale sizes it, so nothing has to be kept by hand.
 	var size := 2.0 * distance * tan(maxf(pixel, angular))
 	body.point.global_transform = Transform3D(
-		camera.global_transform.basis.scaled(Vector3.ONE * size), body.node.global_position
+		camera.get_global_transform_interpolated().basis.scaled(Vector3.ONE * size), body.node.global_position
 	)
 	var material := body.point.material_override as StandardMaterial3D
 	if material == null:

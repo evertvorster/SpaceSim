@@ -327,11 +327,24 @@ func _physics_process(delta: float) -> void:
 ##
 ## Nothing here feeds the simulation, which is what makes the split safe: the ship has already been
 ## stepped and the frame tree already evaluated by the time this runs.
+##
+## **Every transform read here is the INTERPOLATED one**, because `physics/common/physics_interpolation`
+## is on and this is not the physics frame. `get_global_transform()` is only accurate to the most
+## recent physics tick, so deriving the sky, the LOD or the markers from it would describe a different
+## frame than the one being drawn — a lag no interpolation could undo. Godot's own note on
+## `get_global_transform_interpolated` names this exact case: "frame-based operations that take place
+## in `_process` … examples include `Camera3D`s focusing on a node".
+##
+## `Camera3D`'s *methods* already do this for us — `unproject_position` reads `get_camera_transform()`,
+## which returns the interpolated transform outside the physics frame — so only the direct
+## `global_transform` reads need saying out loud.
 func _update_view(delta: float) -> void:
-	_system.aim_sun_at(_ship.global_position)
+	var eye: Transform3D = _camera.get_global_transform_interpolated()
+	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
+	_system.aim_sun_at(observer)
 	# The sky follows the **camera**, not the ship: it is the eye that scattering is seen from, and
 	# nothing about it depends on which body the player is attached to.
-	_system.update_atmospheres(_camera.global_position)
+	_system.update_atmospheres(eye.origin)
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.
@@ -348,7 +361,7 @@ func _update_view(delta: float) -> void:
 	if view_size.y > 0.0:
 		tan_half.x = tan_y * view_size.x / view_size.y
 	var luminance := _system.view_luminance_at(
-		_ship.global_position, -_camera.global_transform.basis.z, tan_half
+		observer, -eye.basis.z, tan_half
 	)
 	# The dark-adapted value is a **ceiling, not a floor**: nothing can adapt you better than darkness,
 	# and a bright object can only stop you down from there. That is also what keeps the sky's brightness
