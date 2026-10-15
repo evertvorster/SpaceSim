@@ -10,6 +10,12 @@ extends SceneTree
 var _frames := 0
 var _target := 90
 
+## Frames of the timed window, and its total. The window starts after the placement and a settle, so it
+## measures the view that was asked for rather than the save's own position or the first frames' setup.
+const SETTLE := 10
+var _timed := 0
+var _elapsed := 0.0
+
 
 func _initialize() -> void:
 	if OS.has_environment("SHOT_FRAMES"):
@@ -23,13 +29,19 @@ func _initialize() -> void:
 	get_root().add_child(scene)
 
 
-func _process(_delta: float) -> bool:
+func _process(delta: float) -> bool:
 	_frames += 1
 	if _frames == _target / 2 and OS.has_environment("SHOT_BODY"):
 		_place_above(OS.get_environment("SHOT_BODY"), float(OS.get_environment("SHOT_ALT")))
 		return false
+	if _frames > _target / 2 + SETTLE and _frames <= _target:
+		_timed += 1
+		_elapsed += delta
 	if _frames < _target:
 		return false
+	if OS.has_environment("SHOT_PROFILE"):
+		_report_profile()
+		return true
 	var path := "/tmp/spacesim_shot.png"
 	if OS.has_environment("SHOT_PATH"):
 		path = OS.get_environment("SHOT_PATH")
@@ -41,6 +53,47 @@ func _process(_delta: float) -> bool:
 	print("SHOT: frame ", _frames, " -> ", path, "  (", image.get_width(), "x", image.get_height(),
 		", error ", error, ")")
 	return true
+
+
+## The frame cost of a view, as numbers. `SHOT_PROFILE=1` reports this **instead of** saving a picture
+## — the same placement and the same aim, so the two modes measure the same view.
+##
+## **Why not read the frame rate off the picture**, which the HUD already draws: `Engine.get_frames_per_second`
+## is a smoothed average that includes startup, and a *rate* alone cannot tell a geometry cost from an
+## overdraw one. The monitors below can — draw calls and primitives say how much was submitted, and
+## `TIME_PROCESS` says how much of that was the main thread's own work rather than the GPU's.
+##
+## `TIME_PROCESS` is in **seconds**; the video memory in **bytes**.
+func _report_profile() -> void:
+	var mean_ms := 1000.0 * _elapsed / float(maxi(_timed, 1))
+	print("PROFILE: %s" % _view_name())
+	print("PROFILE:   %-34s %.2f ms/frame over %d frames  (%.1f fps)" % [
+		"mean frame", mean_ms, _timed, 1000.0 / maxf(mean_ms, 0.001)
+	])
+	print("PROFILE:   %-34s %.2f ms" % ["TIME_PROCESS",
+		1000.0 * Performance.get_monitor(Performance.TIME_PROCESS)])
+	print("PROFILE:   %-34s %.2f ms" % ["TIME_PHYSICS_PROCESS",
+		1000.0 * Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)])
+	print("PROFILE:   %-34s %d" % ["RENDER_TOTAL_DRAW_CALLS_IN_FRAME",
+		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))])
+	print("PROFILE:   %-34s %d" % ["RENDER_TOTAL_PRIMITIVES_IN_FRAME",
+		int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))])
+	print("PROFILE:   %-34s %d" % ["RENDER_TOTAL_OBJECTS_IN_FRAME",
+		int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))])
+	print("PROFILE:   %-34s %.1f MB" % ["RENDER_VIDEO_MEM_USED",
+		Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0])
+
+
+## What was asked for, so a run of these can be told apart in a log without cross-referencing.
+func _view_name() -> String:
+	var body := OS.get_environment("SHOT_BODY") if OS.has_environment("SHOT_BODY") else "(the save's own place)"
+	var altitude := OS.get_environment("SHOT_ALT") if OS.has_environment("SHOT_ALT") else "-"
+	var aim := "default"
+	if OS.has_environment("SHOT_PITCH"):
+		aim = "pitch=%s" % OS.get_environment("SHOT_PITCH")
+	elif OS.has_environment("SHOT_AIM"):
+		aim = OS.get_environment("SHOT_AIM")
+	return "%s  alt=%s  aim=%s" % [body, altitude, aim]
 
 
 ## Put the ship where a test wants it: on the side of the start body that faces the star, at a chosen
