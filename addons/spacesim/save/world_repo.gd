@@ -36,10 +36,28 @@ var root: String
 
 var _git: SpacesimGit
 
+## `current_history()` is asked for on **every HUD update**, and answering it costs a git subprocess —
+## measured at ~3.5 ms, which at sixty ticks a second is a fifth of the main thread spent printing a
+## branch name that changes once a session. So it is cached here.
+##
+## **The cache is cleared by every git command this repository runs**, through [method _run], rather
+## than by a list of operations that are supposed to move HEAD. A list would have to be kept in step
+## with the code and would go stale silently — the failure being a HUD that names the wrong history
+## with nothing to notice it by. One extra read after a save costs nothing; this cannot drift.
+var _current_history := ""
+var _current_history_read := false
+
 
 func _init(repo_root: String) -> void:
 	root = repo_root
 	_git = SpacesimGit.new(repo_root)
+
+
+## Every git command this repository runs goes through here, so that nothing can move HEAD behind the
+## cache's back. See [member _current_history_read].
+func _run(arguments: Array) -> Dictionary:
+	_current_history_read = false
+	return _git.run(arguments)
 
 
 ## The repository for a world, under the XDG data directory.
@@ -58,7 +76,7 @@ func create(world_reference: Dictionary) -> Dictionary:
 		return {"ok": true, "reason": ""}
 	if not SpacesimXdg.ensure_directory(root):
 		return {"ok": false, "reason": "cannot create %s" % root}
-	var initialised := _git.run(["init", "-q", "-b", TRUNK])
+	var initialised := _run(["init", "-q", "-b", TRUNK])
 	if not initialised["ok"]:
 		return {"ok": false, "reason": "git could not make a repository here"}
 	write_json(REFERENCE_FILE, world_reference)
@@ -119,10 +137,10 @@ func save(files: Dictionary, label: String) -> Dictionary:
 func commit(label: String) -> Dictionary:
 	if _git.is_clean():
 		return {"ok": false, "reason": "nothing has changed since the last save"}
-	var staged := _git.run(["add", "-A"])
+	var staged := _run(["add", "-A"])
 	if not staged["ok"]:
 		return {"ok": false, "reason": "git could not stage the working tree"}
-	var committed := _git.run(["commit", "-q", "-m", label])
+	var committed := _run(["commit", "-q", "-m", label])
 	if not committed["ok"]:
 		return {"ok": false, "reason": "git could not commit"}
 	return {"ok": true, "reason": ""}
@@ -131,7 +149,7 @@ func commit(label: String) -> Dictionary:
 ## A save is a commit, so anything uncommitted was never a save — most likely a crash between
 ## writing the files and committing. Called at startup.
 func discard_working_tree() -> bool:
-	return _git.run(["reset", "--hard", "HEAD"])["ok"]
+	return _run(["reset", "--hard", "HEAD"])["ok"]
 
 
 # --- saves ---------------------------------------------------------------------------------------
@@ -141,20 +159,20 @@ func discard_working_tree() -> bool:
 ## Takes the history rather than always using the current one, because the browser shows the saves
 ## of the history you have *selected* — which is not necessarily the one being played.
 func saves(history := "HEAD") -> Array:
-	return _parse_log(_git.run(["log", "--format=%h|%ct|%s", history, "--", STATE_FILE]))
+	return _parse_log(_run(["log", "--format=%h|%ct|%s", history, "--", STATE_FILE]))
 
 
 ## The saves that loading `hash` would remove from that history.
 func affected_saves(hash: String, history := "HEAD") -> Array:
 	return _parse_log(
-		_git.run(["log", "--format=%h|%ct|%s", "%s..%s" % [hash, history], "--", STATE_FILE])
+		_run(["log", "--format=%h|%ct|%s", "%s..%s" % [hash, history], "--", STATE_FILE])
 	)
 
 
 ## A file as it stands in a save — read without touching the working tree, which is what makes
 ## browsing free and only loading cost anything.
 func preview(hash: String, path := STATE_FILE) -> String:
-	var result := _git.run(["show", "%s:%s" % [hash, path]])
+	var result := _run(["show", "%s:%s" % [hash, path]])
 	return _git.text(result) if result["ok"] else ""
 
 
@@ -163,7 +181,7 @@ func preview(hash: String, path := STATE_FILE) -> String:
 ## Abbreviated, like the hashes in [method saves] — the two are compared, so they have to be written
 ## the same way.
 func tip() -> String:
-	var result := _git.run(["rev-parse", "--short", "HEAD"])
+	var result := _run(["rev-parse", "--short", "HEAD"])
 	return _git.text(result).strip_edges() if result["ok"] else ""
 
 
@@ -174,7 +192,7 @@ func tip() -> String:
 ## being continued from arrives in memory, not by checking anything out — reading a save costs
 ## nothing, and this is only run when one is *saved* from.
 func rewind_to(hash: String) -> Dictionary:
-	var moved := _git.run(["reset", "--soft", hash])
+	var moved := _run(["reset", "--soft", hash])
 	if not moved["ok"]:
 		return {"ok": false, "reason": "git could not move the history back"}
 	return {"ok": true, "reason": ""}
@@ -183,13 +201,16 @@ func rewind_to(hash: String) -> Dictionary:
 # --- histories -----------------------------------------------------------------------------------
 
 func current_history() -> String:
-	var result := _git.run(["rev-parse", "--abbrev-ref", "HEAD"])
-	return _git.text(result).strip_edges() if result["ok"] else ""
+	if not _current_history_read:
+		var result := _run(["rev-parse", "--abbrev-ref", "HEAD"])
+		_current_history = _git.text(result).strip_edges() if result["ok"] else ""
+		_current_history_read = true
+	return _current_history
 
 
 ## `{"name", "time", "current"}`, newest first.
 func histories() -> Array:
-	var result := _git.run(["branch", "--format=%(refname:short)|%(committerdate:unix)", "--list"])
+	var result := _run(["branch", "--format=%(refname:short)|%(committerdate:unix)", "--list"])
 	var list: Array = []
 	if not result["ok"]:
 		return list
@@ -211,7 +232,7 @@ func histories() -> Array:
 
 
 func has_history(name: String) -> bool:
-	return _git.run(["show-ref", "--verify", "--quiet", "refs/heads/%s" % name])["ok"]
+	return _run(["show-ref", "--verify", "--quiet", "refs/heads/%s" % name])["ok"]
 
 
 ## Start a history from the trunk. The name is slugged, and checked for both validity and
@@ -223,8 +244,8 @@ func create_history(name: String) -> Dictionary:
 		return {"ok": false, "reason": rejected}
 	# Drop anything uncommitted first: a dirty tree makes git refuse the switch, and a new story
 	# does not want the old one's leftovers anyway.
-	_git.run(["reset", "--hard"])
-	var created := _git.run(["checkout", "-q", "-b", slug, TRUNK])
+	_run(["reset", "--hard"])
+	var created := _run(["checkout", "-q", "-b", slug, TRUNK])
 	if not created["ok"]:
 		return {"ok": false, "reason": "git could not start the history"}
 	return {"ok": true, "reason": "", "name": slug}
@@ -235,7 +256,7 @@ func rename_history(from: String, to: String) -> Dictionary:
 	var rejected := _reject_name(slug, from)
 	if not rejected.is_empty():
 		return {"ok": false, "reason": rejected}
-	var renamed := _git.run(["branch", "-m", from, slug])
+	var renamed := _run(["branch", "-m", from, slug])
 	if not renamed["ok"]:
 		return {"ok": false, "reason": "git could not rename it"}
 	return {"ok": true, "reason": "", "name": slug}
@@ -248,7 +269,7 @@ func delete_history(name: String) -> Dictionary:
 		return {"ok": false, "reason": "the trunk is what a new story starts from"}
 	if name == current_history():
 		return {"ok": false, "reason": "you are playing this history — switch to another first"}
-	var deleted := _git.run(["branch", "-D", name])
+	var deleted := _run(["branch", "-D", name])
 	if not deleted["ok"]:
 		return {"ok": false, "reason": "git could not delete it"}
 	return {"ok": true, "reason": ""}
@@ -261,8 +282,8 @@ func switch_history(name: String) -> Dictionary:
 		return {"ok": true, "reason": ""}
 	if name == TRUNK:
 		return {"ok": false, "reason": "the trunk is the world itself, not a playthrough"}
-	_git.run(["reset", "--hard"])
-	var switched := _git.run(["checkout", "-q", name])
+	_run(["reset", "--hard"])
+	var switched := _run(["checkout", "-q", name])
 	if not switched["ok"]:
 		return {"ok": false, "reason": "git could not switch to it"}
 	return {"ok": true, "reason": ""}
