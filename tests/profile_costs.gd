@@ -234,10 +234,8 @@ func _run() -> void:
 		main._system.view_luminance_at(observer, -eye.basis.z, tan_half)
 	rows.append(["  of which: view_luminance_at", _per_call(piece, decomposition_calls), decomposition_calls])
 
-	piece = Time.get_ticks_usec()
-	for _i in decomposition_calls:
-		main._exposure.update_to(1.0, 1.0 / 60.0)
-	rows.append(["  of which: exposure.update_to", _per_call(piece, decomposition_calls), decomposition_calls])
+	# `exposure.update_to` used to be timed here. It is gone: the adaptation is `SpacesimExposurePass`'s
+	# now, on the GPU, so there is no CPU-side exposure call left in the frame to measure.
 
 	piece = Time.get_ticks_usec()
 	for _i in decomposition_calls:

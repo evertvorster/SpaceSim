@@ -41,11 +41,10 @@ func run(h, root: Node) -> void:
 ## must be 1.0 or the two multiply.
 func _test_the_frame_exposure(h) -> void:
 	var exposure := SpacesimExposure.new()
-	exposure.snap_to(1000.0)
+	h.check(exposure.attributes != null, "the camera's attributes always exist")
 	h.check(
-		exposure.attributes != null and exposure.attributes.exposure_multiplier > 1.0,
-		"a light metre still drives the camera's multiplier the old way (%s)"
-			% exposure.attributes.exposure_multiplier
+		not exposure.attributes.auto_exposure_enabled,
+		"and Godot's own auto-exposure is off: the frame average is not allowed to set this"
 	)
 	exposure.identity()
 	h.check(
@@ -140,14 +139,12 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check(SpacesimExposure.target_multiplier(0.0) == SpacesimExposure.MAX_MULTIPLIER,
 		"and with no light at all it settles at the clamp rather than flying off")
 
-	# Following a change is gradual: what you notice about a night side is that it stays dark, and a
-	# hard cut when flying between planets looks like a bug.
-	var exposure := SpacesimExposure.new()
-	exposure.snap_to(dim)
-	h.check_near(exposure.multiplier(), at_neptune, "a snap lands exactly on the target", 5.0)
-	exposure.update(SpacesimStarLight.illuminance(luminosity, AU), 0.016)
-	h.check(exposure.multiplier() < at_neptune and exposure.multiplier() > at_one_au,
-		"while one 16 ms step only moves part of the way (%.1f)" % exposure.multiplier())
+	# **The adaptation is not checked here any more.** It was `SpacesimExposure.snap_to`/`update`, driving
+	# the camera's multiplier from the light at the *observer*; `SpacesimExposurePass` does that work against
+	# the rendered frame instead, and **the suite cannot see it**: `tests/run.sh` runs `--headless`, where
+	# there is no `RenderingDevice` and nothing is drawn. What is checkable headlessly is the arithmetic
+	# (`tests/test_meter.gd`), this module's arithmetic above, and the wiring below; the *behaviour* needs a
+	# render, and `tests/probe_frame_exposure.gd` is that instrument.
 
 	# The dark-adapted multiplier follows the FIELD OF VIEW, because a star's rendered radiance goes as
 	# `(height / tan(half vfov))^2` and a constant derived at one field is wrong at every other. Evert's

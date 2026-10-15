@@ -841,13 +841,6 @@ func update_lod(camera: Camera3D) -> void:
 	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type, so `:=`
 	# here is the `INFERENCE_ON_VARIANT` error, and everything derived from the result with it.
 	var observer: Vector3 = camera.get_global_transform_interpolated().origin
-	# **The exposure, read off the camera the frame is being drawn with.** This is the same object
-	# `SpacesimExposure` mutates, so there is no second source for it and nothing to keep in step — but
-	# Godot applies it per *path* rather than to the frame, so an unshaded material has to apply it
-	# itself. See `_place_point`.
-	var exposure := 1.0
-	if camera.attributes != null:
-		exposure = camera.attributes.exposure_multiplier
 	var total := 0
 	for body in bodies:
 		if body.node == null:
@@ -866,7 +859,7 @@ func update_lod(camera: Camera3D) -> void:
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
-			_place_point(body, observer, energy, distance, pixel, screen, exposure, camera)
+			_place_point(body, observer, energy, distance, pixel, screen, camera)
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 			# A point still has a shell to price — an air so thin it is not drawn costs nothing, and one
 			# whose ring survives does, which is rare but real at a body just under the tier.
@@ -990,7 +983,7 @@ func _shell_is_visible(body: SpacesimSceneBody, observer: Vector3, pixel: float)
 ## to be settled first. Two renders — one body at 0.8 px and the same body at 0.4 px — would measure it.
 func _place_point(
 	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float,
-	screen: float, exposure: float, camera: Camera3D
+	screen: float, camera: Camera3D
 ) -> void:
 	# **The quad is oriented here rather than by the material, and that is deliberate** — a billboarded
 	# material rewrites `MODELVIEW_MATRIX` with `INV_VIEW_MATRIX`, which is the transform chain the
@@ -1015,7 +1008,13 @@ func _place_point(
 	# full-brightness dot: without it a body at 0.077 px is some 170x brighter than the law says.
 	var fade := minf(1.0, PI * screen * screen)
 	var radiance := body_luminance(body, observer, star_body.node.global_position) * fade
-	material.albedo_color = SpacesimBodyRenderer.point_colour(body, radiance * exposure)
+	# **No exposure here.** This used to be the one place in the 3D pass that applied the camera's exposure
+	# by hand, because an `unshaded` material receives none of Godot's per-path baking and a splat is the
+	# only such thing that is not the star's own disc. `SpacesimExposurePass` scales the *finished frame*
+	# now, which covers this and the disc together and by construction — applying it here as well would be
+	# a second application, and the two together are why the splat's brightness used to need reconciling
+	# against everything else.
+	material.albedo_color = SpacesimBodyRenderer.point_colour(body, radiance)
 
 
 ## **What the eye sees of a body**, in lux/sr: the light falling on it, the fraction it reflects, and the

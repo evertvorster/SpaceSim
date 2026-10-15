@@ -145,7 +145,6 @@ static func dark_adapted_multiplier(fov_degrees: float) -> float:
 	return DARK_ADAPTED_MULTIPLIER * scale * scale
 
 var attributes: CameraAttributesPhysical
-var _multiplier := 1.0
 
 
 func _init() -> void:
@@ -153,7 +152,8 @@ func _init() -> void:
 	# **Auto-exposure off.** Leaving it on would let the engine override the number below with its
 	# frame average, which is the whole failure this replaces.
 	attributes.auto_exposure_enabled = false
-	attributes.exposure_multiplier = _multiplier
+	# **Identity.** The frame's exposure is applied by `SpacesimExposurePass` — see `identity()`.
+	attributes.exposure_multiplier = 1.0
 
 
 ## The multiplier that puts a lit surface at middle grey, given the illuminance at the observer.
@@ -162,6 +162,12 @@ func _init() -> void:
 ## to the reciprocal of the illuminance, and `REFERENCE_LUX` is the light at which no correction is
 ## needed. At one au (128,000 lux) this gives 0.78; at Neptune (141 lux) it gives 709 — a little over
 ## nine stops, which is the honest difference between the two places.
+##
+## **This no longer drives the frame.** `SpacesimExposurePass` meters the rendered pixels and applies one
+## number to them, on Evert's instruction that the EV *"should not be location aware at all, only adjust
+## to what is on the screen"* — so what is kept here is the statement of what the currency means, which
+## the light and the sky are judged against and which the tests still work from. The frame's own arithmetic
+## is `SpacesimExposureMeter`'s.
 static func target_multiplier(lux: float) -> float:
 	if lux <= 0.0:
 		return MAX_MULTIPLIER
@@ -180,18 +186,7 @@ static func target_multiplier_for_luminance(lux_per_sr: float) -> float:
 	return target_multiplier(lux_per_sr * PI)
 
 
-## Follow the light. `delta` is seconds since the last update.
-func update(lux: float, delta: float) -> void:
-	update_to(target_multiplier(lux), delta)
-
-
-## Settle on the light at once — for a jump or an arrival, where a transition would be wrong.
-func snap_to(lux: float) -> void:
-	_multiplier = target_multiplier(lux)
-	attributes.exposure_multiplier = _multiplier
-
-
-## Put the camera's exposure at **identity**, for the frame-wide pass that now applies it.
+## Put the camera's exposure at **identity**, because `SpacesimExposurePass` applies it frame-wide.
 ##
 ## **The attributes must stay attached.** Identity is `CameraAttributesPhysical` with the multiplier at
 ## 1.0 and *never* `attributes = null`: measured 2026-10-15, with no attributes the engine skips the
@@ -202,16 +197,13 @@ func snap_to(lux: float) -> void:
 ## **And `tonemap_exposure` must stay at 1.0** while a pass does the multiply: the glow applies the
 ## exposure itself (`copy.glsl:195`), so an exposure in both places is applied twice.
 func identity() -> void:
-	_multiplier = 1.0
 	attributes.exposure_multiplier = 1.0
 
 
-## Follow a target MULTIPLIER rather than a light level, for the case where the light level is not
-## what the eye is responding to. `update()` is the special case of this.
-func update_to(target: float, delta: float) -> void:
-	var clamped := clampf(target, MIN_MULTIPLIER, MAX_MULTIPLIER)
-	_multiplier = lerpf(_multiplier, clamped, clampf(ADAPTATION_RATE * delta, 0.0, 1.0))
-	attributes.exposure_multiplier = _multiplier
+## **The adaptation is the pass's now.** `update`, `update_to` and `snap_to` lived here and drove the
+## camera's multiplier from the light at the *observer*; `SpacesimExposurePass` does the same work against
+## the rendered frame, on the GPU, with `ADAPTATION_RATE` below as its rate and this window as its bounds —
+## so that the exposure and the frame it is applied to cannot disagree.
 
 
 ## Set the ambient light from the star field's own illuminance, in lux.
@@ -234,7 +226,7 @@ static func set_ambient_illuminance(environment: Environment, lux: float) -> voi
 
 
 func multiplier() -> float:
-	return _multiplier
+	return attributes.exposure_multiplier
 
 
 ## The tone curve, the ambient and the star's glare.
