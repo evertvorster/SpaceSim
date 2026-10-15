@@ -18,9 +18,14 @@ extends Node
 ## Registered as the `SpacesimSettings` autoload. Tests use their own instance with their own
 ## path, so the suite never touches the real file.
 
-## A setting is either the player's business or the world's. World settings come from the world's
-## own file, travel with the world as content, and are never written to the player's config.
-enum Scope { PLAYER, WORLD }
+## A setting is **the player's business**: the file is theirs, and it never travels with the world.
+## Content that *should* travel — the frame bands, the shell altitudes — is authored on the resource
+## instead, in `SpacesimFraming`, which is the one source for it.
+##
+## The `scope` field still declares whose a setting is. **It has one value today, deliberately**: a
+## second scope is then a declaration rather than a refactor, and a reader can see that the single
+## value is a decision and not something left over.
+enum Scope { PLAYER }
 
 const BindingsScript := preload("res://addons/spacesim/settings/bindings.gd")
 
@@ -116,12 +121,6 @@ const REGISTRY := {
 	# The selected target's own colour, against the one colour everything else is drawn in. A colour
 	# rather than a flag so the target can be made to stand out against whatever it is seen against.
 	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER},
-	"frames.system_band": {"default": Vector2(1.0e4, 1.0e11), "scope": Scope.WORLD},
-	"frames.atmosphere_band": {"default": Vector2(2.0e3, 4.0e5), "scope": Scope.WORLD},
-	"frames.surface_band": {"default": Vector2(1.0e2, 5.0e3), "scope": Scope.WORLD},
-	"frames.atmosphere_altitude": {"default": 100000.0, "scope": Scope.WORLD, "min": 0.0},
-	"frames.surface_altitude": {"default": 2000.0, "scope": Scope.WORLD, "min": 0.0},
-	"frames.pad_size": {"default": 4000.0, "scope": Scope.WORLD, "min": 1.0},
 	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.throttle_up": {"default": "W", "scope": Scope.PLAYER, "validator": "key_binding"},
@@ -138,7 +137,6 @@ const REGISTRY := {
 signal changed(key: String, value: Variant)
 
 var _file := ConfigFile.new()
-var _world_values: Dictionary = {}
 var _path := ""
 var _dirty := false
 
@@ -182,7 +180,7 @@ static func default_of(key: String) -> Variant:
 	return row.get("default", null)
 
 
-## The value that stands. Defaults unless the world or the player has said otherwise.
+## The value that stands: the default, unless the player's file says otherwise.
 func get_value(key: String) -> Variant:
 	var row: Dictionary = REGISTRY.get(key, {})
 	if row.is_empty():
@@ -190,11 +188,6 @@ func get_value(key: String) -> Variant:
 		return null
 
 	var fallback: Variant = row["default"]
-	if int(row["scope"]) == Scope.WORLD:
-		if _world_values.has(key):
-			return _sanitise(row, _world_values[key])
-		return fallback
-
 	var parts := _split(key)
 	if not _file.has_section_key(parts[0], parts[1]):
 		return fallback
@@ -209,9 +202,6 @@ func set_value(key: String, value: Variant, save_now := false) -> bool:
 	var row: Dictionary = REGISTRY.get(key, {})
 	if row.is_empty():
 		push_warning("settings: '%s' is not a declared setting" % key)
-		return false
-	if int(row["scope"]) != Scope.PLAYER:
-		push_warning("settings: '%s' is not player-settable" % key)
 		return false
 
 	var coerced: Variant = _coerce(value, row["default"])
@@ -236,25 +226,6 @@ func set_value(key: String, value: Variant, save_now := false) -> bool:
 
 func reset_value(key: String, save_now := false) -> bool:
 	return set_value(key, default_of(key), save_now)
-
-
-## Adopt values from the world's own file. World settings travel with the world as content, so
-## they are never written here.
-func set_world_values(values: Dictionary) -> void:
-	for key in values:
-		var row: Dictionary = REGISTRY.get(key, {})
-		if row.is_empty():
-			push_warning("settings: world sets undeclared '%s'; ignored" % key)
-			continue
-		if int(row["scope"]) != Scope.WORLD:
-			push_warning("settings: world may not set '%s'" % key)
-			continue
-		var coerced: Variant = _coerce(values[key], row["default"])
-		if not _acceptable_row(row, values[key]):
-			push_warning("settings: world value for %s is unusable; ignored" % key)
-			continue
-		_world_values[key] = coerced
-		changed.emit(key, get_value(key))
 
 
 ## Write the file, if there is anything to write. Never called by get_value: reading a setting

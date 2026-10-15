@@ -18,7 +18,6 @@ func run(h, root: Node) -> void:
 	_test_unreadable_values_fall_back(h)
 	_test_coercion(h)
 	_test_unknown_keys_survive(h)
-	_test_world_scope_never_reaches_the_file(h)
 	_test_xdg_fallbacks(h)
 	Fixture.clean()
 	_fixture.release()
@@ -77,7 +76,7 @@ func _test_validation(h) -> void:
 		"and the value that stood is unchanged"
 	)
 	h.check(not settings.set_value("nobody.declared_this", 1.0), "an undeclared key is refused")
-	h.check(not settings.set_value("frames.pad_size", 10.0), "a world setting is not player-settable")
+
 
 
 func _test_coercion(h) -> void:
@@ -108,16 +107,6 @@ func _test_unknown_keys_survive(h) -> void:
 		"a key this build does not know about is preserved, not dropped"
 	)
 
-
-func _test_world_scope_never_reaches_the_file(h) -> void:
-	Fixture.clean()
-	var settings := _fixture.open()
-	settings.set_world_values({"frames.pad_size": 8000.0})
-	h.check(settings.get_value("frames.pad_size") == 8000.0, "the world's value takes effect")
-	settings.set_value("camera.fov", 90.0)
-	settings.save(true)
-	var text := FileAccess.get_file_as_string(Fixture.TEST_PATH)
-	h.check(not text.contains("pad_size"), "a world value is never written to the player's file")
 
 
 func _test_xdg_fallbacks(h) -> void:

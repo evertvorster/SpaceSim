@@ -185,7 +185,7 @@ lives in `SpacesimSystemBody`; a resource is cached and shared, so the nodes liv
 | `shell_level: int` | the icosphere level the **air shell** is drawn at — its own, not the body's, because a shell is judged on its own metric and a looser budget |
 | `point: MeshInstance3D` | the **point of light** this body becomes once it is too small to be a disc: a camera-facing quad sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as geometry |
 | `atmosphere_mesh: MeshInstance3D` | built — the air, on its own unit sphere **scaled on the node** to `radius + sky_top`; null when the body has no atmosphere. The mesh is shared, so the body's size is the transform |
-| `sky_top: float` | **how far above the surface this body's air is worth drawing**, metres — derived from the air's own scale height, floored by `frames.atmosphere_altitude`. The camera's far plane needs it (`sky_reach()`); zero for a body with no air |
+| `sky_top: float` | **how far above the surface this body's air is worth drawing**, metres — derived from the air's own scale height, floored by `SpacesimFraming.atmosphere_altitude`. The camera's far plane needs it (`sky_reach()`); zero for a body with no air |
 | `atmosphere`, `surface: SpacesimFrame` | built when landable, null otherwise |
 | `scale_body: SpacesimScaleBody` | built |
 | `static from_content(content) -> SpacesimSceneBody` | |
@@ -597,7 +597,7 @@ reads from a distance; if the disk haze is ever wanted it needs a second pass ov
 air's own `kT/(m-bar g)`, because one altitude for the whole system is right for exactly one body: a
 fixed 100 km is **twelve** scale heights over Earth and **four** over Jupiter, where the air is still
 2% of surface density at the top and the shell would end in visible haze. It is then floored by
-`frames.atmosphere_altitude`, so a shell can never be shorter than the atmosphere frame the game puts
+`SpacesimFraming.atmosphere_altitude`, so a shell can never be shorter than the atmosphere frame the game puts
 the player in — 100 km is a *gameplay* convention and stays one.
 
 Printed from the running code, and asserted in `test_render.gd`:
@@ -807,17 +807,24 @@ holds that end.
 
 ### Scope
 
-A setting is either the player's business or the world's. **The player half is what is in use.**
-World settings (`frames.*`) were designed to be read from the world's own file, travel with the world
-as content, and **never be written to the player's file** — a world value cannot be set by the player,
-and a player value cannot come from the world.
+**Every setting is the player's.** The file is theirs, it is machine read and written, and it never
+travels with the world.
 
-> **Wired but unused, 2026-10-15.** The mechanism is implemented (`Scope.WORLD`, `set_world_values`)
-> and has **no production caller** — only `test_settings.gd` exercises it. The six `frames.*` keys are
-> likewise **read by nothing**: the live bands and thresholds come from `SpacesimFraming` on the
-> **content resource** (`systems/*.tres`), which is what `SpacesimSystemScene.build()` reads.
-> `frames.system_band`'s default has already drifted from `SpacesimFraming`'s. Either wire the world
-> file up or remove the keys — see `Source Review/settings.gd.md` in the project notes.
+Content that *should* travel — the frame bands, the shell altitudes, the pad size — is authored on the
+**content resource** (`systems/*.tres`) instead. `SpacesimFraming` carries those numbers and
+`SpacesimSystemScene.build()` reads it, so it is the one source for them.
+
+> **Changed 2026-10-15.** There used to be a second scope. Six `frames.*` keys were declared
+> `Scope.WORLD` — meant to be read from the world's own file, travelling with the world as content, and
+> never written to the player's — and **nothing read them.** The bands and thresholds come from
+> `SpacesimFraming` on the resource, and `frames.system_band`'s default had already drifted from it
+> (`1e11` against `1e13`). The keys are gone, and the world-scope machinery went with them: with those
+> keys removed the scope had **no members**, so it could not do anything, and a capability that cannot
+> be exercised is not a capability. **Two copies of one number was the bug this closed** — the original
+> finding is `Source Review/framing.gd.md` in the project notes.
+
+The registry's `scope` field remains, with one value. That is deliberate: it says *whose* a setting is,
+so a second scope would be a declaration rather than a refactor.
 
 ### Hot by construction
 
@@ -847,8 +854,10 @@ on change (`camera.fov`, the marker pool and font size).
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
 | `markers.selected_color` | player | `Color(1.0, 0.9, 0.3)` — the one thing on the overlay that stands out, so it can be made to stand out against what it is seen against |
-| `frames.system_band` / `_atmosphere_band` / `_surface_band` | world | `Vector2(1e4, 1e11)` and so on — **not read by anything**; see § Scope. `SpacesimFraming` on the content resource is the live source |
-| `frames.atmosphere_altitude` / `_surface_altitude` / `_pad_size` | world | 100000.0 / 2000.0 / 4000.0 — likewise unused |
+
+There were six `frames.*` keys here until 2026-10-15. They were **read by nothing** and duplicated
+`SpacesimFraming` on the content resource, which is the live source for every one of those numbers —
+see § Scope. **This is the current, complete list.**
 
 ### Bindings
 
@@ -942,9 +951,8 @@ edit directly.
 | `changed(key, value)` | emitted after a value changes |
 | `open(path := "")` | load; an empty path means the XDG location |
 | `get_value(key) -> Variant` | the value that stands |
-| `set_value(key, value, save_now := false) -> bool` | player settings only; false if refused |
+| `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `reset_value(key, save_now := false) -> bool` | back to the default, erasing the key |
-| `set_world_values(values)` | adopt the world's settings; never written to the player's file |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |

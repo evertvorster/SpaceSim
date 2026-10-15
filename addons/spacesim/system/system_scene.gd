@@ -580,7 +580,7 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	# it is a property of the air -- `SHELL_SCALE_HEIGHTS` scale heights of it -- and one authored
 	# altitude for the whole system is right for exactly one body: 100 km is twelve scale heights over
 	# Earth and four over Jupiter, where the air is still 2% of surface density at the top. Floored
-	# because the atmosphere frame begins at `frames.atmosphere_altitude`: a shorter shell would leave
+	# because the atmosphere frame begins at `SpacesimFraming.atmosphere_altitude`: a shorter shell would leave
 	# a band where the player is *in the atmosphere* with no sky to draw.
 	var shell_reach := SpacesimAtmosphereModel.shell_reach(
 		body.content.atmosphere, _materials(), temperature,

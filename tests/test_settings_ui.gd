@@ -177,6 +177,5 @@ func _test_bad_values_are_not_staged(h) -> void:
 	var settings := _fixture.open()
 	var edit = Edit.new(settings)
 	h.check(not edit.stage("camera.fov", 10000.0), "an out-of-range edit is not staged")
-	h.check(not edit.stage("frames.pad_size", 1.0), "a world setting is not staged")
 	h.check(not edit.stage("bindings.throttle_up", "Nonsense"), "an unparseable binding is not staged")
 	h.check(not edit.has_changes(), "so there is nothing to apply")
