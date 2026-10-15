@@ -191,6 +191,21 @@ func snap_to(lux: float) -> void:
 	attributes.exposure_multiplier = _multiplier
 
 
+## Put the camera's exposure at **identity**, for the frame-wide pass that now applies it.
+##
+## **The attributes must stay attached.** Identity is `CameraAttributesPhysical` with the multiplier at
+## 1.0 and *never* `attributes = null`: measured 2026-10-15, with no attributes the engine skips the
+## factor that implements Godot's "100,000 lux renders a white surface as 1.0" convention
+## (`light_storage.cpp:764` applies it only `if (p_render_data->camera_attributes.is_valid())`), and the
+## scene renders **about 95× too bright** — 1,000 lux on a white Lambertian read 1.0 instead of 0.0103.
+##
+## **And `tonemap_exposure` must stay at 1.0** while a pass does the multiply: the glow applies the
+## exposure itself (`copy.glsl:195`), so an exposure in both places is applied twice.
+func identity() -> void:
+	_multiplier = 1.0
+	attributes.exposure_multiplier = 1.0
+
+
 ## Follow a target MULTIPLIER rather than a light level, for the case where the light level is not
 ## what the eye is responding to. `update()` is the special case of this.
 func update_to(target: float, delta: float) -> void:

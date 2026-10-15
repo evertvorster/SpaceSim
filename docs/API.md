@@ -474,6 +474,35 @@ are consistent everywhere, so nothing looks wrong — and both were inferred bef
 **The star is a source, not a reflector**: it cannot be brought into range without making everything
 else black, so it is allowed to clip and `glow_*` handles how that reads. Nothing here exposes for it.
 
+### `SpacesimExposurePass` — `CompositorEffect`
+
+`lighting/exposure_pass.gd`. **The frame-wide exposure**: the metre and the multiply in one compute pass at
+`POST_TRANSPARENT`, which the class reference documents as running *"before any built-in post-processing
+effects"* — so Godot's glow and tonemap both see what it wrote.
+
+| | |
+|---|---|
+| **sample** | `SAMPLES_X × SAMPLES_Y` (32×18) invocations, each averaging its own block of the frame. **Every texel is capped at `CAP`** before the block mean is taken, then that mean is weighted by `SpacesimExposureMeter`'s radial profile. Writes `(weighted, weight)` per cell. |
+| **finalize** | one invocation: the weighted mean, `TARGET_AVERAGE / mean` clamped to `SpacesimExposure`'s window, then the temporal lerp against the previous frame. **A mean of zero pins at the ceiling** rather than dividing. |
+| **apply** | the frame × that one number. Alpha is left alone — it is coverage, not light. |
+| `frame_delta` | **set by the game each frame.** There is no delta inside `_render_callback`, and a wall clock there would read the render thread's timing rather than the frame's. |
+| `status()` | the instrument: whether it built, and how many frames it has dispatched. |
+
+**The reduction is coarse on purpose** — 576 cells of ~60×60 texels at 1080p is ~37k reads against ~2M for
+every texel, and the weight profile is smooth at that resolution. Capping per *texel* rather than per block
+is what keeps the cap meaning what it means on the CPU.
+
+**Three preconditions, each measured:** the camera attributes must stay **attached** (`attributes = null`
+puts the engine's lux convention out of the pipeline and renders ~95× bright); `Environment.tonemap_exposure`
+must stay **1.0**, because the glow applies the exposure itself (`copy.glsl:195`) and an exposure in both
+places is applied twice; and `SpacesimExposure.identity()` is what puts the camera side at 1.0.
+
+**Verified in the running game**, not only in a probe: `tests/probe_frame_exposure.gd` toggles the effect's
+inherited `enabled` flag inside one run and finds the frame's centre luminance moving ×0.86 — the A/B is
+within a run because the screenshot rig's noise floor is ~2.24% and would have to be ruled out across two.
+**Whether the metre's value is the right one is a judgement about a picture**, and `tests/run.sh` cannot
+make it: the suite is `--headless`, where there is no `RenderingDevice` at all.
+
 ### `SpacesimExposureMeter` — `RefCounted` (static)
 
 `lighting/exposure_meter.gd`. **The frame metre**: one exposure number read from the rendered pixels,

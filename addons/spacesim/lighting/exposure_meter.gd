@@ -58,6 +58,20 @@ const CAP := 1.0
 const TARGET_AVERAGE := 0.18
 
 
+## The **luminance** of a linear colour: **Rec.709 in linear light**, and the one expression the metre
+## uses.
+##
+## `SpacesimExposurePass` carries the same coefficients in its sampling shader, because a compute shader
+## cannot call GDScript. **This is the source of truth** and `tests/test_meter.gd` pins the numbers, so a
+## change here that is not mirrored in the shader is a failing test rather than a quiet disagreement.
+##
+## **Godot's own reduction uses `max(r, g, b)` instead** (`luminance_reduce.glsl`), which over-weights a
+## saturated colour: to it a deep blue sky and a bright white one read the same. That crudeness is part
+## of why its metre was not usable here, alongside the missing weighting and cap.
+static func luminance(colour: Color) -> float:
+	return 0.2126 * colour.r + 0.7152 * colour.g + 0.0722 * colour.b
+
+
 ## The weight of a sample, given its offset from the frame centre **in half-diagonal units**.
 ##
 ## Monotonic in the radius, 1.0 at the centre and `exp(-1/SIGMA^2)` at a corner — 0.0019 at the default.

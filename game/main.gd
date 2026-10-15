@@ -46,6 +46,8 @@ var _camera: Camera3D
 ## The camera's exposure. Physics-computed — see SpacesimExposure — so it needs updating as the
 ## player moves rather than being left to the engine's frame average.
 var _exposure: SpacesimExposure
+## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
+var _exposure_pass: SpacesimExposurePass
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -83,7 +85,20 @@ func _ready() -> void:
 	# the first frame is already right.
 	_exposure = SpacesimExposure.new()
 	_camera.attributes = _exposure.attributes
-	_exposure.snap_to(_system.illuminance_at(_ship.global_position))
+	# **The exposure is applied frame-wide now, by a pass over the finished frame.** The camera's own
+	# attributes go to identity, and `SpacesimExposure`'s per-location target is not used for the frame
+	# any more — it was the three-disagreeing-estimates problem in miniature, and it is what left the
+	# ambient unscaled (measured: exposure ×1/×1000/×80000 give byte-identical pixels).
+	#
+	# **The attributes stay attached.** Identity is `CameraAttributesPhysical` with the multiplier at 1.0,
+	# never `null`: with no attributes the engine skips the factor that implements Godot's lux
+	# convention and the scene renders about 95x too bright (`light_storage.cpp:764`).
+	_exposure.identity()
+	_exposure_pass = SpacesimExposurePass.new()
+	var compositor := Compositor.new()
+	var effects: Array[CompositorEffect] = [_exposure_pass]
+	compositor.compositor_effects = effects
+	_camera.compositor = compositor
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_build_hud()
@@ -358,31 +373,10 @@ func _update_view(delta: float) -> void:
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.
 	_system.update_lod(_camera)
-	# Exposed for **what the eye is looking at**, not for the light falling on a surface where the player
-	# happens to be — see SpacesimSystemScene.view_luminance_at. A luminance, because adaptation follows
-	# the scene; an irradiance is a property of where you are and cannot tell the Sun from empty sky.
-	var tan_y := tan(deg_to_rad(_camera.fov * 0.5))
-	# The **render target's** size, not `get_visible_rect()`: that is the canvas rect, which has the
-	# canvas's aspect rather than the 3D buffer's once `video.aspect` is set to keep. The camera's
-	# horizontal field follows the buffer, so this is the aspect the view's solid angle is built from.
-	var view_size := Vector2(_camera.get_viewport().size)
-	var tan_half := Vector2(tan_y, tan_y)
-	if view_size.y > 0.0:
-		tan_half.x = tan_y * view_size.x / view_size.y
-	var luminance := _system.view_luminance_at(
-		observer, -eye.basis.z, tan_half
-	)
-	# The dark-adapted value is a **ceiling, not a floor**: nothing can adapt you better than darkness,
-	# and a bright object can only stop you down from there. That is also what keeps the sky's brightness
-	# from depending on how far away the star is, which it must not — your eye adapts to what it is
-	# looking at, not to the distance to a lamp.
-	#
-	# Derived from the field of view in use, because a star's radiance goes as `tan(half fov)` squared
-	# and a constant derived at one field is wrong at every other — see `dark_adapted_multiplier`.
-	var target := SpacesimExposure.dark_adapted_multiplier(_camera.fov)
-	if luminance > 0.0:
-		target = minf(target, SpacesimExposure.target_multiplier_for_luminance(luminance))
-	_exposure.update_to(target, delta)
+	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
+	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
+	# the frame's own delta, because `_render_callback` has no clock of its own.
+	_exposure_pass.frame_delta = delta
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_hud_since += delta

@@ -29,6 +29,33 @@ func run(h, root: Node) -> void:
 
 	_test_the_star(h, star)
 	_test_the_star_light(h, sol, root)
+	_test_the_frame_exposure(h)
+
+
+## The frame-wide pass's two preconditions, both of which are traps that cost a measurement each.
+##
+## Marked 2026-10-15: `identity()` must keep the camera attributes **attached**, and the reason is not
+## cosmetic — with `attributes = null` the engine skips the factor that implements Godot's lux convention
+## (`light_storage.cpp:764` applies it only `if camera_attributes.is_valid()`) and a scene renders about
+## **95x too bright**. The second is that the pass owns the exposure now, so the camera's own multiplier
+## must be 1.0 or the two multiply.
+func _test_the_frame_exposure(h) -> void:
+	var exposure := SpacesimExposure.new()
+	exposure.snap_to(1000.0)
+	h.check(
+		exposure.attributes != null and exposure.attributes.exposure_multiplier > 1.0,
+		"a light metre still drives the camera's multiplier the old way (%s)"
+			% exposure.attributes.exposure_multiplier
+	)
+	exposure.identity()
+	h.check(
+		exposure.attributes != null,
+		"identity KEEPS the camera attributes — `null` skips Godot's lux convention and is 95x bright"
+	)
+	h.check_near(
+		exposure.attributes.exposure_multiplier, 1.0,
+		"and puts the multiplier at 1.0, so the frame-wide pass owns the exposure alone", 1e-12
+	)
 
 
 func _test_the_star(h, star: SpacesimSystemBody) -> void:

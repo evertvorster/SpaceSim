@@ -22,10 +22,31 @@ const BLOCK := 8 ## An 8x8 block is 1.6% of a 64x64 frame — "a small part of t
 func run(h, root: Node) -> void:
 	print("  meter")
 	_test_weight_profile(h)
+	_test_luminance(h)
 	_test_centre_beats_perimeter(h)
 	_test_cap(h)
 	_test_window(h)
 	_test_degenerate(h)
+
+
+## The metre's luminance. **This is the source of truth for an expression that also appears in
+## `SpacesimExposurePass`'s sampling shader** (a compute shader cannot call GDScript), so the coefficients
+## are pinned here and any change has to be mirrored there deliberately rather than by accident.
+func _test_luminance(h) -> void:
+	h.check_near(Meter.luminance(Color.WHITE), 1.0, "white is luminance 1", 1e-12)
+	h.check_near(Meter.luminance(Color(0.5, 0.5, 0.5)), 0.5, "and it is linear in a grey", 1e-12)
+	# Rec.709's ordering, which is the reason to prefer it over a plain channel mean: the eye is mostly
+	# green, and a blue sky that measures as bright as a white one is what Godot's max() gets wrong.
+	h.check(
+		Meter.luminance(Color(0.0, 1.0, 0.0)) > Meter.luminance(Color(1.0, 0.0, 0.0))
+			and Meter.luminance(Color(1.0, 0.0, 0.0)) > Meter.luminance(Color(0.0, 0.0, 1.0)),
+		"green outweighs red outweighs blue at equal strength"
+	)
+	h.check(
+		Meter.luminance(Color(1.0, 0.0, 0.0)) < 0.25,
+		"and a saturated red is a fifth of a white one, not equal to it (%s)"
+			% Meter.luminance(Color(1.0, 0.0, 0.0))
+	)
 
 
 ## The profile on its own: monotonic in the radius, 1 at the centre, and the documented value at 0.4.
