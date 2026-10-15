@@ -280,7 +280,8 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		if body.mesh != null and body.mesh.visible:
 			drawn += SpacesimIcosphere.face_count(body.mesh_level)
 		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
-			drawn += SpacesimIcosphere.face_count(SpacesimSystemScene.ATMOSPHERE_SHELL_LEVEL)
+			# The shell wears the body's level, so it is counted at that level.
+			drawn += SpacesimIcosphere.face_count(body.mesh_level)
 	h.check(scene.triangles() == drawn,
 		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 
@@ -387,6 +388,46 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		h.check_near(spot.r / maxf(spot.g, 1.0e-6), mars.color.r / maxf(mars.color.g, 1.0e-6),
 			"while its HUE is the body's own, so a planet is a coloured point and not a white one",
 			1.0e-6)
+
+	# --- the air shell's own rules --------------------------------------------------------------------
+	# **A shell's LOD is draw-or-not**, decided by the thickness of the air rather than by the body's
+	# angular size: a shell is bigger than the planet it wraps, and from outside what it contributes is
+	# the ring between the two radii. Below a pixel of thickness that ring is a smear, not a ring.
+	var venus := scene.body_by_id("planet:venus")
+	if venus != null and venus.atmosphere_mesh != null:
+		# Well outside: Venus's ring is under a pixel, so its shell is not drawn while its disc is.
+		_place_at_screen_radius(camera, venus, to_star_from_luna, 6.0, pixel)
+		scene.update_lod(camera)
+		var venus_distance := camera.global_position.distance_to(venus.node.global_position)
+		var ring := SpacesimLod.screen_radius_pixels(
+				SpacesimLod.angular_radius(venus.radius + venus.sky_top, venus_distance), pixel) \
+			- SpacesimLod.screen_radius_pixels(
+				SpacesimLod.angular_radius(venus.radius, venus_distance), pixel)
+		h.check(not venus.atmosphere_mesh.visible,
+			"a shell whose air is under a pixel thick is not drawn, while the body itself still is (%.3f px)"
+				% ring)
+
+		# Close enough for the ring to read: the same body at 40 px.
+		_place_at_screen_radius(camera, venus, to_star_from_luna, 40.0, pixel)
+		scene.update_lod(camera)
+		h.check(venus.atmosphere_mesh.visible, "and one whose air is thick enough on screen is")
+
+		# **An observer inside the shell needs no special case** — the ring test answers yes on its own,
+		# because the outer radius clamps to the horizon. Checked rather than trusted, which is the whole
+		# point of measuring it this way.
+		camera.global_position = venus.node.global_position \
+			+ to_star_from_luna * (venus.radius + venus.sky_top * 0.5)
+		scene.update_lod(camera)
+		h.check(venus.atmosphere_mesh.visible,
+			"from INSIDE it, the shell is the sky, and the ring test says so by itself")
+
+		# **The shell wears the body's level** (Evert, 2026-10-15), rather than a fixed one: its ring's
+		# outer edge carries the same `sagitta * screen_radius` error the body's silhouette does, at a
+		# radius only ~2% larger, so the same level gives the same error to within a level.
+		_place_at_screen_radius(camera, venus, to_star_from_luna, 400.0, pixel)
+		scene.update_lod(camera)
+		h.check(venus.atmosphere_mesh.mesh == SpacesimIcosphere.mesh_at(venus.mesh_level),
+			"and it wears the same icosphere level the body's own mesh does (level %d)" % venus.mesh_level)
 
 	scene.container.free()
 	camera.queue_free()

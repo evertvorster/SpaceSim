@@ -299,6 +299,13 @@ func _test_the_sky_is_derived(
 	h.check(material != null and material.shader != null, "with the scattering shader")
 	if material == null:
 		return
+	# **Additive, and that is what keeps the star visible through the sky.** A sky is something you look
+	# *through*: with `blend_mix` and alpha 1 an opaque sky would hide the star's own disc, so a sun seen
+	# from the surface would vanish from its own sky. Asserted rather than assumed, because a
+	# `blend_mix` regression is silent — and it has to hold **from inside an atmosphere as well as from
+	# space**, which is the note the lighting plan inherits.
+	h.check(material.shader.code.contains("blend_add"),
+		"and drawn ADDITIVELY, so the star stays visible through the sky it is seen through")
 	h.check_near(material.get_shader_parameter("atmosphere_radius"), top,
 		"and the shader knows both radii, so its ray test matches the mesh", 1.0)
 	h.check_near(material.get_shader_parameter("planet_radius"), earth.radius,

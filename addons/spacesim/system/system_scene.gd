@@ -26,11 +26,33 @@ const ASSET_FRAME_PREFIX := "asset:"
 ## spray of 20-triangle spheres.
 const INITIAL_MESH_LEVEL := 2
 
-## The air shells' level, **fixed rather than taken from the policy**. A fill-bound shader's cost is per
-## *pixel*, not per triangle, so tessellation is not the lever for it — draw or no-draw is, and that is
-## phase 6 of the mesh LOD plan. Level 3 holds the limb ring's silhouette to a couple of pixels at any
-## plausible screen size, at 1,280 triangles against the 16,384 the lat-long shell stood at.
-const ATMOSPHERE_SHELL_LEVEL := 3
+## The air shells' level is **the body's own**, not a constant of their own.
+##
+## The plan first fixed the shells at a coarse level on the argument that a fill-bound shader's cost is
+## per *pixel*, so tessellation barely matters. That is true of their **cost** and false of their
+## **silhouette**: what a shell contributes from outside is its limb ring, and the error in the ring's
+## outer edge is the same `sagitta * screen_radius` a body's own mesh has — with a radius only 1.6%
+## larger at Earth, so **the same level gives the same error, to within a level**. Evert, 2026-10-15:
+## *"we can also reduce the number of facets in a similar way as the planets when we get close."*
+##
+## So a shell wears the level its body wears, which needs no second policy, no second hysteresis and no
+## second budget — and it is the same statement as "a shell is a body's air, seen at the body".
+
+## The screen thickness, in pixels, at which an air shell's **limb ring** is too thin to be worth
+## drawing.
+##
+## A shell is a fill-bound shader — 128 samples per pixel it covers, the heaviest thing here — so its
+## LOD is *draw or not draw*, and the only question worth asking is whether it puts anything on the
+## screen. From outside, what it puts there is the ring between `radius` and `radius + sky_top`; below a
+## pixel of thickness that is a smear across one pixel rather than a ring, and it is bought with the
+## whole march. Earth's ring comes to 4.9 px at 19,000 km, 319 px at 400 km, and **0.05 px at 750 Mm**,
+## so the planet's own limb stops being drawn somewhere around 77,000 km — where its disc is 13 px and a
+## 0.2 px ring around it was never going to be seen.
+##
+## **Suspected at one pixel, not measured**, like the point tier's 4. It wants looking at in flight: the
+## trade it makes is a sub-pixel limb tint for the march, so the way to judge it is to fly out from a
+## body and watch where its ring stops reading.
+const ATMOSPHERE_RING_MIN_PIXELS := 1.0
 
 ## The screen radius below which a body **stops being geometry and becomes a point of light**.
 ##
@@ -617,7 +639,7 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	if material == null:
 		return
 	body.atmosphere_mesh = _add_body_mesh(
-		body.node, body.radius + body.sky_top, material, "%sAir" % body.name, ATMOSPHERE_SHELL_LEVEL
+		body.node, body.radius + body.sky_top, material, "%sAir" % body.name, body.mesh_level
 	)
 
 
@@ -890,8 +912,11 @@ func update_lod(camera: Camera3D) -> void:
 		var is_point: bool = screen < POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
+		# **The air shell is a visibility question, not a tier.** Its limb ring is what it contributes from
+		# outside, and below a pixel of thickness there is nothing to see — which is also why a point-tier
+		# body's shell is not drawn, without this having to know about the point tier.
 		if body.atmosphere_mesh != null:
-			body.atmosphere_mesh.visible = not is_point
+			body.atmosphere_mesh.visible = _shell_is_visible(body, observer, pixel)
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
@@ -904,12 +929,47 @@ func update_lod(camera: Camera3D) -> void:
 		if level != body.mesh_level:
 			body.mesh_level = level
 			body.mesh.mesh = SpacesimIcosphere.mesh_at(level)
+			# **The shell wears the body's level**, so its limb ring's outer edge carries the same error a
+			# planet's silhouette does. One policy instead of two, and nothing to keep in step.
+			if body.atmosphere_mesh != null:
+				body.atmosphere_mesh.mesh = SpacesimIcosphere.mesh_at(level)
 		# Counted from the law rather than from the meshes: `face_count` walks `get_faces()`, which
 		# allocates, and this runs once a frame for every body in the system.
 		total += SpacesimLod.triangles_at(body.mesh_level)
-		if body.atmosphere_mesh != null:
-			total += SpacesimLod.triangles_at(ATMOSPHERE_SHELL_LEVEL)
+		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
+			total += SpacesimLod.triangles_at(body.mesh_level)
 	_triangles = total
+
+
+## Whether a body's air shell can be seen at all from here.
+##
+## **A fill-bound shader's LOD is draw-or-not, not resolution.** The shell's cost is per *pixel* it
+## covers and tessellation barely moves it, so the only question is whether it puts anything on the
+## screen. This also answers the open question in `Atmospheres` §10 — *one shell per body, or only the
+## nearest?* — with visibility rather than a budget: culling to the active frame's body would take the
+## limb ring off every *other* body, and §10 already settled that the ring seen from outside is wanted
+## (*"atmospheres were not being drawn when I was outside them, now they are"*).
+##
+## From **inside** the shell it is the sky, and the answer is always yes. From outside, what the shell
+## contributes is the **limb ring** between `radius` and `radius + sky_top`, so the question is whether
+## that annulus is thick enough to read as a ring — measured exactly, the way every other screen size
+## here is, by projecting both radii and subtracting.
+##
+## **An observer inside the shell needs no branch**: `radius + sky_top` over the distance exceeds 1, so
+## `angular_radius` clamps, the outer radius projects to the horizon, and the "ring" spans the screen —
+## the same test answers yes on its own. `tests/test_lod.gd` checks that from both sides rather than
+## trusting it.
+func _shell_is_visible(body: SpacesimSceneBody, observer: Vector3, pixel: float) -> bool:
+	if body.atmosphere_mesh == null or body.node == null or body.sky_top <= 0.0:
+		return false
+	var distance := observer.distance_to(body.node.global_position)
+	var outer := SpacesimLod.screen_radius_pixels(
+		SpacesimLod.angular_radius(body.radius + body.sky_top, distance), pixel
+	)
+	var inner := SpacesimLod.screen_radius_pixels(
+		SpacesimLod.angular_radius(body.radius, distance), pixel
+	)
+	return outer - inner >= ATMOSPHERE_RING_MIN_PIXELS
 
 
 ## Size and colour a body's point of light.
