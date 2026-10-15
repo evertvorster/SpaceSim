@@ -460,13 +460,44 @@ that travelled with that rollback, **only the stand-down in the star shader's ra
 in the tree.** The stand-down was never needed by this in any case: `AMBIENT_SOURCE_COLOR` does not read
 the cubemap, which is `update_ubo`'s own `use_ambient_cubemap` flag.
 
-**The energy is in `REFERENCE_LUX`'s units and that number was never measured.** The vault inferred the
-convention from Godot's old look-value floor, and Godot's own property hint gives `ambient_light_energy`
-a range of 0 to 16 where this wants 2e-9 — so if a night side comes out wrong, that factor is the
-suspect and it is the one number in this file with no measurement behind it.
+**The energy is in `REFERENCE_LUX`'s units, and both halves of that convention are now measured.**
+`tests/probe_ambient.gd` (2026-10-15) found `ambient_light_energy` maps **1:1** to a white Lambertian's
+outgoing radiance — energy 1.0 is white — but that the ambient is **not dark-adapted**: exposure ×1,
+×1000 and ×80000 give byte-identical pixels, because the shader reads
+`ambient_light_color_energy.rgb` with no exposure factor while the sky's cubemap branch is multiplied by
+`IBL_exposure_normalization`. `tests/probe_range.gd` then measured the *light's* constant at
+**~95,700 lux per unit** (flat within ±3% over four stops), so `REFERENCE_LUX` is about 4.5% high. Both
+are consistent everywhere, so nothing looks wrong — and both were inferred before they were measured.
+**A 2e-9 starlight ambient renders as exactly byte 0**: the 3D buffer is `RGBA16F`, whose floor is
+0.006 lux. See the plan §6a and §11.
 
 **The star is a source, not a reflector**: it cannot be brought into range without making everything
 else black, so it is allowed to clip and `glow_*` handles how that reads. Nothing here exposes for it.
+
+### `SpacesimExposureMeter` — `RefCounted` (static)
+
+`lighting/exposure_meter.gd`. **The frame metre**: one exposure number read from the rendered pixels,
+which is what `SpacesimExposure`'s adaptation targets once Track B3/B4 land. Pure arithmetic — the caller
+supplies luminances and gets a multiplier — so its behaviour is checkable headlessly
+(`tests/test_meter.gd`, 23 checks, mutation-checked against a uniform weight).
+
+| | |
+|---|---|
+| `weight(offset) -> float` | `exp(-(r/SIGMA)^2)`, with `r` in **half-diagonal units** — the centre is 1 and a corner 0.0019. Monotonic in the radius, and steep enough that a bright thing at the perimeter "contributes only a little" |
+| `weighted_mean(samples, width, height) -> float` | the **capped**, weighted mean of a row-major grid. The centre is the grid's own centre, so the weighting is the same shape at any reduction |
+| `target_multiplier(mean) -> float` | `TARGET_AVERAGE / mean`, clamped to `SpacesimExposure.MIN_MULTIPLIER`…`MAX_MULTIPLIER` — the same 32-stop window, so nothing here can run away. A mean of zero **pins at the ceiling** rather than dividing by it |
+| `target_multiplier_for_grid(...)` | the two in one call, for a caller that has a grid and wants a number |
+| `SIGMA` | **0.4.** The one look value here, and the only number that could be tuned without anything becoming wrong: the weights are normalised, so a uniformly lit frame returns its own brightness whatever this is — only the selectivity moves |
+| `CAP` | **1.0**, the reference white. Anything brighter **counts as white**, so a source saturates the metre but cannot own it. This is frame control, *not* protection for the star's brightness — a disc at 24× white survives any realistic dim, because 4.5 stops brings 24 down to 1.0 and it is still clipping |
+| `TARGET_AVERAGE` | **0.18**, middle grey. Derived as far as it can be: an 18%-grey surface lit at `REFERENCE_LUX` reads about 0.23 in this currency, so the metre is **neutral on an ordinarily-lit scene** and moves only when the light or the composition is unusual |
+
+**The requirement it implements** (Evert, 2026-10-15): a full-screen, **centre-weighted** metre — *"if I
+point my camera at a bright object, the entire frame dims, but if that same object is only a small part of
+the perimeter, it should only contribute a little"* — and **no location term at all**. `tests/test_meter.gd`
+asserts that as a **comparison between two frames that differ only in where the bright block is**, because
+a metre with no weighting passes every other check and fails exactly those two — which is the metre Godot
+ships, and the reason metered exposure failed here once. Design, measurements and the four acceptance
+tests: vault `SpaceSim/Lighting Plan` §6a and §9.
 
 ### The star's numbers
 

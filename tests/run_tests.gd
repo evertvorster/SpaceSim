@@ -43,6 +43,7 @@ var suite_paths: Array = [
 	"res://tests/test_space_to_surface.gd",
 	"res://tests/test_lod.gd",
 	"res://tests/test_icosphere.gd",
+	"res://tests/test_meter.gd",
 ]
 
 
