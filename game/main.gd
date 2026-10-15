@@ -338,6 +338,15 @@ func _physics_process(delta: float) -> void:
 ## `Camera3D`'s *methods* already do this for us — `unproject_position` reads `get_camera_transform()`,
 ## which returns the interpolated transform outside the physics frame — so only the direct
 ## `global_transform` reads need saying out loud.
+## How often the readout is rebuilt, in seconds. **Everything on it either moves at human speed** — the
+## date, the frame, names, the selected target — **or jitters faster than anyone can read** — altitude
+## and speed to a centimetre. It was rebuilt every drawn frame, which is a 13-line string with a format
+## per field and a `PackedStringArray` to join it, sixty times a second, for a display. Measured at
+## 0.12% of a frame it is not a cost problem; it is a *shape* problem, and this is the shape.
+const HUD_INTERVAL := 0.1
+var _hud_since := 0.0
+
+
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
@@ -376,7 +385,10 @@ func _update_view(delta: float) -> void:
 	_exposure.update_to(target, delta)
 	_update_markers(_camera)
 	_update_camera(_camera)
-	_update_hud()
+	_hud_since += delta
+	if _hud_since >= HUD_INTERVAL:
+		_hud_since = 0.0
+		_update_hud()
 
 
 ## The player is *inside* the ship while flying, so their location follows it. They are separate
@@ -384,8 +396,17 @@ func _update_view(delta: float) -> void:
 ## from the player's own location. Nothing can be entered yet, so the two currently coincide.
 func _sync_player_location() -> void:
 	var frame := _ship.get_parent() as Frame
-	if frame != null:
-		_session.player.location = Location.new(frame.frame_id, _ship.position)
+	if frame == null:
+		return
+	# **Mutated, not replaced.** This runs every physics tick and a `Location` is a `RefCounted`, so one
+	# allocation per tick was garbage for nothing. The player's location is a single piece of state that
+	# changes in place, and nothing keeps an older one — the only readers use it inside their own call.
+	var location: Location = _session.player.location
+	if location == null:
+		location = Location.new()
+		_session.player.location = location
+	location.frame_id = frame.frame_id
+	location.position = _ship.position
 
 
 ## Put the ship where the session says the player is. Said out loud when the system no longer has the
