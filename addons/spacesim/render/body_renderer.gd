@@ -130,18 +130,36 @@ static func point_quad() -> QuadMesh:
 	return _point_quad
 
 
-## The material a **point of light** is drawn with: unshaded, additive, and always facing the eye.
+## The material a **point of light** is drawn with: unshaded and additive.
 ##
-## A body too small to be a disc is not geometry, it is its own light — so it is a camera-facing quad
-## whose colour is the body's mean radiance and whose size is the disc it would have had. `albedo_color`
-## can exceed 1: Godot passes an overbright albedo straight through, which is what lets a splat be
-## brighter than white and still be tone-mapped with everything else. Nothing here is exposure-corrected,
-## because a splat **reports radiance** and the environment decides what is seen.
+## A body too small to be a disc is not geometry, it is its own light — so it is a quad whose colour is the
+## body's mean radiance and whose size is the disc it would have had. `albedo_color` can exceed 1: Godot
+## passes an overbright albedo straight through, which is what lets a splat be brighter than white and
+## still be tone-mapped with everything else. Nothing here is exposure-corrected *by Godot* — the splat
+## reports radiance and the environment decides what is seen — which is why `_place_point` applies the
+## exposure itself; see there for why that has to be done by hand.
 ##
 ## **It is in the 3D pass and not in the overlay, deliberately.** A `CanvasLayer` is composited *after*
 ## the tonemap, so a splat drawn there would ignore the exposure entirely and could not be a body's
 ## radiance at all — which is why the navigation overlay, for all that it already projects screen
 ## positions, is the wrong home for this.
+##
+## **The quad is NOT billboarded by the material, and that is the point.** Godot's `BILLBOARD_ENABLED`
+## works by rewriting `MODELVIEW_MATRIX` in the vertex shader —
+## `MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2],
+## MODEL_MATRIX[3])` — which multiplies **world-space axes** against a **camera-relative translation**.
+## That is exactly the transform chain the double-precision emulation exists to manage, and the project
+## has already been bitten twice by things that sidestep it: *"No triplanar or `world_vertex_coords`:
+## neither gets the double-precision vertex transform emulation, and both jitter at planet scale."* The
+## symptom would be a quad that lands somewhere other than where the body is, **depending on where the
+## camera is** — so it would blink as you fly rather than being wrong always, and a bright splat's glow
+## would go with it, because the glow is made of that quad's pixels. Evert, 2026-10-15: *"There are very
+## bright blown-out flashes..."* was a different fault, but this one is *"single points of light... about
+## 10% of the time they would just wink out of existence"*, and it does not happen with the camera still.
+##
+## So the orientation is set from GDScript in `_place_point`, by copying the camera's basis onto the node —
+## which is what a billboard is, done where the emulation can see it, and which also needs no
+## `billboard_keep_scale` because the scale is the node's own.
 ##
 ## **Depth is tested and not written.** Tested, so a splat behind a planet is hidden — per pixel, by the
 ## depth buffer, which does that job better than a ray test against body centres could. Not written,
@@ -152,9 +170,6 @@ static func point_material() -> StandardMaterial3D:
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	# Without this the billboard throws the node's scale away, and the scale is what sizes the splat.
-	material.billboard_keep_scale = true
 	material.disable_receive_shadows = true
 	material.albedo_color = Color(0.0, 0.0, 0.0, 1.0)
 	return material

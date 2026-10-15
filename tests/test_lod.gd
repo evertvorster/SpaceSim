@@ -323,8 +323,22 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	var splat := luna.point.material_override as StandardMaterial3D
 	h.check(splat != null and splat.blend_mode == BaseMaterial3D.BLEND_MODE_ADD,
 		"drawn additively, because a point of light is something seen through the sky behind it")
-	h.check(splat != null and splat.billboard_mode != BaseMaterial3D.BILLBOARD_DISABLED,
-		"and facing the eye, so its size is an angle rather than an orientation")
+	# **Oriented from GDScript, not by the material.** A billboarded material rewrites `MODELVIEW_MATRIX`
+	# with `INV_VIEW_MATRIX` — world-space axes against a camera-relative translation — which is the
+	# transform chain the double-precision emulation cannot follow, and the project has been bitten by that
+	# family twice (`world_vertex_coords`, `triplanar`). The symptom is a quad that lands somewhere other
+	# than where the body is **depending on where the camera is**, so it blinks while flying.
+	h.check(splat != null and splat.billboard_mode == BaseMaterial3D.BILLBOARD_DISABLED,
+		"and the material does NOT billboard it, so the emulated transform is left alone")
+	# Normalised, because the size lives on that same basis — the axis points where the eye is, the
+	# magnitude is how big the quad is.
+	h.check(luna.point.global_transform.basis.z.normalized().is_equal_approx(
+			camera.global_transform.basis.z.normalized()),
+		"the quad is turned to face the eye by its own basis instead, which is a billboard the "
+			+ "double-precision emulation can see")
+	var facing_scale := luna.point.global_transform.basis.get_scale()
+	h.check(facing_scale.is_equal_approx(Vector3.ONE * expected_size),
+		"and it carries its size on that same basis, so nothing has to be preserved by hand")
 
 	# **The exposure cannot tell whether a body is drawn** — the trap the plan names, made into a
 	# measurement: if `view_luminance_at` ever learns to skip an invisible body, this goes red, because

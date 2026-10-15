@@ -927,7 +927,7 @@ func update_lod(camera: Camera3D) -> void:
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
-			_place_point(body, observer, energy, distance, pixel, screen, exposure)
+			_place_point(body, observer, energy, distance, pixel, screen, exposure, camera)
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 			# A point still has a shell to price — an air so thin it is not drawn costs nothing, and one
 			# whose ring survives does, which is rare but real at a body just under the tier.
@@ -1062,11 +1062,17 @@ func _shell_is_visible(body: SpacesimSceneBody, observer: Vector3, pixel: float)
 ## to be settled first. Two renders — one body at 0.8 px and the same body at 0.4 px — would measure it.
 func _place_point(
 	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float,
-	screen: float, exposure: float
+	screen: float, exposure: float, camera: Camera3D
 ) -> void:
-	# The quad is a unit square, so its half-width is what a radius measures. One pixel is the floor it
-	# cannot shrink below.
-	body.point.scale = Vector3.ONE * (2.0 * distance * tan(maxf(pixel, angular)))
+	# **The quad is oriented here rather than by the material, and that is deliberate** — a billboarded
+	# material rewrites `MODELVIEW_MATRIX` with `INV_VIEW_MATRIX`, which is the transform chain the
+	# double-precision emulation cannot follow. See `SpacesimBodyRenderer.point_material`. Copying the
+	# camera's basis onto the node *is* a billboard, in a place the emulation can see: the quad's +Z then
+	# points back at the eye, and its own scale sizes it, so nothing has to be kept by hand.
+	var size := 2.0 * distance * tan(maxf(pixel, angular))
+	body.point.global_transform = Transform3D(
+		camera.global_transform.basis.scaled(Vector3.ONE * size), body.node.global_position
+	)
 	var material := body.point.material_override as StandardMaterial3D
 	if material == null:
 		return
