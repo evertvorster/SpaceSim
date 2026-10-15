@@ -1,5 +1,9 @@
 extends Node3D
-## Fly around the playground system and land on planets.
+## Fly **Sol** and land on planets.
+##
+## The keys below are the registry's **defaults**; every one except Esc is a rebindable setting, and
+## the readout at the bottom of the HUD is generated from whatever is bound rather than from this
+## list.
 ##
 ##   W / S      throttle (a fraction of the local travel unit)
 ##   mouse      pitch and yaw
@@ -450,11 +454,38 @@ func _update_hud() -> void:
 				"",
 				"bodies      %s, %d triangles" % [bodies, _triangles],
 				"",
-				"W/S throttle    mouse look    A/D roll    Esc release mouse, click to take it back",
-				"Tab personal data    Alt+C settings    T cycle target    P bodies on/off    [ ] body detail",
+				(
+					"%s/%s throttle    mouse look    %s/%s roll    Esc release mouse, click to take it back"
+					% [
+						_binding("bindings.throttle_up"),
+						_binding("bindings.throttle_down"),
+						_binding("bindings.roll_left"),
+						_binding("bindings.roll_right"),
+					]
+				),
+				(
+					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s %s body detail"
+					% [
+						_binding("bindings.player_screen"),
+						_binding("bindings.settings_screen"),
+						_binding("bindings.cycle_target"),
+						_binding("bindings.bodies_toggle"),
+						_binding("bindings.detail_down"),
+						_binding("bindings.detail_up"),
+					]
+				),
 			]
 		)
 	)
+
+
+## The key a binding currently names, for the readout.
+##
+## **The hints used to be hardcoded text beside a rebindable setting**, which meant changing a binding
+## left the HUD telling the player to press a key that no longer did anything. Reading them from the
+## registry is what keeps the two in step.
+static func _binding(key: String) -> String:
+	return String(SpacesimSettings.get_value(key))
 
 
 static func _speed(metres_per_second: float) -> String:
