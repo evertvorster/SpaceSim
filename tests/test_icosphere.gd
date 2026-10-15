@@ -141,31 +141,35 @@ func run(h, root: Node) -> void:
 	h.check_near(product, SpacesimLod.TRIANGLES_PER_SCREEN_RADIUS,
 		"the law's constant is the geometry's own: sagitta x triangles = %.4f" % product, 0.01)
 
-	# **And so every level honours the budget it was chosen by.** The error is maximal just before a
-	# switch and minimal just after one, so the entry point is where it should come to `epsilon` — and
-	# the top of a level's range is where it is worst, at four times that, because a level spans a 4x
-	# range of screen radius and only a 4x range of triangles. That 4x is inherent to quantisation, not
-	# a fault, and it is printed rather than hidden.
+	# **And the budget is honoured EVERYWHERE in a level's range, not just at its edges.** The range runs
+	# from `level_exit(level) / 4` — where the level is taken up and its error is at its smallest — up to
+	# `level_exit(level)`, where the next level takes over and its error is at its largest, which is the
+	# budget itself. So the error lies in `[epsilon / 4, epsilon]` and **never exceeds the budget**, which is
+	# what makes `epsilon` mean what it says. Sampled across the range, because a pair of endpoints is not
+	# an interval. (An earlier version of this comment claimed the error reached four times the budget,
+	# which had the range inside out.)
 	var worst_ratio := 0.0
 	var lines := []
 	for level in 6:
-		var entry_px := float(SpacesimLod.triangles_at(level)) * EPSILON \
-			/ SpacesimLod.TRIANGLES_PER_SCREEN_RADIUS
-		var top_px := entry_px * 4.0
+		var exit_px := SpacesimLod.level_exit(level, EPSILON)
+		var entry_px := exit_px / 4.0
 		var sagitta := SpacesimIcosphere.relative_sagitta(level)
-		var error_px := sagitta * entry_px
-		worst_ratio = maxf(worst_ratio, error_px / EPSILON)
-		lines.append("level %d: s=%.9f at %8.1f px -> error %.2f px (%.2f at the top of its range)"
-			% [level, sagitta, entry_px, error_px, sagitta * top_px])
-	print("    ---- silhouette error at each level's entry point, budget %.1f px ----" % EPSILON)
+		for step in 33:
+			var radius := lerpf(entry_px, exit_px, float(step) / 32.0)
+			if SpacesimLod.level_for_screen_radius(radius, EPSILON) != level:
+				continue
+			worst_ratio = maxf(worst_ratio, sagitta * radius / EPSILON)
+		lines.append("level %d: taken up %8.1f px (error %.2f), left %8.1f px (error %.2f)"
+			% [level, entry_px, sagitta * entry_px, exit_px, sagitta * exit_px])
+	print("    ---- silhouette error across each level's range, budget %.1f px ----" % EPSILON)
 	for line in lines:
 		print("      ", line)
 	h.check(worst_ratio <= 1.0,
-		"and every level is INSIDE the budget at the screen radius that chooses it — the worst is "
+		"and every level stays INSIDE the budget for the whole range it is used over — the worst is "
 			+ "%.3f of it" % worst_ratio)
 	h.check(worst_ratio > 0.95,
-		"and not wastefully so: the constant is calibrated, so the error reaches the budget rather than "
-			+ "sitting under it (%.3f)" % worst_ratio)
+		"and reaches it, as a calibrated budget should, rather than sitting wastefully under it (%.3f)"
+			% worst_ratio)
 
 
 ## The enclosed volume, signed by the triangles' winding. Positive for one convention, negative for the
