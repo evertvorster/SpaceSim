@@ -44,6 +44,26 @@ static func effective_temperature(luminosity_watts: float, radius: float) -> flo
 	return pow(luminosity_watts / (4.0 * PI * radius * radius * STEFAN_BOLTZMANN), 0.25)
 
 
+## The star's **angular radius** seen from a distance, in radians: `asin(R / d)`.
+##
+## A star's disk is the one quantity in the scene that is the same in kind at every distance and
+## wrong at every distance but one — so it is derived for the same reason the light's strength is. The
+## constant this replaces was the Sun's disk at 1 au (0.533 degrees across): correct there, **2.6x too
+## small at Mercury and 30x too large at Neptune**.
+##
+## **One quantity, four consumers, and two of them are a diameter:** the **drawn disc's size**, the
+## **penumbra width** of a body's shadow, and **total versus annular** (a comparison of two angular
+## radii whose margin is only a few percent) all want this radius; Godot's `light_angular_distance`
+## wants an angular **diameter in degrees** — the engine's own doc gives the Sun from Earth as
+## "approximately 0.5" — so it takes `rad_to_deg(2 * angular_radius(R, d))`, which is where that
+## 0.533 came from. It softens engine shadow *maps* and is not the analytic penumbra: the two read the
+## same number and are not the same mechanism.
+static func angular_radius(radius: float, distance: float) -> float:
+	if radius <= 0.0 or distance <= 0.0:
+		return 0.0
+	return asin(clampf(radius / distance, 0.0, 1.0))
+
+
 ## A star's colour, from its effective temperature.
 ##
 ## Tanner Helland's compact blackbody fit — the same one the Shaders project uses in `star-colour.md`,

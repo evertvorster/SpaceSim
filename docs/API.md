@@ -278,7 +278,7 @@ is what makes the authored Sol a calibration target rather than a fixture.
 
 | Class | |
 |---|---|
-| `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K |
+| `SpacesimStarModel` | `model/star_model.gd` — `static luminosity(body)`: what content pinned, or the piecewise mass–luminosity relation. `static effective_temperature(luminosity, radius)`: Stefan-Boltzmann, and **a check on the data rather than a restatement of it** — L and R are measured independently and the Sun's give 5772 K. `static angular_radius(radius, distance)`: `asin(R/d)` in radians — the star's disk, **derived rather than stated**, because a value fixed at one au is 2.6x too small at Mercury and 30x too large at Neptune. It has four consumers, and **two of them are a diameter**: the drawn disc, the penumbra of a body's shadow, and total-versus-annular take the radius, while Godot's `light_angular_distance` takes `rad_to_deg(2 * angular_radius(...))` |
 | `SpacesimSurfaceModel` | `model/surface_model.gd` — `static bond_albedo(body, materials)` and `static color(body, materials)`. The surface contribution is area-weighted over the coverage fractions. `static lambert_phase(phase_angle)` is the **disc-averaged illuminated fraction** used to weight a body's share of the view: `(sin a + (pi - a)*cos a)/pi`, 1 at full, 1/pi at half, and 0 only at new — so a crescent contributes, where a clamped cosine returns exactly zero for everything past the half moon. **It is Bond-albedo normalised** (its phase integral is 3/2), which is why no geometric albedo is needed anywhere. **The two deliberately disagree about the deck**: the albedo *includes* it, because the temperature depends on it, and the drawn colour does *not*, because the deck was drawn as its own layer on top — counting it in both places gave Earth (0.66, 0.69, 0.73), a colour only 1.15:1 from neutral, which the eye reads as grey. The split outlives the drawn deck, and should: the reflectance is physics and the colour is a picture |
 ### Temperature
 
@@ -351,10 +351,11 @@ it off, Godot ignores `light_intensity_lux` entirely and every number below is c
 |---|---|
 | `LUMINOUS_EFFICACY` | 94 lm/W for sunlight; a constant, with a Planck-derived value as a later refinement |
 | `luminosity`, `light: DirectionalLight3D` | |
-| `create(parent, luminosity, temperature) -> DirectionalLight3D` | sets `light_temperature` and the Sun's 0.533° `light_angular_distance`, so a terminator reads as one |
+| `create(parent, luminosity, temperature, radius) -> DirectionalLight3D` | sets `light_temperature` and keeps the star's radius. The `light_angular_distance` is **not** set here — it follows the observer's distance, so `aim_at` sets it |
+| `static angular_radius(...)` | see `SpacesimStarModel` |
 | `static irradiance(luminosity, distance) -> float` | W/m² — the solar constant, 1361, at 1 au |
 | `static illuminance(luminosity, distance) -> float` | lux — 128,000 at 1 au |
-| `aim_at(observer_position, star_position) -> void` | aims the light and sets its strength for that distance |
+| `aim_at(observer_position, star_position) -> void` | aims the light and sets its strength **and its angular size** for that distance — the disk is a fact about the same distance, so 0.533° at one au is where it lands rather than where it is pinned |
 
 ### `SpacesimExposure` — `RefCounted`
 

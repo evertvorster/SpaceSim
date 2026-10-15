@@ -513,12 +513,14 @@ func _add_lighting() -> void:
 	# by 6,000:1.
 	var luminosity := 0.0
 	var temperature := 0.0
+	var star_radius := 0.0
 	var star_body := star()
 	if star_body != null and star_body.content != null:
 		luminosity = SpacesimStarModel.luminosity(star_body.content)
 		temperature = SpacesimStarModel.effective_temperature(luminosity, star_body.radius)
+		star_radius = star_body.radius
 	star_light = SpacesimStarLight.new()
-	star_light.create(container, luminosity, temperature)
+	star_light.create(container, luminosity, temperature, star_radius)
 
 	var environment := Environment.new()
 	# **The background is the real sky.** It used to be `BG_COLOR` with `Color(0.01, 0.012, 0.02)` — a
@@ -678,7 +680,7 @@ func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -
 	var to_star := star_position - observer
 	var star_distance := to_star.length()
 	if star_distance > star_body.radius:
-		var star_angle := asin(clampf(star_body.radius / star_distance, 0.0, 1.0))
+		var star_angle := SpacesimStarModel.angular_radius(star_body.radius, star_distance)
 		var star_omega := 2.0 * PI * (1.0 - cos(star_angle))
 		if star_omega >= SpacesimExposure.MIN_SOLID_ANGLE \
 				and _in_view(forward, to_star / star_distance, half_diagonal, star_angle) \

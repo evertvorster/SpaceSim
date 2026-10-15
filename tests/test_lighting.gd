@@ -73,6 +73,22 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check(dim > 100.0 and dim < 200.0,
 		"Neptune gets about 140 lux — dim, and not black (%s lux)" % String.num(dim))
 
+	# --- the star's angular size, which is derived rather than stated -------------------------------
+	# `asin(R/d)`, against the three distances the LOD plan's phase 1b names. The constant this replaced
+	# was the Sun's disk at one au: right there, and wrong everywhere else — 2.6x too small at Mercury,
+	# 30x too large at Neptune. The star's radius is read from the content rather than restated, so a
+	# wrong radius in `sol.tres` fails here too.
+	var sun_radius: float = sol.star().radius
+	h.check_near(rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, AU)), 0.266,
+		"the Sun's angular radius at one au is the 0.533-degree disk halved", 0.001)
+	h.check_near(rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, 0.39 * AU)), 0.683,
+		"at Mercury it is 2.6x that, which a constant fixed at 1 au could not have carried", 0.002)
+	h.check_near(rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, 30.07 * AU)), 0.0089,
+		"and at Neptune it is 30x the other way (%.4f degrees)"
+			% rad_to_deg(SpacesimStarModel.angular_radius(sun_radius, 30.07 * AU)), 0.0005)
+	h.check(SpacesimStarModel.angular_radius(0.0, AU) == 0.0,
+		"and a body with no radius has no angular size, rather than a division by nothing")
+
 	# The exposure that puts a lit body at middle grey is arithmetic, not a measurement. Godot's
 	# auto-exposure averages the frame and has no metering mode, so on a frame that is mostly empty
 	# space it raises exposure until the one lit body in it is white — which is what it did.
@@ -191,6 +207,14 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 		var to_star := (star_node.node.global_position - lit_earth.node.global_position).normalized()
 		h.check(scene.star_light.light.global_transform.basis.z.dot(to_star) > 0.99,
 			"and it shines from the star toward the observer")
+		# The disk's size is a fact about that same distance, so it is set from it rather than being a
+		# constant. Godot's `light_angular_distance` is an angular DIAMETER in degrees, and the Sun from
+		# Earth spans 0.524 to 0.542 degrees over the year — which is the window this has to land in, and
+		# is what makes the old 0.533 legible as "this value, at one au".
+		var diameter: float = scene.star_light.light.light_angular_distance
+		h.check(diameter > 0.52 and diameter < 0.55,
+			"and its angular size comes from the star's own radius at that distance (%.4f degrees)"
+				% diameter)
 
 	# **Evert's test of the dark end**, 2026-10-15: *"the shadow side of earth, with no moonlight or
 	# other source of light but starlight should be barely visible, a little above black."* That is a

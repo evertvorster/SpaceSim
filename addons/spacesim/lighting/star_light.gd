@@ -19,23 +19,29 @@ extends RefCounted
 ## refinement.
 const LUMINOUS_EFFICACY := 94.0
 
-## The Sun's disk as seen from 1 au, in degrees. Feeds Godot's shadow softening, so a terminator
-## reads as a terminator rather than as a cut.
-const SOLAR_ANGULAR_DIAMETER := 0.533
+## The Sun's disk is **derived, not stated** — see `SpacesimStarModel.angular_radius`, which this
+## feeds into Godot's `light_angular_distance` as the angular *diameter* it wants. It follows the
+## observer exactly as the strength does, and for the same reason: a value fixed at 1 au is 2.6x too
+## small at Mercury and 30x too large at Neptune.
 
 var luminosity: float = 0.0
+## The star's own radius in metres, so its angular size can be derived at whatever distance the
+## observer happens to be.
+var radius: float = 0.0
 var light: DirectionalLight3D
 
 
-func create(parent: Node, star_luminosity: float, temperature: float) -> DirectionalLight3D:
+func create(parent: Node, star_luminosity: float, temperature: float, star_radius: float) -> DirectionalLight3D:
 	luminosity = star_luminosity
+	radius = star_radius
 	light = DirectionalLight3D.new()
 	light.name = "StarLight"
 	# The temperature is handed to Godot rather than a colour being computed here: Godot already
 	# turns a temperature into a spectrum, and re-implementing Planck-to-sRGB would only be a worse
 	# version of what it does internally.
 	light.light_temperature = temperature if temperature > 0.0 else 6500.0
-	light.light_angular_distance = SOLAR_ANGULAR_DIAMETER if temperature > 0.0 else 0.0
+	# `light_angular_distance` is set in `aim_at`, not here: it is a property of the observer's
+	# distance, and a star with no radius has an angular size of zero, which `angular_radius` returns.
 	parent.add_child(light)
 	return light
 
@@ -57,11 +63,13 @@ func lux_at(distance: float) -> float:
 	return illuminance(luminosity, distance)
 
 
-## Aim the light from the star at wherever the observer is, and set its strength for that distance.
+## Aim the light from the star at wherever the observer is, and set its strength **and its angular
+## size** for that distance.
 ##
 ## One directional light cannot light a whole system from a star, so it lights the place the player
 ## actually is — which is the only place the player can see, and the only place whose distance the
-## strength should be computed from.
+## strength should be computed from. The disk's size is a fact about that same distance, so it is read
+## from it here rather than being a constant.
 func aim_at(observer_position: Vector3, star_position: Vector3) -> void:
 	if light == null:
 		return
@@ -75,3 +83,4 @@ func aim_at(observer_position: Vector3, star_position: Vector3) -> void:
 		up = Vector3.RIGHT
 	light.global_transform = light.global_transform.looking_at(light.global_position + direction, up)
 	light.light_intensity_lux = lux_at(distance)
+	light.light_angular_distance = rad_to_deg(2.0 * SpacesimStarModel.angular_radius(radius, distance))
