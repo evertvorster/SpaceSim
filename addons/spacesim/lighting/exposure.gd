@@ -281,3 +281,19 @@ static func configure(environment: Environment) -> void:
 	environment.glow_intensity = 0.4
 	environment.glow_bloom = 0.05
 	environment.glow_hdr_threshold = 1.0
+	# **The most local glow level was OFF, and that is the one a lone bright pixel needs.** Godot's defaults
+	# are 0.0 for `glow_levels/1` and 0.8, 0.4, 0.1 for 2, 3 and 4 — so the glow *starts* at a mip whose
+	# downsample has already averaged a single pixel away. The consequence is asymmetric and hides well:
+	# **a cluster of bright pixels survives that downsample and blooms, and an isolated one does not**, so
+	# a distant planet or a lone star reads as a flat white pixel rather than as a point of light. Evert,
+	# 2026-10-15, on the point of light a sub-pixel body becomes: *"I see Venus as a solid white pixel."*
+	#
+	# Written through `set()` rather than `set_glow_level()`: **the method is 0-BASED while the property is
+	# `glow_levels/(i+1)`**, so `set_glow_level(1, x)` writes level 2 and leaves the local one off — looking
+	# entirely reasonable in a diff while doing nothing.
+	environment.set("glow_levels/1", 1.0)
+	# The cap is where brightness stops mattering *for the glow*, so above it the brightest thing in the
+	# frame glares exactly as much as a merely bright one. Raised rather than left at 12, so a glare can be
+	# brighter than a glimmer. **A trim, not a measurement** — the number to judge it by is how the Sun and
+	# a bright planet compare when both are in frame.
+	environment.glow_hdr_luminance_cap = 64.0

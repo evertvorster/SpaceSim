@@ -183,6 +183,21 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check_near(environment.tonemap_agx_white, environment.tonemap_white,
 		"and the white point actually in force is the one the arithmetic uses (%.2f)"
 			% environment.tonemap_agx_white, 1.0e-6)
+	# **The glow has to be able to light a SINGLE pixel**, and Godot's default cannot. `glow_levels/1` is
+	# the most local level and it defaults to 0.0, so the glow starts at a mip whose downsample has already
+	# averaged a lone pixel away: a cluster of bright pixels survives that and blooms, an isolated one does
+	# not, and the asymmetry hides. Evert, 2026-10-15, of the point of light a sub-pixel body becomes:
+	# *"I see Venus as a solid white pixel."*
+	h.check(float(environment.get("glow_levels/1")) > 0.0,
+		"the most LOCAL glow level is on, so a single bright pixel can glare (%.2f)"
+			% float(environment.get("glow_levels/1")))
+	# The relations, rather than the numbers: the threshold has to be under the star's own emission or a
+	# star cannot glare, and the cap has to be above it or the brightest thing in the frame glares exactly
+	# as much as a merely bright one.
+	h.check(environment.glow_hdr_threshold < SpacesimBodyRenderer.STAR_INTENSITY,
+		"with the glow threshold under the star's emission, so a star glares at all")
+	h.check(environment.glow_hdr_luminance_cap > SpacesimBodyRenderer.STAR_INTENSITY,
+		"and the cap above it, so a glare can be brighter than a glimmer")
 	h.check(environment.ambient_light_source == Environment.AMBIENT_SOURCE_COLOR,
 		"with the ambient set from the catalogue's starlight rather than from the sky's radiance cubemap "
 			+ "— a point-source sky cannot be represented in one")

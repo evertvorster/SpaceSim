@@ -388,6 +388,28 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		h.check_near(decoded.get_luminance(), expected_radiance,
 			"what arrives in the shader is the body's radiance, unchanged by the tint or the encode",
 			maxf(expected_radiance * 0.02, 1.0e-6))
+		# **Its whole flux into one pixel, once the disc is under a pixel.** Below the floor the value falls
+		# as the disc's share of the pixel's solid angle — `pi * r_px^2` — so a body that recedes gets
+		# *fainter* rather than staying a full-brightness dot. Measured by walking the distance out and
+		# comparing the splat's own value at two radii, because the missing term is what makes a distant
+		# planet too bright and nothing else about it is observable in a still.
+		# **Both radii BELOW the floor, because that is the only place the law applies.** At 2 px the cap is
+		# already holding the value at the radiance, so going from 2 px to 0.2 px only moves the *fade* from
+		# 1 to `pi * 0.2^2` — a factor of 8, not the 1/d^2 of 100. The floor sits at `r_px = 1/sqrt(pi)`,
+		# about 0.56 px, and under it the value falls as the disc's area.
+		var to_star_dir := (star_node.node.global_position - mars.node.global_position).normalized()
+		_place_at_screen_radius(camera, mars, to_star_dir, 0.5, pixel)
+		scene.update_lod(camera)
+		var at_half := (mars.point.material_override as StandardMaterial3D).albedo_color.srgb_to_linear()
+		_place_at_screen_radius(camera, mars, to_star_dir, 0.25, pixel)
+		scene.update_lod(camera)
+		var at_quarter := (mars.point.material_override as StandardMaterial3D).albedo_color.srgb_to_linear()
+		h.check(at_half.get_luminance() > 0.0 and at_quarter.get_luminance() > 0.0,
+			"a body is lit at half a pixel and at a quarter (%.6f against %.6f)"
+				% [at_half.get_luminance(), at_quarter.get_luminance()])
+		h.check_near(at_quarter.get_luminance(), at_half.get_luminance() * 0.25,
+			"and twice as far is a QUARTER as bright, which is the whole flux of a shrinking disc",
+			at_half.get_luminance() * 0.02)
 		h.check_near(decoded.r / maxf(decoded.g, 1.0e-6), mars.color.r / maxf(mars.color.g, 1.0e-6),
 			"while its HUE is the body's own, so a planet is a coloured point and not a white one",
 			1.0e-6)

@@ -927,7 +927,7 @@ func update_lod(camera: Camera3D) -> void:
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
-			_place_point(body, observer, energy, distance, pixel, exposure)
+			_place_point(body, observer, energy, distance, pixel, screen, exposure)
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 			# A point still has a shell to price — an air so thin it is not drawn costs nothing, and one
 			# whose ring survives does, which is rare but real at a body just under the tier.
@@ -1062,7 +1062,7 @@ func _shell_is_visible(body: SpacesimSceneBody, observer: Vector3, pixel: float)
 ## to be settled first. Two renders — one body at 0.8 px and the same body at 0.4 px — would measure it.
 func _place_point(
 	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float,
-	exposure: float
+	screen: float, exposure: float
 ) -> void:
 	# The quad is a unit square, so its half-width is what a radius measures. One pixel is the floor it
 	# cannot shrink below.
@@ -1073,7 +1073,14 @@ func _place_point(
 	var star_body := star()
 	if star_body == null or star_body.node == null:
 		return
-	var radiance := body_luminance(body, observer, star_body.node.global_position)
+	# **Its WHOLE FLUX into one pixel, once the disc is smaller than one.** Below the floor the body's
+	# flux falls as `1/d^2` while its pixel does not grow, so what is drawn is the radiance times the
+	# disc's share of the pixel's solid angle — `omega_disc / omega_px = pi * r_px^2` — capped at 1 once
+	# the splat covers the disc, which it does from about 0.56 px of radius. This is the same term the
+	# star field carries as `lux / d_omega`, and it is what makes a distant body *faint* rather than a
+	# full-brightness dot: without it a body at 0.077 px is some 170x brighter than the law says.
+	var fade := minf(1.0, PI * screen * screen)
+	var radiance := body_luminance(body, observer, star_body.node.global_position) * fade
 	material.albedo_color = SpacesimBodyRenderer.point_colour(body, radiance * exposure)
 
 
