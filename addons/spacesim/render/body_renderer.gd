@@ -334,6 +334,9 @@ static func deck_material(body: SpacesimSceneBody) -> ShaderMaterial:
 		"threshold", cloud_threshold(offset_for(body.id), clouds.fraction, CLOUD_NOISE_SCALE)
 	)
 	material.set_shader_parameter("softness", CLOUD_SOFTNESS)
+	# **The layer's two numbers**, and `blocked` is derived from them here so the shadow the ground gets
+	# and the cloud the eye sees are the same arithmetic — see `cloud_blocked`.
+	material.set_shader_parameter("albedo", clouds.albedo)
 	material.set_shader_parameter("opacity", clouds.opacity)
 	# **The surface's own field**, so the deck's shadow can be sampled from the same noise and the two agree
 	# about where a cloud is — but the deck's own *scale*, because a deck wants far more structure than a
@@ -342,6 +345,42 @@ static func deck_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	material.set_shader_parameter("noise_offset", offset_for(body.id))
 	material.set_shader_parameter("noise_field", noise_field())
 	return material
+
+
+## **How much of the light a deck blocks**: its reflectance plus the share of the rest it absorbs.
+##
+## For a cloud `reflectance + transmittance + absorption = 1`, and content carries the first and a share
+## of the third: `albedo` is what it reflects, `opacity` is of what it does not reflect the share that
+## passes. So `blocked = albedo + (1 - albedo) * (1 - opacity)`, it is what the deck's own alpha is, and
+## **it is what the shadow on the ground uses** — one number, so the cloud and its shadow cannot disagree
+## about the weather. Pinned by test that the three terms sum to one.
+static func cloud_blocked(clouds: SpacesimClouds) -> float:
+	if clouds == null:
+		return 0.0
+	var albedo := clampf(clouds.albedo, 0.0, 1.0)
+	var passing := clampf(clouds.opacity, 0.0, 1.0)
+	return albedo + (1.0 - albedo) * (1.0 - passing)
+
+
+## **The deck's shadow, on the material of the surface it hangs over.**
+##
+## The surface samples the deck's *own* field along the ray to the star and along the ray to the eye, and
+## dims itself by what the deck does not pass — so a cloud that covers half the sky shadows half the
+## ground, and the same coverage that the eye sees is the coverage that darkens it.
+static func set_deck_shadow(
+	material: ShaderMaterial, body: SpacesimSceneBody
+) -> void:
+	if material == null or body.content == null or body.content.clouds == null:
+		return
+	if body.cloud_bottom <= 0.0:
+		return
+	material.set_shader_parameter("deck_radius", body.radius + body.cloud_bottom)
+	material.set_shader_parameter("deck_blocked", cloud_blocked(body.content.clouds))
+	material.set_shader_parameter("deck_threshold",
+		cloud_threshold(offset_for(body.id), body.content.clouds.fraction, CLOUD_NOISE_SCALE))
+	material.set_shader_parameter("deck_softness", CLOUD_SOFTNESS)
+	material.set_shader_parameter("deck_scale", CLOUD_NOISE_SCALE)
+	material.set_shader_parameter("deck_offset", offset_for(body.id))
 
 
 ## **The coverage threshold, as a PERCENTILE of the field rather than `1 - cover`.**

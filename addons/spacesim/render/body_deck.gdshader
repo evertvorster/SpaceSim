@@ -41,6 +41,27 @@ uniform vec3 cloud_color = vec3(1.0);
 uniform vec3 edge_color = vec3(0.7);
 uniform float threshold : hint_range(0.0, 1.0) = 0.5;
 uniform float softness : hint_range(0.001, 0.5) = 0.06;
+
+// ===== THE LAYER ==================================================================
+//
+// **A cloud is a layer, not a stencil.** For every wavelength
+//
+//     reflectance + transmittance + absorption = 1
+//
+// and this is two of the three, from the two numbers content carries:
+//
+//     albedo      what it REFLECTS                       (`SpacesimClouds.albedo`)
+//     opacity     of what it does not reflect, the share that PASSES; the rest is absorbed
+//                 (`SpacesimClouds.opacity` — 1.0 means nothing is absorbed)
+//
+// so at full coverage the layer blocks `blocked = albedo + (1 - albedo) * (1 - opacity)` and passes
+// `1 - blocked`. `blocked` is what the SHADOW on the ground uses too, so the two cannot disagree.
+//
+// **`blend_mix` wants `ALPHA = blocked` and a colour divided by it**, because Godot composites
+// `colour * alpha + background * (1 - alpha)`: dividing by `blocked` makes `colour * alpha` come back to
+// the reflected radiance, `albedo * light`. The division is bounded — `blocked` is at least the albedo —
+// so a fully transmitting cloud cannot blow it up.
+uniform float albedo : hint_range(0.0, 1.0) = 0.5;
 uniform float opacity : hint_range(0.0, 1.0) = 1.0;
 uniform float noise_scale : hint_range(0.1, 2.0) = 1.0;
 uniform vec3 noise_offset = vec3(0.0);
@@ -94,8 +115,9 @@ void fragment() {
 	float cover = smoothstep(threshold - softness, threshold + softness, height);
 	// The edge of a cloud is its thinnest part, so the same number drives colour and alpha: a soft
 	// boundary is also a thin one, which is what makes a deck read as cloud rather than as cut paper.
-	ALBEDO = mix(edge_color, cloud_color, cover);
-	ALPHA = cover * opacity;
+	float blocked = albedo + (1.0 - albedo) * (1.0 - opacity);
+	ALBEDO = mix(edge_color, cloud_color, cover) / max(blocked, 1.0e-4);
+	ALPHA = blocked * cover;
 	ROUGHNESS = 0.9;
 
 	// **The air above, exactly as the ground sees it.** The star's beam is thinned on the way down and the

@@ -85,6 +85,23 @@ uniform float sky_shadow_softness = 1.0;
 // as `1.0`, so an irradiance in lux becomes a radiance by dividing by it.
 uniform float reference_lux = 100000.0;
 
+// ===== THE CLOUD ABOVE ============================================================
+//
+// **A deck between this surface and the star dims it by exactly what the deck does not pass**, and it
+// dims what the surface sends back on the way out by the same number. That is the SHADOW, and it is not
+// a separate mechanism: `deck_blocked` is the deck's own `blocked` (reflectance + absorption) from its
+// own shader, so the shadow and the cloud cannot describe different weather.
+//
+// The ray is the same test the air uses — `air_ray_sphere` from the surface out to the deck's radius —
+// and the field is sampled at **the deck's own scale and offset**, which are not the surface's: a deck
+// maps the whole texture over the sphere where a surface uses a quarter of it.
+uniform float deck_radius = 0.0;
+uniform float deck_blocked = 0.0;
+uniform float deck_threshold = 0.0;
+uniform float deck_softness = 0.06;
+uniform float deck_scale = 1.0;
+uniform vec3 deck_offset = vec3(0.0);
+
 // Model space: the offset from the body's centre.
 varying vec3 local_position;
 
@@ -96,6 +113,30 @@ void vertex() {
 float field(vec3 direction) {
 	return texture(noise_field, direction * (0.25 * noise_scale) + vec3(0.5) + noise_offset).r;
 }
+
+// The deck's field, at the deck's own mapping — a second function rather than a parameter, because the
+// surface's own `field()` is already the surface's.
+float deck_field(vec3 direction) {
+	return texture(noise_field, direction * (0.25 * deck_scale) + vec3(0.5) + deck_offset).r;
+}
+
+
+// What the deck passes along a ray from this surface: 1 where there is no cloud over that direction.
+float deck_transmittance(vec3 point, vec3 direction) {
+	if (deck_radius <= planet_radius) {
+		return 1.0;
+	}
+	vec2 span = air_ray_sphere(point, direction, deck_radius);
+	if (span.x > span.y) {
+		return 1.0;
+	}
+	vec3 crossing = point + direction * max(span.x, 0.0);
+	float cover = smoothstep(
+		deck_threshold - deck_softness, deck_threshold + deck_softness, deck_field(normalize(crossing))
+	);
+	return 1.0 - deck_blocked * cover;
+}
+
 
 void fragment() {
 	// One direction per surface point, and the same one for every pixel that shares it.
@@ -154,8 +195,12 @@ void fragment() {
 			-(rayleigh_coefficient + absorption_coefficient) * view_rayleigh
 				- vec3(mie_coefficient * view_mie)
 		);
+		// **The cloud's own dimming, in both directions.** A deck between the ground and the star is a
+		// shadow on the way down and a veil on the way out, and it is the same number both times.
+		float cloud_sun = deck_transmittance(point, to_sun);
+		float cloud_view = deck_transmittance(point, to_eye);
 		vec3 surface_albedo = ALBEDO;
-		ALBEDO = surface_albedo * sun_transmittance * view_transmittance;
+		ALBEDO = surface_albedo * sun_transmittance * view_transmittance * cloud_sun * cloud_view;
 
 		// **And the sky puts light back on it.** A point in the air's own shadow — past the ground's
 		// terminator but under air the star can still reach — is lit from above, and that is what twilight

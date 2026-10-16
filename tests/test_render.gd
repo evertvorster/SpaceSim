@@ -486,6 +486,25 @@ func _test_the_deck(h, scene: SpacesimSystemScene, earth: SpacesimSceneBody, lun
 	h.check(earth.deck_mesh.scale.x < earth.radius * 1.001,
 		"and NOT a fraction of the radius — the old shell's 1.012 would be %.0f km up"
 			% ((earth.radius * 1.012 - earth.radius) / 1000.0))
+	# **The layer's terms sum to one**, which is the whole of the physics the deck models: what a cloud
+	# reflects, plus what it passes, plus what it absorbs. `blocked` is the first and third together, it is
+	# what the deck's own alpha is built from, and **it is what the shadow on the ground uses** — so the
+	# cloud the eye sees and the shadow it casts cannot describe different weather.
+	var clouds: SpacesimClouds = earth.content.clouds
+	var blocked := SpacesimBodyRenderer.cloud_blocked(clouds)
+	var passes := 1.0 - blocked
+	h.check_near(blocked + passes, 1.0, "the deck's blocked and passed shares sum to one", 1.0e-9)
+	h.check(blocked >= clouds.albedo - 1.0e-9 and blocked <= 1.0,
+		"and absorption is never negative: blocked %.3f is at least the albedo %.3f"
+			% [blocked, clouds.albedo])
+	h.check_near(SpacesimBodyRenderer.cloud_blocked(null), 0.0,
+		"a body with no deck blocks nothing", 1.0e-9)
+	# The surface is told, so the shadow and the cloud are the same numbers.
+	var surface_material: ShaderMaterial = earth.mesh.material_override
+	h.check_near(surface_material.get_shader_parameter("deck_radius"), earth.deck_mesh.scale.x,
+		"the shadow's ray reaches the deck's own radius", 1.0)
+	h.check_near(surface_material.get_shader_parameter("deck_blocked"), blocked,
+		"and it is dimmed by the deck's own blocked share", 1.0e-9)
 	# **And the constraint that makes a thin shell work at all: its own facets may not sag further than
 	# its altitude.** The deck borrowed the air shell's level once, whose budget is sized for a 100 km
 	# skin — and at 1.5 km the shell buried itself in the ground and rendered as a honeycomb of surviving

@@ -825,6 +825,9 @@ func _add_cloud_deck(body: SpacesimSceneBody, temperature: float, illuminance: f
 	SpacesimBodyRenderer.set_air_parameters(
 		material, body, _materials(), body.sky_top, temperature, illuminance
 	)
+	# **And the ground under it learns to be shadowed by it** — the same field, the same threshold, the
+	# same number the deck's own alpha is built from.
+	SpacesimBodyRenderer.set_deck_shadow(body.mesh.material_override as ShaderMaterial, body)
 	# **Its own level, from its own altitude**, because a deck's tessellation is a geometric constraint
 	# rather than a screen one — see `SpacesimLod.deck_level`.
 	body.deck_level = SpacesimLod.deck_level(body.radius, body.cloud_bottom)
