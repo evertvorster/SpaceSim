@@ -379,6 +379,65 @@ static func condensation_levels(
 	return levels
 
 
+## **The air's own reflection** — the term the albedo derivation was missing, and it is DERIVED rather
+## than collected: every number it needs is already in this module.
+##
+## A clear sky is not transparent. Earth's clear-sky planetary albedo is **0.149** against an all-sky
+## **0.293** (Stephens et al. 2015, *Reviews of Geophysics*, from CERES EAFB global annual means), and
+## the difference between those two is the cloud contribution — **0.144**. So the 0.149 is the surface
+## *plus the air above it plus aerosols*, and a model that counts only the surface is short by most of
+## it: our Earth surface derives 0.081 where the clear-sky column reflects 0.149.
+##
+## **The derivation, and what it assumes.** Rayleigh and Mie scattering remove light from the beam; the
+## part that goes back out of the top is the fraction single-scattered **upward**. For a Rayleigh phase
+## function the up/down split is symmetric, so **half** of what is scattered once leaves upward — and a
+## scattering optical depth of `tau` therefore reflects `0.5 * omega * (1 - exp(-tau))`, where `omega` is
+## the single-scattering albedo that separates what is *scattered* from what is *absorbed*.
+##
+## Three things this is not, named rather than hidden:
+##
+##  - **Multiple scattering raises it.** Two or more bounces push the fraction above a half; on Earth that
+##    is a few per cent of the value, on Venus it is the difference between the model and the sky.
+##  - **The sun is taken at the zenith**, so no air mass factor — a disc average would be slightly higher.
+##  - **Aerosols are one authored coefficient**, not a size distribution, so the Mie share carries the
+##    same uncertainty the material table does.
+##
+## Returned **per channel**, like the coefficient it is built from: a Rayleigh atmosphere reflects blue
+## several times more than red, which is the same fact that makes the sky blue.
+static func clear_sky_albedo(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	temperature: float,
+	gravity: float
+) -> Vector3:
+	if atmosphere == null or materials == null or temperature <= 0.0 or gravity <= 0.0:
+		return Vector3.ZERO
+	var air_height := scale_height(atmosphere, materials, temperature, gravity)
+	if air_height <= 0.0:
+		return Vector3.ZERO
+	var scattering := rayleigh_coefficient(atmosphere, materials, temperature) \
+		+ Vector3.ONE * MIE_COEFFICIENT
+	# Absorption is left OUT of the optical depth here and carried by `omega` instead, so a species that
+	# absorbs is a species that reflects less rather than one that scatters more.
+	var depth := scattering * air_height
+	var omega := single_scatter_albedo(atmosphere, materials, temperature)
+	return 0.5 * omega * Vector3(
+		1.0 - exp(-depth.x), 1.0 - exp(-depth.y), 1.0 - exp(-depth.z)
+	)
+
+
+## The same number as one scalar, weighted the way the eye weights it — the form the albedo derivation
+## needs, which is a single fraction of the star's light.
+static func clear_sky_luminance(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	temperature: float,
+	gravity: float
+) -> float:
+	var per_channel := clear_sky_albedo(atmosphere, materials, temperature, gravity)
+	return per_channel.x * 0.2126 + per_channel.y * 0.7152 + per_channel.z * 0.0722
+
+
 ## The mix's mean molar mass, grams per mole, weighted by mole fraction.
 static func mean_molar_mass(
 	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable

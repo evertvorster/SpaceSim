@@ -27,6 +27,48 @@ static func bond_albedo(body: SpacesimSystemBody, materials: SpacesimMaterialTab
 	return cover * deck + (1.0 - cover) * surface_albedo(body, materials)
 
 
+## **The split of a body's reflection**, as its parts — because the total can be right while the parts
+## are not, and that is exactly what the published numbers caught on 2026-10-16.
+##
+## Earth's **all-sky** planetary albedo is 0.293 and its **clear-sky** albedo 0.149 (Stephens et al. 2015,
+## *Reviews of Geophysics*, CERES EAFB global annual means), so the cloud contribution is the difference,
+## **0.144**. Set against that, this model's terms were:
+##
+##     published   cloud 0.144   clear 0.149   total 0.293
+##     model       cloud 0.270   clear 0.032   total 0.302
+##
+## The total was right and both parts were wrong — the cloud doing 1.9x the work it should and the clear
+## column a fifth — and they cancelled, which is why calibrating the total never caught it. The clear
+## term was short because **the air's own reflection was missing entirely**: the sky shader scattered
+## light back and `bond_albedo()` never counted it.
+##
+## `air_reflection` is passed in rather than derived here, because the air's albedo belongs to
+## `SpacesimAtmosphereModel` and asking it from here would be a cycle between the two models. Zero for an
+## airless body, which is the honest answer and not a missing one.
+##
+## **This does not change `bond_albedo()`.** Adding the air term alone would move every body's total by up
+## to 0.06 of albedo — on Earth from 0.302 to 0.348 against a published 0.293 — and the total is what the
+## temperature is calibrated on. Fixing the split means re-fitting the *content* at the same time, which
+## is a change to what is drawn, so it is a separate step with a number attached.
+static func reflectance_terms(
+	body: SpacesimSystemBody, materials: SpacesimMaterialTable, air_reflection: float = 0.0
+) -> Dictionary:
+	var cover := cloud_fraction(body)
+	var deck := 0.0
+	if body.clouds != null:
+		deck = body.clouds.albedo
+	var ground := surface_albedo(body, materials)
+	return {
+		"cloud": cover * deck,
+		"surface": (1.0 - cover) * ground,
+		"air": air_reflection,
+		"total": cover * deck + (1.0 - cover) * ground + air_reflection,
+		"cloud_fraction": cover,
+		"cloud_albedo": deck,
+		"surface_albedo": ground,
+	}
+
+
 ## The **Lambert phase function**: the disc-averaged radiance of a lit sphere relative to a fully-lit
 ## one, as a function of the phase angle.
 ##
