@@ -406,12 +406,20 @@ composition = Dictionary[String, float]({
 ; ---------- atmospheres ----------
 
 [sub_resource type="Resource" id="A_venus"]
+; **Venus is why `atmospheric_rotation_period` has to exist.** Its air superrotates -- it circles the
+; planet in about 4 days while the planet itself takes 243, a factor of 61 -- which moves its band scale
+; from ~31,800 km to ~4,080 and its cells from 0.07 to 0.58. `wind_speed` is the ~100 m/s
+; superrotation, which is what puts its band scale at the planet's own size and makes the model say
+; FEATURELESS. **Both rotations give FEATURELESS**, so the field is about the numbers a map is built
+; from rather than about the verdict; `tests/test_clouds.gd` asserts both. See `SpacesimCloudModel`.
 script = ExtResource("atmosphere")
 surface_pressure = 9200000.0
 species = Dictionary[String, float]({
 "carbon_dioxide": 0.965,
 "nitrogen": 0.035
 })
+atmospheric_rotation_period = 345600.0
+wind_speed = 100.0
 
 [sub_resource type="Resource" id="A_earth"]
 ; **Ozone's mole fraction is DERIVED from the column, not chosen.** The model treats every absorber as
@@ -429,6 +437,9 @@ species = Dictionary[String, float]({
 "water_vapour": 0.01
 })
 variable_species = PackedStringArray("water_vapour")
+; A synoptic eddy velocity, ~10 m/s: the velocity scale the band law takes, not a peak wind. Earth has
+; no `atmospheric_rotation_period`, so its air turns with the body and `rotation_period` is right.
+wind_speed = 10.0
 
 [sub_resource type="Resource" id="A_mars"]
 script = ExtResource("atmosphere")
@@ -478,6 +489,8 @@ species = Dictionary[String, float]({
 ; measured 165 K, and internal heat is most of the budget. `reference_temperature()` reads the pin.
 
 [sub_resource type="Resource" id="A_jupiter"]
+; A ~50 m/s mean zonal wind, against peaks nearer 150: the band law wants the mean. No
+; `atmospheric_rotation_period`, because a giant's 9.9-hour rotation *is* its atmosphere's.
 script = ExtResource("atmosphere")
 surface_pressure = 101325.0
 species = Dictionary[String, float]({
@@ -485,6 +498,7 @@ species = Dictionary[String, float]({
 "hydrogen": 0.861,
 "methane": 0.003
 })
+wind_speed = 50.0
 
 [sub_resource type="Resource" id="A_saturn"]
 script = ExtResource("atmosphere")
