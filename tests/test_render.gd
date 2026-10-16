@@ -35,6 +35,7 @@ func run(h, root: Node) -> void:
 	_test_the_exposure_follows_the_view(h, scene)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_shells_reach_the_right_height(h, scene, sol)
+	_test_the_condensation_levels(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
 	_test_the_greenhouse(h, scene)
 	_test_hiding_bodies_hides_their_air(h, scene)
@@ -537,21 +538,35 @@ func _test_the_temperature_profile(h, scene: SpacesimSystemScene, sol: SpacesimS
 	# adiabat is dry -- named in the model and in the plan, and it is what moist convection fixes.)
 	var earth := scene.body_by_id("planet:earth")
 	var materials_earth := SpacesimMaterialTable.engine_table()
-	var temperature := SpacesimAtmosphereModel.reference_temperature(
+	# **The tropopause is the SKIN temperature of the effective (equilibrium) temperature**, not of the
+	# surface: `tropopause_temperature()` takes the equilibrium, and passing it the greenhouse-adjusted
+	# surface instead put the ceiling 28 K too warm. It is the pairing `condensation_levels` uses, so this
+	# is now the same convention in both places rather than two.
+	var equilibrium := SpacesimAtmosphereModel.equilibrium_temperature(
 		earth.content, materials_earth,
 		SpacesimStarModel.luminosity(star.content), earth.position.distance_to(star.position))
-	var tropopause := SpacesimAtmosphereModel.tropopause_temperature(temperature)
+	var temperature := SpacesimAtmosphereModel.surface_temperature(
+		earth.content.atmosphere, materials_earth,
+		SpacesimAtmosphereModel.surface_gravity(earth.content), equilibrium)
+	var tropopause := SpacesimAtmosphereModel.tropopause_temperature(equilibrium)
 	var lapse := SpacesimAtmosphereModel.lapse_rate(
 		earth.content.atmosphere, materials_earth,
 		SpacesimAtmosphereModel.surface_gravity(earth.content))
-	h.check(absf(tropopause / temperature - 0.8409) < 1.0e-4,
+	h.check(absf(tropopause / equilibrium - 0.8409) < 1.0e-4,
 		"the tropopause is the grey skin temperature, %.1f K for an effective %.1f"
-			% [tropopause, temperature])
+			% [tropopause, equilibrium])
 	# **The profile's shape, and the check that the greenhouse landed.** Before the greenhouse this
 	# surface was 256.5 K — below freezing — so water "condensed" 1.7 km *below ground*. It is now
-	# above freezing and the base is where cloud bases are, from the profile and the material table.
+	# above freezing and the base is where cloud bases are. **The base comes from the derivation rather
+	# than being worked out here**: it was `(T - T_cond) / lapse` inline until
+	# `SpacesimAtmosphereModel.condensation_levels` existed, and that is the one home for it now.
 	var water := materials_earth.by_name("water_vapour")
-	var base := (temperature - water.condensation_temperature) / lapse / 1000.0
+	var base := 0.0
+	for level in SpacesimAtmosphereModel.condensation_levels(
+			earth.content.atmosphere, materials_earth,
+			SpacesimAtmosphereModel.surface_gravity(earth.content), equilibrium):
+		if level.species == "water_vapour":
+			base = level.height / 1000.0
 	h.check(temperature > water.condensation_temperature,
 		"the surface is %.1f K, above water's condensation temperature" % temperature)
 	h.check(base > 0.5 and base < 3.0,
@@ -642,6 +657,99 @@ func _test_the_greenhouse(h, scene: SpacesimSystemScene) -> void:
 			% [water, methane, carbon])
 	h.check(absf(carbon - 0.0001397) < 1.0e-7 and absf(methane - 0.0001961) < 1.0e-7,
 		"both within the range of published broadband infrared absorptivities")
+
+
+## **The cloud decks are derived, and this is the measurement that says the derivation works.**
+##
+## The parameter is the height at which a species in the mix reaches its own `condensation_temperature`
+## in the `T(h)` profile — nothing new is authored for it. What is checked is the *effect*: the two bodies
+## whose real decks are known from outside the model are **Earth** (cumulus bases at 1–2 km, ~0.9 bar)
+## and **Venus** (45–70 km). A third case is checked for its shape rather than its value — an ice giant's
+## methane, which a well-mixed profile cannot put a level on at all.
+##
+## **The pressure is NOT checked against the literature, and `pressure_at` says why**: the sources publish
+## a pressure level, turning a height into one is a single-exponential approximation, and it holds for a
+## couple of scale heights and no further. Earth's 0.84 bar against a real ~0.9 is inside that; Venus's
+## 3.5 against a real ~0.7–1 is not, and the check below says so rather than pretending otherwise.
+func _test_the_condensation_levels(h, scene: SpacesimSystemScene, sol: SpacesimSolarSystem) -> void:
+	var materials := SpacesimMaterialTable.engine_table()
+	var star_body := scene.star()
+	var luminosity := SpacesimStarModel.luminosity(star_body.content)
+
+	# --- Earth: the cloud base, against a real one -----------------------------------------------------
+	var earth := scene.body_by_id("planet:earth")
+	var earth_levels := SpacesimAtmosphereModel.condensation_levels(
+		earth.content.atmosphere, materials,
+		SpacesimAtmosphereModel.surface_gravity(earth.content),
+		SpacesimAtmosphereModel.equilibrium_temperature(
+			earth.content, materials, luminosity,
+			earth.position.distance_to(star_body.position)
+		)
+	)
+	var base: SpacesimAtmosphereModel.Condensation = null
+	var never := 0
+	for level in earth_levels:
+		if level.species == "water_vapour":
+			base = level
+		elif level.regime == SpacesimAtmosphereModel.Condensation.Regime.NONE:
+			never += 1
+	h.check(base != null, "Earth's water finds a level")
+	if base == null:
+		return
+	h.check(base.regime == SpacesimAtmosphereModel.Condensation.Regime.LEVEL,
+		"and it is a deck rather than a fog")
+	h.check(base.height > 1000.0 and base.height < 2000.0,
+		"at %.0f m, against real cumulus bases of 1-2 km" % base.height)
+	# The real base is near 0.9 bar, so this is the pressure check the approximation does survive.
+	h.check(base.pressure / 1.0e5 > 0.78 and base.pressure / 1.0e5 < 0.95,
+		"and at %.2f bar against ~0.9 — a level inside a scale height, which is where the estimate holds"
+			% (base.pressure / 1.0e5))
+	h.check(never > 0,
+		"while species that only reach their condensation point above the tropopause get no deck "
+			+ "at all (%d of them)" % never)
+
+	# --- Venus: the right level from the wrong molecule ------------------------------------------------
+	var venus := scene.body_by_id("planet:venus")
+	var venus_levels := SpacesimAtmosphereModel.condensation_levels(
+		venus.content.atmosphere, materials,
+		SpacesimAtmosphereModel.surface_gravity(venus.content),
+		SpacesimAtmosphereModel.equilibrium_temperature(
+			venus.content, materials, luminosity,
+			venus.position.distance_to(star_body.position)
+		)
+	)
+	var deck: SpacesimAtmosphereModel.Condensation = null
+	for level in venus_levels:
+		if level.regime == SpacesimAtmosphereModel.Condensation.Regime.LEVEL:
+			deck = level
+	h.check(deck != null, "Venus finds one too")
+	if deck != null:
+		# Venus's clouds are H2SO4 and its condensable here is CO2 — but the LEVEL is set by the
+		# temperature profile, so the wrong molecule does not stop it landing in the right place. That
+		# property is the whole reason a generator can use this.
+		h.check(deck.height > 45000.0 and deck.height < 70000.0,
+			"(%.0f km, inside the real deck's 45-70 km, and from CO2 rather than H2SO4)"
+				% (deck.height / 1000.0))
+
+	# --- An ice giant: a fog, not a deck ---------------------------------------------------------------
+	# Uranus's methane is BELOW its condensation point all the way up the troposphere (49-57 K against
+	# methane's 90.7 K), so a well-mixed model has nowhere to put a level. That is a real limitation and
+	# not a bug: its 1.2 bar methane deck exists because methane is UNDERSATURATED there, and saturation
+	# is not modelled.
+	var uranus := scene.body_by_id("planet:uranus")
+	var uranus_levels := SpacesimAtmosphereModel.condensation_levels(
+		uranus.content.atmosphere, materials,
+		SpacesimAtmosphereModel.surface_gravity(uranus.content),
+		SpacesimAtmosphereModel.equilibrium_temperature(
+			uranus.content, materials, luminosity,
+			uranus.position.distance_to(star_body.position)
+		)
+	)
+	var fog := false
+	for level in uranus_levels:
+		if level.regime == SpacesimAtmosphereModel.Condensation.Regime.FOG:
+			fog = true
+	h.check(fog, "an ice giant's methane comes out as a fog rather than a deck, and says so")
 
 
 func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:

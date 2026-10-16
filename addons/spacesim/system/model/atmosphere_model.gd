@@ -287,6 +287,98 @@ static func single_scatter_albedo(
 	)
 
 
+## The pressure at a height, hydrostatic on a single exponential: `P(h) = P0 * exp(-h / H)`.
+##
+## **One scale height, taken at the surface, and it degrades past a scale height or two.** That is the
+## whole of the approximation, and it is the reason the deck check is a *height* against the literature's
+## altitude ranges: the sources publish a pressure level, so a height has to be converted to compare, and
+## this conversion is only good while the level is within a couple of scale heights of the ground.
+## Measured against the two cases that have both numbers: **Earth's cloud base comes to 0.84 bar against
+## a real cumulus base near 0.9**, where the level is 0.18 of a scale height up — but **Venus's comes to
+## 3.5 bar where the real deck sits near 0.7–1**, because that level is 3.3 scale heights up and one
+## exponential cannot span that (the real pressure falls by a factor of 92 over 50 km, an effective
+## scale height of ~11 km against the surface's 15.9).
+static func pressure_at(height: float, surface_pressure: float, air_scale_height: float) -> float:
+	if air_scale_height <= 0.0 or surface_pressure <= 0.0:
+		return 0.0
+	return surface_pressure * exp(-height / air_scale_height)
+
+
+## One species' condensation level — **where a cloud deck sits, derived rather than authored.**
+##
+## The parameter is the height at which the species reaches its own `condensation_temperature` in the
+## `T(h)` profile. Every species already carries that number: it is the same one the greenhouse
+## calibration is fixed against, so nothing new is authored here.
+##
+## **Three regimes, and two of them are not "no deck".**
+##
+## | | |
+## |---|---|
+## | `LEVEL` | the profile crosses the condensation temperature above the ground: there is a height, and a deck could sit on it |
+## | `FOG` | **colder than the condensation point EVERYWHERE** — the species cannot be a well-mixed gas at any level, so no height exists and the honest answer is a haze rather than a deck |
+## | `NONE` | the troposphere never gets cold enough: the condensate is confined to the tropopause or above, and there is no tropospheric deck at all |
+class Condensation:
+	extends RefCounted
+
+	enum Regime {
+		LEVEL, ## a height where the species reaches its condensation temperature
+		FOG, ## below its condensation point everywhere, so there is no level to give
+		NONE, ## never cold enough in the troposphere
+	}
+
+	var species := ""
+	var regime := Regime.NONE
+	## Metres above the surface. Only meaningful for `LEVEL`.
+	var height := 0.0
+	## Pascals, from `pressure_at` — **an approximation that degrades with height**, see there.
+	var pressure := 0.0
+
+
+## Every condensation level in a body's air, **highest first** — so the first `LEVEL` is the deck seen
+## from outside.
+##
+## Inputs are the two a caller already has or can already derive: the surface gravity and the equilibrium
+## temperature. Everything else — the surface temperature, the lapse rate, the tropopause, the scale
+## height — is this module's own and is computed here, so a caller cannot get one of them inconsistent
+## with the other three.
+static func condensation_levels(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	gravity: float,
+	equilibrium: float
+) -> Array:
+	var levels: Array = []
+	if atmosphere == null or materials == null:
+		return levels
+	var lapse := lapse_rate(atmosphere, materials, gravity)
+	if lapse <= 0.0:
+		return levels
+	var surface := surface_temperature(atmosphere, materials, gravity, equilibrium)
+	var ceiling := tropopause_temperature(equilibrium)
+	var air_height := scale_height(atmosphere, materials, surface, gravity)
+	for key in atmosphere.species:
+		var material := materials.by_name(String(key))
+		if material == null or material.condensation_temperature <= 0.0:
+			continue
+		var level := Condensation.new()
+		level.species = String(key)
+		var freezing := material.condensation_temperature
+		if freezing <= ceiling:
+			level.regime = Condensation.Regime.NONE
+		elif freezing >= surface:
+			# The whole troposphere is already below it: **Neptune's methane is this case**, and so is
+			# Uranus's — which is why the ice giants get a haze from a well-mixed model and cannot be
+			# made to give their real 1.2 bar methane deck without modelling saturation.
+			level.regime = Condensation.Regime.FOG
+		else:
+			level.regime = Condensation.Regime.LEVEL
+			level.height = (surface - freezing) / lapse
+			level.pressure = pressure_at(level.height, atmosphere.surface_pressure, air_height)
+		levels.append(level)
+	levels.sort_custom(func(a: Condensation, b: Condensation) -> bool: return a.height > b.height)
+	return levels
+
+
 ## The mix's mean molar mass, grams per mole, weighted by mole fraction.
 static func mean_molar_mass(
 	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable
