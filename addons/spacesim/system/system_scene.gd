@@ -587,19 +587,6 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 		SpacesimAtmosphereModel.surface_gravity(body.content)
 	)
 	body.sky_top = maxf(shell_reach, _framing.atmosphere_altitude)
-	# **The deck's altitude, derived while the air's numbers are already in hand.** The array comes back
-	# highest-first, so the first `LEVEL` is the deck seen from outside; `FOG` and `NONE` contribute
-	# nothing, which is the point of naming them — a body already below its condensation point everywhere
-	# has no level to sit a deck on.
-	var equilibrium := SpacesimAtmosphereModel.equilibrium_temperature(
-		body.content, _materials(), luminosity, distance
-	)
-	for level in SpacesimAtmosphereModel.condensation_levels(
-			body.content.atmosphere, _materials(),
-			SpacesimAtmosphereModel.surface_gravity(body.content), equilibrium):
-		if level.regime == SpacesimAtmosphereModel.Condensation.Regime.LEVEL:
-			body.cloud_bottom = level.height
-			break
 	body.shell_level = INITIAL_MESH_LEVEL
 	var material := SpacesimBodyRenderer.atmosphere_material(
 		body, _materials(), body.sky_top, temperature,
@@ -617,10 +604,6 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 		body.mesh.material_override as ShaderMaterial, body, _materials(), body.sky_top, temperature,
 		SpacesimStarLight.illuminance(luminosity, distance)
 	)
-	# **The deck is built here rather than beside this**, because a deck is a surface under the same air:
-	# it needs the same coefficients, the same shell top and the same illuminance, and recomputing them
-	# next door would be a second place for them to be got wrong.
-	_add_cloud_deck(body, temperature, SpacesimStarLight.illuminance(luminosity, distance))
 
 
 ## Point every atmosphere at the observer and at its star.
@@ -793,47 +776,11 @@ func update_atmospheres(observer: Vector3) -> void:
 			if shell != null:
 				shell.set_shader_parameter("eye_offset", offset)
 				shell.set_shader_parameter("sun_direction", to_star)
-		var lit := body.mesh.material_override as ShaderMaterial if body.mesh != null else null
-		if lit != null:
-			lit.set_shader_parameter("eye_offset", offset)
-			lit.set_shader_parameter("sun_direction", to_star)
-		# The deck is a surface under the same air, so it wants the same two numbers.
-		if body.deck_mesh != null:
-			var deck := body.deck_mesh.material_override as ShaderMaterial
-			if deck != null:
-				deck.set_shader_parameter("eye_offset", offset)
-				deck.set_shader_parameter("sun_direction", to_star)
-
-
-## The cloud deck, at the condensation level the air puts it at.
-##
-## **Not a fraction of the radius.** That is what the removed shell did (`radius * 1.012`), and it is what
-## made every world's outermost silhouette a cloud — 76 km above Earth against a real cloud top of 10-12.
-## The height here is derived from the air's own `T(h)` profile, so a deck is a real altitude above a real
-## surface and it moves when the air does, not when the planet's size does.
-##
-## The shell uses the **air's** level of detail, because it is the same kind of object — a thin skin
-## judged on its limb rather than on its disc.
-func _add_cloud_deck(body: SpacesimSceneBody, temperature: float, illuminance: float) -> void:
-	if body.content == null or body.content.clouds == null or body.cloud_bottom <= 0.0:
-		return
-	var material := SpacesimBodyRenderer.deck_material(body)
-	if material == null:
-		return
-	# **The same air the surface gets**, so the deck is lit through it and seen through it — it is a
-	# surface under the sky, not a lid over it.
-	SpacesimBodyRenderer.set_air_parameters(
-		material, body, _materials(), body.sky_top, temperature, illuminance
-	)
-	# **And the ground under it learns to be shadowed by it** — the same field, the same threshold, the
-	# same number the deck's own alpha is built from.
-	SpacesimBodyRenderer.set_deck_shadow(body.mesh.material_override as ShaderMaterial, body)
-	# **Its own level, from its own altitude**, because a deck's tessellation is a geometric constraint
-	# rather than a screen one — see `SpacesimLod.deck_level`.
-	body.deck_level = SpacesimLod.deck_level(body.radius, body.cloud_bottom)
-	body.deck_mesh = _add_body_mesh(
-		body.node, body.radius + body.cloud_bottom, material, "%sDeck" % body.name, body.deck_level
-	)
+		if body.mesh != null:
+			var lit := body.mesh.material_override as ShaderMaterial
+			if lit != null:
+				lit.set_shader_parameter("eye_offset", offset)
+				lit.set_shader_parameter("sun_direction", to_star)
 
 
 ## A body's geometry: a shared unit icosphere, scaled by the body's radius.
@@ -919,10 +866,6 @@ func update_lod(camera: Camera3D) -> void:
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
-		# **The deck belongs to the disc, not to the shell.** A point-tier body draws neither, and the deck
-		# has no limb of its own worth keeping below one pixel — it is *inside* the air that does.
-		if body.deck_mesh != null:
-			body.deck_mesh.visible = not is_point
 		# **The air shell is a visibility question, not a tier.** Its limb ring is what it contributes from
 		# outside, and below a pixel of thickness there is nothing to see — which is also why a point-tier
 		# body's shell is not drawn, without this having to know about the point tier.
@@ -962,16 +905,6 @@ func update_lod(camera: Camera3D) -> void:
 				body.atmosphere_mesh.mesh = SpacesimIcosphere.mesh_at(shell_level)
 			if body.atmosphere_mesh.visible:
 				total += SpacesimLod.triangles_at(body.shell_level)
-		# **The deck's level is geometric, not a screen size** — a facet that sags further than the deck's
-		# own altitude puts the shell inside the planet, which is a honeycomb and not a cloud. It does not
-		# depend on the distance, so it is set once and only ever raised.
-		if body.deck_mesh != null:
-			var deck_floor := SpacesimLod.deck_level(body.radius, body.cloud_bottom)
-			if deck_floor > body.deck_level:
-				body.deck_level = deck_floor
-				body.deck_mesh.mesh = SpacesimIcosphere.mesh_at(deck_floor)
-			if body.deck_mesh.visible:
-				total += SpacesimLod.triangles_at(body.deck_level)
 	_triangles = total
 
 

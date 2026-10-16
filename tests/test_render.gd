@@ -34,7 +34,6 @@ func run(h, root: Node) -> void:
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_exposure_follows_the_view(h, scene)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
-	_test_the_deck(h, scene, earth, luna)
 	_test_the_air_shells_reach_the_right_height(h, scene, sol)
 	_test_the_condensation_levels(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
@@ -462,104 +461,6 @@ func _test_the_sky_is_derived(
 ## you see. **Their "surface" is the 1-bar level, which is a convention and not a boundary:** there is
 ## no liquid to land on, because hydrogen is supercritical above 33 K at 13 bar and every giant's 1-bar
 ## level is far above that. The radius is already the 1-bar radius, so the shell sits above it.
-## **The cloud deck: drawn at the level the air puts it at, with the coverage that was asked for.**
-##
-## Two things are checked here that were each wrong once. **The altitude**: the removed shell stood at
-## `radius * 1.012`, a fraction of the body, which is 76 km above Earth and what made every world's
-## outermost silhouette a cloud — so the deck's radius is asserted against the *derived* level and
-## against that old fraction. And **the coverage**: a threshold admits the fraction of the field above
-## it, which is the authored fraction only if the distribution is known, and the first deck assumed it.
-## `SpacesimBodyRenderer.cloud_coverage` is the measurement that says it is now measured.
-func _test_the_deck(h, scene: SpacesimSystemScene, earth: SpacesimSceneBody, luna: SpacesimSceneBody) -> void:
-	h.check(luna.deck_mesh == null, "Luna has no deck — no air, so no condensation level")
-	h.check(earth.deck_mesh != null, "Earth's deck is drawn")
-	if earth.deck_mesh == null:
-		return
-	h.check_near(earth.deck_mesh.scale.x, earth.radius + earth.cloud_bottom,
-		"at radius + the derived level", 1.0)
-	h.check(earth.cloud_bottom > 1000.0 and earth.cloud_bottom < 2000.0,
-		"which is %.0f m up — the condensation level, a real cloud base rather than a fraction of the "
-			% earth.cloud_bottom
-			+ "radius")
-	# **The failure that took the last deck out of the tree, asserted as a bound.** `radius * 1.012` is
-	# 76 km at Earth; anything within a tenth of a percent of it means the fraction is back.
-	h.check(earth.deck_mesh.scale.x < earth.radius * 1.001,
-		"and NOT a fraction of the radius — the old shell's 1.012 would be %.0f km up"
-			% ((earth.radius * 1.012 - earth.radius) / 1000.0))
-	# **The layer's terms sum to one**, which is the whole of the physics the deck models: what a cloud
-	# reflects, plus what it passes, plus what it absorbs. `blocked` is the first and third together, it is
-	# what the deck's own alpha is built from, and **it is what the shadow on the ground uses** — so the
-	# cloud the eye sees and the shadow it casts cannot describe different weather.
-	var clouds: SpacesimClouds = earth.content.clouds
-	var blocked := SpacesimBodyRenderer.cloud_blocked(clouds)
-	var passes := 1.0 - blocked
-	h.check_near(blocked + passes, 1.0, "the deck's blocked and passed shares sum to one", 1.0e-9)
-	h.check(blocked >= clouds.albedo - 1.0e-9 and blocked <= 1.0,
-		"and absorption is never negative: blocked %.3f is at least the albedo %.3f"
-			% [blocked, clouds.albedo])
-	h.check_near(SpacesimBodyRenderer.cloud_blocked(null), 0.0,
-		"a body with no deck blocks nothing", 1.0e-9)
-	# The surface is told, so the shadow and the cloud are the same numbers.
-	# **Transparent BOTH ways, and the two halves live in different places on purpose.**
-	# UP: `blend_mix` composites `deck * alpha + ground * (1 - alpha)`, and the deck's shader sets
-	# `ALPHA = blocked * cover` — so at full coverage `(1 - alpha)` is exactly `1 - blocked`, the share of
-	# the planet's light that comes up through it. The number below is that share.
-	var through := 1.0 - blocked
-	h.check(through > 0.4,
-		"a covered pixel still passes %.0f%% of the planet's light up through it — it is not a lid"
-			% (through * 100.0))
-	# DOWN: the sun's ray, tested in the surface, is what shadows the ground.
-	var surface_material: ShaderMaterial = earth.mesh.material_override
-	h.check_near(surface_material.get_shader_parameter("deck_radius"), earth.deck_mesh.scale.x,
-		"the shadow's ray reaches the deck's own radius", 1.0)
-	h.check_near(surface_material.get_shader_parameter("deck_blocked"), blocked,
-		"and the ground is shadowed by the deck's own blocked share", 1.0e-9)
-	# **And the view transmittance is NOT applied a second time in the surface.** `(1 - alpha)` above is
-	# already it; doing it in both places dims the planet twice under every covered pixel, which is a
-	# factor of two of its light — the check is a mutation check on the shader's own text, because the
-	# arithmetic lives there and nowhere else.
-	h.check(not surface_material.shader.code.contains("cloud_view"),
-		"sanity: the surface applies the cloud's SUN transmittance and no view term, or the planet is "
-			+ "dimmed twice")
-	# **And the constraint that makes a thin shell work at all: its own facets may not sag further than
-	# its altitude.** The deck borrowed the air shell's level once, whose budget is sized for a 100 km
-	# skin — and at 1.5 km the shell buried itself in the ground and rendered as a honeycomb of surviving
-	# corners. Measured, not reasoned: at 20x the altitude the same shell was a proper cloud deck.
-	var sag := earth.radius * SpacesimIcosphere.relative_sagitta(earth.deck_level)
-	h.check(sag <= earth.cloud_bottom,
-		"a deck's facets sag %.0f m, inside its own %.0f m altitude (level %d, %d triangles)"
-			% [sag, earth.cloud_bottom, earth.deck_level,
-				SpacesimIcosphere.face_count(earth.deck_level)])
-
-	# --- the coverage, measured rather than assumed -----------------------------------------------------
-	var material: ShaderMaterial = earth.deck_mesh.material_override
-	h.check(material != null, "with the deck shader")
-	if material == null:
-		return
-	# **Not additive.** A deck is something you look AT, so it has to occlude what is behind it — which is
-	# the whole reason it is a second material rather than another term in the atmosphere's.
-	h.check(material.shader.code.contains("blend_mix"),
-		"and drawn with blend_mix, because a deck occludes while the air adds")
-	var offset := SpacesimBodyRenderer.offset_for(earth.id)
-	# **The scale comes off the material**, so this measures the mapping the deck actually samples rather
-	# than the surface's — the two differ on purpose (`CLOUD_NOISE_SCALE` is 4.0, the whole texture over the
-	# sphere, where the surface uses a quarter of it).
-	var scale := float(material.get_shader_parameter("noise_scale"))
-	h.check_near(scale, SpacesimBodyRenderer.CLOUD_NOISE_SCALE,
-		"the deck maps the whole texture over the sphere (%.1f)" % scale, 1.0e-9)
-	for fraction in [0.25, 0.5, 0.75]:
-		var threshold := SpacesimBodyRenderer.cloud_threshold(offset, fraction, scale)
-		var achieved := SpacesimBodyRenderer.cloud_coverage(offset, threshold, scale)
-		h.check(absf(achieved - fraction) < 0.03,
-			"asking for %.0f%% of the sphere covered gets %.1f%% (threshold %.3f)"
-				% [fraction * 100.0, achieved * 100.0, threshold])
-	# The degenerate ends, which are the two answers a caller must not have to special-case.
-	h.check(SpacesimBodyRenderer.cloud_threshold(offset, 0.0) == 1.0,
-		"and a body with no cloud gets a threshold nothing can exceed")
-	h.check(SpacesimBodyRenderer.cloud_threshold(offset, 1.0) == 0.0,
-		"while a body that is all cloud gets one nothing can fall below")
-
-
 func _test_the_air_shells_reach_the_right_height(
 	h, scene: SpacesimSystemScene, sol: SpacesimSolarSystem
 ) -> void:
@@ -853,9 +754,9 @@ func _test_the_condensation_levels(h, scene: SpacesimSystemScene, sol: SpacesimS
 
 func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:
 	# `P` hides the bodies. Leaving the air behind would look like a bug rather than a debug key.
-	# **The deck is drawn now**, at the condensation level rather than at `radius * 1.012` — the altitude
-	# the removed shell got wrong. `SpacesimClouds` also stays and is still read by `bond_albedo`, which
-	# `test_surface.gd` guards: Earth's 0.302 against a measured 0.306.
+	# **Nothing draws a cloud deck any more** — the shell that did was removed for standing 76 km above
+	# Earth and reading as the atmosphere from space. `SpacesimClouds` stays and is still read by
+	# `bond_albedo`, which `test_surface.gd` guards: Earth's 0.302 against a measured 0.306.
 	var meshes := scene.meshes()
 	var air := 0
 	for mesh in meshes:

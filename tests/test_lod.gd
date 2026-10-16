@@ -281,9 +281,6 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 			drawn += SpacesimIcosphere.face_count(body.mesh_level)
 		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
 			drawn += SpacesimIcosphere.face_count(body.shell_level)
-		# The cloud deck has its own level, from its own altitude — `SpacesimLod.deck_level`.
-		if body.deck_mesh != null and body.deck_mesh.visible:
-			drawn += SpacesimIcosphere.face_count(body.deck_level)
 	h.check(scene.triangles() == drawn,
 		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 

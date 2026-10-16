@@ -7,18 +7,15 @@ extends RefCounted
 ## derived yet is named in the constants below rather than buried in the shader, because a hidden
 ## constant is one nobody can find when the picture is wrong.
 ##
-## **The cloud deck is drawn again, and the altitude is what changed.** The shell that was removed in
-## `ffbc802` stood at `radius * 1.012` — a *fraction of the body*, which is 76 km up at Earth against a
-## real cloud top of 10-12, and that is what made it the outermost silhouette of every world. The
-## deck now sits at the **condensation level**, a real height derived from the air's own `T(h)` profile
-## (see `SpacesimAtmosphereModel.condensation_levels`), so it tracks the air rather than the planet's
-## size. `SpacesimClouds` keeps carrying `fraction` and `albedo` for `bond_albedo` — Earth's calibrated
-## 0.302 against a measured 0.306 still depends on them.
+## **Nothing draws a cloud deck.** The shell that did was removed in `ffbc802`: it stood at
+## `radius * 1.012` — 76 km up at Earth, seven times a real cloud top — which made it the outermost
+## silhouette of every body, and it is what read as "an atmosphere" from space while the actual air
+## was invisible. `SpacesimClouds` stays and is still read: `bond_albedo` needs it, and Earth's
+## calibrated 0.302 against a measured 0.306 depends on the deck's fraction and albedo.
 
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 const ATMOSPHERE_SHADER := preload("res://addons/spacesim/render/body_atmosphere.gdshader")
-const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
 
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
@@ -37,25 +34,6 @@ const RELIEF := 0.05
 ## How far into the two-stop colour gradient the blend sits, and how soft the edge is.
 const DETAIL_MIX := 0.5
 const DETAIL_SOFTNESS := 0.18
-
-## **How much of the noise texture the sphere is mapped over, and it is not the surface's 1.0.**
-##
-## At 1.0 the sphere uses a *quarter* of the texture — 16 of its 64 texels across a whole planet — which
-## gives a handful of blobs. A deck wants structure, so it maps the *whole* texture over the sphere and
-## gets roughly four times the features. `seamless` is what makes the wrap invisible, which is the flag's
-## own purpose; the surface keeps 1.0 because its *relief* is a gradient of this same field, and a wrapped
-## gradient would show the repeat as terrain.
-const CLOUD_NOISE_SCALE := 4.0
-
-## How wide the cloud deck's edge is, in field units. A cloud boundary has width, and the same number
-## drives the deck's colour and its alpha, so a soft edge is also a thin one.
-const CLOUD_SOFTNESS := 0.06
-## How many directions the coverage threshold is measured over, and how coarsely the field's range is
-## found. Both are local to building a deck, and the count is what the percentile's accuracy costs.
-const CLOUD_PERCENTILE_SAMPLES := 2048
-## The coverage measurement's own density, and a spin that separates its sample from the threshold's.
-const CLOUD_COVERAGE_SAMPLES := 997
-const CLOUD_SPAN_STRIDE := 2
 
 ## Features **inside the noise texture**, not wraps of it. The sphere is mapped into a quarter of the
 ## texture, so detail comes from how much noise the texture holds — raising the sampling scale instead
@@ -309,173 +287,6 @@ static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	material.set_shader_parameter("star_color", star_color_of(body))
 	material.set_shader_parameter("intensity", STAR_INTENSITY)
 	return material
-
-
-## **The deck's drawn reflectance IS its measured albedo.** `bond_albedo` uses `clouds.albedo` for the
-## temperature, the exposure's body term and the point of light — and a deck drawn in its palette colour
-## is a different number entirely: Earth's is 0.95 against an albedo of 0.45, so the deck was **twice as
-## bright as everything else believes it is.** That is what blew it out from space and what dragged the
-## metre down until the surface under it went black, and why from *below* the deck the whole sky went
-## white. Scaling the colour's luminance to the albedo keeps the hue and makes the picture the
-## measurement — which for the deck costs one line, unlike the surface, where the same split is named and
-## deferred because its palette is per-species authoring rather than one number.
-##
-## The uniforms are **linear**, so the authored colour is decoded here rather than by the engine.
-static func deck_material(body: SpacesimSceneBody) -> ShaderMaterial:
-	var clouds := body.content.clouds
-	var material := ShaderMaterial.new()
-	material.shader = DECK_SHADER
-	var linear: Color = clouds.color.srgb_to_linear()
-	var deck: Color = _at_unit_luminance(linear, clouds.albedo)
-	var colour := Vector3(deck.r, deck.g, deck.b)
-	material.set_shader_parameter("cloud_color", colour)
-	material.set_shader_parameter("edge_color", colour * 0.7)
-	material.set_shader_parameter(
-		"threshold", cloud_threshold(offset_for(body.id), clouds.fraction, CLOUD_NOISE_SCALE)
-	)
-	material.set_shader_parameter("softness", CLOUD_SOFTNESS)
-	# **The layer's two numbers**, and `blocked` is derived from them here so the shadow the ground gets
-	# and the cloud the eye sees are the same arithmetic — see `cloud_blocked`.
-	material.set_shader_parameter("albedo", clouds.albedo)
-	material.set_shader_parameter("opacity", clouds.opacity)
-	# **The surface's own field**, so the deck's shadow can be sampled from the same noise and the two agree
-	# about where a cloud is — but the deck's own *scale*, because a deck wants far more structure than a
-	# surface does. See `CLOUD_NOISE_SCALE` for why the two differ and why wrapping is safe here.
-	material.set_shader_parameter("noise_scale", CLOUD_NOISE_SCALE)
-	material.set_shader_parameter("noise_offset", offset_for(body.id))
-	material.set_shader_parameter("noise_field", noise_field())
-	return material
-
-
-## **How much of the light a deck blocks**: its reflectance plus the share of the rest it absorbs.
-##
-## For a cloud `reflectance + transmittance + absorption = 1`, and content carries the first and a share
-## of the third: `albedo` is what it reflects, `opacity` is of what it does not reflect the share that
-## passes. So `blocked = albedo + (1 - albedo) * (1 - opacity)`, it is what the deck's own alpha is, and
-## **it is what the shadow on the ground uses** — one number, so the cloud and its shadow cannot disagree
-## about the weather. Pinned by test that the three terms sum to one.
-static func cloud_blocked(clouds: SpacesimClouds) -> float:
-	if clouds == null:
-		return 0.0
-	var albedo := clampf(clouds.albedo, 0.0, 1.0)
-	var passing := clampf(clouds.opacity, 0.0, 1.0)
-	return albedo + (1.0 - albedo) * (1.0 - passing)
-
-
-## **The deck's shadow, on the material of the surface it hangs over.**
-##
-## The surface samples the deck's *own* field along the ray to the star and along the ray to the eye, and
-## dims itself by what the deck does not pass — so a cloud that covers half the sky shadows half the
-## ground, and the same coverage that the eye sees is the coverage that darkens it.
-static func set_deck_shadow(
-	material: ShaderMaterial, body: SpacesimSceneBody
-) -> void:
-	if material == null or body.content == null or body.content.clouds == null:
-		return
-	if body.cloud_bottom <= 0.0:
-		return
-	material.set_shader_parameter("deck_radius", body.radius + body.cloud_bottom)
-	material.set_shader_parameter("deck_blocked", cloud_blocked(body.content.clouds))
-	material.set_shader_parameter("deck_threshold",
-		cloud_threshold(offset_for(body.id), body.content.clouds.fraction, CLOUD_NOISE_SCALE))
-	material.set_shader_parameter("deck_softness", CLOUD_SOFTNESS)
-	material.set_shader_parameter("deck_scale", CLOUD_NOISE_SCALE)
-	material.set_shader_parameter("deck_offset", offset_for(body.id))
-
-
-## **The coverage threshold, as a PERCENTILE of the field rather than `1 - cover`.**
-##
-## **What is measured is the noise GENERATOR, on the grid Godot builds the texture from.**
-## `NoiseTexture3D` has **no `get_image()`** in 4.7.2 — the method does not exist, and a probe paid for
-## that — while `Noise::_get_image` evaluates the noise at **integer texel coordinates** and normalises
-## by the min/max over that grid. Those are the two things reproduced here. Two approximations are
-## named rather than hidden: the project's texture is `seamless`, whose skirt blends the outer 16 texels,
-## and it is quantised to 8 bits. Neither moves the percentile of a smooth field by more than a
-## fraction of a percent, and `cloud_coverage` is the instrument that measures whether that is true.
-static func cloud_threshold(
-	offset: Vector3, fraction: float, scale := SURFACE_NOISE_SCALE
-) -> float:
-	if fraction <= 0.0:
-		return 1.0
-	if fraction >= 1.0:
-		return 0.0
-	var samples := _sphere_samples(offset, CLOUD_PERCENTILE_SAMPLES, 0.0, scale)
-	if samples.is_empty():
-		return 0.0
-	samples.sort()
-	# The percentile that leaves `fraction` of the field above it.
-	var index := clampi(int((1.0 - fraction) * float(samples.size())), 0, samples.size() - 1)
-	return samples[index]
-
-
-## **How much of the sphere is above a threshold** — the measurement the vault names as missing
-## (*"the achieved coverage was never measured, only assumed"*), and the instrument that checks
-## `cloud_threshold`.
-##
-## It samples at a **different density and with a different spin** than the threshold does, so the two
-## agreeing is a measurement rather than a restatement of the same list — and a threshold built as
-## `1 - cover`, or from the wrong distribution, fails it.
-static func cloud_coverage(
-	offset: Vector3, threshold: float, scale := SURFACE_NOISE_SCALE
-) -> float:
-	var samples := _sphere_samples(offset, CLOUD_COVERAGE_SAMPLES, 0.5, scale)
-	if samples.is_empty():
-		return 0.0
-	var above := 0
-	for value in samples:
-		if value >= threshold:
-			above += 1
-	return float(above) / float(samples.size())
-
-
-## The field, normalised the way the texture normalises it, over directions on the sphere.
-##
-## `spin` shifts the spiral's phase, which is how a caller gets an independent sample of the same
-## distribution. Directions are Fibonacci-spread so the sample is the sphere's own rather than a
-## pole-heavy one, and each is mapped through **the shader's own mapping** — `direction * 0.25 + 0.5`
-## plus the body's offset — so what is measured is the field the deck actually samples.
-static func _sphere_samples(
-	offset: Vector3, count: int, spin: float, scale: float
-) -> PackedFloat32Array:
-	var samples := PackedFloat32Array()
-	var texture := noise_field()
-	var generator := texture.noise as FastNoiseLite
-	if generator == null:
-		return samples
-	var size := texture.get_width()
-	var span := _grid_span(generator, size)
-	if span.y <= span.x:
-		return samples
-	for i in count:
-		var t := (float(i) + spin) / float(count)
-		var y := 1.0 - 2.0 * t
-		var ring := sqrt(maxf(1.0 - y * y, 0.0))
-		var turn := PI * (1.0 + sqrt(5.0)) * (float(i) + spin)
-		var mapped := Vector3(cos(turn) * ring, y, sin(turn) * ring) \
-			* (0.25 * scale) + Vector3(0.5, 0.5, 0.5) + offset
-		var texel := Vector3i(
-			int(floorf(mapped.x * float(size))) % size,
-			int(floorf(mapped.y * float(size))) % size,
-			int(floorf(mapped.z * float(size))) % size
-		)
-		var raw := generator.get_noise_3d(float(texel.x), float(texel.y), float(texel.z))
-		samples.append((raw - span.x) / (span.y - span.x))
-	return samples
-
-
-## The range the texture normalises with: the generator on its own **integer texel grid**, which is what
-## `Noise::_get_image` walks. Sampled on a stride, since the extremes of a smooth field are found by
-## sampling it rather than by testing all 262,144 texels.
-static func _grid_span(generator: FastNoiseLite, size: int) -> Vector2:
-	var lowest := INF
-	var highest := -INF
-	for z in range(0, size, CLOUD_SPAN_STRIDE):
-		for y in range(0, size, CLOUD_SPAN_STRIDE):
-			for x in range(0, size, CLOUD_SPAN_STRIDE):
-				var value := generator.get_noise_3d(float(x), float(y), float(z))
-				lowest = minf(lowest, value)
-				highest = maxf(highest, value)
-	return Vector2(lowest, highest)
 
 
 ## The surface material: the body's derived colour, split into a two-stop height gradient.
