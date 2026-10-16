@@ -923,7 +923,13 @@ setting — a string with the `key_binding` validator:
 settings_screen=Alt+C
 throttle_up=W
 detail_down=BracketLeft
+ship_toggle=O
 ```
+
+The **ship toggle** (`bindings.ship_toggle`, `O`) draws or hides the player's own hull. It is session
+state and not a setting, so a fresh run always shows the ship. It exists because the placeholder hull is
+lit like the plain box it is, and its own pixels move the exposure metre — so the first thing to do when
+judging the scene's lighting is to take it out of the frame.
 
 Text rather than a raw keycode, so the file stays readable and hand-editable: the key name is
 whatever `OS.get_keycode_string` produces, which `OS.find_keycode_from_string` parses back, so the

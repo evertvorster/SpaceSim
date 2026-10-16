@@ -61,6 +61,10 @@ var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
 var _skip_next_motion := false
+## Whether the player's own hull is drawn. Session state, like `_bodies_visible` — not a setting, so a
+## fresh run always shows the ship. Pressing the ship key clears it, which is what the exposure work
+## wants: the placeholder hull is lit like a plain box and its own pixels move the metre.
+var _ship_visible := true
 var _bodies_visible := true
 
 
@@ -163,6 +167,11 @@ func _handle_key(event: InputEventKey) -> void:
 		for body in _system.bodies:
 			if body.node != null:
 				body.node.visible = _bodies_visible
+	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.ship_toggle"))):
+		_ship_visible = not _ship_visible
+		var hull := _ship.get_node_or_null("Hull")
+		if hull != null:
+			(hull as MeshInstance3D).visible = _ship_visible
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_down"))):
@@ -440,7 +449,14 @@ func _update_markers(camera: Camera3D) -> void:
 func _update_camera(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
-	camera.near = range_for_frame.x
+	var near: float = range_for_frame.x
+	# **A drawn ship sets the near plane, because its hull is only ~23 m in front of the camera.** The
+	# frame's own near plane is a depth-precision knob and deep space's is 100 m, which clips the whole
+	# hull away — so showing the ship anywhere means bringing the plane inside it. The cost is paid only
+	# while the ship is shown, which is why the toggle is the thing that pays it.
+	if _ship_visible:
+		near = minf(near, float(SpacesimSettings.get_value("camera.ship_distance")) * 0.5)
+	camera.near = near
 	var far: float = range_for_frame.y
 	# **Never let the far plane be smaller than what must be drawn.** For space that is the system: the
 	# space range is a player quality knob whose 1e11 m default is *less than one au*, so every body
@@ -525,6 +541,15 @@ func _update_hud() -> void:
 				"target      %s" % target,
 				"",
 				"bodies      %s, %d triangles" % [bodies, _system.triangles()],
+				(
+					"ship        %s at %s"
+					% [
+						"visible" if _ship_visible else "hidden",
+						SpacesimMarkers.format_distance(
+							float(SpacesimSettings.get_value("camera.ship_distance"))
+						),
+					]
+				),
 				"",
 				(
 					"%s/%s throttle    mouse look    %s/%s roll    Esc release mouse, click to take it back"
@@ -536,12 +561,13 @@ func _update_hud() -> void:
 					]
 				),
 				(
-					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s %s mesh error"
+					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s ship on/off    %s %s mesh error"
 					% [
 						_binding("bindings.player_screen"),
 						_binding("bindings.settings_screen"),
 						_binding("bindings.cycle_target"),
 						_binding("bindings.bodies_toggle"),
+						_binding("bindings.ship_toggle"),
 						_binding("bindings.detail_down"),
 						_binding("bindings.detail_up"),
 					]

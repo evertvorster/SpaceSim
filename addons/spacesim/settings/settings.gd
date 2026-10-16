@@ -140,6 +140,7 @@ const REGISTRY := {
 	"bindings.roll_right": {"default": "D", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.ship_toggle": {"default": "O", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.detail_down": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.detail_up": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
 }
