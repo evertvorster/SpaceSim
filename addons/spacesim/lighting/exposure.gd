@@ -228,7 +228,14 @@ static func configure(environment: Environment) -> void:
 	# The star's disk should roll off through the tonemapper rather than sit in the frame as the
 	# brightest thing in the exposure histogram.
 	environment.glow_enabled = true
-	environment.glow_intensity = 0.4
+	# **The strength of the whole glow, and it came down to a quarter of what it was on 2026-10-16.**
+	# Evert: *"can we lessen the bloom effect? About 25% of where it is now would be good."* It was 0.4.
+	#
+	# **This knob and not the level weights.** `glow_intensity` scales every level together, so the *shape*
+	# of the glow — which mips contribute, and how much — is unchanged and only its strength moves. The
+	# threshold and the cap are structural rather than cosmetic: the threshold decides what glares at all
+	# and the cap decides where brightness stops mattering, and both are asserted in `test_lighting.gd`.
+	environment.glow_intensity = 0.1
 	environment.glow_bloom = 0.05
 	environment.glow_hdr_threshold = 1.0
 	# **The most local glow level was OFF, and that is the one a lone bright pixel needs.** Godot's defaults
