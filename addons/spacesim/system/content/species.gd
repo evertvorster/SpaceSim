@@ -18,6 +18,20 @@ enum Domain { SOLID, LIQUID, GAS }
 ## numbers came from. Zero where a species has no measured cross-section yet; that gap is **named**
 ## rather than filled in with a plausible number.
 @export var rayleigh: Vector3 = Vector3.ZERO
+## Wavelength-dependent **absorption** cross-section, one per channel, in **square metres per molecule**
+## at the same three wavelengths `rayleigh` uses (680, 550, 440 nm).
+##
+## **Not the same quantity as `greenhouse`.** That one is a grey *infrared* mass-absorption coefficient
+## with nothing to say about sunlight; this one is what sunlight is lost to. Together with `rayleigh` it
+## gives the mix its `ω = σ_scatter / σ_extinct` — the single-scattering albedo, which is what decides
+## whether a thick air reflects like a mirror or dims like a filter, and the only thing that makes
+## `k = sqrt(3(1-w)(1-wg))` non-zero for the two-stream limit.
+##
+## **Zero where a species has no measured value yet**, by the same rule `rayleigh` follows: the gap is
+## named rather than filled in with a plausible number. The visible absorbers that matter are **ozone**
+## (the Chappuis band, and Earth's whole visible absorption), **methane** (Titan) and NO2 — while CO2, N2
+## and O2 are transparent through the visible, which is why this cannot be what makes Venus's air dark.
+@export var absorption: Vector3 = Vector3.ZERO
 ## Infrared band absorptivities for the greenhouse model, m²/kg **per band** — the array being where
 ## more bands would go. Populated in `materials.tres`, and read by
 ## [code]SpacesimAtmosphereModel.greenhouse_optical_depth()[/code], which is where Earth's 288 K and

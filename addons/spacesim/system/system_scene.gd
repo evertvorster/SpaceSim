@@ -597,6 +597,13 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	body.atmosphere_mesh = _add_body_mesh(
 		body.node, body.radius + body.sky_top, material, "%sAir" % body.name, body.shell_level
 	)
+	# **And the ground is lit through that air.** The mesh's own material gets the same numbers, so what a
+	# surface is drawn in is the light that reaches it rather than the light above the shell, and the sky
+	# above it is a light on it rather than only a picture.
+	SpacesimBodyRenderer.set_air_parameters(
+		body.mesh.material_override as ShaderMaterial, body, _materials(), body.sky_top, temperature,
+		SpacesimStarLight.illuminance(luminosity, distance)
+	)
 
 
 ## Point every atmosphere at the observer and at its star.
@@ -757,15 +764,23 @@ func update_atmospheres(observer: Vector3) -> void:
 	if star_body == null or star_body.node == null:
 		return
 	for body in bodies:
-		if body.atmosphere_mesh == null or body.node == null:
+		if body.node == null:
 			continue
-		var material := body.atmosphere_mesh.material_override as ShaderMaterial
-		if material == null:
-			continue
-		material.set_shader_parameter("eye_offset", observer - body.node.global_position)
-		material.set_shader_parameter(
-			"sun_direction", (star_body.node.global_position - body.node.global_position).normalized()
-		)
+		# **Both materials that care about the air get the same two numbers, once a frame** — the shell
+		# that draws it and the surface that is lit through it. One writer, so they cannot be told
+		# different things about where the sun is or where the eye is.
+		var offset := observer - body.node.global_position
+		var to_star := (star_body.node.global_position - body.node.global_position).normalized()
+		if body.atmosphere_mesh != null:
+			var shell := body.atmosphere_mesh.material_override as ShaderMaterial
+			if shell != null:
+				shell.set_shader_parameter("eye_offset", offset)
+				shell.set_shader_parameter("sun_direction", to_star)
+		if body.mesh != null:
+			var lit := body.mesh.material_override as ShaderMaterial
+			if lit != null:
+				lit.set_shader_parameter("eye_offset", offset)
+				lit.set_shader_parameter("sun_direction", to_star)
 
 
 ## A body's geometry: a shared unit icosphere, scaled by the body's radius.

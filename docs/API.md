@@ -642,7 +642,7 @@ reads from a distance; if the disk haze is ever wanted it needs a second pass ov
 | `rayleigh_coefficient` | the derivation's `kRlh`, per channel — blue scattering most is the whole reason the sky is blue |
 | `rayleigh_scale_height` | `kT/(m-bar g)`. Earth derives **8,371 m** against the model doc's 8.5 km and `glsl-atmosphere`'s own 8.0 km |
 | `mie_*` | **named constants, not derivation.** Mie is aerosols, not the species mix — Earth-like values from `glsl-atmosphere`'s example |
-| `sun_intensity` | `SKY_INTENSITY * illuminance / REFERENCE_LUX`, so the sky keeps its proportion to the surface the star lights instead of brightening with distance |
+| `sun_intensity` | `SpacesimAtmosphereModel.sky_scale(illuminance)` — the star's own light converted into the engine's radiance unit (`illuminance·π / REFERENCE_LUX`), so the sky keeps its proportion to the surface the star lights instead of brightening with distance. **No free constant**: it replaced a `glsl-atmosphere` look value of 22.0 |
 | `eye_offset`, `sun_direction` | **refreshed per frame, as offsets.** Bodies sit at ~1.5e11 m and a GLSL float has ~7 digits, so a world coordinate would arrive with ~16 km of resolution against an air 100 km deep |
 
 **How far the shell reaches is derived, not authored.** `SHELL_SCALE_HEIGHTS` scale heights of the

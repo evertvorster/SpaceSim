@@ -26,17 +26,48 @@ const MIE_COEFFICIENT := 21.0e-6
 const MIE_SCALE_HEIGHT := 1.2e3
 const MIE_ANISOTROPY := 0.758
 
-## How bright the sky is, as a multiple of the reference illuminance below. **A look constant, not
-## physics**: 22.0 is `glsl-atmosphere`'s own value for Earth at noon, and the shader's output has the
-## same shape as the one that value was chosen for.
+## **The sky's scale is the star's own light, converted — there is no free constant in it.**
 ##
-## It is applied *relative to the star's light*, so a sky stays in proportion to the surface the star
-## lights instead of getting brighter as you fly outward — the exposure multiplier already divides the
-## illuminance back out.
-const SKY_INTENSITY := 22.0
+## The shader's integration returns a quantity in **inverse steradians**: the phase function times the
+## optical depth, with the phase functions normalised the way they have to be (`3/(16π)(1+cos²θ)` for
+## Rayleigh, so `∫p dΩ = 1`). Multiplying that by an illuminance in lux gives a radiance in **lux per
+## steradian** — and the engine's radiance unit is `REFERENCE_LUX / π`, because a white Lambertian under
+## `REFERENCE_LUX` has radiance `REFERENCE_LUX / π` and renders as `1.0`. So the conversion is the whole
+## of it:
+##
+##     scale = illuminance * PI / REFERENCE_LUX
+##
+## **It replaces `SKY_INTENSITY = 22.0`**, which was `glsl-atmosphere`'s own value for Earth at noon: a
+## number with no derivation, chosen against units its author never stated. Earth at noon is what checks
+## the derived one — `3/(16π)·2·τ` in blue is about `0.031`, and the conversion turns that into ~4,000
+## lux/sr, which is what a clear zenith sky measures. The old constant drew the same sky about seven
+## times brighter than that.
+static func sky_scale(illuminance: float) -> float:
+	return illuminance * PI / REFERENCE_LUX
+
 ## What a multiplier of 1.0 means to the camera. The same number `SpacesimExposure` uses, so the sky
 ## and the exposure cannot drift apart.
 const REFERENCE_LUX := 100_000.0
+
+## --- the sky's own light on the ground -----------------------------------------------------------------
+##
+## **The other half of the air.** The shell draws the scattered light for the *eye*; these constants are
+## how much of it arrives at the *ground*, which is a different integral and a different problem.
+##
+## First order, and named as such: the light the air removes from the beam is the light it has to give
+## back, `DOWN_FRACTION` of an isotropically scattered beam goes down, and `DIFFUSE_MAX` is the ceiling
+## where single scattering stops being the answer. **The ceiling is a limit, not a fit** — without it the
+## form runs away at grazing sun angles, where the beam is fully removed but most of what was removed
+## came off a path nowhere near the ground.
+const SKY_DOWN_FRACTION := 0.5
+const SKY_DIFFUSE_MAX := 0.12
+## The sun's cosine below which the path is taken as grazing rather than infinite.
+const SKY_MIN_COS_ZENITH := 0.05
+## How softly the air's own horizon shades out, in cosine. **This is the twilight term.** The ground goes
+## dark when the sun crosses ITS horizon; the air above it stays lit until the sun drops below the
+## *shell's* horizon, which is `sqrt(1 - (R / (R + h))^2)` lower — about 10 degrees for Earth. That gap is
+## the whole reason a term like this has to be evaluated at the top of the air and not at the ground.
+const SKY_SHADOW_SOFTNESS := 0.1
 
 ## **How many scale heights of air to draw.** The shell's top is derived, not authored: the air thins
 ## exponentially, so "where it ends" is a multiple of `kT/(m-bar g)` and nothing else.
@@ -210,6 +241,50 @@ static func rayleigh_coefficient(
 			continue
 		total += material.rayleigh * (float(atmosphere.species[key]) * density)
 	return total
+
+
+## The mix's **absorption** coefficient, 1/m. The exact mirror of `rayleigh_coefficient`, and zero
+## everywhere until the material table carries visible absorption cross-sections — which is a **named
+## gap**, not a value of zero (see `SpacesimSpecies.absorption`).
+##
+## **Absorption uses the scattering species' scale height**, i.e. it is treated as well mixed with the
+## air. That is right for methane in Titan's atmosphere and **wrong for ozone**, which sits in a layer
+## around 25 km rather than following the air's exponential. The error is a thinner ozone column at
+## low sun than a well-mixed ozone would give — named here rather than modelled.
+static func absorption_coefficient(
+	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable, temperature: float
+) -> Vector3:
+	if atmosphere == null or materials == null:
+		return Vector3.ZERO
+	var density := number_density(atmosphere, temperature)
+	var total := Vector3.ZERO
+	for key in atmosphere.species:
+		var material := materials.by_name(String(key))
+		if material == null:
+			continue
+		total += material.absorption * (float(atmosphere.species[key]) * density)
+	return total
+
+
+## **The single-scattering albedo**, per channel: how much of the light the air removes it gives back as
+## scattering rather than losing to absorption.
+##
+## It is the one number that decides whether a thick air behaves like a mirror or a filter, and it is
+## what the two-stream limit is built on (`k = sqrt(3(1-w)(1-wg))`, which is zero when `w` is one).
+## **Exactly 1 when the table carries no absorption**, which is where this starts — conservative
+## scattering is the assumption until a measurement says otherwise.
+static func single_scatter_albedo(
+	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable, temperature: float
+) -> Vector3:
+	var scattering := rayleigh_coefficient(atmosphere, materials, temperature)
+	var absorption := absorption_coefficient(atmosphere, materials, temperature)
+	var mie := Vector3.ONE * MIE_COEFFICIENT
+	var extinction := scattering + mie + absorption
+	return Vector3(
+		(scattering.x + mie.x) / maxf(extinction.x, 1.0e-30),
+		(scattering.y + mie.y) / maxf(extinction.y, 1.0e-30),
+		(scattering.z + mie.z) / maxf(extinction.z, 1.0e-30)
+	)
 
 
 ## The mix's mean molar mass, grams per mole, weighted by mole fraction.

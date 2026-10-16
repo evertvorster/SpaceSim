@@ -77,6 +77,54 @@ static func noise_field() -> NoiseTexture3D:
 	return _noise
 
 
+## The air's own numbers, on a material that has to deal with it.
+##
+## **Both shaders get the air from here.** The shell integrates it as scattering; the surface attenuates
+## its light by it. One place handing out the same numbers is what keeps the sky and the ground under it
+## from disagreeing about how thick the air is — and a second copy is exactly how they would.
+##
+## Nothing is set when the body has no air, so the material keeps the degenerate defaults and the column
+## comes back empty.
+static func set_air_parameters(
+	material: ShaderMaterial,
+	body: SpacesimSceneBody,
+	materials: SpacesimMaterialTable,
+	shell_top: float,
+	temperature: float,
+	illuminance: float
+) -> void:
+	if material == null or body.content == null or body.content.atmosphere == null or shell_top <= 0.0:
+		return
+	var air := body.content.atmosphere
+	material.set_shader_parameter("planet_radius", body.radius)
+	material.set_shader_parameter("atmosphere_radius", body.radius + shell_top)
+	material.set_shader_parameter(
+		"rayleigh_coefficient", SpacesimAtmosphereModel.rayleigh_coefficient(air, materials, temperature)
+	)
+	material.set_shader_parameter(
+		"rayleigh_scale_height",
+		SpacesimAtmosphereModel.scale_height(
+			air, materials, temperature, SpacesimAtmosphereModel.surface_gravity(body.content)
+		)
+	)
+	material.set_shader_parameter("mie_coefficient", SpacesimAtmosphereModel.MIE_COEFFICIENT)
+	material.set_shader_parameter("mie_scale_height", SpacesimAtmosphereModel.MIE_SCALE_HEIGHT)
+	# **Absorption joins the extinction and never the emission** — the shaders are handed it separately so
+	# the split cannot be lost. Zero until the material table carries visible cross-sections, which is a
+	# named gap rather than a value: see `SpacesimSpecies.absorption`.
+	material.set_shader_parameter(
+		"absorption_coefficient", SpacesimAtmosphereModel.absorption_coefficient(air, materials, temperature)
+	)
+	# **The sky's own light on the ground.** Every number is the model's, so the shader holds none of the
+	# derivation — and the shell's material ignores these, which is what keeps one call serving both.
+	material.set_shader_parameter("sky_illuminance", Vector3.ONE * illuminance)
+	material.set_shader_parameter("sky_diffuse_max", SpacesimAtmosphereModel.SKY_DIFFUSE_MAX)
+	material.set_shader_parameter("sky_down_fraction", SpacesimAtmosphereModel.SKY_DOWN_FRACTION)
+	material.set_shader_parameter("sky_min_cos_zenith", SpacesimAtmosphereModel.SKY_MIN_COS_ZENITH)
+	material.set_shader_parameter("sky_shadow_softness", SpacesimAtmosphereModel.SKY_SHADOW_SOFTNESS)
+	material.set_shader_parameter("reference_lux", SpacesimAtmosphereModel.REFERENCE_LUX)
+
+
 ## The air's material, or null when the body has none.
 ##
 ## `shell_top` is how far above the surface the shell reaches — **derived** from the air's own scale
@@ -99,24 +147,11 @@ static func atmosphere_material(
 		return null
 	var material := ShaderMaterial.new()
 	material.shader = ATMOSPHERE_SHADER
-	material.set_shader_parameter("planet_radius", body.radius)
-	material.set_shader_parameter("atmosphere_radius", body.radius + shell_top)
-	material.set_shader_parameter(
-		"rayleigh_coefficient", SpacesimAtmosphereModel.rayleigh_coefficient(air, materials, temperature)
-	)
-	material.set_shader_parameter(
-		"rayleigh_scale_height",
-		SpacesimAtmosphereModel.scale_height(
-			air, materials, temperature, SpacesimAtmosphereModel.surface_gravity(body.content)
-		)
-	)
-	material.set_shader_parameter("mie_coefficient", SpacesimAtmosphereModel.MIE_COEFFICIENT)
-	material.set_shader_parameter("mie_scale_height", SpacesimAtmosphereModel.MIE_SCALE_HEIGHT)
+	set_air_parameters(material, body, materials, shell_top, temperature, illuminance)
 	material.set_shader_parameter("mie_anisotropy", SpacesimAtmosphereModel.MIE_ANISOTROPY)
 	# Relative to the star's light, so the sky keeps its proportion to the surface it is seen against.
 	material.set_shader_parameter(
-		"sun_intensity",
-		SpacesimAtmosphereModel.SKY_INTENSITY * illuminance / SpacesimAtmosphereModel.REFERENCE_LUX
+		"sun_intensity", SpacesimAtmosphereModel.sky_scale(illuminance)
 	)
 	return material
 

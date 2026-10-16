@@ -14,7 +14,7 @@ const ENGINE_TABLE_PATH := "res://addons/spacesim/system/content/materials.tres"
 ## **Held in a static, because `load()` is only a cache hit while something still references the
 ## result.** The table is always used *inside* an expression — `bond_albedo(body.content,
 ## engine_table())` — so the temporary reference died at the end of the statement, the cache entry
-## went with it, and the whole 27-species `.tres` was re-read from disk once per point-tier body per
+## went with it, and the whole species `.tres` was re-read from disk once per point-tier body per
 ## frame. Measured 2026-10-15 with the GDScript profiler (`-d --profiling`): **self time 10.2-10.7 ms
 ## per frame, 14 calls, ~0.73 ms each**, and `SpacesimSpecies` constructed 378 times a frame
 ## (14 x 27). The line here used to read "Godot caches the load, so this is cheap to call" — which is

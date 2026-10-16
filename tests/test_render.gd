@@ -339,6 +339,52 @@ func _test_the_sky_is_derived(
 	h.check_near(material.get_shader_parameter("planet_radius"), earth.radius,
 		"planet radius included", 1.0)
 
+	# **The sky's brightness is the star's own light converted, not a look constant.** The integration
+	# returns inverse steradians and the engine's radiance unit is `REFERENCE_LUX/π` lux/sr, so the scale
+	# is `illuminance·π/REFERENCE_LUX` and nothing is left to choose. It replaced a hard-coded 22.0 —
+	# `glsl-atmosphere`'s value for Earth at noon — which drew every sky about seven times too bright.
+	var star_body := scene.star()
+	var star_luminosity := SpacesimStarModel.luminosity(star_body.content)
+	var star_distance := earth.position.distance_to(star_body.position)
+	var expected_scale := SpacesimAtmosphereModel.sky_scale(
+		SpacesimStarLight.illuminance(star_luminosity, star_distance)
+	)
+	h.check_near(material.get_shader_parameter("sun_intensity"), expected_scale,
+		"the sky's scale is the star's light converted (%.3f against %.3f)"
+			% [float(material.get_shader_parameter("sun_intensity")), expected_scale], 1.0e-6)
+	h.check_near(SpacesimAtmosphereModel.sky_scale(SpacesimAtmosphereModel.REFERENCE_LUX), PI,
+		"and at the reference illuminance it is exactly pi, because that IS the unit", 1.0e-9)
+
+	# **The single-scattering albedo, and the visible absorption behind it.** `w = scattering /
+	# (scattering + absorption)` decides whether a thick air reflects like a mirror or dims like a filter,
+	# and it is the whole basis of the two-stream limit (`k = sqrt(3(1-w)(1-wg))`, zero when `w` is one).
+	# **Earth's air is the only one carrying a measured absorber today — ozone** — and the check on it is
+	# the effect rather than the value: a 300 DU ozone column absorbs about 2.6% of 550 nm light, which is
+	# a published figure, so landing on it is what says the cross-section and the column are both right.
+	var absorption := SpacesimAtmosphereModel.absorption_coefficient(
+		earth.content.atmosphere, materials, 288.15
+	)
+	var albedo := SpacesimAtmosphereModel.single_scatter_albedo(
+		earth.content.atmosphere, materials, 288.15
+	)
+	var air_height := SpacesimAtmosphereModel.scale_height(
+		earth.content.atmosphere, materials, 288.15,
+		SpacesimAtmosphereModel.surface_gravity(earth.content)
+	)
+	h.check(absorption.length_squared() > 0.0,
+		"Earth's air absorbs visible light, because the ozone species carries measured cross-sections")
+	h.check_near(absorption.y * air_height, 0.026,
+		"and a 300 DU ozone column comes to %.2f%% absorbed at 550 nm"
+			% (absorption.y * air_height * 100.0), 0.004)
+	h.check(absorption.y > absorption.x and absorption.x > absorption.z,
+		"with the Chappuis band's own shape: strongest in green, then red, and barely anything in blue")
+	for channel in 3:
+		h.check(albedo[channel] < 1.0,
+			"so the air is no longer a conservative scatterer in channel %d (w = %.5f)"
+				% [channel, albedo[channel]])
+	h.check(albedo.y < albedo.x and albedo.x < albedo.z,
+		"and the albedo follows it — green loses most of what it removes, blue almost nothing")
+
 	# The mix, at a temperature we can check by hand. Earth's air is 78% nitrogen, 21% oxygen.
 	var reference := SpacesimAtmosphereModel.rayleigh_coefficient(
 		earth.content.atmosphere, materials, 288.15

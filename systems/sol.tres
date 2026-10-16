@@ -414,6 +414,10 @@ species = Dictionary[String, float]({
 })
 
 [sub_resource type="Resource" id="A_earth"]
+; **Ozone's mole fraction is DERIVED from the column, not chosen.** The model treats every absorber as
+; well mixed with the air, while the real ozone sits in a layer around 25 km -- so the honest way to put
+; the right amount in is to match the COLUMN: Earth's 300 DU is 8.06e22 molecules per square metre, and a
+; well-mixed profile needs `n_surface * H = 8.06e22`, which at 288 K and one atmosphere is 3.8e-7.
 script = ExtResource("atmosphere")
 surface_pressure = 101325.0
 species = Dictionary[String, float]({
@@ -421,6 +425,7 @@ species = Dictionary[String, float]({
 "carbon_dioxide": 0.00036,
 "nitrogen": 0.78084,
 "oxygen": 0.20946,
+"ozone": 0.00000038,
 "water_vapour": 0.01
 })
 variable_species = PackedStringArray("water_vapour")

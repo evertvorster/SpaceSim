@@ -41,6 +41,30 @@
 ; not the greenhouse) and Triton 37 against 38. The ordering is right too -- water vapour absorbs far
 ; more per kilogram than methane, and methane more than CO2.
 
+;
+; VISIBLE ABSORPTION, `absorption`, is the per-channel **absorption** cross-section in square metres per
+; molecule at the same 680, 550 and 440 nm as `rayleigh`, and it is what makes a sky's extinction larger
+; than its scattering. Unlike the IR `greenhouse` it says what SUNLIGHT is lost to, and it is what gives
+; the mix its single-scattering albedo `w = sigma_scatter / sigma_extinct` -- the number that decides
+; whether a thick air behaves like a mirror or like a filter.
+;
+; The gases that absorb visible light are ozone, methane and NO2. **CO2, N2 and O2 are transparent right
+; through the visible**, so no amount of absorption data will darken Venus; its air has nothing to
+; absorb with and its darkness is geometry and multiple scattering.
+;
+; **Ozone is measured, not recalled.** SOURCE: Serdyuchenko, Gorshelev, Weber, Chehade & Burrows (2014),
+; Atmos. Meas. Tech. 7, 609-624, high spectral resolution ozone cross-sections; the data set itself is
+; the Zenodo deposit the IUP Bremen group publishes (doi:10.5281/ZENODO.5793206), read at 0.01 nm over
+; 213-1100 nm. The **223 K** column is used, because that is the temperature of the ozone layer rather
+; than of the air at the ground -- the Chappuis band's own temperature dependence is under 1% between
+; 193 and 293 K, so the choice is almost free, but 223 K is the honest one. Values are **vacuum
+; wavelengths**, which sit within 0.2 nm of the air wavelengths the engine's channels are named at.
+; The band peaks at 5.15e-21 cm2/molecule at 603 nm, and a 300 DU column comes to 2.6% absorbed at
+; 550 nm -- which is the check the table is judged against, rather than the values being taken on trust.
+;
+; Methane's visible bands (619, 665.7 and 703.6 nm, for Titan) are **not in yet**. That is a named gap:
+; zero here means the species is transparent at that wavelength, per the rule `rayleigh` already follows.
+
 [sub_resource type="Resource" id="Sp_iron"]
 script = ExtResource("species")
 species_name = "iron"
@@ -290,6 +314,25 @@ albedo = 0.0
 color = Color(0.8, 0.85, 0.9, 1)
 condensation_temperature = 24.6
 
+;
+; **A trace species that carries Earth's entire visible absorption.** Its Rayleigh scattering is three
+; orders below nitrogen's at the same wavelengths *and* it is present at 0.4 parts per million, so it is
+; left at zero -- a statement about the mix, not a missing measurement. Its IR greenhouse is likewise
+; left at zero and IS a gap, but a harmless one: at this mole fraction it could not move Earth's 288 K
+; calibration either way.
+[sub_resource type="Resource" id="Sp_ozone"]
+script = ExtResource("species")
+species_name = "ozone"
+domain = 2
+density = 2.144
+molar_mass = 47.998
+heat_capacity = 820.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.6, 0.75, 0.95, 1)
+absorption = Vector3(1.31135e-25, 3.27083e-25, 1.31710e-26)
+condensation_temperature = 0.0
+
 [sub_resource type="Resource" id="Sp_ocean"]
 script = ExtResource("species")
 species_name = "ocean"
@@ -342,4 +385,4 @@ condensation_temperature = 0.0
 
 [resource]
 script = ExtResource("table")
-species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])
+species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ozone"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])

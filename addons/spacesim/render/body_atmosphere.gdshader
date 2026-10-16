@@ -66,6 +66,11 @@ uniform float atmosphere_radius;
 uniform vec3 rayleigh_coefficient;
 uniform float rayleigh_scale_height;
 
+// Per-channel **absorption** coefficient, 1/m. **It removes light and does not give any back**: the
+// extinction below is scattering plus this, while only the scattering terms reach the emission. That
+// split IS the single-scattering albedo, and with it at zero the air is conservative.
+uniform vec3 absorption_coefficient = vec3(0.0);
+
 // Mie is aerosols, not the species mix, so these three are named tuning constants rather than
 // derivation — see SpacesimAtmosphereModel.
 uniform float mie_coefficient;
@@ -173,9 +178,11 @@ vec3 sky_color(vec3 r, vec3 r0, vec3 pSun) {
 		}
 
 		// Blue is extinguished and re-scattered more than red — which is the entire reason the sky
-		// is blue, and why the coefficient is per-channel.
+		// is blue, and why the coefficient is per-channel. **Absorption joins the extinction and not the
+		// emission**: what it removes is gone, which is the difference between a filter and a mirror.
 		vec3 attenuation = exp(-(mie_coefficient * (depth_mie + sun_depth_mie)
-			+ rayleigh_coefficient * (depth_rayleigh + sun_depth_rayleigh)));
+			+ (rayleigh_coefficient + absorption_coefficient)
+				* (depth_rayleigh + sun_depth_rayleigh)));
 
 		total_rayleigh += step_rayleigh * attenuation;
 		total_mie += step_mie * attenuation;
