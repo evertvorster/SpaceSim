@@ -108,6 +108,9 @@ class Morphology:
 	var band_scale := 0.0
 	## Metres, the eddy size. Zero likewise.
 	var eddy_scale := 0.0
+	## **The eddy size as an ANGLE** — `eddy_scale / radius`, in radians. This is the form a map needs:
+	## the field sizes its features in angle, and the metres are meaningful for one body at a time.
+	var eddy_angular_scale := 0.0
 	## `L_Rh / a`, the dimensionless number the verdict comes from. Zero where unknown.
 	var ratio := 0.0
 	var banding := Banding.UNKNOWN
@@ -297,6 +300,8 @@ static func morphology(
 		buoyancy_frequency(body.atmosphere, materials, gravity, temperature),
 		result.rotation.omega
 	)
+	if body.radius > 0.0:
+		result.eddy_angular_scale = result.eddy_scale / body.radius
 	return result
 
 
