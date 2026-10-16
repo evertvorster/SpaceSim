@@ -61,10 +61,13 @@ var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
 var _skip_next_motion := false
-## Whether the player's own hull is drawn. Session state, like `_bodies_visible` — not a setting, so a
-## fresh run always shows the ship. Pressing the ship key clears it, which is what the exposure work
-## wants: the placeholder hull is lit like a plain box and its own pixels move the metre.
-var _ship_visible := true
+## **The ship's visibility is a setting now, not session state** (`ship.visible`), and it is *not* cached
+## in a variable here — the project's rule, because a cached setting silently stops being hot. Evert,
+## 2026-10-16: *"I want the 'ship' in the game to remember its last setting, currently it resets to a
+## default."* It used to be a `var` defaulting to true on every run, so the key had to be pressed again
+## each time; and it defaulted to true deliberately, because the placeholder hull is lit like a plain box
+## and its own pixels move the exposure metre. The default is unchanged — what changed is that pressing
+## the key now persists.
 var _bodies_visible := true
 
 
@@ -168,10 +171,9 @@ func _handle_key(event: InputEventKey) -> void:
 			if body.node != null:
 				body.node.visible = _bodies_visible
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.ship_toggle"))):
-		_ship_visible = not _ship_visible
-		var hull := _ship.get_node_or_null("Hull")
-		if hull != null:
-			(hull as MeshInstance3D).visible = _ship_visible
+		# **Write the setting and let `_apply_settings` draw it** — one writer for the hull's visibility,
+		# and it is the same path a hand-edited file or a future control would take.
+		SpacesimSettings.set_value("ship.visible", not ship_is_visible(), true)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_down"))):
@@ -274,8 +276,20 @@ func _cycle_target() -> void:
 
 ## Everything this scene takes from settings, applied now. Called at startup and again on any
 ## change, so nothing here is read once at startup and then forgotten.
+## Whether the player's hull is drawn. **One place to ask**, so the HUD, the near plane and the material
+## cannot disagree about it — and it reads the settings rather than a variable, which is what makes the
+## value hot and what makes it survive a restart.
+func ship_is_visible() -> bool:
+	return bool(SpacesimSettings.get_value("ship.visible"))
+
+
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
+	# **The one writer of the hull's visibility.** Read from the setting rather than a variable, so the file
+	# stays hot by construction.
+	var hull := _ship.get_node_or_null("Hull") if _ship != null else null
+	if hull != null:
+		(hull as MeshInstance3D).visible = ship_is_visible()
 	# The camera sits behind the hull, on the ship's own basis. Only the distance is settable; the height
 	# above the hull is part of what the ship is.
 	var offset := PlayerShip.CAMERA_OFFSET
@@ -294,7 +308,7 @@ func _apply_settings() -> void:
 
 func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
-		"camera.fov", "camera.ship_distance", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops":
+		"camera.fov", "camera.ship_distance", "ship.visible", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops":
 			_apply_settings()
 
 
@@ -457,7 +471,7 @@ func _update_camera(camera: Camera3D) -> void:
 	# frame's own near plane is a depth-precision knob and deep space's is 100 m, which clips the whole
 	# hull away — so showing the ship anywhere means bringing the plane inside it. The cost is paid only
 	# while the ship is shown, which is why the toggle is the thing that pays it.
-	if _ship_visible:
+	if ship_is_visible():
 		near = minf(near, float(SpacesimSettings.get_value("camera.ship_distance")) * 0.5)
 	camera.near = near
 	var far: float = range_for_frame.y
@@ -547,7 +561,7 @@ func _update_hud() -> void:
 				(
 					"ship        %s at %s"
 					% [
-						"visible" if _ship_visible else "hidden",
+						"visible" if ship_is_visible() else "hidden",
 						SpacesimMarkers.format_distance(
 							float(SpacesimSettings.get_value("camera.ship_distance"))
 						),

@@ -103,7 +103,25 @@ func _build_editors(key: String) -> Array[Control]:
 			editors.append(_color_field(key))
 		TYPE_STRING:
 			editors.append(_text_field(key))
+		# **A boolean has two states and no third, so a checkbox is the one control that cannot be got
+		# wrong** — and it is what `ship.visible` needed to exist as a real setting rather than as session
+		# state. The suite requires every declared setting to have a control, so this branch is the price
+		# of declaring one.
+		TYPE_BOOL:
+			editors.append(_bool_field(key))
 	return editors
+
+
+## A checkbox, staged like every other control: the box moves at once and the value commits on Apply.
+func _bool_field(key: String) -> CheckBox:
+	var field := CheckBox.new()
+	field.button_pressed = bool(_edit.value(key))
+	field.toggled.connect(func(pressed: bool) -> void:
+		if _updating:
+			return
+		_edit.stage(key, pressed)
+	)
+	return field
 
 
 ## Godot's own colour button: a swatch that opens the picker. **A colour is a thing you look at**, so
@@ -323,6 +341,8 @@ func _refresh() -> void:
 		elif editors[0] is LineEdit:
 			editors[0].text = String(value)
 			editors[0].modulate = IDLE_COLOR
+		elif editors[0] is CheckBox:
+			editors[0].button_pressed = bool(value)
 	_updating = false
 
 	var pending := _edit.has_changes()
