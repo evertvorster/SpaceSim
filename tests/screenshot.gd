@@ -262,14 +262,19 @@ func _place_above(body_name: String, altitude: float) -> void:
 		_aim(camera, along.normalized(), up)
 		_report_aim(body, camera, "level")
 		return
-	# The up vector must not be parallel to the look direction, or look_at is degenerate and the
-	# camera ends up pointing nowhere — which reads as "the planet is not rendered".
-	var aim := body.global_position + to_star * (6.371e6 * 0.4)
-	var look := (aim - camera.global_position).normalized()
-	var up := Vector3.UP
-	if absf(look.dot(up)) > 0.99:
-		up = Vector3.RIGHT
-	camera.look_at(aim, up)
+	# **Aim at the body's CENTRE, and construct the basis rather than calling `look_at`.** The previous
+	# form aimed at a point a fixed 0.4 Earth radii from the centre *toward the star*, which lies inside
+	# the body only while the ship is further out than 2.55 Mm — so every small body, and every placement
+	# nearer than that, was aimed *away* and photographed empty sky. It read as "the body is not
+	# rendered": the Luna control at 500 km (2.24 Mm from the centre) came back black for exactly this.
+	#
+	# `look_at` cannot be used here at all — for the star the target is the origin, which is the case the
+	# comment on `_aim` says it fails on.
+	var look := (body.global_position - ship.global_position).normalized()
+	var cam_up := Vector3.UP
+	if absf(look.dot(cam_up)) > 0.99:
+		cam_up = Vector3.RIGHT
+	_aim(camera, look, cam_up)
 	_report_aim(body, camera, "radial")
 
 
@@ -284,19 +289,38 @@ func _aim(camera: Camera3D, forward: Vector3, up: Vector3) -> void:
 	camera.global_transform = Transform3D(Basis(right, true_up, -forward), camera.global_position)
 
 
-## Say where the camera ended up pointing, in **degrees above the local horizontal**.
+## Say where the camera ended up pointing, in **degrees above the local horizontal**, and **what phase the
+## body is being seen at.**
 ##
 ## Worth printing because the aim is set once, on one frame, and the ship is reparented by the frame
 ## tree afterwards — so "did the camera stay where I put it" is not something a picture answers, and a
 ## shot that quietly looks the wrong way reads as a broken shader rather than a broken rig. It has
 ## already caught one: `look_at` failing left every "level" shot aimed straight down.
 ##
+## **The phase is the part that decides whether a brightness number means anything.** The placement puts
+## the ship on the sub-solar side, so the star is directly behind the camera and the phase is 0 — a full
+## disc. Any angle away from that is a crescent, which reflects less for reasons that have nothing to do
+## with the body's albedo, and a measurement taken at one is a measurement of the geometry. Evert,
+## 2026-10-16: *"be careful to place the rig with Sol directly behind you when you are looking at a
+## body."*
+##
 ## `up` is the body's own vertical taken from the *ship*, not from the camera.
 func _report_aim(body: Node3D, camera: Camera3D, mode: String) -> void:
 	var up := (body.global_position - camera.global_position).normalized()
 	var forward := -camera.global_transform.basis.z
 	var elevation := rad_to_deg(asin(clampf(forward.dot(-up), -1.0, 1.0)))
-	print("SHOT: aim=%s elevation=%.1f deg" % [mode, elevation])
+	print("SHOT: aim=%s elevation=%.1f deg%s" % [mode, elevation, _phase_report(body, camera)])
+
+
+## The **phase angle** at the body — between the star and the camera — in degrees, 0 being full.
+func _phase_report(body: Node3D, camera: Camera3D) -> String:
+	var star := get_root().find_child("Sol", true, false) as Node3D
+	if star == null:
+		return ""
+	var to_star := (star.global_position - body.global_position).normalized()
+	var to_camera := (camera.global_position - body.global_position).normalized()
+	var phase := rad_to_deg(acos(clampf(to_star.dot(to_camera), -1.0, 1.0)))
+	return "  phase=%.1f deg (%s)" % [phase, "full, Sol behind" if phase < 5.0 else "NOT full"]
 
 
 func _find_camera(node: Node) -> Camera3D:

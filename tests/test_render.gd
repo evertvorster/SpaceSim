@@ -272,12 +272,20 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	if material == null:
 		return
 
-	# The two gradient stops come from the derived colour, so a world keeps its identity while gaining
-	# structure — rather than two hand-picked colours that could belong to anything.
-	h.check(material.get_shader_parameter("base_color") == earth.color.darkened(0.35),
-		"the base colour is the derived colour, darkened")
-	h.check(material.get_shader_parameter("detail_color") == earth.color.lightened(0.25),
-		"and the detail colour is the derived colour, lightened")
+	# **The mapping is off deliberately (2026-10-16), so the sphere is drawn bare.** Both stops are the
+	# derived colour and the relief is nothing — a flat Lambertian at the body's own albedo. The gradient
+	# and the bump are still in the shader and come back by setting these three parameters.
+	#
+	# It was not a cosmetic removal: measured through the rig, the mapping made the ground render **black**
+	# on an airless body and on Earth alike, at 1,000 km with the deck hidden and the disc filling the
+	# frame. With it off, Luna reads 0.144 against a published 0.110 and Earth 0.0172 against 0.081 — see
+	# the vault's `Cloud Decks` for the numbers.
+	h.check(material.get_shader_parameter("base_color") == earth.color,
+		"the base colour is the derived colour, with the mapping disabled")
+	h.check(material.get_shader_parameter("detail_color") == earth.color,
+		"and so is the detail stop, so the gradient has nothing to blend between")
+	h.check_near(float(material.get_shader_parameter("relief")), 0.0,
+		"and no relief, so nothing perturbs the normal", 1.0e-12)
 
 	# One noise field, shared. Two bodies differ by offset, not by texture.
 	var luna_material: ShaderMaterial = luna.mesh.material_override

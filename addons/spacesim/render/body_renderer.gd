@@ -364,20 +364,29 @@ static func uniform_white() -> ImageTexture:
 	return _white
 
 
-## The surface material: the body's derived colour, split into a two-stop height gradient.
+## The surface material: the body's derived colour, **with its mapping disabled**.
 ##
-## The two stops are the colour darkened and lightened rather than two hand-picked colours, so a world
-## keeps its identity while gaining structure. That is the honest version of Planet 3D's
-## `heightGradient`: real stops per material are what the coverage fractions will fill in later.
+## **The two-stop gradient and the relief are off deliberately, 2026-10-16.** Evert: *"we can comment out
+## the surface mapping we put on the planet, and just use the bare sphere."* The mapped surface is being
+## rebuilt, so what is drawn for now is a plain Lambertian sphere in its derived colour — which is also the
+## cleaner thing to measure an albedo against, and it removes the two candidates that could turn a lit
+## sphere black: a bump normal built from the field's gradient, and a colour blended between two stops.
+##
+## **Everything else the material carries is unchanged.** The air block still dims the ground and still
+## lights it from the sky, so the ground is still a surface under air and not a sticker on the sphere.
+## `tests/test_render.gd` still checks the wiring of every one of those, which is why this is a change of
+## two parameters rather than a different material.
 static func surface_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = SURFACE_SHADER
-	material.set_shader_parameter("base_color", body.color.darkened(0.35))
-	material.set_shader_parameter("detail_color", body.color.lightened(0.25))
+	# **Both stops the same colour, and no relief.** A flat Lambertian at the derived albedo; turning the
+	# mapping back on is these three lines.
+	material.set_shader_parameter("base_color", body.color)
+	material.set_shader_parameter("detail_color", body.color)
 	material.set_shader_parameter("detail_mix", DETAIL_MIX)
 	material.set_shader_parameter("detail_softness", DETAIL_SOFTNESS)
 	material.set_shader_parameter("noise_scale", SURFACE_NOISE_SCALE)
-	material.set_shader_parameter("relief", RELIEF)
+	material.set_shader_parameter("relief", 0.0)
 	material.set_shader_parameter("roughness_value", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("specular_value", SURFACE_SPECULAR)
 	material.set_shader_parameter("noise_offset", offset_for(body.id))
