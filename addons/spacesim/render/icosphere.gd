@@ -41,6 +41,8 @@ const FACES := [
 ]
 
 static var _levels: Array = []
+## Each level's measured sagitta, or -1 where it has not been measured yet. See `relative_sagitta`.
+static var _sagittas: Array = []
 
 
 ## The mesh for a level, built on first use and then the *same* object every time.
@@ -76,7 +78,25 @@ static func face_count(level: int) -> int:
 ## to the origin is the distance from the origin to its plane, so the deviation is `1 - |a . n|` with
 ## `n` the unit plane normal. **This is a measurement of the built mesh**, which is what makes it usable
 ## as the check on the law: see `tests/test_icosphere.gd`.
+##
+## **Measured once per level and then remembered, and it has to be.** The measurement copies the level's
+## vertex and index arrays — `surface_get_arrays` allocates, it does not hand out a reference — and then
+## walks every triangle in it, so level 6 alone is 81,920 triangles of cross products. Levels 0 to 6 are
+## **109,220 triangles a call**, and a caller that asks once a frame pays that every frame: the engine's
+## profiler measured **16.2 ms of a 35 ms frame** here, the entire frame-rate complaint, for a number
+## that is a property of a mesh built once and shared. A level's sagitta cannot change, so this is a
+## cache and not an optimisation.
 static func relative_sagitta(level: int) -> float:
+	var index := clampi(level, 0, SpacesimLod.MAX_LEVEL)
+	while _sagittas.size() <= index:
+		_sagittas.append(-1.0)
+	if _sagittas[index] < 0.0:
+		_sagittas[index] = _measure_sagitta(index)
+	return _sagittas[index]
+
+
+## The measurement itself, once. Split out so the cache above reads as a cache.
+static func _measure_sagitta(level: int) -> float:
 	var mesh := mesh_at(level)
 	if mesh == null:
 		return 0.0

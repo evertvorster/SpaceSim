@@ -60,6 +60,9 @@ class Entry:
 
 var _entries: Dictionary = {}
 var _clock := 0
+## The question every bake in flight asks once a row. **One per cache**, so closing the cache stops them
+## all — see `close()`.
+var _bail := SpacesimCloudField.Bail.new()
 ## How many bakes have been started, including the synchronous floors. For the suite, which needs to
 ## show that a cache hit is a hit.
 var _bakes := 0
@@ -230,6 +233,22 @@ func clear() -> void:
 	_entries.clear()
 
 
+## **Stop baking, then wait for what is in flight — and in that order.**
+##
+## This is what the scene calls as it goes away, and both halves are load-bearing. The pool requires every
+## task to be awaited before the engine goes away, and a run that quits with one still going **takes the
+## process down with it**: the headless smoke load exited 139 with no output until this existed. But a
+## bake can be 27 seconds, so waiting for it whole would only trade a crash for a hung exit.
+##
+## So the bail flag goes up first, the bake stops at its next row, and the wait is one row long — about
+## 3 ms for a 4,096-wide map. The abandoned bake returns `null`, which `poll()` already treats as "no new
+## map yet", so the deck keeps the one it had.
+func close() -> void:
+	_bail.asked = true
+	clear()
+	_bail.asked = false
+
+
 ## The synchronous floor: a body gets *a* map on the frame it is first seen.
 func _bake_floor(
 	entry: Entry, body_id: String, layer: int, coverage: float,
@@ -268,10 +287,11 @@ func _bake_refinement(
 ) -> void:
 	var height := maxi(width / 2, 1)
 	var image := SpacesimCloudField.bake(
-		SpacesimCloudField.seed_for(body_id, layer), morphology, width, height
+		SpacesimCloudField.seed_for(body_id, layer), morphology, width, height, _bail
 	)
 	entry.image = image
-	entry.threshold = threshold_for(image, coverage)
+	if image != null:
+		entry.threshold = threshold_for(image, coverage)
 
 
 ## **Least-recently-used, and never a map with a task in flight** — its id has to be released on the

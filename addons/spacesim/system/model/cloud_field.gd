@@ -163,6 +163,21 @@ static func intensity(
 	)
 
 
+## How much of the field is generated before the engine goes away
+##
+## **A question a long bake asks once a row: should it still bother?** A bake is up to 27 seconds of work,
+## and the pool requires every task to be awaited before the engine goes away — so a run that quits with
+## one still going takes the process down with it, which is exactly what the headless smoke load did
+## (exit 139, no output). Waiting for it whole is not an option either: quitting would hang for the
+## length of the bake.
+##
+## Rows are the natural checkpoint. A bake that stops at one loses at most a row of work, the caller
+## sees `null` rather than a map, and the exit waits milliseconds.
+class Bail:
+	extends RefCounted
+	var asked := false
+
+
 ## **One layer's coverage map for a body**: equirectangular, `width` x `height`, one channel.
 ##
 ## `FORMAT_L8` because coverage is a scalar — colour is a derived constant, not something a map has to
@@ -174,9 +189,11 @@ static func intensity(
 ##
 ## **Pure, and safe to run on a worker thread** — it allocates an `Image` and touches nothing else.
 ## Measured costs to size a bake against: 2048x1024 in 192 ms and 8192x4096 in 3.1 s for the noise
-## generator alone, before this field's own arithmetic.
+## generator alone, before this field's own arithmetic; **0.80 µs a pixel** measured end to end.
+##
+## `bail` is optional and is what lets a bake be abandoned mid-flight — see [Bail].
 static func bake(
-	seed: int, morphology: SpacesimCloudModel.Morphology, width: int, height: int
+	seed: int, morphology: SpacesimCloudModel.Morphology, width: int, height: int, bail: Bail = null
 ) -> Image:
 	var w := maxi(width, 1)
 	var h := maxi(height, 1)
@@ -199,6 +216,10 @@ static func bake(
 		noise = noise_for(seed)
 
 	for row in h:
+		# The checkpoint, once a row: a bake that is no longer wanted returns nothing rather than a
+		# map nobody would see.
+		if bail != null and bail.asked:
+			return null
 		var latitude := PI * 0.5 - (float(row) + 0.5) / float(h) * PI
 		var cos_latitude := cos(latitude)
 		var sin_latitude := sin(latitude)

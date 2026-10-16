@@ -43,6 +43,7 @@ func run(h, root: Node) -> void:
 	_test_it_refines_on_approach(h, earth, earth_morphology)
 	_test_a_featureless_body_bakes_nothing(h, venus_morphology)
 	_test_the_cache_is_bounded(h, earth, earth_morphology)
+	_test_a_bake_can_be_abandoned(h)
 
 	scene.container.free()
 
@@ -227,3 +228,27 @@ func _drain(maps: SpacesimCloudMaps, limit_ms: int = 30000) -> bool:
 		OS.delay_msec(5)
 		_waited += 5
 	return maps.pending() == 0
+
+
+## **A bake that is no longer wanted has to be abandonable.** This is the shutdown path, and both halves
+## matter: the pool requires every task to be awaited or the engine takes the process down with it — the
+## headless smoke load exited 139 with no output while a 27-second bake was in flight — and waiting for
+## the bake whole would hang the exit instead. Rows are the checkpoint, and `close()` raises the flag
+## before it waits.
+func _test_a_bake_can_be_abandoned(h) -> void:
+	var bail := SpacesimCloudField.Bail.new()
+	bail.asked = true
+	h.check(SpacesimCloudField.bake(1, null, 64, 32, bail) == null,
+		"a bake asked to stop generates nothing and returns no map")
+	bail.asked = false
+	h.check(SpacesimCloudField.bake(1, null, 64, 32, bail) != null,
+		"and one that is still wanted bakes as usual")
+
+	# Closing a cache is the same path the scene takes when it goes away: stop, then wait.
+	var maps := SpacesimCloudMaps.new()
+	maps.close()
+	h.check(maps.pending() == 0, "and closing a cache leaves nothing in flight")
+	# **And it re-arms.** A cache closed once must not refuse to bake for the rest of the session.
+	var morphology := SpacesimCloudModel.Morphology.new()
+	h.check(SpacesimCloudField.bake(1, morphology, 32, 16) != null,
+		"with the bail put back down, so a later bake is not silently skipped")

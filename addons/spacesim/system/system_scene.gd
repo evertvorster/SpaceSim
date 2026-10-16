@@ -142,6 +142,11 @@ func build(parent: Node) -> SpacesimSystemScene:
 		_build_body(body)
 
 	frame_tree.frame_changed.connect(_on_frame_changed)
+	# **A bake in flight has to be stopped and awaited as the scene goes away.** The pool requires every
+	# task to be awaited or the engine takes the process down with it — measured, as the headless smoke
+	# load exiting 139 with no output — and `close()` stops the bake at a row boundary first, so the exit
+	# waits milliseconds instead of the bake.
+	container.tree_exiting.connect(cloud_maps.close)
 	return self
 
 
