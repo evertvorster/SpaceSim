@@ -40,14 +40,19 @@ vec2 air_ray_sphere(vec3 origin, vec3 direction, float radius) {
 // the body meets it *ahead*, in which case the ground is where the column ends.
 //
 // Airless bodies need no branch: pass a top radius equal to the planet's and the column is empty.
-float air_column(vec3 origin, vec3 direction, float planet_radius, float top_radius, float scale_height) {
-	vec2 span = air_ray_sphere(origin, direction, top_radius);
+// **The parameters are deliberately NOT named after the uniforms the callers declare.**
+// `planet_radius` is a uniform in both `body_atmosphere` and `body_surface`, and a parameter of
+// that name made Godot report *"Redefinition of 'planet_radius'"* — at this line, from the deck,
+// which is the third shader to include this. It compiled in the other two only because of where
+// the `#include` sat relative to their uniforms, which is luck rather than a rule.
+float air_column(vec3 origin, vec3 direction, float solid_radius, float shell_radius, float scale_height) {
+	vec2 span = air_ray_sphere(origin, direction, shell_radius);
 	if (span.x > span.y) {
 		return 0.0;
 	}
 	float start = max(span.x, 0.0);
 	float end = span.y;
-	vec2 ground = air_ray_sphere(origin, direction, planet_radius);
+	vec2 ground = air_ray_sphere(origin, direction, solid_radius);
 	if (ground.x <= ground.y && ground.x > 0.0 && ground.x < end) {
 		end = ground.x;
 	}
@@ -57,7 +62,7 @@ float air_column(vec3 origin, vec3 direction, float planet_radius, float top_rad
 	float step_size = (end - start) / float(AIR_STEPS);
 	float depth = 0.0;
 	for (int i = 0; i < AIR_STEPS; i++) {
-		float height = length(origin + direction * (start + (float(i) + 0.5) * step_size)) - planet_radius;
+		float height = length(origin + direction * (start + (float(i) + 0.5) * step_size)) - solid_radius;
 		depth += exp(-height / scale_height) * step_size;
 	}
 	return depth;

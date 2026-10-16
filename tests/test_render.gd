@@ -506,9 +506,15 @@ func _test_the_deck(h, scene: SpacesimSystemScene, earth: SpacesimSceneBody, lun
 	h.check(material.shader.code.contains("blend_mix"),
 		"and drawn with blend_mix, because a deck occludes while the air adds")
 	var offset := SpacesimBodyRenderer.offset_for(earth.id)
+	# **The scale comes off the material**, so this measures the mapping the deck actually samples rather
+	# than the surface's — the two differ on purpose (`CLOUD_NOISE_SCALE` is 4.0, the whole texture over the
+	# sphere, where the surface uses a quarter of it).
+	var scale := float(material.get_shader_parameter("noise_scale"))
+	h.check_near(scale, SpacesimBodyRenderer.CLOUD_NOISE_SCALE,
+		"the deck maps the whole texture over the sphere (%.1f)" % scale, 1.0e-9)
 	for fraction in [0.25, 0.5, 0.75]:
-		var threshold := SpacesimBodyRenderer.cloud_threshold(offset, fraction)
-		var achieved := SpacesimBodyRenderer.cloud_coverage(offset, threshold)
+		var threshold := SpacesimBodyRenderer.cloud_threshold(offset, fraction, scale)
+		var achieved := SpacesimBodyRenderer.cloud_coverage(offset, threshold, scale)
 		h.check(absf(achieved - fraction) < 0.03,
 			"asking for %.0f%% of the sphere covered gets %.1f%% (threshold %.3f)"
 				% [fraction * 100.0, achieved * 100.0, threshold])

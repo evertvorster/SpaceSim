@@ -38,6 +38,15 @@ const RELIEF := 0.05
 const DETAIL_MIX := 0.5
 const DETAIL_SOFTNESS := 0.18
 
+## **How much of the noise texture the sphere is mapped over, and it is not the surface's 1.0.**
+##
+## At 1.0 the sphere uses a *quarter* of the texture — 16 of its 64 texels across a whole planet — which
+## gives a handful of blobs. A deck wants structure, so it maps the *whole* texture over the sphere and
+## gets roughly four times the features. `seamless` is what makes the wrap invisible, which is the flag's
+## own purpose; the surface keeps 1.0 because its *relief* is a gradient of this same field, and a wrapped
+## gradient would show the repeat as terrain.
+const CLOUD_NOISE_SCALE := 4.0
+
 ## How wide the cloud deck's edge is, in field units. A cloud boundary has width, and the same number
 ## drives the deck's colour and its alpha, so a soft edge is also a thin one.
 const CLOUD_SOFTNESS := 0.06
@@ -322,14 +331,14 @@ static func deck_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	# The edge, darkened rather than hand-picked, so a deck keeps its identity while gaining structure.
 	material.set_shader_parameter("edge_color", colour.darkened(0.3))
 	material.set_shader_parameter(
-		"threshold", cloud_threshold(offset_for(body.id), clouds.fraction)
+		"threshold", cloud_threshold(offset_for(body.id), clouds.fraction, CLOUD_NOISE_SCALE)
 	)
 	material.set_shader_parameter("softness", CLOUD_SOFTNESS)
 	material.set_shader_parameter("opacity", clouds.opacity)
 	# **The surface's own field, scale and offset.** The deck's shadow is sampled from this same noise, so
 	# the two have to agree about where a cloud is — and the scale is 1.0 because the sphere is mapped into
 	# a quarter of the texture; raising it walks out of the texture and repeats it as a grid.
-	material.set_shader_parameter("noise_scale", SURFACE_NOISE_SCALE)
+	material.set_shader_parameter("noise_scale", CLOUD_NOISE_SCALE)
 	material.set_shader_parameter("noise_offset", offset_for(body.id))
 	material.set_shader_parameter("noise_field", noise_field())
 	return material
@@ -344,12 +353,14 @@ static func deck_material(body: SpacesimSceneBody) -> ShaderMaterial:
 ## named rather than hidden: the project's texture is `seamless`, whose skirt blends the outer 16 texels,
 ## and it is quantised to 8 bits. Neither moves the percentile of a smooth field by more than a
 ## fraction of a percent, and `cloud_coverage` is the instrument that measures whether that is true.
-static func cloud_threshold(offset: Vector3, fraction: float) -> float:
+static func cloud_threshold(
+	offset: Vector3, fraction: float, scale := SURFACE_NOISE_SCALE
+) -> float:
 	if fraction <= 0.0:
 		return 1.0
 	if fraction >= 1.0:
 		return 0.0
-	var samples := _sphere_samples(offset, CLOUD_PERCENTILE_SAMPLES, 0.0)
+	var samples := _sphere_samples(offset, CLOUD_PERCENTILE_SAMPLES, 0.0, scale)
 	if samples.is_empty():
 		return 0.0
 	samples.sort()
@@ -365,8 +376,10 @@ static func cloud_threshold(offset: Vector3, fraction: float) -> float:
 ## It samples at a **different density and with a different spin** than the threshold does, so the two
 ## agreeing is a measurement rather than a restatement of the same list — and a threshold built as
 ## `1 - cover`, or from the wrong distribution, fails it.
-static func cloud_coverage(offset: Vector3, threshold: float) -> float:
-	var samples := _sphere_samples(offset, CLOUD_COVERAGE_SAMPLES, 0.5)
+static func cloud_coverage(
+	offset: Vector3, threshold: float, scale := SURFACE_NOISE_SCALE
+) -> float:
+	var samples := _sphere_samples(offset, CLOUD_COVERAGE_SAMPLES, 0.5, scale)
 	if samples.is_empty():
 		return 0.0
 	var above := 0
@@ -382,7 +395,9 @@ static func cloud_coverage(offset: Vector3, threshold: float) -> float:
 ## distribution. Directions are Fibonacci-spread so the sample is the sphere's own rather than a
 ## pole-heavy one, and each is mapped through **the shader's own mapping** — `direction * 0.25 + 0.5`
 ## plus the body's offset — so what is measured is the field the deck actually samples.
-static func _sphere_samples(offset: Vector3, count: int, spin: float) -> PackedFloat32Array:
+static func _sphere_samples(
+	offset: Vector3, count: int, spin: float, scale: float
+) -> PackedFloat32Array:
 	var samples := PackedFloat32Array()
 	var texture := noise_field()
 	var generator := texture.noise as FastNoiseLite
@@ -398,7 +413,7 @@ static func _sphere_samples(offset: Vector3, count: int, spin: float) -> PackedF
 		var ring := sqrt(maxf(1.0 - y * y, 0.0))
 		var turn := PI * (1.0 + sqrt(5.0)) * (float(i) + spin)
 		var mapped := Vector3(cos(turn) * ring, y, sin(turn) * ring) \
-			* (0.25 * SURFACE_NOISE_SCALE) + Vector3(0.5, 0.5, 0.5) + offset
+			* (0.25 * scale) + Vector3(0.5, 0.5, 0.5) + offset
 		var texel := Vector3i(
 			int(floorf(mapped.x * float(size))) % size,
 			int(floorf(mapped.y * float(size))) % size,

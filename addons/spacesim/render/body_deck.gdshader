@@ -43,6 +43,30 @@ uniform float noise_scale : hint_range(0.1, 2.0) = 1.0;
 uniform vec3 noise_offset = vec3(0.0);
 uniform sampler3D noise_field : filter_linear, repeat_enable;
 
+// ===== THE AIR THIS DECK SITS UNDER ================================================
+//
+// **A cloud is a surface under the air, so it is lit and seen through it exactly as the ground is.**
+// Without this the deck is lit by the star's full beam and seen unattenuated — which is what made it
+// read as a flat white lid from space, where 100 km of air should both dim it and add its own glow.
+// It is the same block `body_surface.gdshader` carries, off the same uniforms, from the same call.
+uniform float planet_radius = 1.0;
+uniform float atmosphere_radius = 0.0;
+uniform vec3 rayleigh_coefficient = vec3(0.0);
+uniform float rayleigh_scale_height = 1.0;
+uniform vec3 absorption_coefficient = vec3(0.0);
+uniform float mie_coefficient = 0.0;
+uniform float mie_scale_height = 1.0;
+uniform vec3 eye_offset = vec3(0.0);
+uniform vec3 sun_direction = vec3(0.0, 1.0, 0.0);
+uniform vec3 sky_illuminance = vec3(0.0);
+uniform float sky_diffuse_max = 0.0;
+uniform float sky_down_fraction = 0.0;
+uniform float sky_min_cos_zenith = 1.0;
+uniform float sky_shadow_softness = 1.0;
+uniform float reference_lux = 100000.0;
+
+#include "res://addons/spacesim/render/air.gdshaderinc"
+
 // Model space, the offset from the body's centre — which for a unit sphere IS its direction. Captured
 // in `vertex()` because **`VERTEX` inside `fragment()` is in VIEW space**.
 varying vec3 local_position;
@@ -70,4 +94,48 @@ void fragment() {
 	ALBEDO = mix(edge_color, cloud_color, cover);
 	ALPHA = cover * opacity;
 	ROUGHNESS = 0.9;
+
+	// **The air above, exactly as the ground sees it.** The star's beam is thinned on the way down and the
+	// light the cloud sends back on the way out, and the sky puts its own light on it. The point is at the
+	// deck's own radius, so the columns are the ones above *the deck* and not above the ground.
+	if (atmosphere_radius > planet_radius) {
+		vec3 r0 = (VIEW_MATRIX * vec4(eye_offset, 0.0)).xyz;
+		vec3 point = VERTEX + r0;
+		vec3 to_sun = normalize((VIEW_MATRIX * vec4(sun_direction, 0.0)).xyz);
+		float rayleigh_column = air_column(
+			point, to_sun, planet_radius, atmosphere_radius, rayleigh_scale_height
+		);
+		float mie_column = air_column(
+			point, to_sun, planet_radius, atmosphere_radius, mie_scale_height
+		);
+		vec3 to_eye = normalize(-point);
+		float view_rayleigh = air_column(
+			point, to_eye, planet_radius, atmosphere_radius, rayleigh_scale_height
+		);
+		float view_mie = air_column(
+			point, to_eye, planet_radius, atmosphere_radius, mie_scale_height
+		);
+		vec3 sun_transmittance = exp(
+			-(rayleigh_coefficient + absorption_coefficient) * rayleigh_column
+				- vec3(mie_coefficient * mie_column)
+		);
+		vec3 view_transmittance = exp(
+			-(rayleigh_coefficient + absorption_coefficient) * view_rayleigh
+				- vec3(mie_coefficient * view_mie)
+		);
+		vec3 cloud_albedo = ALBEDO;
+		ALBEDO = cloud_albedo * sun_transmittance * view_transmittance;
+		// And the sky's own light on the cloud, which at a deck's altitude is the same law as on the ground.
+		vec3 normal_view = normalize((VIEW_MATRIX * vec4(normalize(local_position), 0.0)).xyz);
+		float cos_zenith = dot(normal_view, to_sun);
+		float ratio = planet_radius / atmosphere_radius;
+		float air_horizon = -sqrt(max(1.0 - ratio * ratio, 0.0));
+		float lit = clamp((cos_zenith - air_horizon) / max(sky_shadow_softness, 1.0e-4), 0.0, 1.0);
+		vec3 tau_vertical = (rayleigh_coefficient + absorption_coefficient) * rayleigh_scale_height
+			+ vec3(mie_coefficient * mie_scale_height);
+		float mu = max(abs(cos_zenith), sky_min_cos_zenith);
+		vec3 removed = min(1.0 - exp(-tau_vertical / mu), vec3(sky_diffuse_max));
+		vec3 sky_lux = sky_illuminance * removed * sky_down_fraction * lit;
+		EMISSION += cloud_albedo * view_transmittance * sky_lux / max(reference_lux, 1.0);
+	}
 }

@@ -452,7 +452,6 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_atmosphere_shell(body)
-	_add_cloud_deck(body)
 
 	if not body.landable:
 		return
@@ -618,6 +617,10 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 		body.mesh.material_override as ShaderMaterial, body, _materials(), body.sky_top, temperature,
 		SpacesimStarLight.illuminance(luminosity, distance)
 	)
+	# **The deck is built here rather than beside this**, because a deck is a surface under the same air:
+	# it needs the same coefficients, the same shell top and the same illuminance, and recomputing them
+	# next door would be a second place for them to be got wrong.
+	_add_cloud_deck(body, temperature, SpacesimStarLight.illuminance(luminosity, distance))
 
 
 ## Point every atmosphere at the observer and at its star.
@@ -790,11 +793,16 @@ func update_atmospheres(observer: Vector3) -> void:
 			if shell != null:
 				shell.set_shader_parameter("eye_offset", offset)
 				shell.set_shader_parameter("sun_direction", to_star)
-		if body.mesh != null:
-			var lit := body.mesh.material_override as ShaderMaterial
-			if lit != null:
-				lit.set_shader_parameter("eye_offset", offset)
-				lit.set_shader_parameter("sun_direction", to_star)
+		var lit := body.mesh.material_override as ShaderMaterial if body.mesh != null else null
+		if lit != null:
+			lit.set_shader_parameter("eye_offset", offset)
+			lit.set_shader_parameter("sun_direction", to_star)
+		# The deck is a surface under the same air, so it wants the same two numbers.
+		if body.deck_mesh != null:
+			var deck := body.deck_mesh.material_override as ShaderMaterial
+			if deck != null:
+				deck.set_shader_parameter("eye_offset", offset)
+				deck.set_shader_parameter("sun_direction", to_star)
 
 
 ## The cloud deck, at the condensation level the air puts it at.
@@ -806,12 +814,17 @@ func update_atmospheres(observer: Vector3) -> void:
 ##
 ## The shell uses the **air's** level of detail, because it is the same kind of object — a thin skin
 ## judged on its limb rather than on its disc.
-func _add_cloud_deck(body: SpacesimSceneBody) -> void:
+func _add_cloud_deck(body: SpacesimSceneBody, temperature: float, illuminance: float) -> void:
 	if body.content == null or body.content.clouds == null or body.cloud_bottom <= 0.0:
 		return
 	var material := SpacesimBodyRenderer.deck_material(body)
 	if material == null:
 		return
+	# **The same air the surface gets**, so the deck is lit through it and seen through it — it is a
+	# surface under the sky, not a lid over it.
+	SpacesimBodyRenderer.set_air_parameters(
+		material, body, _materials(), body.sky_top, temperature, illuminance
+	)
 	# **Its own level, from its own altitude**, because a deck's tessellation is a geometric constraint
 	# rather than a screen one — see `SpacesimLod.deck_level`.
 	body.deck_level = SpacesimLod.deck_level(body.radius, body.cloud_bottom)
