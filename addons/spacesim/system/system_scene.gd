@@ -452,6 +452,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_atmosphere_shell(body)
+	_add_cloud_deck(body)
 
 	if not body.landable:
 		return
@@ -587,6 +588,19 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 		SpacesimAtmosphereModel.surface_gravity(body.content)
 	)
 	body.sky_top = maxf(shell_reach, _framing.atmosphere_altitude)
+	# **The deck's altitude, derived while the air's numbers are already in hand.** The array comes back
+	# highest-first, so the first `LEVEL` is the deck seen from outside; `FOG` and `NONE` contribute
+	# nothing, which is the point of naming them — a body already below its condensation point everywhere
+	# has no level to sit a deck on.
+	var equilibrium := SpacesimAtmosphereModel.equilibrium_temperature(
+		body.content, _materials(), luminosity, distance
+	)
+	for level in SpacesimAtmosphereModel.condensation_levels(
+			body.content.atmosphere, _materials(),
+			SpacesimAtmosphereModel.surface_gravity(body.content), equilibrium):
+		if level.regime == SpacesimAtmosphereModel.Condensation.Regime.LEVEL:
+			body.cloud_bottom = level.height
+			break
 	body.shell_level = INITIAL_MESH_LEVEL
 	var material := SpacesimBodyRenderer.atmosphere_material(
 		body, _materials(), body.sky_top, temperature,
@@ -783,6 +797,29 @@ func update_atmospheres(observer: Vector3) -> void:
 				lit.set_shader_parameter("sun_direction", to_star)
 
 
+## The cloud deck, at the condensation level the air puts it at.
+##
+## **Not a fraction of the radius.** That is what the removed shell did (`radius * 1.012`), and it is what
+## made every world's outermost silhouette a cloud — 76 km above Earth against a real cloud top of 10-12.
+## The height here is derived from the air's own `T(h)` profile, so a deck is a real altitude above a real
+## surface and it moves when the air does, not when the planet's size does.
+##
+## The shell uses the **air's** level of detail, because it is the same kind of object — a thin skin
+## judged on its limb rather than on its disc.
+func _add_cloud_deck(body: SpacesimSceneBody) -> void:
+	if body.content == null or body.content.clouds == null or body.cloud_bottom <= 0.0:
+		return
+	var material := SpacesimBodyRenderer.deck_material(body)
+	if material == null:
+		return
+	# **Its own level, from its own altitude**, because a deck's tessellation is a geometric constraint
+	# rather than a screen one — see `SpacesimLod.deck_level`.
+	body.deck_level = SpacesimLod.deck_level(body.radius, body.cloud_bottom)
+	body.deck_mesh = _add_body_mesh(
+		body.node, body.radius + body.cloud_bottom, material, "%sDeck" % body.name, body.deck_level
+	)
+
+
 ## A body's geometry: a shared unit icosphere, scaled by the body's radius.
 ##
 ## **Levels are built once at unit radius and shared by every body**, which is the whole point of the
@@ -866,6 +903,10 @@ func update_lod(camera: Camera3D) -> void:
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
+		# **The deck belongs to the disc, not to the shell.** A point-tier body draws neither, and the deck
+		# has no limb of its own worth keeping below one pixel — it is *inside* the air that does.
+		if body.deck_mesh != null:
+			body.deck_mesh.visible = not is_point
 		# **The air shell is a visibility question, not a tier.** Its limb ring is what it contributes from
 		# outside, and below a pixel of thickness there is nothing to see — which is also why a point-tier
 		# body's shell is not drawn, without this having to know about the point tier.
@@ -905,6 +946,16 @@ func update_lod(camera: Camera3D) -> void:
 				body.atmosphere_mesh.mesh = SpacesimIcosphere.mesh_at(shell_level)
 			if body.atmosphere_mesh.visible:
 				total += SpacesimLod.triangles_at(body.shell_level)
+		# **The deck's level is geometric, not a screen size** — a facet that sags further than the deck's
+		# own altitude puts the shell inside the planet, which is a honeycomb and not a cloud. It does not
+		# depend on the distance, so it is set once and only ever raised.
+		if body.deck_mesh != null:
+			var deck_floor := SpacesimLod.deck_level(body.radius, body.cloud_bottom)
+			if deck_floor > body.deck_level:
+				body.deck_level = deck_floor
+				body.deck_mesh.mesh = SpacesimIcosphere.mesh_at(deck_floor)
+			if body.deck_mesh.visible:
+				total += SpacesimLod.triangles_at(body.deck_level)
 	_triangles = total
 
 

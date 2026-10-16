@@ -200,6 +200,32 @@ const ATMOSPHERE_RING_MIN_PIXELS := 1.0
 const POINT_TIER_SCREEN_RADIUS := 4.0
 
 
+## **The floor under a cloud deck's tessellation, and it is NOT a screen-size law.**
+##
+## Every other level here is chosen so a facet's deviation projects under a pixel budget. A deck cannot be:
+## it is a skin a kilometre or two above the ground, so a facet that sags further than its own altitude
+## puts the shell **inside the planet**, and what survives is a honeycomb of corners. That is measured
+## rather than reasoned — the same shell drawn at 20x its altitude was a proper cloud deck with soft
+## edges and large gaps, and at its real 1.5 km it was a honeycomb.
+##
+## So the constraint is geometric and holds at every distance: `radius * relative_sagitta(level)` must
+## stay under the altitude. **The cost is fixed and can be large** — Earth's 1.5 km deck needs level 6,
+## about 82,000 triangles, where the body's own disc at the same distance is a few thousand. That is the
+## honest price of a thin shell over a sphere, and it is why this is its own law rather than a borrowed
+## one.
+static func deck_level(radius: float, altitude: float) -> int:
+	if radius <= 0.0 or altitude <= 0.0:
+		return 0
+	var allowed := altitude / radius
+	# **`MAX_LEVEL`, not `built_levels()`** — that one reports how many are *cached so far*, so early in a
+	# build it reads as a low ceiling and the floor comes out as whatever happens to exist. It did: the
+	# first version returned level 2 and the test caught it at 113 km of sag.
+	for level in range(MAX_LEVEL, -1, -1):
+		if SpacesimIcosphere.relative_sagitta(level) <= allowed:
+			return level
+	return MAX_LEVEL
+
+
 ## **The screen radius an air shell's tessellation is judged at.**
 ##
 ## **From outside** the shell's visible edge is its outer limb, so it is the ordinary silhouette:
