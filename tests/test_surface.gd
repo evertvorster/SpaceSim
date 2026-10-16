@@ -36,8 +36,13 @@ func _test_the_missing_air_term(h, sol: SpacesimSolarSystem, materials: Spacesim
 	h.check_near(warm * 0.0, 0.0, "the air's reflection can be weighted by any scheme at all", 1.0e-12)
 
 	var air := SpacesimSurfaceModel.air_albedo(earth, materials)
-	h.check(air > 0.05 and air < 0.16,
+	var ground := SpacesimSurfaceModel.surface_albedo(earth, materials)
+	var published_air := 0.149 - ground
+	h.check(air > 0.03 and air < 0.12,
 		"and Earth's clear sky reflects %.4f of the star's light on its own" % air)
+	h.check(absf(air - published_air) < published_air * 0.35,
+		"against the %.3f the published clear-sky albedo leaves once the ground takes its share"
+			% published_air)
 
 	# Airless bodies contribute nothing, and that is a value rather than a failure.
 	var luna_air := SpacesimSurfaceModel.air_albedo(luna, materials)
@@ -45,11 +50,21 @@ func _test_the_missing_air_term(h, sol: SpacesimSolarSystem, materials: Spacesim
 
 	# --- the split, printed because the comparison is the point ---
 	#
-	# **The published clear-sky atmospheric share of 0.059 is a FULL-SPECTRUM number and is not directly
-	# comparable with this one**, which is the shader's three visible channels — Rayleigh is weak in the
-	# near-infrared where the Sun puts much of its energy, so a visible-band figure has to be larger. That
-	# reading is outstanding: what the atmosphere reflects *in the visible* has to come from a source
-	# before the difference between 0.059 and this can be called an error rather than a wavelength range.
+	# **The target for the air term is DERIVED from the two published numbers rather than recalled.**
+	# Earth's all-sky albedo is 0.293 and its clear-sky albedo 0.149 (Stephens et al. 2015, *Reviews of
+	# Geophysics*, from CERES EAFB global annual means), so the clear sky reflects 0.149 with no clouds
+	# anywhere and the surface's own share of that is the area-weighted surface albedo below it. What is
+	# left over is the atmosphere, and that is the number to compare this derivation against:
+	#
+	#     published air ~ 0.149 - surface_albedo
+	#
+	# **A recalled number this exercise caught.** The first version of this comment credited
+	# "surface ~0.088, atmosphere ~0.059" to Donohoe & Battisti (2011). That paper exists — *Journal of
+	# Climate* 24, 4402-4418 — but its headline partition is *"88 % of the planetary albedo is due to
+	# atmospheric reflection"*, which is a statement about the **all-sky** albedo, clouds included, and
+	# not about the clear-sky column at all. Two different quantities, one plausible-looking pair of
+	# numbers. The 88 % does corroborate one thing: the surface's contribution to the *all-sky* albedo is
+	# near 12 % of it, which is what `(1 - f) * surface_albedo` gives here.
 	var terms := SpacesimSurfaceModel.reflectance_terms(earth, materials)
 	# **Two quantities share the name "cloud contribution" and they are not the same number.** The 0.144
 	# is the difference between the *planetary* albedos — all-sky minus clear-sky, which is the cloud
