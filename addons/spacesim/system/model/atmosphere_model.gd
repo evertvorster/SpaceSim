@@ -10,6 +10,10 @@ extends RefCounted
 ## The sky itself is `body_atmosphere.gdshader`, which is `glsl-atmosphere` applied to a shell. Its
 ## inputs are exactly these numbers — see [[SpaceSim/Atmospheres]].
 
+## A temperature for the callers that take one and for the internals that must not care. **The air's
+## reflection does not depend on it** — see `clear_sky_albedo`, where the cancellation is spelled out —
+## so this is a formality rather than a physical input.
+const REFERENCE_TEMPERATURE := 288.0
 ## Boltzmann, joules per kelvin.
 const BOLTZMANN := 1.380649e-23
 ## Avogadro, per mole.
@@ -385,8 +389,7 @@ static func condensation_levels(
 ## A clear sky is not transparent. Earth's clear-sky planetary albedo is **0.149** against an all-sky
 ## **0.293** (Stephens et al. 2015, *Reviews of Geophysics*, from CERES EAFB global annual means), and
 ## the difference between those two is the cloud contribution — **0.144**. So the 0.149 is the surface
-## *plus the air above it plus aerosols*, and a model that counts only the surface is short by most of
-## it: our Earth surface derives 0.081 where the clear-sky column reflects 0.149.
+## *plus the air above it*, and a model that counts only the surface is short by most of it.
 ##
 ## **The derivation, and what it assumes.** Rayleigh and Mie scattering remove light from the beam; the
 ## part that goes back out of the top is the fraction single-scattered **upward**. For a Rayleigh phase
@@ -394,48 +397,64 @@ static func condensation_levels(
 ## scattering optical depth of `tau` therefore reflects `0.5 * omega * (1 - exp(-tau))`, where `omega` is
 ## the single-scattering albedo that separates what is *scattered* from what is *absorbed*.
 ##
-## Three things this is not, named rather than hidden:
+## **There is NO temperature argument, and that is a result rather than a simplification.** The optical
+## depth is `k(1/m) * H(m)` = `[sigma * p / (k T)] * [k T / (m-bar g)]` = `sigma * p / (m-bar g)` — the
+## temperature cancels exactly, as does the number density, because a hot atmosphere is both thinner and
+## taller. `omega` cancels it the same way, both its terms being proportional to the number density. So
+## the air's reflection depends only on **what it is made of, how much of it there is, and how hard the
+## body pulls** — which is also what stops this from being circular, since `bond_albedo()` is what the
+## equilibrium temperature is computed *from*. A parameter that cannot depend on the temperature cannot
+## depend on itself through it. `tests/test_surface.gd` asserts the independence rather than trusting it.
 ##
-##  - **Multiple scattering raises it.** Two or more bounces push the fraction above a half; on Earth that
-##    is a few per cent of the value, on Venus it is the difference between the model and the sky.
-##  - **The sun is taken at the zenith**, so no air mass factor — a disc average would be slightly higher.
-##  - **Aerosols are one authored coefficient**, not a size distribution, so the Mie share carries the
-##    same uncertainty the material table does.
+## **The Mie share is deliberately NOT counted, and that is a finding rather than a simplification.**
+## `MIE_COEFFICIENT` is 21e-6 per metre — a *volume* coefficient authored for Earth's air, used by the sky
+## shader as one number for every body because aerosols are a named gap in the material table. Adding it
+## here gave tiny Triton, whose air is 1.4 Pa of nitrogen, an aerosol optical depth of **0.30** — an
+## Earth-like haze over a near-vacuum — and that pushed its clear-sky albedo past 1.0, at which point
+## `equilibrium_temperature` takes the fourth root of a negative number and every temperature on the body
+## becomes NaN. The suite caught it, which is the only reason it is not in the file.
+##
+## So a body's air reflects what its **own** gases scatter, scaled by its own pressure and gravity, and
+## counts no aerosol at all. A per-body aerosol column is a collection item; an Earth haze on Neptune is
+## not an approximation of one.
 ##
 ## Returned **per channel**, like the coefficient it is built from: a Rayleigh atmosphere reflects blue
 ## several times more than red, which is the same fact that makes the sky blue.
 static func clear_sky_albedo(
 	atmosphere: SpacesimAtmosphere,
 	materials: SpacesimMaterialTable,
-	temperature: float,
 	gravity: float
 ) -> Vector3:
-	if atmosphere == null or materials == null or temperature <= 0.0 or gravity <= 0.0:
+	if atmosphere == null or materials == null or gravity <= 0.0:
 		return Vector3.ZERO
-	var air_height := scale_height(atmosphere, materials, temperature, gravity)
+	# One number is a stand-in for "any temperature", because the result does not have it. Named rather
+	# than passed, so that a caller cannot think it matters.
+	var air_height := scale_height(atmosphere, materials, REFERENCE_TEMPERATURE, gravity)
 	if air_height <= 0.0:
 		return Vector3.ZERO
-	var scattering := rayleigh_coefficient(atmosphere, materials, temperature) \
-		+ Vector3.ONE * MIE_COEFFICIENT
-	# Absorption is left OUT of the optical depth here and carried by `omega` instead, so a species that
-	# absorbs is a species that reflects less rather than one that scatters more.
-	var depth := scattering * air_height
-	var omega := single_scatter_albedo(atmosphere, materials, temperature)
+	# Scattering only, and only the gases the mix actually has.
+	var depth := rayleigh_coefficient(atmosphere, materials, REFERENCE_TEMPERATURE) * air_height
+	var omega := single_scatter_albedo(atmosphere, materials, REFERENCE_TEMPERATURE)
 	return 0.5 * omega * Vector3(
 		1.0 - exp(-depth.x), 1.0 - exp(-depth.y), 1.0 - exp(-depth.z)
 	)
 
 
-## The same number as one scalar, weighted the way the eye weights it — the form the albedo derivation
-## needs, which is a single fraction of the star's light.
-static func clear_sky_luminance(
+## The same number as one scalar over the three channels.
+##
+## **Weighted equally unless a caller says otherwise, and that is a stated simplification rather than a
+## claim.** This is an *energy* question, so weighting by luminance would be wrong — that is the eye's
+## response and not the star's output — and the right weights are Planck's function at the star's
+## effective temperature across these three wavelengths. Equal weights are within about a sixth of that
+## for a solar-type star, and the sensitivity is printed by the suite rather than left implicit.
+static func clear_sky_scalar(
 	atmosphere: SpacesimAtmosphere,
 	materials: SpacesimMaterialTable,
-	temperature: float,
-	gravity: float
+	gravity: float,
+	weights: Vector3 = Vector3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
 ) -> float:
-	var per_channel := clear_sky_albedo(atmosphere, materials, temperature, gravity)
-	return per_channel.x * 0.2126 + per_channel.y * 0.7152 + per_channel.z * 0.0722
+	var per_channel := clear_sky_albedo(atmosphere, materials, gravity)
+	return per_channel.x * weights.x + per_channel.y * weights.y + per_channel.z * weights.z
 
 
 ## The mix's mean molar mass, grams per mole, weighted by mole fraction.

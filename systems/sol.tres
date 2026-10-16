@@ -786,16 +786,27 @@ color = Color(0.98, 0.92, 0.72, 1)
 opacity = 1.0
 
 [sub_resource type="Resource" id="C_earth"]
+; **0.419 is the NET reflectance of the cloud system, and it was 0.45 under the gross accounting.**
+; `bond_albedo` is net as of 2026-10-16 — the clear column is weighted by the cloud-free fraction and the
+; air's own reflection is counted — so the deck's number had to give up the light the clear column it
+; hides would have reflected. The value is fitted to hold Earth's measured 0.306 exactly: the fit
+; `(0.306 - (1-f)*(surface + air)) / f` is printed by `tests/test_surface.gd`, and the CERES-implied
+; deck reflectance for f = 0.6 is 0.389, so this is within 8% of the published split rather than
+; 1.9x off it. Nothing else moves: with `fraction = 1.0` the clear term carries no weight at all, so
+; Venus and all four giants are untouched by the change.
 script = ExtResource("clouds")
 fraction = 0.6
-albedo = 0.45
+albedo = 0.419
 color = Color(0.95, 0.96, 1, 1)
 opacity = 0.9
 
 [sub_resource type="Resource" id="C_mars"]
+; Same fit as Earth's: 0.4 -> 0.488, holding Mars's measured 0.250 under the net accounting. It goes UP
+; rather than down because Mars's air reflects only 0.006 — a 610 Pa atmosphere — so its deck carries almost
+; all of the reflection the clear column does not.
 script = ExtResource("clouds")
 fraction = 0.35
-albedo = 0.4
+albedo = 0.488
 color = Color(0.85, 0.78, 0.68, 1)
 opacity = 0.6
 

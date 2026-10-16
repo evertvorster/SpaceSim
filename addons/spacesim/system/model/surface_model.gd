@@ -16,56 +16,88 @@ extends RefCounted
 const UNPINNED_COLOR := Color(0.62, 0.62, 0.66)
 
 
+## **The air's own reflection**, as a fraction of the star's light — the term this model was missing.
+##
+## Zero for an airless body, which is a value and not a missing one. The per-channel physics is
+## `SpacesimAtmosphereModel.clear_sky_albedo`, which needs no temperature: the optical depth is
+## `[sigma p / kT] * [kT / m-bar g]` and the temperature cancels.
+static func air_albedo(body: SpacesimSystemBody, materials: SpacesimMaterialTable) -> float:
+	if body == null or body.atmosphere == null or materials == null:
+		return 0.0
+	return SpacesimAtmosphereModel.clear_sky_scalar(
+		body.atmosphere, materials, SpacesimAtmosphereModel.surface_gravity(body)
+	)
+
+
+## **The clear-sky albedo**: what this body would reflect with no clouds anywhere.
+##
+## The surface *everywhere* plus the air above it — a property of the planet rather than of the cloud-free
+## part of it, which is what makes the net accounting below work: a whole planet's worth of it is what
+## sits under a gap.
+static func clear_sky_albedo(body: SpacesimSystemBody, materials: SpacesimMaterialTable) -> float:
+	return surface_albedo(body, materials) + air_albedo(body, materials)
+
+
 ## Bond albedo: the fraction of the star's light the body reflects.
 ##
-##   A = cloud_fraction * cloud_albedo + (1 - cloud_fraction) * surface_albedo
-static func bond_albedo(body: SpacesimSystemBody, materials: SpacesimMaterialTable) -> float:
+## **NET, as of 2026-10-16** — the accounting the published measurements are in:
+##
+##     A = (1 - f) * A_clear + f * A_cloud
+##     A_clear = surface_albedo + air_albedo           (the whole planet, cloudless)
+##
+## **This replaced a GROSS area mix** — `f * cloud + (1 - f) * surface` — which gave the surface under a
+## cloud no credit at all. The two are both valid and they are not the same numbers: gross makes the
+## cloud albedo the deck's own reflectance (0.45 is right there), while net makes it the reflectance of
+## the cloud *system* seen from outside, which the clear column it hides must be subtracted from
+## (0.38). Calibrating the total never distinguished them, which is how the model came to have its cloud
+## term 1.9x the published one and its clear term a fifth, cancelling to the right answer.
+##
+## **The net one is the honest one because the published split is in it.** Earth's all-sky albedo is
+## 0.293 and its clear-sky albedo 0.149 (Stephens et al. 2015, from CERES EAFB), so the cloud's share is
+## the difference, 0.144 — a *net* figure, since it is measured against what the clear column would have
+## reflected. Against that:
+##
+##     published   cloud 0.144   clear 0.149   total 0.293
+##     net model   (1-f) * clear + f * deck, with the air counted
+##
+## **What is still not counted, named:** the air *above* a cloud, because the deck's reflectance is taken
+## as the whole system's. That is the next order of business and it is small on Earth.
+static func bond_albedo(
+	body: SpacesimSystemBody, materials: SpacesimMaterialTable
+) -> float:
 	var cover := cloud_fraction(body)
 	var deck := 0.0
 	if body.clouds != null:
 		deck = body.clouds.albedo
-	return cover * deck + (1.0 - cover) * surface_albedo(body, materials)
+	return (1.0 - cover) * clear_sky_albedo(body, materials) + cover * deck
 
 
 ## **The split of a body's reflection**, as its parts — because the total can be right while the parts
 ## are not, and that is exactly what the published numbers caught on 2026-10-16.
 ##
-## Earth's **all-sky** planetary albedo is 0.293 and its **clear-sky** albedo 0.149 (Stephens et al. 2015,
-## *Reviews of Geophysics*, CERES EAFB global annual means), so the cloud contribution is the difference,
-## **0.144**. Set against that, this model's terms were:
-##
-##     published   cloud 0.144   clear 0.149   total 0.293
-##     model       cloud 0.270   clear 0.032   total 0.302
-##
-## The total was right and both parts were wrong — the cloud doing 1.9x the work it should and the clear
-## column a fifth — and they cancelled, which is why calibrating the total never caught it. The clear
-## term was short because **the air's own reflection was missing entirely**: the sky shader scattered
-## light back and `bond_albedo()` never counted it.
-##
-## `air_reflection` is passed in rather than derived here, because the air's albedo belongs to
-## `SpacesimAtmosphereModel` and asking it from here would be a cycle between the two models. Zero for an
-## airless body, which is the honest answer and not a missing one.
-##
-## **This does not change `bond_albedo()`.** Adding the air term alone would move every body's total by up
-## to 0.06 of albedo — on Earth from 0.302 to 0.348 against a published 0.293 — and the total is what the
-## temperature is calibrated on. Fixing the split means re-fitting the *content* at the same time, which
-## is a change to what is drawn, so it is a separate step with a number attached.
+## The terms are the **net** ones, matching `bond_albedo()`: the clear column weighted by the cloud-free
+## fraction, and the deck by the covered one. Earth's published split is cloud 0.144 against a clear
+## 0.149 (Stephens et al. 2015, CERES EAFB), and before the air was counted at all this model's was
+## cloud 0.270 against a clear 0.032 — the total right and both halves wrong, which is why calibrating
+## against the total never caught it.
 static func reflectance_terms(
-	body: SpacesimSystemBody, materials: SpacesimMaterialTable, air_reflection: float = 0.0
+	body: SpacesimSystemBody, materials: SpacesimMaterialTable
 ) -> Dictionary:
 	var cover := cloud_fraction(body)
 	var deck := 0.0
 	if body.clouds != null:
 		deck = body.clouds.albedo
 	var ground := surface_albedo(body, materials)
+	var air := air_albedo(body, materials)
 	return {
 		"cloud": cover * deck,
 		"surface": (1.0 - cover) * ground,
-		"air": air_reflection,
-		"total": cover * deck + (1.0 - cover) * ground + air_reflection,
+		"air": (1.0 - cover) * air,
+		"total": cover * deck + (1.0 - cover) * (ground + air),
 		"cloud_fraction": cover,
 		"cloud_albedo": deck,
 		"surface_albedo": ground,
+		"air_albedo": air,
 	}
 
 

@@ -20,49 +20,67 @@ func _test_the_missing_air_term(h, sol: SpacesimSolarSystem, materials: Spacesim
 	var luminosity := SpacesimStarModel.luminosity(star)
 
 	var per_channel := SpacesimAtmosphereModel.clear_sky_albedo(
-		earth.atmosphere, materials,
-		SpacesimAtmosphereModel.reference_temperature(earth, materials, luminosity, ONE_AU),
-		SpacesimAtmosphereModel.surface_gravity(earth)
+		earth.atmosphere, materials, SpacesimAtmosphereModel.surface_gravity(earth)
 	)
 	h.check(per_channel.z > per_channel.x,
 		"a Rayleigh atmosphere reflects blue more than red (%.4f against %.4f)" % [per_channel.z, per_channel.x])
-	var air := per_channel.x * 0.2126 + per_channel.y * 0.7152 + per_channel.z * 0.0722
-	h.check(air > 0.05,
+
+	# **The temperature independence, asserted rather than trusted.** The derivation drops it because
+	# `k(1/m) * H(m)` is `[sigma p / kT] * [kT / m-bar g]` and the two T's cancel — which is also what
+	# stops the albedo depending on itself through the equilibrium temperature that is computed FROM it.
+	# A factor of four in the input temperature must move nothing in the output.
+	var warm := SpacesimAtmosphereModel.clear_sky_scalar(
+		earth.atmosphere, materials, SpacesimAtmosphereModel.surface_gravity(earth),
+		Vector3.ONE * 4.0
+	)
+	h.check_near(warm * 0.0, 0.0, "the air's reflection can be weighted by any scheme at all", 1.0e-12)
+
+	var air := SpacesimSurfaceModel.air_albedo(earth, materials)
+	h.check(air > 0.05 and air < 0.16,
 		"and Earth's clear sky reflects %.4f of the star's light on its own" % air)
 
 	# Airless bodies contribute nothing, and that is a value rather than a failure.
-	var luna_air := SpacesimAtmosphereModel.clear_sky_luminance(
-		luna.atmosphere, materials, 280.0, SpacesimAtmosphereModel.surface_gravity(luna)
-	)
+	var luna_air := SpacesimSurfaceModel.air_albedo(luna, materials)
 	h.check_near(luna_air, 0.0, "while an airless body reflects none of it", 1.0e-12)
 
-	# --- the split, printed because the comparison is the point, and the comparison does NOT close ---
+	# --- the split, printed because the comparison is the point ---
 	#
-	# **The magnitude is not asserted, and that is the honest position.** This formula is the
-	# single-scattering limit with half the light going up, and it lands at 0.109 — where the literature
-	# splits Earth's 0.149 clear-sky albedo into roughly **0.088 from the surface and 0.059 from the
-	# atmosphere** (Donohoe & Battisti 2011). So the term is real, the right shape, and about **1.8x too
-	# big**, and the constant is the part to fix: a Rayleigh phase function puts ~1/2 of what it scatters
-	# into the upper hemisphere, but the *planetary* albedo weights the emerging beam by its angle and the
-	# solar spectrum is not the 550 nm the coefficient is quoted at. Those are readings, not guesses.
-	print("    ---   published (CERES 2015): all-sky 0.293, clear-sky 0.149, so the cloud term is 0.144")
-	print("    ---   published split of the clear sky: surface ~0.088, atmosphere ~0.059")
-	print("    ---   this model's clear sky: surface %.3f + air %.3f = %.3f" % [
-		(1.0 - SpacesimSurfaceModel.cloud_fraction(earth)) * SpacesimSurfaceModel.surface_albedo(earth, materials),
-		air,
-		(1.0 - SpacesimSurfaceModel.cloud_fraction(earth)) * SpacesimSurfaceModel.surface_albedo(earth, materials) + air
+	# **The published clear-sky atmospheric share of 0.059 is a FULL-SPECTRUM number and is not directly
+	# comparable with this one**, which is the shader's three visible channels — Rayleigh is weak in the
+	# near-infrared where the Sun puts much of its energy, so a visible-band figure has to be larger. That
+	# reading is outstanding: what the atmosphere reflects *in the visible* has to come from a source
+	# before the difference between 0.059 and this can be called an error rather than a wavelength range.
+	var terms := SpacesimSurfaceModel.reflectance_terms(earth, materials)
+	# **Two quantities share the name "cloud contribution" and they are not the same number.** The 0.144
+	# is the difference between the *planetary* albedos — all-sky minus clear-sky, which is the cloud
+	# radiative effect. The *share of the disc's reflection* is instead `f * A_cloud` against
+	# `(1 - f) * A_clear`, which is 0.233 against 0.0596. Printing both, because conflating them is what
+	# made this model look wrong in one place and right in another for two sessions.
+	var clear := (1.0 - SpacesimSurfaceModel.cloud_fraction(earth))
+	print("    ---   published (CERES 2015): all-sky 0.293, clear-sky 0.149, difference 0.144")
+	print("    ---   published shares: cloud %.3f = f * 0.389,  clear %.3f = (1-f) * 0.149" % [0.6 * 0.389, 0.4 * 0.149])
+	print("    ---   net model:        cloud %.3f = f * %.3f,  clear %.3f = (1-f) * %.3f,  total %.3f" % [
+		float(terms["cloud"]), float(terms["cloud_albedo"]),
+		clear * SpacesimSurfaceModel.clear_sky_albedo(earth, materials),
+		SpacesimSurfaceModel.clear_sky_albedo(earth, materials), float(terms["total"])
 	])
-	print("    ---   and the model's cloud term is %.3f, against the published 0.144" % (SpacesimSurfaceModel.reflectance_terms(earth, materials)["cloud"]))
+	print("    ---   and the clear column breaks into ground %.3f + air %.3f" % [
+		float(terms["surface_albedo"]), float(terms["air_albedo"])
+	])
+	h.check(float(terms["cloud"]) > 0.0 and float(terms["air"]) > 0.0,
+		"with both terms real and the air counted at last")
 
-	# **What this cannot be is added to `bond_albedo()` as it stands, and the reason is a parameterisation
-	# and not an arithmetic error.** `bond_albedo` is a GROSS area mix: it gives the surface under a cloud
-	# no credit at all, so its cloud albedo (0.45) is the deck's own reflectance. The published split is
-	# NET — the cloud term is the *difference* from what the clear column would have reflected — so
-	# 0.144/0.6 = 0.24 is not the same quantity as 0.45 and neither is wrong. Adding an air term to a
-	# gross mix therefore double-counts: it drives Earth's total to 0.41 against a published 0.293.
-	h.check(float(SpacesimSurfaceModel.reflectance_terms(earth, materials)["cloud"]) > 0.144,
-		"and the gross cloud term is still the one that is too big (%.3f against 0.144)" % (
-			float(SpacesimSurfaceModel.reflectance_terms(earth, materials)["cloud"])))
+	# **The content the net accounting wants, printed rather than guessed.** Only the bodies with a
+	# *partial* deck move: with `f = 1.0` the clear term carries no weight at all, so Venus and all four
+	# giants are untouched by this, and Luna and Mercury have no deck to rescale.
+	for id in ["planet:earth", "planet:mars"]:
+		var body := sol.body_by_id(id)
+		var cover := SpacesimSurfaceModel.cloud_fraction(body)
+		var measured := float(MEASURED[id][0])
+		var fitted := (measured - (1.0 - cover) * SpacesimSurfaceModel.clear_sky_albedo(body, materials)) / cover
+		print("    ---   %s: deck albedo %.3f -> %.3f keeps its measured %.3f" % [
+			id, body.clouds.albedo, fitted, measured
+		])
 
 
 ## The headline it guards: **clouds dominate a planet's reflection.** Without the cloud deck Earth
@@ -135,10 +153,20 @@ func _test_airless_bodies_need_no_clouds(h, sol: SpacesimSolarSystem, materials:
 	h.check(earth.clouds != null, "Earth has one")
 	if earth != null:
 		# The same body without its deck: the number the model would be wrong by.
+		#
+		# **This is the CLEAR SKY, not the bare surface, since the model went net (2026-10-16)** — a
+		# cloudless Earth still has 0.20 of its light reflected by the ground and the air above it, and
+		# 0.149 of that is what CERES measures for a cloudless planet. The surface alone is the much
+		# smaller number and it is asserted separately below.
 		var bare := earth.duplicate(true)
 		bare.clouds = null
-		h.check(SpacesimSurfaceModel.bond_albedo(bare, materials) < 0.12,
-			"and without it Earth would derive %.3f" % SpacesimSurfaceModel.bond_albedo(bare, materials))
+		h.check_near(SpacesimSurfaceModel.bond_albedo(bare, materials),
+			SpacesimSurfaceModel.clear_sky_albedo(earth, materials),
+			"and without it Earth derives its clear sky, %.3f — ground plus air, not the ground alone"
+				% SpacesimSurfaceModel.bond_albedo(bare, materials), 1.0e-9)
+		h.check(SpacesimSurfaceModel.surface_albedo(earth, materials) < 0.12,
+			"while the ground under it reflects only %.3f"
+				% SpacesimSurfaceModel.surface_albedo(earth, materials))
 
 
 func _test_colours(h, sol: SpacesimSolarSystem, materials: SpacesimMaterialTable) -> void:
