@@ -16,6 +16,16 @@ extends RefCounted
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 const ATMOSPHERE_SHADER := preload("res://addons/spacesim/render/body_atmosphere.gdshader")
+const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
+
+## The width of a cloud's edge, in field units. **Not the coverage** — the coverage is the threshold,
+## which is the map's own percentile — so this only decides whether a boundary is a stipple or a smear.
+const DECK_SOFTNESS := 0.05
+
+## **The deck before the air.** Both shells are centred on the body, so distance sorting cannot separate
+## them; the deck has to occlude first and the air add over it. The atmosphere's own material is what
+## this is relative to, and it is left at the default.
+const DECK_RENDER_PRIORITY := -1
 
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
@@ -56,6 +66,7 @@ const POINT_TRIANGLES := 2
 
 static var _noise: NoiseTexture3D
 static var _point_quad: QuadMesh
+static var _white: ImageTexture
 
 
 ## One 3D noise field, shared by every body and every layer. Each body gets its own **offset**, so
@@ -287,6 +298,50 @@ static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	material.set_shader_parameter("star_color", star_color_of(body))
 	material.set_shader_parameter("intensity", STAR_INTENSITY)
 	return material
+
+
+## The **cloud deck's** material: a baked coverage map, thresholded into cloud, lit through the air
+## above it.
+##
+## **The deck's drawn reflectance is its measured albedo.** `bond_albedo` uses `clouds.albedo` for the
+## temperature, for the exposure's body term and for the point of light — and a deck drawn in its palette
+## colour is a different number entirely. So the colour is scaled to the albedo's **luminance**, which
+## keeps the hue while making the drawn brightness the one the physics already believes.
+##
+## `cover` may be **null**, and that is a real case rather than a failure: a body the model calls
+## `FEATURELESS` has no map because there is no noise to bake, and its honest picture is a uniform shroud
+## at full coverage. `uniform_white()` is what it gets.
+static func deck_material(
+	body: SpacesimSceneBody, cover: Texture2D, threshold: float
+) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = DECK_SHADER
+	material.set_shader_parameter("cover", cover if cover != null else uniform_white())
+	material.set_shader_parameter("threshold", threshold)
+	material.set_shader_parameter("softness", DECK_SOFTNESS)
+	var clouds: SpacesimClouds = body.content.clouds if body.content != null else null
+	if clouds != null:
+		var linear := clouds.color.srgb_to_linear()
+		var deck := _at_unit_luminance(linear, clouds.albedo)
+		material.set_shader_parameter("cloud_color", Vector3(deck.r, deck.g, deck.b))
+	else:
+		material.set_shader_parameter("cloud_color", Vector3.ONE)
+	# **The deck is drawn before the air that is in front of it.** Both shells are centred on the body, so
+	# a distance sort cannot separate them and the order is ours to state: the deck occludes, then the air
+	# adds over it. Without this the air's own glow would be covered by a cloud it should be lighting.
+	material.render_priority = DECK_RENDER_PRIORITY
+	return material
+
+
+## **One white texel, shared.** A featureless body's field is uniform, so its map is uniform — and a
+## 1x1 texture with `threshold = 0` draws exactly that without a branch in the shader or a special case
+## in the scene.
+static func uniform_white() -> ImageTexture:
+	if _white == null:
+		var image := Image.create_empty(1, 1, false, Image.FORMAT_L8)
+		image.fill(Color.WHITE)
+		_white = ImageTexture.create_from_image(image)
+	return _white
 
 
 ## The surface material: the body's derived colour, split into a two-stop height gradient.

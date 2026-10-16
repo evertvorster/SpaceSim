@@ -388,6 +388,9 @@ func _update_view(delta: float) -> void:
 	# The sky follows the **camera**, not the ship: it is the eye that scattering is seen from, and
 	# nothing about it depends on which body the player is attached to.
 	_system.update_atmospheres(eye.origin)
+	# **And the clouds, which are the same two numbers plus a map.** The decks are lit through that same
+	# air, so this runs after it and never tells a deck something the air above it was not told.
+	_system.update_clouds(eye.origin)
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.

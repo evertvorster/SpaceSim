@@ -47,6 +47,21 @@ var atmosphere_mesh: MeshInstance3D
 ## mesh, and the camera's far plane (`SpacesimSystemScene.sky_reach`), which falls short of the sky
 ## otherwise. Zero for a body with no air.
 var sky_top: float = 0.0
+## **Where this body's cloud deck sits, in metres above the surface** — the condensation level, derived
+## from the air's own `T(h)` profile. Zero when there is no deck, which is the honest answer in more than
+## one case: no air at all; air whose condensables never reach their condensation point inside the
+## troposphere; and air already below its condensation point everywhere, which is a fog rather than a
+## deck. A height rather than a boolean, so the three cannot be confused for one another.
+var cloud_bottom: float = 0.0
+## The layer's coverage, from content: what the deck's threshold is a percentile of. Zero means the deck
+## is not drawn at all, which is a different statement from a deck of no clouds.
+var cloud_coverage: float = 0.0
+## The deck's own sphere, reaching `radius + cloud_bottom`; null when the body has no deck.
+var deck_mesh: MeshInstance3D
+## The icosphere level the deck is drawn at — `max(the screen law, the sagitta floor)`, because a facet
+## that dips below the shell's own altitude puts the mesh inside the planet. See
+## `SpacesimLod.level_for_sagitta`.
+var deck_level: int = 0
 
 
 static func from_content(

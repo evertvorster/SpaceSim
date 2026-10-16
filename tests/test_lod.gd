@@ -281,6 +281,11 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 			drawn += SpacesimIcosphere.face_count(body.mesh_level)
 		if body.atmosphere_mesh != null and body.atmosphere_mesh.visible:
 			drawn += SpacesimIcosphere.face_count(body.shell_level)
+		# **The decks too.** A deck is tens of thousands of triangles — the sagitta floor is a geometric
+		# law, so it does not get cheaper with distance — which makes it the largest single item here and
+		# the one thing this count must not quietly miss.
+		if body.deck_mesh != null and body.deck_mesh.visible:
+			drawn += SpacesimIcosphere.face_count(body.deck_level)
 	h.check(scene.triangles() == drawn,
 		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 

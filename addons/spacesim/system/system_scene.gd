@@ -26,6 +26,12 @@ const ASSET_FRAME_PREFIX := "asset:"
 ## without a game is not a spray of 20-triangle spheres.
 const INITIAL_MESH_LEVEL := 2
 
+## **The one deck layer drawn.** `SpacesimCloudModel.layers()` returns every condensable that has a
+## level, highest first, and the plan's shape is a stack of them — Jupiter has three in reality
+## (water, ammonium hydrosulfide, ammonia). Drawing only the outermost is the honest first version:
+## it is the one seen from outside, and the giants' other levels need abundances nobody has collected.
+const CLOUD_LAYER := 0
+
 
 ## The authored content this scene was built from.
 var content: SpacesimSolarSystem
@@ -52,6 +58,10 @@ var environment: Environment
 ## environment keeps a flat background colour rather than rendering a black sky that reads as a bug.
 var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
+## **The baked cloud maps, and the one thing that polls them.** Owned here rather than by a frame,
+## because a map belongs to a body — and because `update_clouds()` is the main-thread step that turns a
+## finished bake into a texture.
+var cloud_maps := SpacesimCloudMaps.new()
 ## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
 ## summing it walks the whole catalogue, so it is recomputed when this changes rather than every frame.
 var _ambient_depth := -1.0
@@ -159,6 +169,8 @@ func meshes() -> Array[MeshInstance3D]:
 			list.append(body.mesh)
 		if body.atmosphere_mesh != null:
 			list.append(body.atmosphere_mesh)
+		if body.deck_mesh != null:
+			list.append(body.deck_mesh)
 	return list
 
 
@@ -452,6 +464,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_add_atmosphere_shell(body)
+	_add_cloud_deck(body)
 
 	if not body.landable:
 		return
@@ -567,14 +580,9 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 		return
 	# The coefficients are evaluated at the body's equilibrium temperature, which is §3.6's first row
 	# and the only temperature there is. Named in SpacesimAtmosphereModel, not guessed here.
-	var luminosity := 0.0
-	var distance := 0.0
-	var star_body := star()
-	if star_body != null and star_body.content != null:
-		luminosity = SpacesimStarModel.luminosity(star_body.content)
-		distance = body.position.distance_to(star_body.position)
+	var light := _light_at(body)
 	var temperature := SpacesimAtmosphereModel.reference_temperature(
-		body.content, _materials(), luminosity, distance
+		body.content, _materials(), light.x, light.y
 	)
 	# **The shell's top is derived, and floored by the frame's transition altitude.** Derived because
 	# it is a property of the air -- `SHELL_SCALE_HEIGHTS` scale heights of it -- and one authored
@@ -590,7 +598,7 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	body.shell_level = INITIAL_MESH_LEVEL
 	var material := SpacesimBodyRenderer.atmosphere_material(
 		body, _materials(), body.sky_top, temperature,
-		SpacesimStarLight.illuminance(luminosity, distance)
+		SpacesimStarLight.illuminance(light.x, light.y)
 	)
 	if material == null:
 		return
@@ -602,8 +610,141 @@ func _add_atmosphere_shell(body: SpacesimSceneBody) -> void:
 	# above it is a light on it rather than only a picture.
 	SpacesimBodyRenderer.set_air_parameters(
 		body.mesh.material_override as ShaderMaterial, body, _materials(), body.sky_top, temperature,
-		SpacesimStarLight.illuminance(luminosity, distance)
+		SpacesimStarLight.illuminance(light.x, light.y)
 	)
+
+
+## The star's luminosity and this body's distance from it — the pair every per-body derivation needs and
+## none of them can work out for itself. Distance rather than position, because twenty of the twenty-one
+## kilmetres of precision a GLSL float has at 1.5e11 m are lost the moment it crosses the boundary.
+func _light_at(body: SpacesimSceneBody) -> Vector2:
+	var star_body := star()
+	if star_body == null or star_body.content == null:
+		return Vector2.ZERO
+	return Vector2(
+		SpacesimStarModel.luminosity(star_body.content),
+		body.position.distance_to(star_body.position)
+	)
+
+
+## **The cloud deck, at the condensation level the air puts it at.**
+##
+## Three gates, and each is a different honest answer rather than a failure:
+##
+##  - **no air, or no level for one** — `SpacesimCloudModel.layers()` returns only the `LEVEL` regime, so
+##    a body whose condensables never reach their condensation point in the troposphere, and one that is
+##    below it everywhere (a fog — both ice giants), contributes nothing. No shell is built.
+##  - **no coverage in content** — not drawn. That is a statement about the deck, and it is separate from
+##    the air's, which is why it is a second gate.
+##  - **a `FEATURELESS` verdict** — a shell IS built, and it is a uniform veil rather than nothing.
+##    Featureless means *without structure*, not *absent*: Venus's whole disc is its deck.
+##
+## The altitude is derived, so this is a real height above a real surface rather than a fraction of the
+## body's radius — `radius * 1.012` is what made the first attempt 76 km up at Earth and every world's
+## outermost silhouette.
+func _add_cloud_deck(body: SpacesimSceneBody) -> void:
+	if body.content == null or body.content.clouds == null or body.content.atmosphere == null:
+		return
+	body.cloud_coverage = clampf(body.content.clouds.fraction, 0.0, 1.0)
+	if body.cloud_coverage <= 0.0:
+		return
+	var light := _light_at(body)
+	var levels := SpacesimCloudModel.layers(
+		body.content.atmosphere, _materials(),
+		SpacesimAtmosphereModel.surface_gravity(body.content),
+		SpacesimAtmosphereModel.equilibrium_temperature(
+			body.content, _materials(), light.x, light.y
+		)
+	)
+	if levels.is_empty():
+		return
+	body.cloud_bottom = levels[0].height
+
+	var material := SpacesimBodyRenderer.deck_material(body, null, 0.0)
+	# **The same air the surface gets**, so the deck is lit through it and seen through it rather than lit
+	# by the star's full beam. The map arrives later, in `update_clouds`.
+	SpacesimBodyRenderer.set_air_parameters(
+		material, body, _materials(), body.sky_top,
+		SpacesimAtmosphereModel.reference_temperature(
+			body.content, _materials(), light.x, light.y
+		),
+		SpacesimStarLight.illuminance(light.x, light.y)
+	)
+	# **Its own level, from its own altitude**, and it is a *floor* rather than a screen law — see
+	# `SpacesimLod.level_for_sagitta`. Far away the screen law is cheaper and wins; close in the facets
+	# have to stay above the surface or the deck is a honeycomb.
+	body.deck_level = SpacesimLod.level_for_sagitta(body.radius, body.cloud_bottom)
+	body.deck_mesh = _add_body_mesh(
+		body.node, body.radius + body.cloud_bottom, material, "%sDeck" % body.name, body.deck_level
+	)
+	# **The floor map is baked here, and not on the first frame.** The material's defaults are a white
+	# texel at no threshold, which is a solid cloud — so a deck that waited for `update_clouds` would
+	# flash white over the whole disc for one frame. A distance of zero asks for the floor and starts no
+	# refinement, because the observer is not known yet.
+	_set_deck_map(
+		body, material, 0.0,
+		SpacesimCloudModel.morphology(body.content, _materials(), light.x, light.y)
+	)
+
+
+## **Hand a deck its map, or its veil.** One writer, so the material is set the same way at build and on
+## every frame after it — the alternative is a default that shows for one frame and looks like a bug.
+func _set_deck_map(
+	body: SpacesimSceneBody, material: ShaderMaterial, distance: float,
+	morphology: SpacesimCloudModel.Morphology
+) -> void:
+	var texture := cloud_maps.map(
+		body.id, CLOUD_LAYER, body.radius, body.cloud_coverage, distance, morphology
+	)
+	if texture == null:
+		# **A veil, not a gap.** No map means there is no structure to threshold — `FEATURELESS`, or a
+		# wind scale nobody has collected — and a uniform field cannot carry partial *area*, because
+		# every texel would land on the same side of the threshold. So the coverage goes into the alpha.
+		# One white texel at no threshold is the whole of it, and Mars, Titan and the ice giants get
+		# this: a haze, which is what they look like.
+		material.set_shader_parameter("cover", SpacesimBodyRenderer.uniform_white())
+		material.set_shader_parameter("threshold", 0.0)
+		material.set_shader_parameter("veil", body.cloud_coverage)
+	else:
+		material.set_shader_parameter("cover", texture)
+		material.set_shader_parameter("threshold", cloud_maps.threshold_of(body.id, CLOUD_LAYER))
+		material.set_shader_parameter("veil", 1.0)
+
+
+## **Bake, refine, and hand every deck its map.** Called once a frame, after `update_atmospheres`.
+##
+## `poll()` first, so a bake that finished since the last frame is the one this frame draws — the maps
+## arrive when they arrive and a refinement in flight leaves the previous one in place, so the picture
+## improves rather than blinking.
+##
+## The deck's own air uniforms are set here rather than in `update_atmospheres` because they are the same
+## two numbers: one writer per number, so a deck and the air above it cannot be told different things
+## about where the sun is.
+func update_clouds(observer: Vector3) -> void:
+	cloud_maps.poll()
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	for body in bodies:
+		if body.deck_mesh == null or body.node == null:
+			continue
+		var material := body.deck_mesh.material_override as ShaderMaterial
+		if material == null:
+			continue
+		var offset := observer - body.node.global_position
+		material.set_shader_parameter("eye_offset", offset)
+		material.set_shader_parameter(
+			"sun_direction", (star_body.node.global_position - body.node.global_position).normalized()
+		)
+		if body.content == null:
+			continue
+		var light := _light_at(body)
+		# **The distance the map size is derived from is the observer's**, which is the whole of the
+		# refinement: closing on a body asks for a wider map, from the law and with nothing to tune.
+		_set_deck_map(
+			body, material, offset.length(),
+			SpacesimCloudModel.morphology(body.content, _materials(), light.x, light.y)
+		)
 
 
 ## Point every atmosphere at the observer and at its star.
@@ -871,6 +1012,10 @@ func update_lod(camera: Camera3D) -> void:
 		# body's shell is not drawn, without this having to know about the point tier.
 		if body.atmosphere_mesh != null:
 			body.atmosphere_mesh.visible = _shell_is_visible(body, observer, pixel)
+		# **The deck belongs to the disc, not to the shell.** A point-tier body draws neither, and a deck
+		# left behind would be the largest thing on screen at the range where it is least wanted.
+		if body.deck_mesh != null:
+			body.deck_mesh.visible = not is_point
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
@@ -905,6 +1050,19 @@ func update_lod(camera: Camera3D) -> void:
 				body.atmosphere_mesh.mesh = SpacesimIcosphere.mesh_at(shell_level)
 			if body.atmosphere_mesh.visible:
 				total += SpacesimLod.triangles_at(body.shell_level)
+		# **The deck's level is a floor, not a screen law.** A facet that sags further than the shell's own
+		# altitude has its plane inside the planet and the depth test eats it, which leaves a honeycomb —
+		# and that is a *geometric* constraint that does not get easier with distance, so the floor holds
+		# wherever the deck is drawn. The screen law is the ceiling on top of it for the rare case where a
+		# deck is large enough on screen to want more.
+		if body.deck_mesh != null and body.deck_mesh.visible:
+			var deck_floor := SpacesimLod.level_for_sagitta(body.radius, body.cloud_bottom)
+			var deck_screen := SpacesimLod.level_with_hysteresis(body.deck_level, screen, epsilon)
+			var deck_level := maxi(deck_floor, deck_screen)
+			if deck_level != body.deck_level:
+				body.deck_level = deck_level
+				body.deck_mesh.mesh = SpacesimIcosphere.mesh_at(deck_level)
+			total += SpacesimLod.triangles_at(body.deck_level)
 	_triangles = total
 
 

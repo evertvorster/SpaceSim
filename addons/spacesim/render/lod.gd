@@ -159,6 +159,29 @@ static func level_with_hysteresis(
 
 
 ## The triangles in a level. Exact, and an integer: each subdivision turns one triangle into four.
+## **The smallest level whose facets sag no further than `allowance`**, in metres — a geometric floor
+## under a shell rather than a screen-size law.
+##
+## A shell drawn a few kilometres above a surface is the one place where tessellation is not a question
+## of what a pixel can resolve. A facet is a flat chord across the sphere and dips below it by
+## `radius * relative_sagitta(level)`; if that dip exceeds the shell's own altitude, the facet's plane is
+## **inside the planet** and the depth test eats it. What is left is a honeycomb of corners that touch —
+## which is what the first cloud deck did, and it was measured rather than reasoned: the same shell at
+## 20x its altitude was a proper deck with soft edges, and at its real 1.5 km it was corners.
+##
+## So a deck's level is `max(screen level, this)`. Far away the screen law wins and is cheap; close in
+## this holds the facets above the surface. **The cost is real and bounded** — Earth's 1.8 km deck wants a
+## level whose sagitta is under two kilometres — and that is the price of drawing a deck at a real
+## altitude with a mesh at all. The near regime is what replaces it.
+static func level_for_sagitta(radius: float, allowance: float) -> int:
+	if radius <= 0.0 or allowance <= 0.0:
+		return 0
+	for level in range(MAX_LEVEL + 1):
+		if radius * SpacesimIcosphere.relative_sagitta(level) <= allowance:
+			return level
+	return MAX_LEVEL
+
+
 static func triangles_at(level: int) -> int:
 	return ICO_BASE_TRIANGLES << (2 * clampi(level, 0, MAX_LEVEL))
 
