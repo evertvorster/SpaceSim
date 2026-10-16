@@ -87,10 +87,11 @@ uniform float reference_lux = 100000.0;
 
 // ===== THE CLOUD ABOVE ============================================================
 //
-// **A deck between this surface and the star dims it by exactly what the deck does not pass**, and it
-// dims what the surface sends back on the way out by the same number. That is the SHADOW, and it is not
-// a separate mechanism: `deck_blocked` is the deck's own `blocked` (reflectance + absorption) from its
-// own shader, so the shadow and the cloud cannot describe different weather.
+// **A deck between this surface and the star dims it by exactly what the deck does not pass.** That is
+// the SHADOW, and it is not a separate mechanism: `deck_blocked` is the deck's own `blocked`
+// (reflectance + absorption) from its own shader, so the shadow and the cloud cannot describe different
+// weather. **Only the SUN's ray is tested here** — the eye's ray is the compositor's job, and doing it in
+// both places dimmed the ground twice.
 //
 // The ray is the same test the air uses — `air_ray_sphere` from the surface out to the deck's radius —
 // and the field is sampled at **the deck's own scale and offset**, which are not the surface's: a deck
@@ -195,12 +196,13 @@ void fragment() {
 			-(rayleigh_coefficient + absorption_coefficient) * view_rayleigh
 				- vec3(mie_coefficient * view_mie)
 		);
-		// **The cloud's own dimming, in both directions.** A deck between the ground and the star is a
-		// shadow on the way down and a veil on the way out, and it is the same number both times.
+		// **The cloud's shadow, on the way DOWN only.** The way out is not this shader's business:
+		// `blend_mix` already composites `deck + ground * (1 - blocked * cover)`, so applying a view
+		// transmittance here as well dimmed the ground **twice** — 0.25 of its light under a covered
+		// pixel instead of 0.5, which is what read as the deck letting nothing through.
 		float cloud_sun = deck_transmittance(point, to_sun);
-		float cloud_view = deck_transmittance(point, to_eye);
 		vec3 surface_albedo = ALBEDO;
-		ALBEDO = surface_albedo * sun_transmittance * view_transmittance * cloud_sun * cloud_view;
+		ALBEDO = surface_albedo * sun_transmittance * view_transmittance * cloud_sun;
 
 		// **And the sky puts light back on it.** A point in the air's own shadow — past the ground's
 		// terminator but under air the star can still reach — is lit from above, and that is what twilight

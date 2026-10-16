@@ -500,11 +500,27 @@ func _test_the_deck(h, scene: SpacesimSystemScene, earth: SpacesimSceneBody, lun
 	h.check_near(SpacesimBodyRenderer.cloud_blocked(null), 0.0,
 		"a body with no deck blocks nothing", 1.0e-9)
 	# The surface is told, so the shadow and the cloud are the same numbers.
+	# **Transparent BOTH ways, and the two halves live in different places on purpose.**
+	# UP: `blend_mix` composites `deck * alpha + ground * (1 - alpha)`, and the deck's shader sets
+	# `ALPHA = blocked * cover` — so at full coverage `(1 - alpha)` is exactly `1 - blocked`, the share of
+	# the planet's light that comes up through it. The number below is that share.
+	var through := 1.0 - blocked
+	h.check(through > 0.4,
+		"a covered pixel still passes %.0f%% of the planet's light up through it — it is not a lid"
+			% (through * 100.0))
+	# DOWN: the sun's ray, tested in the surface, is what shadows the ground.
 	var surface_material: ShaderMaterial = earth.mesh.material_override
 	h.check_near(surface_material.get_shader_parameter("deck_radius"), earth.deck_mesh.scale.x,
 		"the shadow's ray reaches the deck's own radius", 1.0)
 	h.check_near(surface_material.get_shader_parameter("deck_blocked"), blocked,
-		"and it is dimmed by the deck's own blocked share", 1.0e-9)
+		"and the ground is shadowed by the deck's own blocked share", 1.0e-9)
+	# **And the view transmittance is NOT applied a second time in the surface.** `(1 - alpha)` above is
+	# already it; doing it in both places dims the planet twice under every covered pixel, which is a
+	# factor of two of its light — the check is a mutation check on the shader's own text, because the
+	# arithmetic lives there and nowhere else.
+	h.check(not surface_material.shader.code.contains("cloud_view"),
+		"sanity: the surface applies the cloud's SUN transmittance and no view term, or the planet is "
+			+ "dimmed twice")
 	# **And the constraint that makes a thin shell work at all: its own facets may not sag further than
 	# its altitude.** The deck borrowed the air shell's level once, whose budget is sized for a 100 km
 	# skin — and at 1.5 km the shell buried itself in the ground and rendered as a honeycomb of surviving
