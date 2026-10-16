@@ -27,13 +27,38 @@ func _initialize() -> void:
 		return
 	var scene: Node = packed.instantiate()
 	get_root().add_child(scene)
-	# **The hull has to go before the first frame.** It is a few tens of metres from the camera, so it
-	# fills the middle of every shot and drags the exposure metre, and a shot is of the world.
-	_hide_ship()
+
+
+## **`SHOT_TONEMAP=linear` is for a measurement rather than a picture.** The project's film curve is
+## monotone but not linear, so a ratio read off a tonemapped frame is not a ratio of reflectances — and
+## a brightness question is exactly a ratio. Linear makes the frame's values
+## `reflectance * illuminance`, which is the currency the model is written in. Glow goes off with it,
+## because a halo around a bright thing is light that did not come off the thing.
+##
+## **On the first frame, with the ship, and for the same reason**: the game builds its scene and its
+## environment a frame after the scene is added, so an `_initialize()` that looks for either finds
+## nothing and says nothing.
+func _prepare_measurement() -> void:
+	if not OS.has_environment("SHOT_TONEMAP"):
+		return
+	var world := get_root().find_child("Environment", true, false) as WorldEnvironment
+	if world == null or world.environment == null:
+		print("SHOT: no environment found to measure on")
+		return
+	world.environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	world.environment.glow_enabled = false
+	print("SHOT: tonemap LINEAR and glow off, for a measurement")
 
 
 func _process(delta: float) -> bool:
 	_frames += 1
+	# **The hull is hidden on the first frame, not at `_initialize`.** The ship does not exist when the
+	# scene is added — `_find_ship` looks for the node that owns the camera, and that is built a frame
+	# later — so hiding it in `_initialize` silently found nothing, which is indistinguishable from a
+	# shot where the ship happens to be out of frame.
+	if _frames == 1:
+		_hide_ship()
+		_prepare_measurement()
 	if _frames == _target / 2 and OS.has_environment("SHOT_BODY"):
 		_place_above(OS.get_environment("SHOT_BODY"), float(OS.get_environment("SHOT_ALT")))
 		return false
@@ -59,19 +84,22 @@ func _process(delta: float) -> bool:
 	return true
 
 
-## **Hide the player's ship, so a shot is of the world and not of the hull.** It sits a few tens of
+## **Hide the player's own hull, so a shot is of the world and not of the ship.** It sits a few tens of
 ## metres from the camera and fills the middle of every frame — which is where whatever is being looked
-## at is — and at that range it also drags the exposure metre. `SHOT_SHIP=1` keeps it, for the shots
-## that are *about* the ship.
+## at is — and at that range its own pixels move the exposure metre. `SHOT_SHIP=1` keeps it, for the
+## shots that are *about* the ship.
+##
+## **Recursive, and it says what it found.** The first version hid only direct children and silently hid
+## nothing, which is indistinguishable from a shot where the ship happens to be out of frame.
 func _hide_ship() -> void:
 	if OS.has_environment("SHOT_SHIP"):
 		return
 	var ship := _find_ship(get_root())
 	if ship == null:
+		print("SHOT: no ship found to hide")
 		return
-	for child in ship.get_children():
-		if child is MeshInstance3D:
-			(child as MeshInstance3D).visible = false
+	var hidden := _hide_meshes(ship)
+	print("SHOT: hid %d mesh(es) of the ship at %s" % [hidden, ship.name])
 
 
 ## **What the decks were actually drawn with.** A map that never refined looks exactly like a map that
@@ -248,6 +276,17 @@ func _find_camera(node: Node) -> Camera3D:
 		if found != null:
 			return found
 	return null
+
+
+## Every `MeshInstance3D` under a node, hidden, and how many there were.
+func _hide_meshes(node: Node) -> int:
+	var hidden := 0
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			(child as MeshInstance3D).visible = false
+			hidden += 1
+		hidden += _hide_meshes(child)
+	return hidden
 
 
 func _find_ship(node: Node) -> Node3D:

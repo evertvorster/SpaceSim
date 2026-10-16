@@ -303,10 +303,29 @@ static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
 ## The **cloud deck's** material: a baked coverage map, thresholded into cloud, lit through the air
 ## above it.
 ##
-## **The deck's drawn reflectance is its measured albedo.** `bond_albedo` uses `clouds.albedo` for the
-## temperature, for the exposure's body term and for the point of light — and a deck drawn in its palette
-## colour is a different number entirely. So the colour is scaled to the albedo's **luminance**, which
-## keeps the hue while making the drawn brightness the one the physics already believes.
+## **The deck is drawn in its palette colour, and NOT scaled to its albedo — measured, 2026-10-16.**
+##
+## The two numbers are different quantities and both are right. `bond_albedo` is the fraction of
+## incident *energy* reflected **integrated over every direction and phase**, which is what the
+## temperature depends on. What you see from a spacecraft is the *directional* reflectance at one
+## geometry, and for a thick water cloud at low phase that is **0.8-0.9 — near white**. Drawing the
+## average instead is what made the clouds grey, and the arithmetic is worth recording:
+##
+##     illuminance at 1 au = 3.828e26 / (4 pi d^2) * 94 lm/W = 127,900 lux
+##     a Lambertian of albedo A renders at A * 127,900 / 100,000 = A * 1.279
+##     measured at the cloud tops, straight down from 1,000 km: 0.4872
+##     implied reflectance 0.4872 / 1.279 = 0.381, and / 0.87 of air = 0.44  ->  the albedo, as drawn
+##
+## `7020cba` fixed the opposite fault — the deck was drawn at its palette colour while `bond_albedo`
+## said 0.45, and the note called it *"twice as reflective"*. That was right about the **disc average**
+## and wrong about the **peak**, and the two facts hold at once: `SpacesimClouds.color` is the "how it
+## looks" field and `SpacesimClouds.albedo` is the "what it reflects" field, and scaling one to the
+## other is what conflated them.
+##
+## **What this does not have yet is the phase dependence.** A real cloud is near-white at low phase and
+## much darker toward crescent, and *that* is why its Bond average is 0.45 while its peak is 0.85. A
+## Lambertian cannot be both, so the drawn deck is now right where you look at it and the disc average
+## is the thing to check next — against Earth's measured 0.302 — rather than a number to defend here.
 ##
 ## `cover` may be **null**, and that is a real case rather than a failure: a body the model calls
 ## `FEATURELESS` has no map because there is no noise to bake, and its honest picture is a uniform shroud
@@ -321,9 +340,10 @@ static func deck_material(
 	material.set_shader_parameter("softness", DECK_SOFTNESS)
 	var clouds: SpacesimClouds = body.content.clouds if body.content != null else null
 	if clouds != null:
+		# **sRGB-decoded, but NOT luminance-scaled.** Godot's spatial shaders take a linear albedo, so the
+		# decode is required; the rescale to `clouds.albedo` was the fault.
 		var linear := clouds.color.srgb_to_linear()
-		var deck := _at_unit_luminance(linear, clouds.albedo)
-		material.set_shader_parameter("cloud_color", Vector3(deck.r, deck.g, deck.b))
+		material.set_shader_parameter("cloud_color", Vector3(linear.r, linear.g, linear.b))
 	else:
 		material.set_shader_parameter("cloud_color", Vector3.ONE)
 	# **The deck is drawn before the air that is in front of it.** Both shells are centred on the body, so
