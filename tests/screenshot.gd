@@ -29,6 +29,36 @@ func _initialize() -> void:
 	get_root().add_child(scene)
 
 
+## **`SHOT_HIDE=deck,surface,air` — take parts of the scene out so the rest can be measured.**
+##
+## The point of the split is the albedo accounting: the disc's total must be the ground you can see plus
+## the cloud you can see, and neither can be measured on its own while the other is drawn over it.
+##
+## **Set on `VisualInstance3D.layers`, NOT on `visible`.** The game writes `visible` every frame —
+## `update_lod` shows or hides a body's mesh and its deck by the point tier — so a rig that hid them that
+## way would be overruled before the frame was drawn, and would report a measurement of an unchanged
+## picture. `layers = 0` puts an instance on no render layer at all, which nothing in the game writes, so
+## the hide holds for every frame after it.
+func _hide_parts() -> void:
+	if not OS.has_environment("SHOT_HIDE"):
+		return
+	var suffixes: Array = []
+	for part in OS.get_environment("SHOT_HIDE").split(",", false):
+		match part.strip_edges():
+			"surface":
+				suffixes.append("Surface")
+			"deck":
+				suffixes.append("Deck")
+			"air":
+				suffixes.append("Air")
+	for suffix in suffixes:
+		var found := 0
+		for node in get_root().find_children("*%s" % suffix, "MeshInstance3D", true, false):
+			(node as VisualInstance3D).layers = 0
+			found += 1
+		print("SHOT: took %d %s mesh(es) out of the frame" % [found, suffix])
+
+
 ## **`SHOT_TONEMAP=linear` is for a measurement rather than a picture.** The project's film curve is
 ## monotone but not linear, so a ratio read off a tonemapped frame is not a ratio of reflectances — and
 ## a brightness question is exactly a ratio. Linear makes the frame's values
@@ -59,6 +89,7 @@ func _process(delta: float) -> bool:
 	if _frames == 1:
 		_hide_ship()
 		_prepare_measurement()
+		_hide_parts()
 	if _frames == _target / 2 and OS.has_environment("SHOT_BODY"):
 		_place_above(OS.get_environment("SHOT_BODY"), float(OS.get_environment("SHOT_ALT")))
 		return false
