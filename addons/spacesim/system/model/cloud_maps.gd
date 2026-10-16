@@ -65,15 +65,29 @@ var _clock := 0
 var _bakes := 0
 
 
-## **The map width worth having at a distance**, from the law the probe measured. Raising this is the
-## whole of "refine as you approach" — there is no ladder and no threshold to tune.
+## **The map width worth having at a distance**, from the law the probe measured — and the distance is to
+## the *surface*, not to the body's centre.
+##
+## A texel of length `2*pi*r/W` subtends `texel / distance_to_it`, so what the law needs is how far away
+## the ground being looked at is. Using the distance to the centre instead is 4x wrong at 2,000 km
+## altitude (8,371 km against 2,000) and 4x in width is two quantisation steps — which is a map that
+## reads as obviously blocky while every test says the refinement is working. It was, on the wrong
+## number.
+##
+## **The size therefore saturates, and that is information rather than a limitation.** Below about
+## 3,800 km an 8,192-wide Earth map can no longer be pixel-perfect — a 4.89 km texel is `4.89e3 / h`
+## radians against a pixel of `1.297e-3`, so it is good down to `h = 3,769 km` and no further, whatever
+## the map. That altitude is where the near regime has to take over, and it is derived here rather than
+## asserted in a plan.
 static func required_width(
 	radius: float, distance: float, pixel_angle: float = DEFAULT_PIXEL_ANGLE
 ) -> int:
 	if radius <= 0.0 or distance <= 0.0 or pixel_angle <= 0.0:
 		return FLOOR_WIDTH
-	var width := TAU * radius / (pixel_angle * distance)
-	return quantise(int(ceil(width)))
+	# `max(..., 1.0)` rather than a negative distance: a camera at or under the surface asks for the
+	# ceiling, which is what "as fine as this map can be" means.
+	var to_surface := maxf(distance - radius, 1.0)
+	return quantise(int(ceil(TAU * radius / (pixel_angle * to_surface))))
 
 
 ## To a power of two, and inside the bounds. Powers of two because a texture wants them and because a

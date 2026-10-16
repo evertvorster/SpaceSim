@@ -33,6 +33,7 @@ func run(h, root: Node) -> void:
 	_test_what_it_carries(h, scene)
 	_test_the_air_above_it(h, scene)
 	_test_one_writer(h, scene)
+	_test_it_refines_through_to_the_material(h, scene)
 
 	scene.cloud_maps.clear()
 	scene.container.free()
@@ -170,6 +171,39 @@ func _test_the_air_above_it(h, scene: SpacesimSystemScene) -> void:
 	h.check(material.get_shader_parameter("eye_offset") != null, "the eye is set every frame")
 	var to_sun: Vector3 = material.get_shader_parameter("sun_direction")
 	h.check_near(to_sun.length(), 1.0, "and the sun arrives as a direction", 1.0e-6)
+
+
+## **The wiring from a finished bake to the shader, which is the half that was missing.**
+##
+## `SpacesimCloudMaps`'s own suite proves the cache refines; this proves the *material* ends up with the
+## better map. A render showed Earth still at the floor up close and very pixellated, so the cache cannot
+## be where the fault is — and this is the guard that should have existed before the render was taken.
+func _test_it_refines_through_to_the_material(h, scene: SpacesimSystemScene) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	var material := earth.deck_mesh.material_override as ShaderMaterial
+	var before := scene.cloud_maps.width_of("planet:earth", 0)
+	var before_cover := material.get_shader_parameter("cover") as Texture2D
+
+	# **The observer has to be near the body.** The map's width is derived from the distance to it, so an
+	# absolute position anywhere in the system says nothing about how much of Earth is on screen.
+	var near := earth.node.global_position + Vector3(1.0e8, 0.0, 0.0)
+	var waited := 0
+	while waited < 30000:
+		scene.update_clouds(near)
+		if scene.cloud_maps.pending() == 0 and scene.cloud_maps.width_of("planet:earth", 0) > before:
+			break
+		OS.delay_msec(5)
+		waited += 5
+
+	var after := scene.cloud_maps.width_of("planet:earth", 0)
+	h.check(after > before,
+		"a closer observer refines the deck's map (%d -> %d in %.1f s)" % [
+			before, after, float(waited) / 1000.0
+		])
+	h.check(material.get_shader_parameter("cover") != before_cover,
+		"and the material is handed the new map rather than left on the floor")
+	h.check_near(float(material.get_shader_parameter("softness")), SpacesimBodyRenderer.DECK_SOFTNESS,
+		"with the shader's own parameters intact", 1.0e-9)
 
 
 ## **One writer for the material's state.** The map is set by the same function at build and every frame

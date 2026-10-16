@@ -27,6 +27,9 @@ func _initialize() -> void:
 		return
 	var scene: Node = packed.instantiate()
 	get_root().add_child(scene)
+	# **The hull has to go before the first frame.** It is a few tens of metres from the camera, so it
+	# fills the middle of every shot and drags the exposure metre, and a shot is of the world.
+	_hide_ship()
 
 
 func _process(delta: float) -> bool:
@@ -52,7 +55,47 @@ func _process(delta: float) -> bool:
 	var error := image.save_png(path)
 	print("SHOT: frame ", _frames, " -> ", path, "  (", image.get_width(), "x", image.get_height(),
 		", error ", error, ")")
+	_report_decks()
 	return true
+
+
+## **Hide the player's ship, so a shot is of the world and not of the hull.** It sits a few tens of
+## metres from the camera and fills the middle of every frame — which is where whatever is being looked
+## at is — and at that range it also drags the exposure metre. `SHOT_SHIP=1` keeps it, for the shots
+## that are *about* the ship.
+func _hide_ship() -> void:
+	if OS.has_environment("SHOT_SHIP"):
+		return
+	var ship := _find_ship(get_root())
+	if ship == null:
+		return
+	for child in ship.get_children():
+		if child is MeshInstance3D:
+			(child as MeshInstance3D).visible = false
+
+
+## **What the decks were actually drawn with.** A map that never refined looks exactly like a map that
+## refined and is being sampled wrongly, and neither is visible in the file name — so the width, the
+## threshold and the veil are printed, from the materials the frame was rendered with.
+func _report_decks() -> void:
+	var decks := 0
+	for node in get_root().find_children("*Deck", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		if not mesh.visible:
+			continue
+		var material := mesh.material_override as ShaderMaterial
+		if material == null:
+			continue
+		var cover := material.get_shader_parameter("cover") as Texture2D
+		decks += 1
+		print("SHOT deck %-18s %sx%s  threshold=%.3f  veil=%.3f" % [
+			mesh.name,
+			"-" if cover == null else str(cover.get_width()),
+			"-" if cover == null else str(cover.get_height()),
+			float(material.get_shader_parameter("threshold")),
+			float(material.get_shader_parameter("veil")),
+		])
+	print("SHOT: %d deck(s) in the tree" % decks)
 
 
 ## The frame cost of a view, as numbers. `SHOT_PROFILE=1` reports this **instead of** saving a picture

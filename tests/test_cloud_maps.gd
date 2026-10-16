@@ -55,15 +55,30 @@ func _test_the_size_law(h) -> void:
 	var far := SpacesimCloudMaps.required_width(radius, 1.0e8)
 	h.check(near > far, "closing on a body asks for a bigger map (%d against %d)" % [near, far])
 
-	# The texel at the required width must project under a pixel at that distance. That is the whole
-	# content of the law, and it is checkable rather than asserted.
+	# The texel at the required width must project under a pixel **at the distance to the ground**, which is
+	# where the law's own input comes from — the distance to the surface, not to the centre.
 	var distance := 5.0e7
 	var width := SpacesimCloudMaps.required_width(radius, distance)
 	var texel := TAU * radius / float(width)
-	var pixels := texel / (SpacesimCloudMaps.DEFAULT_PIXEL_ANGLE * distance)
+	var pixels := texel / (SpacesimCloudMaps.DEFAULT_PIXEL_ANGLE * (distance - radius))
 	h.check(pixels <= 1.0,
 		"and the texel it lands on is %.3f of a pixel at that distance — sub-pixel, which is the point"
 			% pixels)
+
+	# **And the distance that matters is the ALTITUDE, not the radius.** At 2,000 km up the ground is
+	# 2,000 km away while the centre is 8,371, so the centre asks for a quarter of the map — two
+	# quantisation steps, and the difference between a sharp deck and one that reads as blocky.
+	var from_altitude := SpacesimCloudMaps.required_width(radius, radius + 2.0e6)
+	var by_centre := SpacesimCloudMaps.quantise(
+		int(ceil(TAU * radius / (SpacesimCloudMaps.DEFAULT_PIXEL_ANGLE * (radius + 2.0e6))))
+	)
+	h.check(from_altitude > by_centre,
+		"at 2,000 km up it asks for %d where the distance to the centre asks only for %d"
+			% [from_altitude, by_centre])
+	h.check(from_altitude == SpacesimCloudMaps.MAX_WIDTH,
+		"which is the ceiling, because no map resolves the ground that low")
+	h.check(SpacesimCloudMaps.required_width(radius, radius + 3.769e6) == SpacesimCloudMaps.MAX_WIDTH,
+		"and the ceiling holds from the altitude where a map stops being pixel-perfect")
 
 	h.check(SpacesimCloudMaps.required_width(radius, CLOSE) == SpacesimCloudMaps.MAX_WIDTH,
 		"a very close body asks for the maximum and no more (%d)" % SpacesimCloudMaps.MAX_WIDTH)
