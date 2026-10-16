@@ -388,8 +388,8 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 |---|---|
 | `REFERENCE_LUX` | 100,000 — Godot's own default for `light_intensity_lux`, so a multiplier of 1.0 means "the light Godot considers normal" |
 | `MIN_MULTIPLIER` | **1/π** — **fully light-adapted**, the floor the exposure may not stop down past. Past a scene luminance of `LIGHT_ADAPTED_LUMINANCE` (100,000 lux/sr, sunlit snow) the eye has nowhere left to go, and that is what being dazzled *is*; a picture that stops down further is modelling a state that does not exist. A sunlit surface filling the view lands at 2.5 and the day sky with the Sun in it at 0.45, both inside it — **the Sun starts to dazzle inside about 0.83 au**, so Venus and Mercury reach the floor and nothing further out does |
-| `MAX_MULTIPLIER` | the top of the same range: **32 stops** above the floor. Not a state of anything — what it has to do is sit above `DARK_ADAPTED_MULTIPLIER` at the **widest field the settings allow** (140°, where the anchor is 64× its reference value), and it does so with a 26× margin. It is derived from the floor rather than written beside the anchor, which is what stopped the floor being dragged around by the ceiling |
-| `DARK_ADAPTED_MULTIPLIER` | 800,000 — **the exposure's resting state when nothing extended is in view**, and a *ceiling* rather than a floor: it is also what keeps the sky's brightness from depending on how far away the star is. **Anchored at the faint end**, see below |
+| `MAX_MULTIPLIER` | the top of the same range: **32 stops** above the floor, the wide end of what a human eye spans. Not a state of anything on its own — it is the ceiling the pass's metre clamps its gain to. **The ceiling in force is the setting `exposure.range_stops`**, in stops above the floor: 32.0 is this value and 0.0 allows no boost. Derived from the floor rather than written beside anything, so the floor cannot be dragged around by the ceiling |
+| `max_multiplier_for_stops(stops)` | `MIN_MULTIPLIER * 2^stops` — the arithmetic behind `exposure.range_stops`, so the setting and the window cannot disagree. Pinned by test against `MAX_MULTIPLIER` at 32.0 |
 | `MIN_SOLID_ANGLE` | 9.6e-6 sr — **the eye's own pooling scale**, a disk 0.2° across. Below it a source cannot be resolved as a surface, so it has no surface brightness to adapt to and can only glare. This one number is what makes looking at the Sun mean different things at 1 au and at Saturn |
 | `DAYLIGHT_SKY_LUMINANCE` | 8,000 lux/sr — a clear sky's own luminance (Schlyter's 25,000 lux on the ground is `pi*L`) |
 | `ADAPTATION_RATE` | how fast exposure follows a change, per second |
@@ -416,36 +416,28 @@ planet filling the frame did not stop the exposure down and flying close to Satu
 `SpacesimSystemScene.view_luminance_at` integrates what is actually in front of the eye, as each
 source's radiance weighted by its share of the view, and `MIN_SOLID_ANGLE` is what excludes points.
 
-**Why a star field needs its own anchor.** `target_multiplier()` exposes a lit *surface*, which has a
-mean luminance the eye adapts to. A star field has no mean luminance — it is point sources on black —
-so there is nothing there to adapt to. What an observer has instead is a *range*, and dark adaptation
-opens that range onto the sky. So the anchor is the observer, not the scene.
-
-**Anchored at the FAINT end — the first one was at the wrong end, and that was the bug.** The original
-derivation put the *brightest* star at the display's white point. The naked-eye range is Sirius at
-V = −1.44 down to the 6.5th magnitude: **7.94 magnitudes, 1,502:1**. Anchoring the top of that at white
-puts the bottom **3.18 decades** below it, under the display's own floor — and the picture that
-produces is a handful of stars, which is exactly what it was showing (Evert, 2026-10-15: *“only a
-couple of stars”* at gain 0).
-
-The anchor is now the **dark-adapted eye**, stated at the faint end: the 6.5th magnitude — by
-definition the faintest thing a fully dark-adapted eye can see — sits at the faintest thing the display
-shows, and the whole range above it is visible at once with the brightest stars saturating. Evert, on
-the target: *“I want to re-create the relative brightness as if you took a long exposure shot, as
-cameras can't naturally step down to what a human eye is capable of… what a human eye would see at its
-most dark adapted state.”* A long exposure says the same thing: the top blows out and the faint field
-appears.
-
-Derived at 1920×1080 and a 37.8° field: mag 6.5 is 6.375e-9 lux over a 4.020e-7 sr pixel, so 1.586e-2
-lux/sr, which is **4.984e-7** in engine units; the multiplier that lifts that to the display's visible
-floor is the constant. **The display's floor is the one number in the chain that is not physics** — it
-belongs to the screen and the room, not to the sky — and Evert measured it at **10²**. That 10² is the
-same correction `sky.star_gain` 2.1 was carrying all along, now placed where it belongs instead of in a
-fudge on the field.
-
-**The sky's brightness follows the resolution and the field; this constant does not.** That is
-deliberate (Evert, 2026-10-14): a higher resolution concentrates the same flux into a smaller angle
-and the stars get brighter, which is what a larger aperture does to a point source.
+> **The dark-adapted multiplier is gone — removed 2026-10-16, and this is why.**
+>
+> `DARK_ADAPTED_MULTIPLIER` arrived with the sky itself (2026-10-14), as "an exposure that can reach
+> it", and was re-anchored 8,000 → 800,000 the same day while hunting a 126× discrepancy. Its *value*
+> was a fudge and the history said so, but its *status* was not: it wore the clothes of physics for a
+> session and a half, and **two different claims hid behind each other** — that the shader's numbers
+> were right, and that the picture was right. The first was true, the second was not, and the second
+> borrowed the first's authority.
+>
+> It was the compensation for a calibrated sky looking too dim, and it went when the pass made it
+> unnecessary: `SpacesimExposurePass` meters the finished frame and applies one multiplier to it, so
+> the frame's exposure is decided by **what is on the screen**, not by an anchor computed from the
+> light at the observer. Nothing replaced it — that is the point.
+>
+> What the paragraph recorded that still stands: the naked-eye range really is Sirius at V = −1.44
+> down to the 6.5th magnitude, **7.94 magnitudes, 1,502:1**, and the scene is rendered in the
+> published values with the EV doing the adapting. That is the shape Evert asked for on 2026-10-16:
+> *"I want the scene to be rendered scientifically correct, THEN apply the EV pass to make dim things
+> visible, or bright things resolvable."*
+>
+> What remains in `SpacesimExposure` is the light-adapted floor (`MIN_MULTIPLIER`) and the ceiling
+> (`MAX_MULTIPLIER`, moved by `exposure.range_stops`) — both states of the eye, neither a compensation.
 
 **The ambient is the star field's own light, summed from the catalogue** — `AMBIENT_SOURCE_COLOR`, with
 its energy set each time `sky.star_depth` changes from `SpacesimStarSky.illuminance()`. It is *not*
@@ -611,8 +603,8 @@ beyond (0.99 at 8, 0.69 at 9), so the setting belongs in 6.5 to 8.0 with 9.5 a s
 and `view_luminance_at(observer, forward, tan_half)` answers **what the eye is looking at** — a mean
 luminance over the view, weighted by each source's share of it. It is not `illuminance_at()`, which is
 the light falling on a surface: at 1 au that answer is 128,000 lux whether you are looking at the Sun
-or at empty sky. **Zero means "nothing extended is in front of the eye"**, and the exposure then rests
-at `DARK_ADAPTED_MULTIPLIER` — which is what lets the stars appear at all.
+or at empty sky. **Zero means "nothing extended is in front of the eye"**, which the metre answers by
+opening the frame up toward the top of its window — that is what lets the stars appear at all.
 
 **"In front of the eye" includes being behind the planet.** `SpacesimLuminance.in_view` is a cone test,
 so on a planet's night side the Sun is in the frame *through the planet* whenever the camera looks at
@@ -908,12 +900,14 @@ on change (`camera.fov`, the marker pool and font size).
 | `video.window_size` | player | `Vector2i(1280, 720)` — the windowed window, remembered |
 | `mouse.sensitivity` | player | 0.0015 |
 | `camera.fov` | player | 70.0 |
+| `camera.ship_distance` | player | 32.0 — how far behind the player's ship its own camera sits, in metres. **It decides whether the hull is drawn at all**: the placeholder hull is only ~23 m in front of the camera and deep space's near plane is 100 m, so it is clipped away there. `_update_camera` brings the near plane inside the hull while the ship is shown, which is a depth-precision cost paid only then. See the ship key in § Bindings |
 | `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on — **floors, not ceilings**: `_update_camera` raises the far plane to cover the sky and the system. See **The far plane** |
 | `lod.error_budget` | player | 4.0 — the geometric error a body's mesh may show at its **silhouette**, in pixels on screen. One number decides the whole engine's mesh budget: tessellation follows from it and a body's screen size, and body to body it is the difference between 20 triangles and 20,000. Read by `SpacesimSystemScene.update_lod`, and in flight by the `[` / `]` keys. Small is finer. It is a **trim** meant to be tuned by eye and then frozen into `SpacesimLod`, the same shape as the star field's gain |
 | `markers.pool_size` | player | 12 |
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
 | `markers.selected_color` | player | `Color(1.0, 0.9, 0.3)` — the one thing on the overlay that stands out, so it can be made to stand out against what it is seen against |
+| `exposure.range_stops` | player | 32.0 — **the ceiling on the metre's gain**, in stops above the light-adapted floor (`SpacesimExposure.MIN_MULTIPLIER`). The metre drives the frame toward middle grey, and a frame of nothing but stars has almost no mean luminance to answer with, so it asks for the top of the window; this is what caps how far it may go. 32.0 reproduces the derived `MAX_MULTIPLIER` exactly and 0.0 allows no boost. Read by `main.gd` and handed to `SpacesimExposurePass` |
 
 There were six `frames.*` keys here until 2026-10-15. They were **read by nothing** and duplicated
 `SpacesimFraming` on the content resource, which is the live source for every one of those numbers —

@@ -181,9 +181,12 @@ func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
 		"at 1 au the Sun's disk is five times the pooling scale, so it is a sky you adapt to "
 		+ "(%.1f e5 lux/sr)" % (looking * 1e-5))
 	var at_one_au := SpacesimExposure.target_multiplier_for_luminance(looking)
-	h.check(at_one_au < SpacesimExposure.DARK_ADAPTED_MULTIPLIER,
-		"so staring at the Sun stops the exposure down to %.1f from %.0f"
-			% [at_one_au, SpacesimExposure.DARK_ADAPTED_MULTIPLIER])
+	# The reference moved with the dark-adapted multiplier's removal (2026-10-16): what the exposure
+	# stops down *from* is no longer an anchor, it is the light-adapted floor, which is a state of the
+	# eye and still stated.
+	h.check(at_one_au < 8.0 * SpacesimExposure.MIN_MULTIPLIER,
+		"so staring at the Sun stops the exposure down to %.2f, near the light-adapted floor of %.2f"
+			% [at_one_au, SpacesimExposure.MIN_MULTIPLIER])
 
 	# --- a planet filling the frame ---------------------------------------------------------------
 	# On the SUB-SOLAR side, so it is fully lit and its phase is 1. The first version of this placed the
@@ -198,7 +201,7 @@ func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
 	h.check(body > 0.0,
 		"a lit body filling the frame is what the exposure follows now (%.1f lux/sr)" % body)
 	h.check(SpacesimExposure.target_multiplier_for_luminance(body)
-			< SpacesimExposure.DARK_ADAPTED_MULTIPLIER,
+			< SpacesimExposure.MAX_MULTIPLIER * 1.0e-3,
 		"so flying close to Saturn stops the exposure down instead of blowing out")
 	h.check(scene.view_luminance_at(close, -down, tan_half) == 0.0,
 		"while looking away from it at the same place is empty sky again")

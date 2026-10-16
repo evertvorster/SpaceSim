@@ -44,9 +44,8 @@ const LIGHT_ADAPTED_LUMINANCE := 100000.0
 ##
 ## `MAX_MULTIPLIER` is the other end, and the range between them is **32 stops** (Evert,
 ## 2026-10-15: *"open the EV range to 32"*) — `2^32` times the floor, which is the wide end of what a
-## human eye spans. It is nowhere near a state of anything on its own; what it has to do is sit above
-## `DARK_ADAPTED_MULTIPLIER` at the **widest field the settings allow** (140 degrees, where the anchor
-## is 64x its reference value), and it does so with a 26x margin. Pinned by test.
+## human eye spans. It is nowhere near a state of anything on its own; it is the top of the window the
+## metre clamps to, and the setting `exposure.range_stops` moves it. Pinned by test.
 const MIN_MULTIPLIER := REFERENCE_LUX / (LIGHT_ADAPTED_LUMINANCE * PI)
 const MAX_MULTIPLIER := MIN_MULTIPLIER * 4294967296.0 ## 2^32: the range is 32 stops
 
@@ -78,71 +77,15 @@ const DAYLIGHT_SKY_LUMINANCE := 8000.0
 ## 2026-10-14, and it is why the exposure was anchored to the wrong thing.
 const MIN_SOLID_ANGLE := 9.6e-6
 
-## The multiplier a fully dark-adapted eye corresponds to — the exposure's resting state when there
-## is nothing bright in front of it, and the whole of what "a night sky" means on screen.
+## The ceiling on the metre's gain, for a window `stops` above the light-adapted floor.
 ##
-## **`target_multiplier()` above cannot serve for a star field, and the reason is worth stating.**
-## That rule exposes a lit *surface*, which has a mean luminance the eye adapts to. A star field has
-## no mean luminance — it is point sources on black — so there is nothing there to adapt to. What an
-## observer has instead is a RANGE, and dark adaptation opens that range onto the sky. So the anchor
-## is the observer, not the scene.
-##
-## **Anchored at the FAINT end, and that was the bug** (Evert, 2026-10-15). The first derivation put
-## the *brightest* star at the display's white point — and the naked-eye range is Sirius at V = -1.44
-## down to the 6.5th magnitude, which is **7.94 magnitudes, or 1,502:1**. Anchoring the top of that at
-## white puts the bottom 3.18 decades below it, under the display's own floor. The picture that
-## produces is a handful of stars, which is exactly what it showed.
-##
-## Anchored at the faint end it is the dark-adapted eye instead: **the 6.5th magnitude — by definition
-## the faintest thing a fully dark-adapted eye can see — sits at the faintest thing the display shows**, 
-## and the whole range above it is visible at once, with the brightest stars saturating. Evert, on what
-## he is asking for: *"I want to re-create the relative brightness as if you took a long exposure shot,
-## as cameras can't naturally step down to what a human eye is capable of."* A long exposure is the same
-## statement: the top blows out and the faint field appears.
-##
-## Derived, at the reference the sky is judged at (1920x1080, a 37.8 degree field):
-##     mag 6.5, the naked-eye limit      2.54e-6 * 10^(-0.4 * 6.5)   = 6.375e-9 lux
-##     one pixel's solid angle          4 * tan18.9^2 * 1.778 / (1920*1080) = 4.020e-7 sr
-##     its radiance                     6.375e-9 / 4.020e-7          = 1.586e-2 lux/sr
-##     in Godot's units                 1.586e-2 / (100000/pi)       = 4.984e-7
-##     to the display's floor           ~0.05 -> 0.05 / 4.984e-7     = 1.0e5
-##
-## **The one number in that chain that is not physics is the display's floor**, and it is why this is
-## 800,000 rather than 100,000: the floor is not a property of the sky, it is a property of the screen
-## and the room it is looked at in, and Evert measured it at **10^2** — the same correction the old
-## `sky.star_gain` 2.1 was carrying all along, now placed where it belongs instead of in a fudge on the
-## field. Anchoring at the faint end is the fix; the exact height of the floor is the free parameter,
-## and it is the one thing here that a person's eye decides rather than a measurement.
-##
-## **The sky's brightness follows the resolution and the field; this does not.** Evert chose that on
-## 2026-10-14: a higher resolution concentrates the same flux into a smaller angle and the stars get
-## brighter, which is what a larger aperture does to a point source.
-##
-## The field of view the value below was derived at. It is REFERENCE ONLY — the multiplier that is
-## actually used comes from `dark_adapted_multiplier(fov)`, because a star's rendered radiance goes as
-## `(height / tan(half vfov))^2` and a constant derived at one field is wrong at every other.
-const DARK_ADAPTED_REFERENCE_FOV := 37.8
-
-const DARK_ADAPTED_MULTIPLIER := 800000.0
-
-
-## The dark-adapted multiplier **for the field of view actually in use**.
-##
-## Evert's idea, 2026-10-14: *"can't we use the FOV for the dark adapted multiplier?"* It is the right
-## correction, and it fixes a self-inconsistency rather than papering over one — the shader's output
-## goes as `(height / tan(half vfov))^2`, so a multiplier derived at one field cannot be right at
-## another. Deriving it also *chooses a behaviour*: with this, the sky is **independent of the field of
-## view and still dependent on the resolution**, which is the consistent reading of Evert's choice that
-## stars should brighten with more pixels. A narrower field stops changing brightness; a bigger frame
-## still does.
-##
-## Number to check it against: at 70 degrees this is 4.18x the reference value, because
-## `(tan 35 / tan 18.9)^2 = (0.7002 / 0.3424)^2`.
-static func dark_adapted_multiplier(fov_degrees: float) -> float:
-	var tan_reference := tan(deg_to_rad(DARK_ADAPTED_REFERENCE_FOV * 0.5))
-	var tan_now := tan(deg_to_rad(clampf(fov_degrees, 1.0, 179.0) * 0.5))
-	var scale := tan_now / tan_reference
-	return DARK_ADAPTED_MULTIPLIER * scale * scale
+## The window's two ends are both states of the eye, and this is the top of it: `MAX_MULTIPLIER` is
+## 32 stops up, and the setting `exposure.range_stops` moves the ceiling so the gain can be capped.
+## That cap is what a frame of nothing but stars drives toward — a star field has almost no mean
+## luminance, so the metre answers with a large multiplier, and how large is a judgement about the
+## picture rather than a measurement. 32.0 reproduces `MAX_MULTIPLIER` exactly; 0.0 allows no boost.
+static func max_multiplier_for_stops(stops: float) -> float:
+	return MIN_MULTIPLIER * pow(2.0, stops)
 
 var attributes: CameraAttributesPhysical
 
@@ -264,8 +207,8 @@ static func configure(environment: Environment) -> void:
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
 	# **Both white points, and that is not belt-and-braces.** AgX IGNORES `tonemap_white` — the engine
 	# says so in as many words, *"tonemap_agx_white will be used instead when using the
-	# TONE_MAPPER_AGX tonemapper"* — and the derivation of `DARK_ADAPTED_MULTIPLIER` is done against
-	# **6.0**. Setting only `tonemap_white` therefore left the curve running at its own default of
+	# TONE_MAPPER_AGX tonemapper"* — and the arithmetic here is written against **6.0**. Setting only
+	# `tonemap_white` therefore left the curve running at its own default of
 	# **16.29**, which is not the value the arithmetic above was written against.
 	#
 	# **What this does and does not buy, measured rather than assumed.** The white parameter shapes the

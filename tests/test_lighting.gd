@@ -6,6 +6,7 @@ extends RefCounted
 ## not claimed to be.
 
 const SOL_PATH := "res://systems/sol.tres"
+const Settings := preload("res://addons/spacesim/settings/settings.gd")
 const AU := 1.495978707e11
 const SOLAR_CONSTANT := 1361.0 ## W/m² at 1 au, measured
 const SUN_EFFECTIVE_TEMPERATURE := 5772.0 ## K, measured
@@ -146,44 +147,8 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	# (`tests/test_meter.gd`), this module's arithmetic above, and the wiring below; the *behaviour* needs a
 	# render, and `tests/probe_frame_exposure.gd` is that instrument.
 
-	# The dark-adapted multiplier follows the FIELD OF VIEW, because a star's rendered radiance goes as
-	# `(height / tan(half vfov))^2` and a constant derived at one field is wrong at every other. Evert's
-	# idea, 2026-10-14, and the point of checking it is that it *chooses a behaviour*: the sky becomes
-	# independent of the field and stays dependent on the resolution.
-	var reference := SpacesimExposure.DARK_ADAPTED_MULTIPLIER
-	h.check_near(SpacesimExposure.dark_adapted_multiplier(SpacesimExposure.DARK_ADAPTED_REFERENCE_FOV),
-		reference, "at its reference field it is the reference value", 1.0)
-	var wide := SpacesimExposure.dark_adapted_multiplier(70.0)
-	h.check_near(wide / reference, 4.18,
-		"and at the game's 70 degrees it is %.2fx that, because (tan35/tan18.9)^2 = 4.18"
-			% (wide / reference), 0.05)
-	h.check(SpacesimExposure.dark_adapted_multiplier(20.0) < reference,
-		"a narrower field needs LESS, since the same flux is already concentrated into a smaller angle")
-
-	# The invariant the whole thing rests on. A star's rendered radiance goes as 1/tan^2(half fov) and
-	# this multiplier goes as tan^2(half fov), so it is their PRODUCT that is field-independent — which
-	# is another way of saying what lands on the screen does not change when the field does. The first
-	# version of this check had the ratio the wrong way up, and the two numbers were three orders of
-	# magnitude apart, which is what made the mistake obvious rather than subtle.
-	var a := SpacesimExposure.dark_adapted_multiplier(30.0) / pow(tan(deg_to_rad(15.0)), 2.0)
-	var b := SpacesimExposure.dark_adapted_multiplier(110.0) / pow(tan(deg_to_rad(55.0)), 2.0)
-	h.check_near(a, b, "so radiance x multiplier — what actually lands on the screen — is the same "
-		+ "at 30 degrees as at 110 (%.1f against %.1f)" % [a, b], 0.01 * a)
-
-	# **The clamp must sit above the anchor at the WIDEST field the settings allow**, not merely at the
-	# reference one, because the anchor goes as tan^2(half fov): 140 degrees — `camera.fov`'s own maximum
-	# in `settings.gd` — is 64x its reference value. Checked at the widest field rather than at the 70
-	# the game runs at, since that is where it would fail, and the clamp is now derived from the anchor
-	# so that it keeps holding the next time the anchor moves, which it has now done once.
-	var widest := SpacesimExposure.dark_adapted_multiplier(140.0)
-	h.check(widest < SpacesimExposure.MAX_MULTIPLIER,
-		"the clamp sits above the dark-adapted anchor even at the widest field (%s against %s)"
-			% [widest, SpacesimExposure.MAX_MULTIPLIER])
-	h.check(widest * 10.0 < SpacesimExposure.MAX_MULTIPLIER,
-		"with real headroom rather than a coincidence")
-
 	# **The range is 32 stops, and both ends of it are states of the eye** — the floor is fully
-	# light-adapted, the ceiling is the dark-adapted anchor's headroom. Evert, 2026-10-15: *"open the
+	# light-adapted, the ceiling is how far a dark-adapted eye opens. Evert, 2026-10-15: *"open the
 	# EV range to 32."* The floor being below 1.0 is the check that it is a *state* and not a guess: a
 	# sunlit surface at middle grey is 1.0, and "as bright as the eye still adapts to" is a sunlit
 	# surface that is BRIGHTER than middle grey, so the multiplier is smaller.
@@ -191,6 +156,19 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check_near(range_stops, 32.0, "the exposure can swing 32 stops (%.2f)" % range_stops, 0.01)
 	h.check(SpacesimExposure.MIN_MULTIPLIER < 1.0 and SpacesimExposure.MIN_MULTIPLIER > 0.0,
 		"with the floor under middle grey and above zero (%.4f)" % SpacesimExposure.MIN_MULTIPLIER)
+
+	# **The ceiling is a setting now** — `exposure.range_stops`, in stops above the floor — because a
+	# frame of nothing but stars has no mean luminance to answer with and the metre asks for the top of
+	# the window. The declared default has to reproduce the derived `MAX_MULTIPLIER` exactly, or the
+	# window moves the day someone edits the registry, so the two are tied here rather than trusted.
+	h.check_near(SpacesimExposure.max_multiplier_for_stops(range_stops),
+		SpacesimExposure.MAX_MULTIPLIER, "the ceiling formula reproduces the derived window",
+		SpacesimExposure.MAX_MULTIPLIER * 1.0e-9)
+	var declared_stops := float(Settings.default_of("exposure.range_stops"))
+	h.check_near(declared_stops, range_stops,
+		"and the setting's declared default is that same window (%.2f stops)" % declared_stops, 1.0e-6)
+	h.check(SpacesimExposure.max_multiplier_for_stops(16.0) < SpacesimExposure.MAX_MULTIPLIER,
+		"a smaller window caps the gain, which is what the setting is for")
 
 	# **AgX ignores `tonemap_white`**, and the engine says so outright: *"tonemap_agx_white will be
 	# used instead when using the TONE_MAPPER_AGX tonemapper"*. The derivation this file is built on
@@ -256,27 +234,18 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 				% diameter)
 
 	# **Evert's test of the dark end**, 2026-10-15: *"the shadow side of earth, with no moonlight or
-	# other source of light but starlight should be barely visible, a little above black."* That is a
-	# statement about the ANCHOR and it is arithmetic — the surface renders at the ratio between the
-	# exposure in force and the exposure that would put it at middle grey:
+	# other source of light but starlight should be barely visible, a little above black."*
 	#
-	#     rendered = dark_adapted_multiplier(fov) / target_multiplier_for_luminance(albedo * sky_lux / pi)
-	#
-	# The whole naked-eye star field is the only light there, so `sky_lux` is the sky's own integrated
-	# illuminance — the number the calibration was checked against, not a constant chosen here.
+	# **The ratio it was written as is gone with the dark-adapted multiplier.** It read
+	# `dark_adapted_multiplier(fov) / target_multiplier_for_luminance(albedo * sky_lux / pi)` — the
+	# surface at the resting exposure over the exposure that would put it at middle grey. That multiplier
+	# was a compensation dressed as a constant and was removed on 2026-10-16; what a night side renders
+	# at is now `SpacesimExposurePass`'s answer for that frame, which is as invisible to this suite as
+	# the rest of the pass's behaviour. What is still checkable is the light that does it.
 	if scene.star_sky != null:
-		var materials := SpacesimMaterialTable.engine_table()
-		var albedo := SpacesimSurfaceModel.bond_albedo(lit_earth.content, materials)
 		var sky_lux := scene.star_sky.illuminance(6.5)
-		var ground_luminance := albedo * sky_lux / PI
-		var rendered := SpacesimExposure.dark_adapted_multiplier(70.0) \
-			/ SpacesimExposure.target_multiplier_for_luminance(ground_luminance)
-		# A band and not a point: "barely visible" is a person's judgement, and the band is what a
-		# factor of five either way looks like. Through the tone curve's toe, 2e-3 lands near 2/255.
-		h.check(rendered > 5.0e-4 and rendered < 5.0e-3,
-			"starlight alone on a shadowed surface is barely visible, a little above black (%s)"
-				% rendered)
-		h.check(scene.star_sky.illuminance(6.5) > 1.0e-4,
-			"because the field lighting it is the real one (%.2f e-4 lux)" % (sky_lux * 1.0e4))
+		h.check(sky_lux > 1.0e-4,
+			"the whole naked-eye star field is what lights a shadowed surface (%.2f e-4 lux)"
+				% (sky_lux * 1.0e4))
 
 	scene.container.free()

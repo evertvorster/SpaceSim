@@ -267,6 +267,16 @@ func _cycle_target() -> void:
 ## change, so nothing here is read once at startup and then forgotten.
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
+	# The camera sits behind the hull, on the ship's own basis. Only the distance is settable; the height
+	# above the hull is part of what the ship is.
+	var offset := PlayerShip.CAMERA_OFFSET
+	offset.z = float(SpacesimSettings.get_value("camera.ship_distance"))
+	_camera.position = offset
+	# The exposure's ceiling, hot like everything else here: `exposure.range_stops` is in stops above
+	# the light-adapted floor, and 32.0 is the whole window with no cap on the derived value.
+	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
+		float(SpacesimSettings.get_value("exposure.range_stops"))
+	)
 	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
 	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
 	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))
@@ -275,7 +285,7 @@ func _apply_settings() -> void:
 
 func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
-		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color":
+		"camera.fov", "camera.ship_distance", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops":
 			_apply_settings()
 
 

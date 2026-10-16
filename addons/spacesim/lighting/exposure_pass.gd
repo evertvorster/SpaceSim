@@ -50,6 +50,12 @@ const BLOCK := 8
 ## than the frame's, so the main thread hands it over — the same delta `_update_view` already works in.
 var frame_delta := 1.0 / 60.0
 
+## The ceiling on the metre's gain — the top of the window it clamps to. `MAX_MULTIPLIER` (32 stops
+## above the floor) unless the game lowers it from `exposure.range_stops`, which is how far the gain
+## may go. It matters most on a frame of nothing but stars: with no mean luminance to answer, the
+## metre asks for the ceiling.
+var max_multiplier := SpacesimExposure.MAX_MULTIPLIER
+
 ## The last metre value the *CPU* knows, which is only ever a report: it is written from the render
 ## thread, so it may lag or be read mid-write. The authoritative value lives on the GPU, in `_state`.
 var last_multiplier := 0.0
@@ -296,7 +302,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	rd.compute_list_bind_uniform_set(list, finalize_set, 0)
 	rd.compute_list_set_push_constant(list, PackedFloat32Array([
 		float(SAMPLE_COUNT), SpacesimExposureMeter.TARGET_AVERAGE,
-		SpacesimExposure.MIN_MULTIPLIER, SpacesimExposure.MAX_MULTIPLIER,
+		SpacesimExposure.MIN_MULTIPLIER, max_multiplier,
 		SpacesimExposure.ADAPTATION_RATE, frame_delta, 0.0, 0.0,
 	]).to_byte_array(), 32)
 	rd.compute_list_dispatch(list, 1, 1, 1)

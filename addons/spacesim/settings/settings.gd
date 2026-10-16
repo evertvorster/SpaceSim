@@ -75,6 +75,11 @@ const REGISTRY := {
 	},
 	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
 	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
+	# --- how far behind the ship its own camera sits, in metres. **The ship's placeholder hull is only
+	# visible when the near plane is inside it**, and the near plane follows the frame kind (deep space is
+	# 100 m), so this is the knob that decides whether you can see the ship you are flying at all. Read at
+	# the point of use in `main.gd`.
+	"camera.ship_distance": {"default": 32.0, "scope": Scope.PLAYER, "min": 10.0, "max": 2000.0},
 	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_atmosphere": {
@@ -95,6 +100,12 @@ const REGISTRY := {
 	# by eye while flying and then frozen to a constant once a render set justifies the number, at which
 	# point it stops being a setting and the value moves into `SpacesimLod`.
 	"lod.error_budget": {"default": 4.0, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	# --- the exposure's ceiling. The metre drives the frame toward middle grey, and a frame of nothing
+	# but stars has almost no mean luminance to answer with, so it drives toward the *top* of the
+	# window — which is what this caps. In STOPS above the light-adapted floor, so 32 is the whole
+	# range a dark-adapted eye has and 0 allows no boost at all. Read every frame by `main.gd` and
+	# handed to `SpacesimExposurePass`; the arithmetic is `SpacesimExposure.max_multiplier_for_stops`.
+	"exposure.range_stops": {"default": 32.0, "scope": Scope.PLAYER, "min": 0.0, "max": 40.0},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a
