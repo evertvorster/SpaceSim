@@ -32,10 +32,13 @@ render_mode blend_mix, cull_disabled, specular_disabled;
 // patches. `direction * 0.25 + 0.5` uses a quarter of the texture and cannot wrap; the detail comes
 // from what the texture itself holds. Same mapping as the surface shader, and the same two traps.
 
-uniform vec3 cloud_color : source_color = vec3(1.0);
-// The thin edge and the shadowed underside. Derived from `cloud_color` by the host rather than
-// hand-picked, so a deck keeps its identity while gaining structure.
-uniform vec3 edge_color : source_color = vec3(0.7);
+// **These two are LINEAR, and the host has already scaled the luminance to the deck's measured albedo.**
+// Not `source_color`, deliberately: with the decode left to Godot the drawn reflectance would be the
+// palette's `level^2.2` rather than the number `bond_albedo` uses, which is the whole fault this avoids.
+uniform vec3 cloud_color = vec3(1.0);
+// The thin edge and the shadowed underside. The host derives it from `cloud_color` rather than picking
+// it, so a deck keeps its identity while gaining structure.
+uniform vec3 edge_color = vec3(0.7);
 uniform float threshold : hint_range(0.0, 1.0) = 0.5;
 uniform float softness : hint_range(0.001, 0.5) = 0.06;
 uniform float opacity : hint_range(0.0, 1.0) = 1.0;

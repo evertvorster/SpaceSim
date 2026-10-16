@@ -311,33 +311,33 @@ static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	return material
 
 
-## The cloud deck's own material: one shell of noise, drawn where the noise says there is cloud.
+## **The deck's drawn reflectance IS its measured albedo.** `bond_albedo` uses `clouds.albedo` for the
+## temperature, the exposure's body term and the point of light — and a deck drawn in its palette colour
+## is a different number entirely: Earth's is 0.95 against an albedo of 0.45, so the deck was **twice as
+## bright as everything else believes it is.** That is what blew it out from space and what dragged the
+## metre down until the surface under it went black, and why from *below* the deck the whole sky went
+## white. Scaling the colour's luminance to the albedo keeps the hue and makes the picture the
+## measurement — which for the deck costs one line, unlike the surface, where the same split is named and
+## deferred because its palette is per-species authoring rather than one number.
 ##
-## **`fraction` is turned into a threshold by measuring the field, not by assuming its distribution.**
-## A threshold admits the fraction of the field *above* it, which is the authored fraction only if the
-## distribution is known — and the first deck assumed it, which is why the vault carries "the achieved
-## coverage was never measured, only assumed" as a trap. `cloud_threshold` measures it.
-##
-## **The deck's drawn reflectance is its palette colour, not `clouds.albedo`** — the same split the
-## surface has, and named for the same reason: `bond_albedo` uses the albedo for the temperature, the
-## exposure's body term and the point of light, while the picture is a colour. Making the drawn
-## reflectance the measurement is a step of its own (see the cloud plan), not something to half-do here.
+## The uniforms are **linear**, so the authored colour is decoded here rather than by the engine.
 static func deck_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	var clouds := body.content.clouds
 	var material := ShaderMaterial.new()
 	material.shader = DECK_SHADER
-	var colour: Color = clouds.color
+	var linear: Color = clouds.color.srgb_to_linear()
+	var deck: Color = _at_unit_luminance(linear, clouds.albedo)
+	var colour := Vector3(deck.r, deck.g, deck.b)
 	material.set_shader_parameter("cloud_color", colour)
-	# The edge, darkened rather than hand-picked, so a deck keeps its identity while gaining structure.
-	material.set_shader_parameter("edge_color", colour.darkened(0.3))
+	material.set_shader_parameter("edge_color", colour * 0.7)
 	material.set_shader_parameter(
 		"threshold", cloud_threshold(offset_for(body.id), clouds.fraction, CLOUD_NOISE_SCALE)
 	)
 	material.set_shader_parameter("softness", CLOUD_SOFTNESS)
 	material.set_shader_parameter("opacity", clouds.opacity)
-	# **The surface's own field, scale and offset.** The deck's shadow is sampled from this same noise, so
-	# the two have to agree about where a cloud is — and the scale is 1.0 because the sphere is mapped into
-	# a quarter of the texture; raising it walks out of the texture and repeats it as a grid.
+	# **The surface's own field**, so the deck's shadow can be sampled from the same noise and the two agree
+	# about where a cloud is — but the deck's own *scale*, because a deck wants far more structure than a
+	# surface does. See `CLOUD_NOISE_SCALE` for why the two differ and why wrapping is safe here.
 	material.set_shader_parameter("noise_scale", CLOUD_NOISE_SCALE)
 	material.set_shader_parameter("noise_offset", offset_for(body.id))
 	material.set_shader_parameter("noise_field", noise_field())
