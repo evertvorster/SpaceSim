@@ -755,8 +755,10 @@ mean_anomaly_at_epoch = 0.0
 ;
 ; These carry the albedo as well as the look, because **clouds dominate a planet's reflection**:
 ; without them Earth derives 0.081 against a measured 0.306. They sit on the body rather than in the
-; atmosphere because a gas giant's visible surface *is* its cloud deck, and the giants carry no
-; atmosphere block.
+; atmosphere because a gas giant's visible surface *is* its cloud deck -- what the body looks like
+; rather than a property of its air. **The giants do carry atmospheres**: all four are authored above
+; with 101,325 Pa each. An earlier version of this comment said the opposite, and the same false claim
+; had spread to five files before it was caught.
 ;
 ; A gas giant's fraction is 1.0 and its albedo is its whole Bond albedo — there is nothing else to
 ; reflect off. The four giant values are the measured ones: Jupiter 0.50, Saturn 0.34, Uranus 0.30,

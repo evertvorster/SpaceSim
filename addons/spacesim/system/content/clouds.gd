@@ -8,9 +8,16 @@ extends Resource
 ## something to draw in the meantime. So the fraction is authored, and the derivation replaces it
 ## without changing this shape.
 ##
-## Clouds belong on the **body** rather than inside [SpacesimAtmosphere] on purpose: a gas giant's
-## visible surface *is* its cloud deck, and the giants here carry no atmosphere block, so putting
-## clouds under the atmosphere would have made them unrepresentable where they matter most.
+## Clouds belong on the **body** rather than inside [SpacesimAtmosphere] on purpose: **a gas giant's
+## visible surface *is* its cloud deck**, so the deck is part of what a body *looks like* rather than a
+## property of the air above it. Where a deck is *derived* — from the condensation level, as the cloud
+## plan does it — the derivation reads the atmosphere, and the resource still belongs here.
+##
+## **Corrected 2026-10-16.** This used to say *"the giants here carry no atmosphere block"*, which is
+## false: `systems/sol.tres` gives all four giants a 101,325 Pa atmosphere. It was the stated reason for
+## the placement, it contradicted `docs/API.md`'s own gas-giant note in the same file, and by the time it
+## was caught it had spread to five files in this repository and two in the vault. The placement stands;
+## the sentence that justified it did not.
 ##
 ## Why this exists at all: **clouds dominate a planet's reflection**, and without them the albedo
 ## derivation is wrong by a factor of two to six on any body with air — Earth derives 0.081 against a

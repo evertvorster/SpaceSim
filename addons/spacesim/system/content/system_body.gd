@@ -35,8 +35,8 @@ enum Kind { STAR, PLANET, DWARF_PLANET, MOON }
 @export var fixed_position: Vector3 = Vector3.ZERO
 @export var atmosphere: SpacesimAtmosphere
 @export var surface: SpacesimSurface
-## The cloud deck. On the body rather than inside the atmosphere: a gas giant's visible surface *is* its
-## cloud deck, and the giants here carry no atmosphere block.
+## The cloud deck. On the body rather than inside the atmosphere, because a gas giant's visible surface
+## *is* its cloud deck — what the body looks like, not a property of its air, which the giants do have.
 @export var clouds: SpacesimClouds
 @export var overrides: SpacesimBodyOverrides
 ## Whether it gets atmosphere and surface frames. Authored for now: a content judgement, not a
