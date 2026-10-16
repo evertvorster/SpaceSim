@@ -331,7 +331,7 @@ static func star_material(body: SpacesimSceneBody) -> ShaderMaterial:
 ## `FEATURELESS` has no map because there is no noise to bake, and its honest picture is a uniform shroud
 ## at full coverage. `uniform_white()` is what it gets.
 static func deck_material(
-	body: SpacesimSceneBody, cover: Texture2D, threshold: float
+	body: SpacesimSceneBody, cover: Texture2D, threshold: float, ramp_mean: float = 1.0
 ) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = DECK_SHADER
@@ -340,8 +340,7 @@ static func deck_material(
 	material.set_shader_parameter("softness", DECK_SOFTNESS)
 	var clouds: SpacesimClouds = body.content.clouds if body.content != null else null
 	if clouds != null:
-		# **sRGB-decoded, but NOT luminance-scaled.** Godot's spatial shaders take a linear albedo, so the
-		# decode is required; the rescale to `clouds.albedo` was the fault.
+		# sRGB-decoded, because Godot's spatial shaders take a linear albedo. It carries the *hue*.
 		var linear := clouds.color.srgb_to_linear()
 		material.set_shader_parameter("cloud_color", Vector3(linear.r, linear.g, linear.b))
 	else:
@@ -351,6 +350,31 @@ static func deck_material(
 	# adds over it. Without this the air's own glow would be covered by a cloud it should be lighting.
 	material.render_priority = DECK_RENDER_PRIORITY
 	return material
+
+
+## **The ramp's gain** — the number that makes the deck's *average* drawn reflectance the albedo the
+## light budget uses, whatever the field's distribution turns out to be.
+##
+## `blend_mix` composites `ALBEDO * ALPHA`, and the shader's alpha rises with thickness, so what reaches
+## the eye from a texel is `cloud_color * gain * thickness`. The average over the covered area is
+## therefore `palette_luminance * gain * mean(thickness)`, and setting
+## `gain = albedo / (palette_luminance * mean)` makes that the albedo **exactly**, for any mean.
+##
+## That exactness is the point: the field's *shape* cannot break the light budget, it can only change how
+## the whiteness is distributed. Thick tops get as near white as the average permits, thin edges fade
+## out, and the mean is the calibrated number either way.
+##
+## **The clamp is a real ceiling and not paranoia.** A low-contrast field has a small mean thickness,
+## which asks for a gain above 1 — a cloud reflecting more than white. It cannot, so the gain stops and
+## the achieved average falls short of the budget. That shortfall is the honest signal that the field
+## wants more contrast, and `tests/test_cloud_deck.gd` measures it rather than hiding it.
+static func deck_ramp_gain(body: SpacesimSceneBody, ramp_mean: float) -> float:
+	var clouds: SpacesimClouds = body.content.clouds if body.content != null else null
+	if clouds == null:
+		return 1.0
+	var palette := maxf(clouds.color.srgb_to_linear().get_luminance(), 1.0e-4)
+	var mean := clampf(ramp_mean, 1.0e-4, 1.0)
+	return clampf((clouds.albedo / palette) / mean, 0.0, 1.0)
 
 
 ## **One white texel, shared.** A featureless body's field is uniform, so its map is uniform — and a

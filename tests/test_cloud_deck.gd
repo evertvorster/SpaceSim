@@ -34,6 +34,7 @@ func run(h, root: Node) -> void:
 	_test_the_air_above_it(h, scene)
 	_test_one_writer(h, scene)
 	_test_it_refines_through_to_the_material(h, scene)
+	_test_the_ramp_carries_the_albedo(h, scene)
 
 	scene.cloud_maps.clear()
 	scene.container.free()
@@ -145,7 +146,9 @@ func _test_what_it_carries(h, scene: SpacesimSystemScene) -> void:
 	# The deck's colour is scaled to its albedo, so what is drawn is the reflectance the physics uses
 	# rather than the palette — the same split the surface has.
 	var colour: Vector3 = material.get_shader_parameter("cloud_color")
-	h.check(colour.length() > 0.0, "Earth's deck has its albedo-scaled colour (%.3f)" % colour.length())
+	h.check(colour.length() > 0.0,
+		"Earth's deck has the palette's own colour, %.3f long — the HUE, with the brightness in the ramp"
+			% colour.length())
 
 
 ## **The air it is lit through.** A deck is a surface under the same air the ground is, and without this
@@ -204,6 +207,60 @@ func _test_it_refines_through_to_the_material(h, scene: SpacesimSystemScene) -> 
 		"and the material is handed the new map rather than left on the floor")
 	h.check_near(float(material.get_shader_parameter("softness")), SpacesimBodyRenderer.DECK_SOFTNESS,
 		"with the shader's own parameters intact", 1.0e-9)
+
+
+## **The ramp's arithmetic as a measurement**, because it is the thing that lets a white cloud and a
+## calibrated average coexist.
+##
+## `blend_mix` composites `ALBEDO * ALPHA`; the shader's alpha rises with thickness; so what reaches the
+## eye from the covered area averages `palette_luminance * gain * mean(thickness)` over it. The host sets
+## the gain from the map's *own measured* distribution, so that product is the light budget's number
+## whatever the field turns out to look like.
+##
+## **And the clamp is reported rather than passed over.** A field with too little contrast has a small
+## mean thickness, which would ask for a gain above 1 — a cloud reflecting more than white. Where that
+## happens the achieved average falls short and this says so, because that shortfall is the signal that
+## the field wants more contrast and not something to hide.
+func _test_the_ramp_carries_the_albedo(h, scene: SpacesimSystemScene) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	var material := earth.deck_mesh.material_override as ShaderMaterial
+	if material == null or earth.content == null or earth.content.clouds == null:
+		h.check(false, "Earth's deck carries a material and a deck to calibrate")
+		return
+	var clouds: SpacesimClouds = earth.content.clouds
+	var palette := clouds.color.srgb_to_linear().get_luminance()
+	var mean := scene.cloud_maps.ramp_mean_of("planet:earth", 0)
+	var gain := float(material.get_shader_parameter("ramp_gain"))
+	var achieved := palette * gain * mean
+
+	h.check(mean > 0.0 and mean <= 1.0,
+		"the map's mean exceedance is measured, not assumed (%.3f)" % mean)
+	if gain >= 1.0:
+		h.check(achieved <= clouds.albedo + 1.0e-6,
+			"the deck is as bright as the budget allows: %.3f achieved against %.3f calibrated, because a\n\t\tfield with a mean thickness of %.3f cannot reach it without reflecting more than white"
+				% [achieved, clouds.albedo, mean])
+	else:
+		h.check_near(achieved, clouds.albedo,
+			"and the deck's average drawn reflectance IS its calibrated albedo (%.3f)" % clouds.albedo,
+			0.02)
+
+	# **The peak is where the whiteness is.** With the average pinned by the budget, the thick tops are
+	# `palette * gain` — and that is the number that decides whether the cloud reads white or grey.
+	var peak := palette * gain
+	h.check(peak > clouds.albedo,
+		"with thick cloud drawn brighter than the average: %.3f at the top against %.3f over the area"
+			% [peak, achieved])
+
+	# A body with no map has a uniform field at its own top, so its mean is 1 and its gain is the albedo
+	# over the palette — which is the same arithmetic, not a special case.
+	var venus := scene.body_by_id("planet:venus")
+	var venus_material := venus.deck_mesh.material_override as ShaderMaterial
+	if venus_material != null and venus.content.clouds != null:
+		var v_palette := venus.content.clouds.color.srgb_to_linear().get_luminance()
+		var v_gain := float(venus_material.get_shader_parameter("ramp_gain"))
+		h.check_near(v_palette * v_gain * 1.0, venus.content.clouds.albedo,
+			"and a featureless body gets the same fit off a mean of one (%.3f against %.3f)"
+				% [v_palette * v_gain, venus.content.clouds.albedo], 0.02)
 
 
 ## **One writer for the material's state.** The map is set by the same function at build and every frame

@@ -701,6 +701,11 @@ func _set_deck_map(
 	var texture := cloud_maps.map(
 		body.id, CLOUD_LAYER, body.radius, body.cloud_coverage, distance, morphology
 	)
+	# **The ramp's mean comes from the map in hand**, measured when it was baked — so the deck's average
+	# reflectance is the calibrated one whatever the field's distribution turns out to be. The gain is
+	# applied by the renderer, which knows the palette and the albedo.
+	var ramp_mean := cloud_maps.ramp_mean_of(body.id, CLOUD_LAYER)
+	var ramp_gain := SpacesimBodyRenderer.deck_ramp_gain(body, ramp_mean)
 	if texture == null:
 		# **A veil, not a gap.** No map means there is no structure to threshold — `FEATURELESS`, or a
 		# wind scale nobody has collected — and a uniform field cannot carry partial *area*, because
@@ -710,10 +715,12 @@ func _set_deck_map(
 		material.set_shader_parameter("cover", SpacesimBodyRenderer.uniform_white())
 		material.set_shader_parameter("threshold", 0.0)
 		material.set_shader_parameter("veil", body.cloud_coverage)
+		material.set_shader_parameter("ramp_gain", ramp_gain)
 	else:
 		material.set_shader_parameter("cover", texture)
 		material.set_shader_parameter("threshold", cloud_maps.threshold_of(body.id, CLOUD_LAYER))
 		material.set_shader_parameter("veil", 1.0)
+		material.set_shader_parameter("ramp_gain", ramp_gain)
 
 
 ## **Bake, refine, and hand every deck its map.** Called once a frame, after `update_atmospheres`.

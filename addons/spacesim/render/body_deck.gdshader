@@ -58,6 +58,24 @@ uniform float veil : hint_range(0.0, 1.0) = 1.0;
 // reflectance `bond_albedo` uses, not the palette colour, which is a different number entirely.
 uniform vec3 cloud_color = vec3(1.0);
 
+// **The drawn reflectance scales with how thick the cloud is, and the alpha carries the variation.**
+//
+// A single reflectance for the whole deck cannot be both near-white where the cloud is thick and the
+// calibrated *average* the light budget uses — Earth's total, at 60 % cover, permits its deck an average
+// of about 0.42, and a Lambertian at 0.42 is a grey lid. So the deck varies:
+//
+//     thickness = how far above the threshold this texel is, 0 at the edge and 1 at the top
+//     ALPHA     = edge * veil * thickness      (thin cloud transmits, which is what makes it look thin)
+//     ALBEDO    = cloud_color * ramp_gain      (one reflectance, as near white as the budget allows)
+//
+// **The mean comes out exactly right because of how `blend_mix` composites.** What reaches the eye from
+// a texel is `ALBEDO * ALPHA`, so the deck's average reflectance is `ramp_gain * mean(thickness)`, and
+// the host sets `ramp_gain = target / mean(thickness)` from the map's own measured distribution. That
+// also means the *shape* of the field cannot break the budget — it can only change how the whiteness is
+// distributed. And where thin cloud is concerned, transmitting and reflecting less are the same fact, so
+// the alpha is the honest place for the variation and not a trick.
+uniform float ramp_gain : hint_range(0.0, 1.0) = 1.0;
+
 // ===== THE AIR THIS DECK SITS UNDER ================================================
 //
 // **A cloud is a surface under the air, so it is lit and seen through it exactly as the ground is.**
@@ -98,12 +116,14 @@ void fragment() {
 	float v = 0.5 - asin(p.y) / PI;
 	float height = texture(cover, vec2(u, v)).r;
 
-	// **The percentile as a step, softened.** At `threshold = 0` everything is cloud — which is what a
-	// body the model calls FEATURELESS should be, and what a one-texel white map produces.
+	// **The percentile as a step, softened**, then the thickness above it. `threshold = 0` makes the whole
+	// field cloud — which is what a body the model calls FEATURELESS should be, and what a one-texel white
+	// map produces.
 	float covered = smoothstep(threshold - softness, threshold + softness, height);
+	float thickness = clamp((height - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
 
-	ALBEDO = cloud_color;
-	ALPHA = covered * veil;
+	ALBEDO = cloud_color * ramp_gain;
+	ALPHA = covered * veil * thickness;
 	ROUGHNESS = 0.9;
 
 	if (atmosphere_radius > planet_radius) {

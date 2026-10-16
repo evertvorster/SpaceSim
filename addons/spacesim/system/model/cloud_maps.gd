@@ -51,6 +51,10 @@ class Entry:
 	var width := 0
 	## **The percentile the layer's coverage implies**, 0 to 1, computed when the map was baked.
 	var threshold := 0.0
+	## **The mean exceedance above that threshold**, measured from the same map — what a reflectance ramp
+	## needs to know so that the deck's *average* reflectance is the calibrated one while its thick tops
+	## are near white. One for a body with no map, whose field is uniformly at its top.
+	var ramp_mean := 1.0
 	## The `WorkerThreadPool` task id of a refinement in flight, or -1.
 	var task := -1
 	## The width that task is baking, so a second request does not start a third.
@@ -136,6 +140,33 @@ static func threshold_for(image: Image, coverage: float) -> float:
 	return clampf(float(level) / 255.0, 0.0, 1.0)
 
 
+## **How much cloud there is above the threshold, averaged over the covered area** — 0 at the threshold,
+## 1 at the top of the field.
+##
+## This is the number that lets the drawn deck carry its own calibrated reflectance. A ramp from thin to
+## thick has a *mean* that depends on the field's distribution, which the host cannot know by argument —
+## but it can measure, from the same histogram `threshold_for()` already builds.
+static func mean_exceedance(image: Image, threshold: float) -> float:
+	if image == null:
+		return 1.0
+	var data := image.get_data()
+	if data.is_empty():
+		return 1.0
+	var level := int(clampf(threshold, 0.0, 1.0) * 255.0)
+	var span := 255.0 - float(level)
+	if span <= 0.0:
+		return 1.0
+	var total := 0.0
+	var count := 0
+	for byte in data:
+		if byte >= level:
+			total += (float(byte) - float(level)) / span
+			count += 1
+	if count == 0:
+		return 0.0
+	return total / float(count)
+
+
 ## The map for one body's layer, baking or refining as this distance needs.
 ##
 ## **Returns whatever is available now** — never null once a floor has been baked, and never a stall. A
@@ -217,6 +248,13 @@ func threshold_of(body_id: String, layer: int) -> float:
 	return 1.0 if entry == null else entry.threshold
 
 
+## **The mean exceedance of the map in hand** — see `mean_exceedance()`. One where there is no map, which
+## is the truth for a featureless body: its field is uniform and sits at its own top.
+func ramp_mean_of(body_id: String, layer: int) -> float:
+	var entry: Entry = _entries.get("%s#%d" % [body_id, layer])
+	return 1.0 if entry == null else entry.ramp_mean
+
+
 ## How many bakes have been started. The suite uses it to show a cache hit is a hit.
 func bakes() -> int:
 	return _bakes
@@ -262,6 +300,7 @@ func _bake_floor(
 	entry.image = image
 	entry.width = FLOOR_WIDTH
 	entry.threshold = threshold_for(image, coverage)
+	entry.ramp_mean = mean_exceedance(image, entry.threshold)
 	entry.texture = ImageTexture.create_from_image(image)
 
 
@@ -292,6 +331,7 @@ func _bake_refinement(
 	entry.image = image
 	if image != null:
 		entry.threshold = threshold_for(image, coverage)
+		entry.ramp_mean = mean_exceedance(image, entry.threshold)
 
 
 ## **Least-recently-used, and never a map with a task in flight** — its id has to be released on the
