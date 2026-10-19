@@ -105,6 +105,17 @@ const RELIEF_GAIN := 0.25
 ## only so far before it becomes a hole.
 const RELIEF_MAX_TILT := 0.6
 
+## **How much of the detail ladder a plain at the waterline keeps.** Evert, 2026-10-19: *"for most of the
+## planet the mottling should be much less, so we have some flat plains too... it stretches all the way to the
+## coast, so it needs to be less at low altitudes."* The field handles the map's own texture (its `mottle`),
+## and this handles the ladder's, which is a separate generator read per pixel and would otherwise be at full
+## strength over a shore. `0.10` is aggressive for the first flight: the plains should be unmistakably plain, and
+## a lever nobody can see has not been tested. Raise it if the ground reads as paint.
+const PLAIN_DETAIL := 0.10
+## **The band above sea level over which it ramps back to full**, in the field's own units. Earth's amplitude is
+## 8.9 km, so 0.15 is about 1.3 km: a coast and its plain, and no more — the uplands must not be thinned.
+const PLAIN_BAND := 0.15
+
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
 ## interpolates the measured quantiles, so it is not quantised by this), and it is one row: the ramp is a
 ## lookup table, not a texture.
@@ -388,6 +399,8 @@ static func surface_material(
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
+	material.set_shader_parameter("plain_detail", PLAIN_DETAIL)
+	material.set_shader_parameter("plain_band", PLAIN_BAND)
 	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)

@@ -86,6 +86,17 @@ uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
 // How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
 // one place the ladder's relief is calibrated.
 uniform float detail_relief = 0.0;
+// **How much of the ladder a plain at the waterline gets**, as a fraction of the full ladder, and the band above
+// sea level over which it ramps back to full. Evert, 2026-10-19: *"it stretches all the way to the coast, so it
+// needs to be less at low altitudes."* The ladder knows nothing about where the sea is, and a coastal plain is
+// exactly where the eye expects ground that is *smooth* — so the two numbers the shader already has (`height`
+// from the map, `sea_level` from the measured quantiles) thin it there.
+//
+// **Only where there is a sea to measure from.** On a body with no ocean `sea_level` resolves to the field's own
+// minimum, so the whole surface would read as "shore level" and the ladder would be flattened everywhere on
+// Luna — the same trap `has_ocean` already guards the discard against.
+uniform float plain_detail : hint_range(0.0, 1.0) = 1.0;
+uniform float plain_band = 0.15;
 // **Whether this body has an ocean at all**, which decides whether the discard below exists. A body with no
 // liquid on its surface — Mercury, Luna, Io, Europa, Venus — has no sea layer, and `sea_level` then resolves to
 // the field's own minimum; a naive `height < sea_level` discard would punch a hole in whatever ground sits at
@@ -241,6 +252,15 @@ void fragment() {
 				rungs, relief_gain, relief_height
 			);
 		}
+	}
+
+	// **The ladder is thinned over low ground.** `height` is the map's own value and `sea_level` its measured
+	// percentile, so this is height above the water in the field's units — see the uniforms above for why the
+	// `has_ocean` gate is not optional.
+	if (has_ocean > 0.5) {
+		float plain = mix(plain_detail, 1.0, smoothstep(sea_level, sea_level + plain_band, height));
+		detail *= plain;
+		relief_height *= plain;
 	}
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
