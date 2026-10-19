@@ -67,12 +67,22 @@ uniform float wave_gain = 0.5;
 uniform float wave_lacunarity = 2.0;
 // The coarsest wave feature, in radians on the unit sphere: a swell some hundreds of metres across.
 uniform float wave_feature = 0.0;
-uniform float wave_relief = 0.02;
-uniform float wave_near = 1.0;
-uniform float wave_far = 25.0;
+uniform float wave_relief = 0.0015;
 // **The wind's stretch**, along the east tangent: 3 means a swell three times longer than it is wide. See
 // `OCEAN_WAVE_STRETCH` — an isotropic sea is indistinguishable from ground.
 uniform float wave_stretch = 1.0;
+
+// ===== THE SEA'S OWN COLOUR STRUCTURE =====
+//
+// **Waves are geometry, so nothing under a few hundred metres can be seen from orbit** — and the far sea was one
+// flat colour because of it. What an ocean actually shows at range is its *colour*: eddies, fronts, slicks at
+// tens of kilometres. Same ladder, same band-limit, different mechanism: this one modulates the water's albedo
+// rather than its normal.
+uniform int tone_octaves = 0;
+uniform int tone_seed = 0;
+uniform float tone_gain = 0.5;
+uniform float tone_lacunarity = 2.0;
+uniform float tone_variation : hint_range(0.0, 1.0) = 0.0;
 
 const float OCEAN_PI = 3.141592653589793;
 const float OCEAN_TAU = 6.283185307179586;
@@ -129,25 +139,27 @@ void fragment() {
 	ROUGHNESS = roughness_value;
 	SPECULAR = specular_value;
 
-	// **The waves.** Flat by default; a ripple only where a pixel spans metres. The sea's ripple is not an octave
-	// of the planet's height field, so it is expressed as its own ladder of the same generator: octave 0 sits at
-	// `1 / wave_feature`, and `wave_relief` is the amplitude that makes it a sea rather than a landscape.
+	// **One sampling law for everything here**: a feature is drawn while a pixel holds at least four samples of
+	// it, gone by two. There is no near/far gate — there was, `wave_fade = 1 - smoothstep(1 m, 25 m, pixel)`, and it
+	// decided when the sea appeared rather than the law doing it: full below 0.8 km and zero above 20.8 km, which
+	// is why a descent saw nothing until 10 km. See `OCEAN_WAVE_OCTAVES`.
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+
+	// **The swell runs downwind, so the domain is drawn out along one axis** — the same trick the cloud field uses
+	// for zonal stretching, in the tangent plane instead of in latitude. Without it the sea is an isotropic fbm,
+	// which is exactly what the land's detail is, and it reads as ground.
+	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	vec3 east = normalize(cross(up, polar));
+	float along = dot(up, east);
+	vec3 wave_point = up + east * (along * (1.0 / max(wave_stretch, 1.0) - 1.0));
+
+	// **The waves**: a fraction of a degree of tilt, from a 400 m swell down to metres of chop.
 	if (wave_octaves > 0 && wave_feature > 0.0) {
-		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
-		float pixel_metres = footprint_angle * planet_radius;
-		float wave_fade = 1.0 - smoothstep(wave_near, wave_far, pixel_metres);
-		// **The swell runs downwind, so the domain is drawn out along one axis** — the same trick the cloud field
-		// uses for zonal stretching, in the tangent plane instead of in latitude. Without it the sea is an
-		// isotropic fbm, which is exactly what the land's detail is, and it reads as ground.
-		vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-		vec3 east = normalize(cross(up, polar));
-		float along = dot(up, east);
-		vec3 wave_point = up + east * (along * (1.0 / max(wave_stretch, 1.0) - 1.0));
 		float wave_height = surface_detail(
 			wave_point, wave_seed, 1.0 / wave_feature, 0, wave_octaves,
 			wave_gain, wave_gain, wave_lacunarity, 1.0, footprint_angle
 		);
-		if (wave_height != 0.0 && wave_fade > 0.0) {
+		if (wave_height != 0.0) {
 			// **The same slope the land's relief uses** — metres of height per metre of water — divided by the
 			// ground a pixel spans, so a small ripple stays small however the view grazes.
 			vec3 view_x = dFdx(VERTEX);
@@ -158,8 +170,25 @@ void fragment() {
 			vec2 gradient = vec2(
 				dFdx(wave_height) / max(length(view_x), 1.0e-4),
 				dFdy(wave_height) / max(length(view_y), 1.0e-4)
-			) * field_amplitude * wave_relief * wave_fade;
+			) * field_amplitude * wave_relief;
 			NORMAL = normalize(normal_view - (tangent * gradient.x + bitangent * gradient.y));
+		}
+	}
+
+	// **The sea's colour structure**: what an ocean shows at range, where no wave can be seen at all. It starts at
+	// **the same feature the land's ladder starts at** — two texels of the map in hand, so the two layers begin
+	// showing texture at the same distance — and it is band-limited by the same law, which is why `map_width` is a
+	// uniform here and no longer a dead one.
+	if (tone_octaves > 0) {
+		float first_feature = 2.0 * OCEAN_TAU / float(max(map_width, 1));
+		int rungs = int(ceil(log2(max(first_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+		rungs = clamp(rungs, 0, tone_octaves);
+		if (rungs > 0) {
+			float tone = surface_detail(
+				wave_point, tone_seed, 1.0 / first_feature, 0, rungs,
+				tone_gain, tone_gain, tone_lacunarity, 1.0, footprint_angle
+			);
+			ALBEDO *= 1.0 + tone * tone_variation;
 		}
 	}
 }

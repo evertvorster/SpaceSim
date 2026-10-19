@@ -49,17 +49,38 @@ const OCEAN_DEEP_METRES := 3000.0
 const OCEAN_SHALLOW_BOTTOM_SHARE := 0.7
 ## **Waves**: two rungs of the field's generator, a swell of a few hundred metres, and a tilt of a fraction of a
 ## degree. `OCEAN_WAVE_METRES` is the coarsest wavelength.
-const OCEAN_WAVE_OCTAVES := 2
+## **Eight octaves, from a 400 m swell down to 3 m of chop**, and there is no separate near/far gate any more.
+## Evert, 2026-10-19: *"The sea still renders absolutely smooth all the way down to 10 km. Then, we get a rough
+## texture. We need a finer texture, and that needs to start resolving at about the same height that the mottling
+## on land starts to resolve."* Two octaves reached 200 m and a `wave_fade` clamped everything to a pixel under
+## 25 m — full below 0.8 km, gone above 20.8 km — so the *gate* decided when the sea appeared, not the sampling
+## law, and it appeared at the altitude he named. The per-rung footprint fade was always the law (**reuse the law;
+## never restate it**), and with the clamp gone a 400 m swell resolves from 166 km; eight octaves carry it down to
+## 3 m, which keeps resolving below a kilometre of altitude.
+const OCEAN_WAVE_OCTAVES := 8
 const OCEAN_WAVE_METRES := 400.0
-const OCEAN_WAVE_RELIEF := 0.02
-const OCEAN_WAVE_NEAR_METRES := 1.0
-const OCEAN_WAVE_FAR_METRES := 25.0
+## **The wave's own steepness, and the reason it is 0.0015 and not 0.02.** A wave's height is a fraction of its
+## wavelength — a moderate sea is about a twentieth — so a 400 m swell is ~13 m tall, and 13 m is 0.0015 of the
+## 8,919 m field. At 0.02 the swell would have been 178 m: waves as tall as mountains, which is the *"bit scary"*
+## the earlier number was trying to avoid.
+const OCEAN_WAVE_RELIEF := 0.0015
 ## **How far the swell is drawn out along the wind**, and this is what makes water look like water rather than
 ## like ground. Evert, 2026-10-19: the close-up sea *"looks exactly like that mottling on land"* — because it was
 ## the same isotropic generator sampled the same way, with no direction in it at all. Wind-driven swell and chop
 ## are stretched downwind, and that anisotropy is the single thing that reads as sea.
 ## 3.0 is a light breeze's swell; a gale would be nearer 6.
 const OCEAN_WAVE_STRETCH := 3.0
+## **The sea's own colour structure**, which is the only thing an ocean shows at range: eddies, fronts and slicks.
+## Waves are geometry — nothing under 400 m can be seen from 1,000 km — so without this the far sea is one colour,
+## which is what Evert reported.
+##
+## **It starts where the land's ladder starts**: two texels of the map in hand, which the shader derives from
+## `map_width`, so the two layers begin to show texture at the same distance and by the same law. Evert,
+## 2026-10-19: *"I just wanted to reduce the strength, not the distance at which it started drawing."* The
+## strength is `OCEAN_TONE_VARIATION`; the distance is the sampling law and is not a knob.
+const OCEAN_TONE_OCTAVES := 3
+## A few per cent of the water's colour — enough to read as water moving, not enough to be paint.
+const OCEAN_TONE_VARIATION := 0.12
 
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
@@ -490,9 +511,12 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	)
 	material.set_shader_parameter("wave_octaves", OCEAN_WAVE_OCTAVES)
 	material.set_shader_parameter("wave_relief", OCEAN_WAVE_RELIEF)
-	material.set_shader_parameter("wave_near", OCEAN_WAVE_NEAR_METRES)
-	material.set_shader_parameter("wave_far", OCEAN_WAVE_FAR_METRES)
 	material.set_shader_parameter("wave_stretch", OCEAN_WAVE_STRETCH)
+	material.set_shader_parameter("tone_seed", plan.seed + 5501)
+	material.set_shader_parameter("tone_gain", plan.gain)
+	material.set_shader_parameter("tone_lacunarity", plan.lacunarity)
+	material.set_shader_parameter("tone_octaves", OCEAN_TONE_OCTAVES)
+	material.set_shader_parameter("tone_variation", OCEAN_TONE_VARIATION)
 	return material
 
 
