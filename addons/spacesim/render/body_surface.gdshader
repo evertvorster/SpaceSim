@@ -49,6 +49,16 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // up and the map is read at its coarsest levels. That failure mode is *blur*, which is the safe direction,
 // and the fine detail at the poles comes from the ladder rather than from the map.
 uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
+// **The window: a sub-rectangle of the same equirect space at a much finer raster**, baked for the cap the eye
+// can actually see. `window_size.x <= 0` means there is none.
+//
+// **It LAYERS on the base map — it never replaces it.** That is the fault the cloud version had (`57b8f0a`): its
+// window replaced the whole-body map, so outside the window the shader sampled window data and the picture was
+// wrong in a way that looked like a mapping bug. Here the base map is always what draws, and the window is
+// blended over it only where the pixel is inside it.
+uniform sampler2D window_map : filter_linear, repeat_enable, hint_default_black;
+uniform vec2 window_origin = vec2(0.0, 0.0);
+uniform vec2 window_size = vec2(0.0, 0.0);
 // The colour ramp: **1-D, indexed by field value over [-1, 1]**, built from the derived bands and the
 // measured quantiles. Clamped, because a value past either end is a coast or a peak and not a wrap.
 uniform sampler2D colour_ramp : filter_linear, repeat_disable, hint_default_black;
@@ -132,6 +142,19 @@ void fragment() {
 	// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
 	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 	float height = texture(height_map, uv).r;
+
+	// **And the window over it**, where the eye is close enough for the base raster to be too coarse. The feather
+	// is a few percent of the window's own edge, so the two rasters cross-fade instead of stepping — a seam here
+	// would be a visible rectangle in the terrain.
+	if (window_size.x > 0.0 && window_size.y > 0.0) {
+		vec2 local = (uv - window_origin) / window_size;
+		vec2 edge = smoothstep(vec2(0.0), vec2(0.03), local)
+			* (1.0 - smoothstep(vec2(0.97), vec2(1.0), local));
+		float blend = edge.x * edge.y;
+		if (blend > 0.0) {
+			height = mix(height, texture(window_map, local).r, blend);
+		}
+	}
 
 	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
 	// 2026-10-19: water and land are fundamentally different things. So the ground below sea level is culled

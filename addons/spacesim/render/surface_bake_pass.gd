@@ -91,11 +91,21 @@ func _notification(what: int) -> void:
 
 ## **Ask for a wider map.** One request at a time; a request for a body that is already in flight is dropped,
 ## because by the time it lands the eye will have moved anyway and the next frame will ask again.
-func request(body_id: String, plan: SpacesimSurfaceField.Plan, width: int) -> bool:
+func request(
+	body_id: String, plan: SpacesimSurfaceField.Plan, width: int,
+	uv_origin: Vector2 = Vector2.ZERO, uv_size: Vector2 = Vector2.ONE
+) -> bool:
 	if not _pending.is_empty() or _ready.has(body_id):
 		return false
 	var w := maxi(width, 8)
-	_pending = {"body_id": body_id, "width": w, "height": maxi(w / 2, 4), "plan": plan}
+	_pending = {
+		"body_id": body_id,
+		"width": w,
+		"height": maxi(int(float(w) * uv_size.y / maxf(uv_size.x, 1.0e-6)), 4),
+		"plan": plan,
+		"uv_origin": uv_origin,
+		"uv_size": uv_size,
+	}
 	return true
 
 
@@ -110,7 +120,12 @@ func take_ready() -> Dictionary:
 		var bake: Dictionary = taken[body_id]
 		var texture := Texture2DRD.new()
 		texture.texture_rd_rid = bake["rid"]
-		result[body_id] = {"texture": texture, "width": int(bake["width"])}
+		result[body_id] = {
+			"texture": texture,
+			"width": int(bake["width"]),
+			"uv_origin": bake["uv_origin"],
+			"uv_size": bake["uv_size"],
+		}
 	return result
 
 
@@ -165,6 +180,8 @@ func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
 	var width := int(_pending["width"])
 	var height := int(_pending["height"])
 	var plan: SpacesimSurfaceField.Plan = _pending["plan"]
+	var uv_origin: Vector2 = _pending["uv_origin"]
+	var uv_size: Vector2 = _pending["uv_size"]
 	_pending = {}
 
 	var format := RDTextureFormat.new()
@@ -197,7 +214,7 @@ func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
 		rd.free_rid(texture)
 		return
 
-	var params := SpacesimSurfaceField.push_constants(plan, width, height)
+	var params := SpacesimSurfaceField.push_constants(plan, width, height, uv_origin, uv_size)
 	var list := rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(list, _pipeline)
 	rd.compute_list_bind_uniform_set(list, uniform_set, 0)
@@ -211,8 +228,10 @@ func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
 	rd.free_rid(uniform_set)
 
 	_bakes += 1
-	_ready[body_id] = {"rid": texture, "width": width}
-	_status = "baked %dx%d" % [width, height]
+	_ready[body_id] = {
+		"rid": texture, "width": width, "uv_origin": uv_origin, "uv_size": uv_size
+	}
+	_status = "baked %dx%d over %s" % [width, height, str(uv_size)]
 
 
 func _build(rd: RenderingDevice) -> void:

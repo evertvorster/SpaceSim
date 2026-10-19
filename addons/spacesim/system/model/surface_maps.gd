@@ -50,6 +50,15 @@ class Entry:
 	## The refined map, on the rendering device, with no mips — it is only ever magnified.
 	var refined: Texture2DRD
 	var refined_width := 0
+	## **The window over the cap the eye can see**, at a raster the base map could never afford, and where it
+	## sits in uv space. Layered on the base map by the shader, never instead of it.
+	var window: Texture2DRD
+	var window_origin := Vector2.ZERO
+	var window_size := Vector2.ZERO
+	var window_width := 0
+	## The window's uv centre and its texel angle when it was baked — what decides whether it needs re-baking.
+	var window_centre := Vector2.ZERO
+	var window_texel := 0.0
 	## The width of what is being drawn.
 	var width := 0
 	## The value at each 1/64th of the area, ascending — the percentile table.
@@ -176,14 +185,78 @@ func poll() -> Array:
 		if entry == null:
 			continue
 		var bake: Dictionary = ready[body_id]
-		var previous := entry.refined
-		entry.refined = bake["texture"]
-		entry.refined_width = int(bake["width"])
-		entry.width = entry.refined_width
-		if previous != null:
-			_bake_pass.release(previous)
+		var uv_size: Vector2 = bake["uv_size"]
+		if uv_size.is_equal_approx(Vector2.ONE):
+			# A whole-body refinement.
+			var previous := entry.refined
+			entry.refined = bake["texture"]
+			entry.refined_width = int(bake["width"])
+			entry.width = entry.refined_width
+			if previous != null:
+				_bake_pass.release(previous)
+		else:
+			# **A window**, which sits over the refined map rather than replacing it.
+			var previous := entry.window
+			entry.window = bake["texture"]
+			entry.window_origin = bake["uv_origin"]
+			entry.window_size = uv_size
+			entry.window_width = int(bake["width"])
+			entry.window_centre = Vector2(bake["uv_origin"]) + uv_size * 0.5
+			entry.window_texel = uv_size.x * TAU / float(maxi(int(bake["width"]), 1))
+			if previous != null:
+				_bake_pass.release(previous)
 		changed.append(body_id)
 	return changed
+
+
+## **The window worth having for the cap the eye can see**, or an empty Dictionary when the base map is already
+## fine enough there.
+##
+## The cap is the horizon plus a margin, and the raster it wants follows the same law as everything else here: a
+## texel should not project past a pixel. So the width is the cap's angular diameter over the pixel angle —
+## **which is the quantity the mesh's error budget already spends**, not an altitude and not a distance.
+static func window_for(
+	radius: float, altitude: float, eye_direction: Vector3, pixel_angle: float
+) -> Dictionary:
+	if radius <= 0.0 or pixel_angle <= 0.0:
+		return {}
+	var horizon := acos(clampf(radius / (radius + maxf(altitude, 0.0)), -1.0, 1.0))
+	# A margin past the limb, so a window that follows the eye does not need re-baking the moment it moves.
+	var half := minf(horizon * 1.3, PI * 0.5)
+	var wanted := int(ceil(2.0 * half / pixel_angle))
+	if wanted <= MAP_WIDTH:
+		return {}
+	var width := mini(wanted, WINDOW_MAX_WIDTH)
+	var latitude := asin(clampf(eye_direction.y, -1.0, 1.0))
+	var longitude := atan2(eye_direction.z, eye_direction.x)
+	# The cap's extent in the map's own coordinates: `v` spans half a turn, `u` a whole one, and a cap of angular
+	# radius `half` covers `half / cos(lat)` of longitude — **floored near the poles**, where that ratio runs away
+	# and a window would become the whole map.
+	var span_v := half / PI
+	var span_u := half / (PI * maxf(cos(latitude), 0.2))
+	var centre := Vector2(
+		0.5 + longitude / TAU, 0.5 - latitude / PI
+	)
+	# Clamped so the rectangle never straddles the seam: a strip at the antimeridian then keeps the base map,
+	# which is the layering rule doing its job rather than a hole.
+	var origin := Vector2(
+		clampf(centre.x - span_u, 0.0, maxf(1.0 - 2.0 * span_u, 0.0)),
+		clampf(centre.y - span_v, 0.0, maxf(1.0 - 2.0 * span_v, 0.0))
+	)
+	var size := Vector2(2.0 * span_u, 2.0 * span_v)
+	return {
+		"origin": origin,
+		"size": size,
+		"width": width,
+		"height": maxi(int(round(float(width) * size.y / maxf(size.x, 1.0e-6))), 8),
+		"centre": origin + size * 0.5,
+		"texel": size.x * TAU / float(width),
+	}
+
+
+## The cap's own raster ceiling. 2,048 sides is 4 Mtexel — a few milliseconds on the render thread, and finer
+## than a whole-body 8,192 map over the cap by a factor of four at 100 km and far more than that lower down.
+const WINDOW_MAX_WIDTH := 2048
 
 
 ## **What to draw this body with, and at what width.** The refining map when the distance law asks for more than
@@ -191,12 +264,29 @@ func poll() -> Array:
 ##
 ## The refined texture becomes visible the frame after it lands, so this returns the old one until then; that is
 ## why `poll()` reports *changes* rather than the scene asking "is it different".
-func map_for(body_id: String, radius: float, distance: float, pixel_angle: float) -> Dictionary:
+func map_for(
+	body_id: String, radius: float, distance: float, pixel_angle: float,
+	eye_direction: Vector3 = Vector3.ZERO
+) -> Dictionary:
 	var entry: Entry = _entries.get(body_id)
 	if entry == null:
 		return {}
 	if _bake_pass == null:
 		return {"texture": entry.base, "width": entry.width}
+	var altitude := maxf(distance - radius, 0.0)
+	var window := window_for(radius, altitude, eye_direction, pixel_angle)
+	if not window.is_empty():
+		# **Re-baked when the eye has moved a third of a span, or when the cap wants a raster half the current
+		# one again.** Both are the window's own quantities — no altitude, no ladder, and one bake in flight
+		# enforced by the pass.
+		var moved := entry.window_centre.is_zero_approx() \
+			or (Vector2(window["centre"]) - entry.window_centre).length() > 0.33 * Vector2(window["size"]).length()
+		var finer := entry.window_texel <= 0.0 or float(window["texel"]) < entry.window_texel * 0.6
+		if moved or finer:
+			var plan := SpacesimSurfaceField.plan(body_id, radius)
+			_bake_pass.request(
+				body_id, plan, int(window["width"]), window["origin"], window["size"]
+			)
 	var wanted := required_width(radius, distance, pixel_angle)
 	if wanted <= MAP_WIDTH:
 		# Back to the build map, which is finer than the screen needs and carries mips for the far end.
@@ -205,12 +295,17 @@ func map_for(body_id: String, radius: float, distance: float, pixel_angle: float
 			entry.refined = null
 			entry.refined_width = 0
 			entry.width = MAP_WIDTH
-		return {"texture": entry.base, "width": MAP_WIDTH}
+		return _drawn(entry)
 	if entry.refined != null and entry.refined_width >= wanted:
-		return {"texture": entry.refined, "width": entry.refined_width}
+		return _drawn(entry)
 	# **One bake in flight**, and a request only while the map is short of what the law asks for: a fast approach
 	# then costs a handful of dispatches rather than one a frame.
 	_bake_pass.request(body_id, SpacesimSurfaceField.plan(body_id, radius), wanted)
+	return _drawn(entry)
+
+
+## What the material should be sampling now, plus the window when one is in hand.
+static func _drawn(entry: Entry) -> Dictionary:
 	if entry.refined != null:
 		return {"texture": entry.refined, "width": entry.refined_width}
 	return {"texture": entry.base, "width": MAP_WIDTH}

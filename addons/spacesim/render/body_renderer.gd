@@ -420,14 +420,28 @@ static func band_is_liquid(band: Dictionary) -> bool:
 ## level and the band edges come from), which happens on the host.
 ## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
 ## second texture in the shader is a second resolution to keep in step with the picture.
-static func apply_surface_maps(material: Material, texture: Texture2D, width: int) -> void:
+static func apply_surface_maps(
+	material: Material, texture: Texture2D, width: int, window: Texture2D = null,
+	window_origin: Vector2 = Vector2.ZERO, window_size: Vector2 = Vector2.ZERO
+) -> void:
 	if material == null or texture == null:
 		return
 	var surface := material as ShaderMaterial
 	if surface == null:
 		return
-	surface.set_shader_parameter("height_map", texture)
-	surface.set_shader_parameter("map_width", width)
-	# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
-	# duplicate what the new map shows or leave a band of nothing between them.
-	surface.set_shader_parameter("detail_feature", 2.0 * TAU / float(maxi(width, 1)))
+	# **Identity, not a width**: two refined maps can share a width across a recede and re-approach, and a
+	# repoint is a dictionary write against a texture that is already correct.
+	if surface.get_shader_parameter("height_map") != texture:
+		surface.set_shader_parameter("height_map", texture)
+		surface.set_shader_parameter("map_width", width)
+		# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
+		# duplicate what the new map shows or leave a band of nothing between them.
+		surface.set_shader_parameter("detail_feature", 2.0 * TAU / float(maxi(width, 1)))
+	if surface.get_shader_parameter("window_map") != window:
+		surface.set_shader_parameter("window_map", window)
+		surface.set_shader_parameter("window_origin", window_origin)
+		# **A zero size is how "no window" is said**, and the shader reads it as such. The base map is what draws
+		# then, which is the layering rule: the window is an addition, never a substitution.
+		surface.set_shader_parameter(
+			"window_size", window_size if window != null else Vector2.ZERO
+		)

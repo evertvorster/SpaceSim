@@ -110,7 +110,10 @@ func error() -> String:
 ## the distribution, measured from this).
 ##
 ## Returns `null` with [method error] set when there is no device to run on.
-func bake(plan_data: SpacesimSurfaceField.Plan, width: int, height: int) -> Image:
+func bake(
+	plan_data: SpacesimSurfaceField.Plan, width: int, height: int,
+	uv_origin: Vector2 = Vector2.ZERO, uv_size: Vector2 = Vector2.ONE
+) -> Image:
 	if not open():
 		return null
 	var w := maxi(width, 1)
@@ -145,7 +148,7 @@ func bake(plan_data: SpacesimSurfaceField.Plan, width: int, height: int) -> Imag
 		_device.free_rid(texture)
 		return null
 
-	var params := SpacesimSurfaceField.push_constants(plan_data, w, h)
+	var params := SpacesimSurfaceField.push_constants(plan_data, w, h, uv_origin, uv_size)
 	# Every `compute_list_*` call takes the list handle FIRST, and it is an `int`.
 	var list := _device.compute_list_begin()
 	_device.compute_list_bind_compute_pipeline(list, _pipeline)

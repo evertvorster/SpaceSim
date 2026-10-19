@@ -23,17 +23,18 @@ extends RefCounted
 ## and a half features across the planet is the broad shape inside a plate, eleven is a mountain crest —
 ## because the field is sampled on the unit direction and never in world metres.
 ##
-## ## The CPU transcription is TEMPORARY, and that is deliberate
+## ## There is no CPU twin, and that is the point
 ##
-## [method height_at] and [method bake_cpu] exist to *design the shader against*: a `double` reference and a
-## GLSL transcription can be compared texel for texel while the composition is being tuned, which is how the
-## cloud field's port was checked. **They are retired once the shader is right** (Evert, 2026-10-19: *"the
-## CPU version of the shader is only to design the shader, and then it gets retired"*) — unlike the cloud
-## field, where the CPU path stays because it is also the only route a headless run has.
+## A `double` transcription of the field lived here while the shader was being designed — it is how the plate
+## lattice, the belts and the warp were compared texel for texel against the GLSL. **It is retired** (Evert,
+## 2026-10-19: *"the CPU version of the shader is only to design the shader, and then it gets retired"*), so the
+## GLSL in `surface_field.gdshaderinc` is the **only** implementation of what a body's surface is.
 ##
-## **The consequence, planned for rather than discovered:** a bake needs a rendering device, so a headless
-## run has no surface maps. What the suite can still check is here — the plan's determinism, its ranges, and
-## that the plate partition is deterministic too — and the picture is a flight, or a probe under `xvfb-run`.
+## **The consequence, planned for rather than discovered:** a bake needs a rendering device, so a headless run has
+## no surface maps, and the field's *shape* cannot be asserted in `tests/run.sh` — only the plan's determinism and
+## its ranges can. The shape is checked by `tests/shader_check.sh` (it compiles), by a throwaway probe under
+## `xvfb-run` when one is needed, and by the flight. That is the price of one implementation rather than two that
+## agree until they do not.
 
 ## Frequencies, in unit-sphere cycles: a feature is `1/frequency` of the sphere across.
 ##
@@ -144,39 +145,46 @@ static func source() -> String:
 ##
 ## **Every number comes off the plan**, including the FBM normalisers — a constant typed into the GLSL would be
 ## a second copy of a number the plan already knows, and it would drift. The block is `ivec2` plus seventeen
-## 4-byte fields: **76 bytes, and it must be supplied at exactly that size** — the driver rejects both more and
+## 4-byte fields: **92 bytes, and it must be supplied at exactly that size** — the driver rejects both more and
 ## less (*"requires (76) bytes of push constant data, supplied: (80)"*), unlike a uniform block where padding is
 ## the caller's to choose.
-static func push_constants(plan_data: Plan, width: int, height: int) -> PackedByteArray:
+static func push_constants(
+	plan_data: Plan, width: int, height: int,
+	uv_origin: Vector2 = Vector2.ZERO, uv_size: Vector2 = Vector2.ONE
+) -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(PUSH_CONSTANT_BYTES)
 	bytes.encode_s32(0, width)
 	bytes.encode_s32(4, height)
-	bytes.encode_s32(8, plan_data.seed)
-	bytes.encode_float(12, plan_data.continent_frequency)
-	bytes.encode_s32(16, plan_data.continent_octaves)
-	bytes.encode_float(20, plan_data.ridge_frequency)
-	bytes.encode_s32(24, plan_data.ridge_octaves)
-	bytes.encode_float(28, plan_data.warp_frequency)
-	bytes.encode_s32(32, plan_data.warp_octaves)
-	bytes.encode_float(36, plan_data.warp_strength)
-	bytes.encode_float(40, plan_data.ridge_strength)
-	bytes.encode_float(44, plan_data.continent_share)
-	bytes.encode_float(48, plan_data.plate_bias_share)
-	bytes.encode_float(52, plan_data.belt_width)
-	bytes.encode_float(56, plan_data.plate_phase)
-	bytes.encode_float(60, plan_data.gain)
-	bytes.encode_float(64, plan_data.lacunarity)
-	bytes.encode_float(68, plan_data.continent_bounding)
-	bytes.encode_float(72, plan_data.warp_bounding)
+	bytes.encode_float(8, uv_origin.x)
+	bytes.encode_float(12, uv_origin.y)
+	bytes.encode_float(16, uv_size.x)
+	bytes.encode_float(20, uv_size.y)
+	bytes.encode_s32(24, plan_data.seed)
+	bytes.encode_float(28, plan_data.continent_frequency)
+	bytes.encode_s32(32, plan_data.continent_octaves)
+	bytes.encode_float(36, plan_data.ridge_frequency)
+	bytes.encode_s32(40, plan_data.ridge_octaves)
+	bytes.encode_float(44, plan_data.warp_frequency)
+	bytes.encode_s32(48, plan_data.warp_octaves)
+	bytes.encode_float(52, plan_data.warp_strength)
+	bytes.encode_float(56, plan_data.ridge_strength)
+	bytes.encode_float(60, plan_data.continent_share)
+	bytes.encode_float(64, plan_data.plate_bias_share)
+	bytes.encode_float(68, plan_data.belt_width)
+	bytes.encode_float(72, plan_data.plate_phase)
+	bytes.encode_float(76, plan_data.gain)
+	bytes.encode_float(80, plan_data.lacunarity)
+	bytes.encode_float(84, plan_data.continent_bounding)
+	bytes.encode_float(88, plan_data.warp_bounding)
 	return bytes
 
 
 const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
 const FIELD_PATH := "res://addons/spacesim/system/model/surface_field.gdshaderinc"
 const KERNEL_PATH := "res://addons/spacesim/system/model/surface_kernel.gdshaderinc"
-## 76: `ivec2` plus seventeen 4-byte fields. Exact, not padded — see [method push_constants].
-const PUSH_CONSTANT_BYTES := 76
+## 92: `ivec2`, two `vec2`, then seventeen 4-byte fields. Exact, not padded — see [method push_constants].
+const PUSH_CONSTANT_BYTES := 92
 
 
 ## A body's address, as the seed its surface grows from.
@@ -207,156 +215,3 @@ static func plan(body_id: String, radius: float) -> Plan:
 ## a second definition is a second normaliser waiting to drift.
 static func _bounding(octaves: int, gain: float) -> float:
 	return SpacesimCloudField.fractal_bounding(octaves, gain)
-
-
-# ===== THE CPU TRANSCRIPTION — TEMPORARY, RETIRED WHEN THE SHADER IS RIGHT ============
-#
-# A `double` mirror of `surface_height()`, for comparing against while the composition is tuned. It follows
-# the GLSL call for call, including the swizzle order, the plate loop's tie-breaking and the R3 rotation the
-# fbm wrapper applies. Nothing outside the probe should call it.
-
-## One generator per mechanism, built once per bake.
-##
-## **Built rather than shared**: this is state, and a bake is a long loop. The seeds are the plan's own plus
-## the offsets the GLSL uses, so the two paths cannot be told different fields.
-static func noises_for(plan_data: Plan) -> Dictionary:
-	# **Three warp generators, not one** — the GLSL decorrelates the three components with three seeds, and
-	# one generator reused across three swizzles is a different field entirely (found by the probe: the warp
-	# disagreed and dragged every mechanism downstream of it along).
-	return {
-		"continent": _noise(plan_data.seed + 577, plan_data.continent_octaves, plan_data),
-		"warp_x": _noise(plan_data.seed + 101, plan_data.warp_octaves, plan_data),
-		"warp_y": _noise(plan_data.seed + 211, plan_data.warp_octaves, plan_data),
-		"warp_z": _noise(plan_data.seed + 307, plan_data.warp_octaves, plan_data),
-		"ridge": _noise(plan_data.seed + 991, 1, plan_data),
-	}
-
-
-static func _noise(seed: int, octaves: int, plan_data: Plan) -> FastNoiseLite:
-	var noise := FastNoiseLite.new()
-	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	noise.seed = seed
-	# The scale is the *caller's*: one unit of noise space per feature, as the cloud field arranges it.
-	noise.frequency = 1.0
-	noise.fractal_octaves = maxi(octaves, 1)
-	noise.fractal_gain = plan_data.gain
-	noise.fractal_lacunarity = plan_data.lacunarity
-	return noise
-
-
-## The field at a unit direction, about ±1 — the CPU mirror of `surface_height()`.
-static func height_at(unit: Vector3, plan_data: Plan, noises: Dictionary) -> float:
-	# The warp: three samples of one generator through three swizzles, exactly as the GLSL writes them.
-	var warp := Vector3(
-		_fbm(noises["warp_x"], Vector3(unit.y, unit.z, unit.x), plan_data.warp_frequency),
-		_fbm(noises["warp_y"], Vector3(unit.z, unit.x, unit.y), plan_data.warp_frequency),
-		_fbm(noises["warp_z"], unit, plan_data.warp_frequency)
-	)
-	var q := (unit + plan_data.warp_strength * warp).normalized()
-	var plates := plates_at(q, plan_data.plate_phase, plan_data.belt_width)
-	var variation := _fbm(noises["continent"], q, plan_data.continent_frequency)
-	var mountains := _ridged(noises["ridge"], q * plan_data.ridge_frequency, plan_data)
-	var crest := float(plates["belt"]) * float(plates["belt"])
-	return (
-		plan_data.plate_bias_share * float(plates["level"])
-		+ plan_data.continent_share * variation
-		+ plan_data.ridge_strength * mountains * crest
-	)
-
-
-## `surface_plates()`, including its iteration order and its tie-breaking — a nearest-plate test that broke
-## ties the other way would put a different plate's level on the same texel.
-static func plates_at(q: Vector3, phase: float, belt_width: float) -> Dictionary:
-	var nearest := 2.0
-	var second := 2.0
-	var nearest_index := 0
-	for index in SpacesimSurfaceField.PLATE_COUNT:
-		var distance := 1.0 - q.dot(plate_centre(index, phase))
-		if distance < nearest:
-			second = nearest
-			nearest = distance
-			nearest_index = index
-		elif distance < second:
-			second = distance
-	return {
-		"level": plate_level(nearest_index, phase),
-		"belt": 1.0 - smoothstep(0.0, maxf(belt_width, 1.0e-4), second - nearest),
-	}
-
-
-## A plate's centre on the Fibonacci lattice — the same three lines as `surface_plate_centre()`.
-static func plate_centre(index: int, phase: float) -> Vector3:
-	var z := 1.0 - (2.0 * float(index) + 1.0) / float(PLATE_COUNT)
-	var ring := sqrt(maxf(1.0 - z * z, 0.0))
-	var angle := float(index) * GOLDEN_ANGLE + phase
-	return Vector3(ring * cos(angle), z, ring * sin(angle))
-
-
-## Whether that plate stands or sags, on -1..1 — `surface_plate_level()`, including the bias that keeps a
-## *minority* of plates standing (`PLATE_LEVEL_GAIN`/`PLATE_LEVEL_BIAS`, and the GLSL says why).
-static func plate_level(index: int, phase: float) -> float:
-	return clampf(
-		PLATE_LEVEL_GAIN * sin(float(index) * 12.9898 + phase * 7.0) - PLATE_LEVEL_BIAS, -1.0, 1.0
-	)
-
-
-## `pi * (3 - sqrt(5))`, the same golden angle the GLSL carries.
-const GOLDEN_ANGLE := 2.3999632297286535
-## `SURFACE_PLATES` — how many plates the sphere is partitioned into.
-const PLATE_COUNT := 14
-## `surface_plate_level()`'s gain and bias: the pair that makes a *minority* of plates stand, so the sea
-## level's percentile lands at the foot of the continental mode rather than in the gap between the modes.
-const PLATE_LEVEL_GAIN := 3.0
-const PLATE_LEVEL_BIAS := 0.55
-
-
-## `fnl_fbm3()`'s job on the CPU side: `GetNoise` is the R3 rotation and the octave loop, which
-## `FastNoiseLite.get_noise_3d()` already is — **including** the `1/(1+g+…)` normalisation, which the GLSL
-## is handed rather than deriving.
-static func _fbm(noise: FastNoiseLite, sample: Vector3, frequency: float) -> float:
-	return noise.get_noise_3d(sample.x * frequency, sample.y * frequency, sample.z * frequency)
-
-
-## `surface_ridged3()`: one octave per rung, the seed advancing with the rung, `1 - |n|` squared and summed.
-static func _ridged(noise: FastNoiseLite, sample: Vector3, plan_data: Plan) -> float:
-	var seed := noise.seed
-	var sum := 0.0
-	var amplitude := 1.0
-	var weight := 0.0
-	var frequency := 1.0
-	for octave in plan_data.ridge_octaves:
-		noise.seed = seed + octave
-		var value := noise.get_noise_3d(
-			sample.x * frequency, sample.y * frequency, sample.z * frequency
-		)
-		var ridge := 1.0 - absf(value)
-		sum += amplitude * ridge * ridge
-		weight += amplitude
-		amplitude *= plan_data.gain
-		frequency *= plan_data.lacunarity
-	noise.seed = seed
-	return sum / weight
-
-
-## The whole-body map on the CPU, in `FORMAT_RH` — the bake the probe compares against, and **the only thing
-## that can produce a map with no GPU**. Equirectangular, north at the top row, the same mapping the shader
-## inverts.
-static func bake_cpu(plan_data: Plan, width: int, height: int) -> Image:
-	var w := maxi(width, 1)
-	var h := maxi(height, 1)
-	var noises := noises_for(plan_data)
-	var bytes := PackedByteArray()
-	bytes.resize(w * h * 2)
-	for row in h:
-		var v := (float(row) + 0.5) / float(h)
-		var latitude := PI * 0.5 - v * PI
-		var cos_latitude := cos(latitude)
-		var sin_latitude := sin(latitude)
-		for column in w:
-			var u := (float(column) + 0.5) / float(w)
-			var longitude := (u - 0.5) * TAU
-			var direction := Vector3(
-				cos_latitude * cos(longitude), sin_latitude, cos_latitude * sin(longitude)
-			)
-			bytes.encode_half((row * w + column) * 2, height_at(direction, plan_data, noises))
-	return Image.create_from_data(w, h, false, Image.FORMAT_RH, bytes)

@@ -15,6 +15,12 @@ layout(r16f, set = 0, binding = 0) uniform image2D out_map;
 
 layout(push_constant, std430) uniform Params {
 	ivec2 size;
+	// **The window**: a sub-rectangle of the same equirect space, so one field can be rasterised over the whole
+	// sphere or over the cap the eye can actually see. `(0, 0, 1, 1)` is the whole map, which is what the
+	// build-time bake asks for — **the window LAYERS on the base map, it never replaces it**, which is the fault
+	// the cloud version had.
+	vec2 uv_origin;
+	vec2 uv_size;
 	int seed;
 	float continent_frequency;
 	int continent_octaves;
@@ -45,8 +51,8 @@ void main() {
 	// The map's own `(u, v)`: `u` around the equator, `v` pole to pole, north at the top row. **Pixel
 	// centres, half a texel in**, so the seam and the poles land where the CPU path puts them and the
 	// shader's inverse is exact.
-	float u = (float(pos.x) + 0.5) / float(params.size.x);
-	float v = (float(pos.y) + 0.5) / float(params.size.y);
+	float u = params.uv_origin.x + (float(pos.x) + 0.5) / float(params.size.x) * params.uv_size.x;
+	float v = params.uv_origin.y + (float(pos.y) + 0.5) / float(params.size.y) * params.uv_size.y;
 	float latitude = SURFACE_PI * 0.5 - v * SURFACE_PI;
 	float longitude = (u - 0.5) * SURFACE_TAU;
 	float cos_latitude = cos(latitude);

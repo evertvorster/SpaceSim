@@ -889,7 +889,7 @@ func update_lod(camera: Camera3D) -> void:
 	# **Publish whatever landed since the last frame**, before any of it is counted: a rebuild is a mesh
 	# that appears a frame or two after it was asked for, never a stall in the frame that asked.
 	# **Collected before the bodies are walked**, so a bake that landed this frame is drawn this frame.
-	_publish_refined_maps()
+	_surface_maps.poll()
 	_poll_patch_builds()
 	for body in bodies:
 		if body.node == null:
@@ -911,7 +911,9 @@ func update_lod(camera: Camera3D) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_refine_surface_map(body, distance, pixel)
+		_refine_surface_map(
+			body, distance, pixel, (observer - body.node.global_position).normalized()
+		)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1023,29 +1025,6 @@ func close() -> void:
 	_surface_maps.close()
 
 
-## **Repoint a material whose map was refined.** The bake happens on the render thread, the swap happens here:
-## the texture becomes visible the frame after it lands, and the map the material was using is released back to
-## the pass to be freed on the render thread.
-##
-## The width goes with the texture — the shader turns a texel into an angle, and a map of the wrong width would
-## put the normal's baseline at the wrong scale.
-func _publish_refined_maps() -> void:
-	for body_id in _surface_maps.poll():
-		var body := body_by_id(body_id)
-		if body == null or not (body.mesh_material is ShaderMaterial):
-			continue
-		var entry := _surface_maps.map(body_id)
-		if entry == null or entry.refined == null:
-			continue
-		SpacesimBodyRenderer.apply_surface_maps(
-			body.mesh_material as ShaderMaterial, entry.refined, entry.refined_width
-		)
-		if body.ocean_material != null:
-			SpacesimBodyRenderer.apply_surface_maps(
-				body.ocean_material, entry.refined, entry.refined_width
-			)
-
-
 ## **Hand the surface maps a render-thread bake pass** — from `main.gd`, which owns the camera's compositor.
 ## Without one, every body keeps the map baked at scene build.
 func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
@@ -1054,26 +1033,34 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 
 ## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
 ## want more than the build map has. Called from `update_lod` for every drawn body.
-func _refine_surface_map(body: SpacesimSceneBody, distance: float, pixel: float) -> void:
+func _refine_surface_map(
+	body: SpacesimSceneBody, distance: float, pixel: float, eye_direction: Vector3
+) -> void:
 	if body.mesh_material == null or body.content == null:
 		return
 	if body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return
-	var chosen := _surface_maps.map_for(body.id, body.radius, distance, pixel)
+	# **The request happens here** — a wider whole-body map, or a window over the cap the eye can see — and the
+	# entry already holds whatever has landed, so the draw below needs no separate publish step.
+	var chosen := _surface_maps.map_for(body.id, body.radius, distance, pixel, eye_direction)
 	if chosen.is_empty():
 		return
-	var surface := body.mesh_material as ShaderMaterial
-	if surface == null:
-		return
-	# **Identity, not a width**: two refined maps can share a width across a recede and re-approach, and a
-	# repoint is one dictionary write against a texture that is already correct.
-	if surface.get_shader_parameter("height_map") == chosen["texture"]:
-		return
-	surface.set_shader_parameter("height_map", chosen["texture"])
-	surface.set_shader_parameter("map_width", chosen["width"])
+	var entry := _surface_maps.map(body.id)
+	var window: Texture2D = null
+	var window_origin := Vector2.ZERO
+	var window_size := Vector2.ZERO
+	if entry != null and entry.window != null:
+		window = entry.window
+		window_origin = entry.window_origin
+		window_size = entry.window_size
+	SpacesimBodyRenderer.apply_surface_maps(
+		body.mesh_material, chosen["texture"], chosen["width"], window, window_origin, window_size
+	)
+	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a window
+	# that reached one and not the other would put a seam along every coastline inside it.
 	if body.ocean_material != null:
 		SpacesimBodyRenderer.apply_surface_maps(
-			body.ocean_material, chosen["texture"], chosen["width"]
+			body.ocean_material, chosen["texture"], chosen["width"], window, window_origin, window_size
 		)
 
 
