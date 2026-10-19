@@ -130,6 +130,10 @@ func build(parent: Node) -> SpacesimSystemScene:
 		_build_body(body)
 
 	frame_tree.frame_changed.connect(_on_frame_changed)
+	# **Every task added must be awaited before the engine goes away**, or the exit segfaults with no
+	# output at all — the pool has to free what the task allocated. A rebuild is milliseconds, so the join
+	# is one poll long.
+	container.tree_exiting.connect(await_patch_builds)
 	return self
 
 
@@ -848,10 +852,20 @@ func update_lod(camera: Camera3D) -> void:
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
 			pixel, epsilon, body.radius, body.patch_walk_epsilon
-		) or wireframe != body.patch_walk_wireframe or body.mesh.mesh == null:
+		) or wireframe != body.patch_walk_wireframe:
 			body.patch_chunks = SpacesimPatches.select(
 				distance, to_eye, body.radius, pixel, epsilon
 			)
+			# **A selection of nothing has a reason, and it is worth printing once.** `select()` refuses a
+			# sphere it cannot see round — the eye at or below the surface, or a pixel angle or budget of
+			# zero — and an empty answer looks exactly like a body that was never walked.
+			if body.patch_chunks.is_empty() and not body.patch_empty_reported:
+				body.patch_empty_reported = true
+				print(
+					"PATCH: %s has no patches — distance %.1f m, radius %.1f m, altitude %.1f m, "
+					% [body.name, distance, body.radius, distance - body.radius]
+					+ "pixel %.6f, epsilon %.2f" % [pixel, epsilon]
+				)
 			body.patch_walk_distance = distance
 			body.patch_walk_direction = to_eye
 			body.patch_walk_epsilon = epsilon
@@ -921,19 +935,27 @@ func _poll_patch_builds() -> void:
 		body.patch_task = -1
 		var arrays := body.patch_arrays
 		body.patch_arrays = []
-		if body.mesh != null and not arrays.is_empty():
-			body.mesh.mesh = (
-				SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
-				else SpacesimPatches.mesh_from(arrays)
-			)
-			body.mesh.material_override = (
-				SpacesimBodyRenderer.wireframe_material() if body.patch_task_wireframe
-				else body.mesh_material
-			)
-			body.patch_triangles = (
-				arrays[0].size() / 6 if body.patch_task_wireframe
-				else arrays[0].size() / 3
-			)
+		# **An empty selection is a real answer** — the eye inside the body, or a sphere whose whole surface
+		# is over its own horizon — and it is not a reason to throw the geometry away. `add_surface_from_arrays`
+		# refuses an empty surface (the rendering server logs `array_len == 0` every frame it is asked), so an
+		# empty build publishes nothing and **the mesh that is already there stays**: a stale equator is worth
+		# more than a frame with no ground in it, and a frame with no ground in it is what swings the exposure.
+		if body.mesh == null:
+			continue
+		if arrays.is_empty() or (arrays[0] as PackedVector3Array).is_empty():
+			continue
+		body.mesh.mesh = (
+			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
+			else SpacesimPatches.mesh_from(arrays)
+		)
+		body.mesh.material_override = (
+			SpacesimBodyRenderer.wireframe_material() if body.patch_task_wireframe
+			else body.mesh_material
+		)
+		body.patch_triangles = (
+			arrays[0].size() / 6 if body.patch_task_wireframe
+			else arrays[0].size() / 3
+		)
 		# The selection moved while this was building, so the answer is already out of date.
 		if body.patch_task_chunks != body.patch_chunks:
 			_request_patch_build(body, body.patch_walk_wireframe)

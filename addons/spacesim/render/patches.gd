@@ -337,6 +337,11 @@ static func lines_of(chunks: Array) -> Array:
 ## would be the identity range — and building that for sixty thousand triangles in GDScript is the very
 ## cost chunking exists to remove.
 static func mesh_from(arrays: Array) -> ArrayMesh:
+	# **An empty selection is "nothing to draw", not an empty surface.** `add_surface_from_arrays` with no
+	# vertices is an error from the rendering server (`array_len == 0`), logged every frame it is asked —
+	# so this returns null and the caller clears the mesh, which is what an empty answer means.
+	if arrays.is_empty() or (arrays[0] as PackedVector3Array).is_empty():
+		return null
 	var surface := []
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
@@ -347,6 +352,8 @@ static func mesh_from(arrays: Array) -> ArrayMesh:
 
 
 static func lines_mesh_from(arrays: Array) -> ArrayMesh:
+	if arrays.is_empty() or (arrays[0] as PackedVector3Array).is_empty():
+		return null
 	var surface := []
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]

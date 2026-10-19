@@ -435,6 +435,8 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		h.check_near(probe.linear_to_srgb().srgb_to_linear().r, probe.r,
 			"and the encode is the exact inverse of what Godot decodes, so the two cancel", 1.0e-6)
 
+	_test_the_eye_inside_a_body(h, scene, camera, pixel)
+
 	# --- the point of light is in the FRAME's exposure, not the camera's ----------------------------
 	# **This check used to assert the opposite**, and the reversal is the point. Godot bakes the exposure
 	# into the sky and the light energy and *not* into an `unshaded` material, so a splat had to apply
@@ -516,6 +518,40 @@ static func _finest_under_eye(distance: float, radius: float, to_eye: Vector3, p
 				maxf((leaf[1] as Vector3).angle_to(leaf[2]), (leaf[2] as Vector3).angle_to(leaf[0]))
 			))
 	return finest
+
+
+## **An eye inside a body is a real answer, not a failure.** `SpacesimPatches.select` refuses a sphere it
+## cannot see round, so the selection is empty — and an empty *mesh* is an error from the rendering server
+## (`array_len == 0`, logged every frame it is asked). The body has to draw nothing instead, and it has to
+## stop asking: a body whose answer is "nothing" must not re-walk every frame.
+func _test_the_eye_inside_a_body(h, scene: SpacesimSystemScene, camera: Camera3D, pixel: float) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	if earth == null:
+		return
+	var saved := camera.global_position
+	# Half a radius below the surface, which is inside by any measure.
+	camera.global_position = earth.node.global_position + Vector3.UP * (earth.radius * 0.5)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	# **The mesh that is already there stays.** An empty selection is an error to hand to
+	# `add_surface_from_arrays` — the rendering server logs `array_len == 0` every frame it is asked — and
+	# clearing the mesh instead would take the ground out of the frame, which is what swings the exposure.
+	# A stale equator is worth more than no ground at all.
+	h.check(earth.patch_chunks.is_empty(), "the walk has no answer for a sphere it cannot see round")
+	h.check(earth.mesh.mesh is ArrayMesh, "so the last mesh stands rather than being thrown away")
+	# **And it stops asking.** The walk gate says nothing has moved, so a body whose answer is "nothing"
+	# does not re-walk — and re-request — on every frame.
+	var chunks_before := earth.patch_chunks.size()
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(earth.patch_chunks.size() == chunks_before, "and it does not ask again while nothing has moved")
+	# Back outside: the surface returns, which is what makes the clear above a state rather than a loss.
+	camera.global_position = earth.node.global_position + Vector3.UP * (earth.radius * 1.05)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(earth.mesh.mesh is ArrayMesh and earth.patch_triangles > 0,
+		"and stepping outside brings the surface back (%d triangles)" % earth.patch_triangles)
+	camera.global_position = saved
 
 
 ## Triangles in the mesh the body is drawn with. Kept for the report, not for the law.
