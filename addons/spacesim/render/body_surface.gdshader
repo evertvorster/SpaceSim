@@ -227,10 +227,13 @@ void fragment() {
 	float relief_height = 0.0;
 	if (detail_max_rungs > 0 && detail_feature > 0.0) {
 		// **How many rungs this pixel can resolve**, in octaves: from the ladder's first rung down to the pixel.
-		// A distant body gets 0 or 1 and pays nothing; a ground filling the frame gets as many as the depth
-		// allows. The rungs still fade individually inside `surface_detail`, so this is a bound on the work and
-		// not a second band-limit.
-		int rungs = int(ceil(log2(max(detail_feature / max(footprint_angle, 1.0e-9), 1.0))));
+		// A distant body gets 0 and pays nothing; a ground filling the frame gets as many as the depth allows.
+		// **The count is `ceil(F / 2*fp)`, not `ceil(F / fp)`**, because it has to match the band the fade draws:
+		// a rung survives only while a pixel holds more than two samples per feature, so the ladder stops one
+		// octave earlier than the raw ratio suggests. `ceil(F/fp)` asked for exactly that one extra rung, which
+		// `surface_detail` then faded to zero — one noise tap a pixel of pure waste, and, before the band was
+		// widened, the mechanism that put the deepest rung *below* the sampling limit at every distance.
+		int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
 		rungs = clamp(rungs, 0, detail_max_rungs);
 		if (rungs > 0) {
 			detail = surface_detail(
