@@ -26,6 +26,16 @@ func _test_the_mapping(h) -> void:
 	h.check(eighth.is_equal_approx(Vector4(5.0 / 8.0, 2.0 / 8.0, 6.0 / 8.0, 3.0 / 8.0)),
 		"level 3, tile 5,2 is the eighth it says it is")
 
+	h.check(SpacesimSurfaceTiles.rect_contains(
+		SpacesimSurfaceTiles.rect_of(1, 1, 1), SpacesimSurfaceTiles.rect_of(3, 5, 5)),
+		"a level-3 tile inside a level-1 one is contained by it")
+	h.check(not SpacesimSurfaceTiles.rect_contains(
+		SpacesimSurfaceTiles.rect_of(3, 1, 1), SpacesimSurfaceTiles.rect_of(1, 1, 1)),
+		"and containment is not symmetric — the walk needs the direction to know an ancestor from a cousin")
+	h.check(not SpacesimSurfaceTiles.rect_contains(
+		SpacesimSurfaceTiles.rect_of(1, 1, 1), SpacesimSurfaceTiles.rect_of(1, 0, 0)),
+		"a neighbouring tile of the same level is not inside it")
+
 	var centre := SpacesimSurfaceTiles.direction_of(0.5, 0.5)
 	h.check(centre.is_equal_approx(Vector3(1.0, 0.0, 0.0)),
 		"the map's centre is +X — the equator at longitude zero")

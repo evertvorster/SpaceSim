@@ -186,10 +186,16 @@ func prepare(body_id: String, radius: float, ocean_fraction: float) -> Entry:
 ## Returns **true when the published set changed**, so the scene republishes rects to the materials. That is the
 ## whole interface: the cache owns the table, the scene owns the materials.
 func update_tiles(
-	body_id: String, radius: float, distance: float, pixel_angle: float, eye_direction: Vector3
+	body_id: String, radius: float, distance: float, pixel_angle: float,
+	eye_direction: Vector3, cap: int
 ) -> bool:
 	if _bake_pass == null:
 		return false
+	# **No near field until the whole-body map has run out.** A far body's disc is smaller than the map that already
+	# covers it, so its tiles are work without a need and — because the table is shared — they cost the body the eye
+	# *is* looking at. See [method near_field_is_worth_it].
+	if not near_field_is_worth_it(radius, distance, pixel_angle, cap):
+		return _release_tiles(body_id)
 	# **The walk is gated; the requests are not.** Those are two different things and conflating them was a bug:
 	# a walk whose requests were all refused because the pass was busy with a whole-body rung would record the eye
 	# state as walked, and the gate would then keep it closed until the eye moved — so the near field never
@@ -212,8 +218,12 @@ func update_tiles(
 		)
 		_reconcile_slots(body_id, wanted)
 	_request_missing_slots(body_id, radius)
-	# **Republish only when what a material would be told has changed** — a slot freed, a slot made, or a tile
-	# that landed. A walk that changes nothing costs the rects nothing.
+	return _republish_if_changed(body_id)
+
+
+## **Republish only when what a material would be told has changed** — a slot freed, a slot made, or a tile that
+## landed. A walk that changes nothing costs the rects nothing.
+func _republish_if_changed(body_id: String) -> bool:
 	var version := int(_tile_version.get(body_id, 0))
 	if version == int(_published_version.get(body_id, -1)):
 		return false
@@ -234,9 +244,16 @@ func _reconcile_slots(body_id: String, wanted: Array) -> void:
 		var own: Slot = slot
 		if own.body_id != body_id:
 			continue
-		if not keep.has("%d/%d/%d" % [own.level, own.x, own.y]):
-			_slots[index] = null
-			_bump_tiles(body_id)
+		if keep.has("%d/%d/%d" % [own.level, own.x, own.y]):
+			continue
+		# **An ancestor is kept until the tiles inside it have landed.** Crossing a level used to free a tile's
+		# pixels and queue its four children, so the region fell back to the whole-body map and sharpened again a
+		# frame later — the pulse Evert saw in flight. Now the coarser tile stays published underneath (the shader
+		# takes the finest rectangle, so the children win the moment they are ready) and it is let go then.
+		if _holds_unready_child(own, keep, body_id):
+			continue
+		_slots[index] = null
+		_bump_tiles(body_id)
 	var placed := {}
 	for slot in _slots:
 		if slot == null:
@@ -261,6 +278,50 @@ func _reconcile_slots(body_id: String, wanted: Array) -> void:
 		_slots[layer] = slot
 		placed[key] = true
 		_bump_tiles(body_id)
+
+
+## **Whether a slot that is no longer wanted still covers tiles that have not landed** — in which case it is the
+## fallback rather than a waste, and stays until they do.
+##
+## Only a *descendant* counts: a tile whose rectangle lies inside the slot's. A slot whose area the eye has left
+## falls straight out, which is what keeps a recede from holding anything.
+func _holds_unready_child(own: Slot, keep: Dictionary, body_id: String) -> bool:
+	var mine := SpacesimSurfaceTiles.rect_of(own.level, own.x, own.y)
+	for slot in _slots:
+		if slot == null:
+			continue
+		var other: Slot = slot
+		if other.body_id != body_id or other == own:
+			continue
+		var theirs := SpacesimSurfaceTiles.rect_of(other.level, other.x, other.y)
+		if not SpacesimSurfaceTiles.rect_contains(mine, theirs):
+			continue
+		if not keep.is_empty() and not keep.has("%d/%d/%d" % [other.level, other.x, other.y]):
+			continue
+		if not other.ready:
+			return true
+	return false
+
+
+## **Let go of a body's whole near field** — the eye has receded past the point where tiles beat the map, so their
+## layers are worth more to whatever comes next. Returns whether anything was actually freed, which is what the
+## caller needs to know to republish.
+func _release_tiles(body_id: String) -> bool:
+	var freed := false
+	for index in _slots.size():
+		var slot: Variant = _slots[index]
+		if slot == null:
+			continue
+		var own: Slot = slot
+		if own.body_id != body_id:
+			continue
+		_slots[index] = null
+		freed = true
+	if freed:
+		_bump_tiles(body_id)
+	# **Forget the eye state**, so the next approach walks at once rather than waiting for a tenth of the distance.
+	_tile_last.erase(body_id)
+	return freed and _republish_if_changed(body_id)
 
 
 ## **Ask the pass for one slot that has no tiles in it yet.** One request per call, because the pass takes one at a
@@ -459,6 +520,24 @@ func map_for(
 		body_id, SpacesimSurfaceField.plan(body_id, radius), next_bake_width(entry.width, wanted)
 	)
 	return _drawn(entry)
+
+
+## **Whether the near field is worth walking at all** — and the answer is the same law: tiles exist to give what the
+## whole-body map cannot, so while that map still has room to refine, a tile is work without a need.
+##
+## **This is the gate that stops far bodies eating the table.** The walk used to run for every drawn body, and
+## "finer than the base map" is satisfied at almost any distance — so Luna at 400,000 km, a 20-pixel disc, took four
+## slots for tiles worth nothing, and the body the eye was actually looking at was starved of them. Evert flew it,
+## 2026-10-19: *"when I see a refinement, I also see it being reverted, but not in all cases."*
+##
+## `required_width` saturating at the cap **is** the signal, and no new threshold is involved. At 720p that begins
+## inside **~60,000 km** — the exact form would say 48,000, and the power-of-two quantisation is why it is further
+## out, since a rung is rounded up before it is clamped. There Earth's disc is ~170 px against a 640-wide map, which
+## is about one texel per pixel; nothing to tune, because it is the same law at a different question.
+static func near_field_is_worth_it(
+	radius: float, distance: float, pixel_angle: float, cap: int
+) -> bool:
+	return required_width(radius, distance, pixel_angle, cap) >= cap
 
 
 ## **The next rung of the ladder**: double the width in hand, and no further than what is needed.

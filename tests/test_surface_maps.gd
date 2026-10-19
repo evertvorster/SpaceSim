@@ -11,6 +11,7 @@ func run(h, _root: Node) -> void:
 	print("  surface maps")
 	_test_no_bake_on_lookup(h)
 	_test_the_ladder(h)
+	_test_the_near_field_policy(h)
 	_test_quantiles(h)
 	_test_the_ramp(h)
 
@@ -82,6 +83,97 @@ func _test_no_bake_on_lookup(h) -> void:
 	h.check(maps.bakes() == 0, "and no bake has run")
 	h.check(not SpacesimSurfaceMaps.linear_quantiles().is_empty(),
 		"the linear placeholder a material starts with is there when a bake cannot run")
+
+
+## **When the near field is worth walking at all**, and **what may be let go while it is.**
+##
+## Both are arithmetic, so both are checked here rather than in flight. The first is the rule that stopped a
+## 20-pixel moon at 400,000 km eating four of the table's thirty-two slots; the second is the rule that stopped a
+## level change from dropping a tile's pixels before its children had landed, which Evert saw as refinements
+## *reverting* in patches.
+func _test_the_near_field_policy(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var cap := 640
+	h.check(SpacesimSurfaceMaps.near_field_is_worth_it(earth, earth + 2.0e6, pixel, cap),
+		"a body 2,000 km away is worth a near field — the map is at its ceiling and the disc wants more")
+	h.check(not SpacesimSurfaceMaps.near_field_is_worth_it(earth, earth + 4.0e8, pixel, cap),
+		"a body 400,000 km away is not: its whole disc is 20 px and the map already covers it")
+	h.check(not SpacesimSurfaceMaps.near_field_is_worth_it(earth, 1.0e11, pixel, cap),
+		"nor is one at 1 au")
+	# The crossover is the law's own: the width the eye asks for reaching the ceiling.
+	var inside := -1.0
+	var outside := -1.0
+	for km in range(1000, 120000, 1000):
+		var d := earth + float(km) * 1000.0
+		if SpacesimSurfaceMaps.near_field_is_worth_it(earth, d, pixel, cap):
+			inside = float(km)
+		elif inside >= 0.0:
+			outside = float(km)
+			break
+	# The crossover is the law's own, **including its power-of-two quantisation**: the rung the distance asks for is
+	# rounded up, so the ceiling is reached a little farther out than the raw arithmetic says — 60,000 km here
+	# rather than the 48,000 the exact form gives. That is the quantiser doing its job (a map that grows by a few
+	# texels at a time is a map that re-bakes on every metre of approach), and it is why the bound is generous.
+	h.check(inside >= 48000.0 and inside <= 70000.0,
+		"and it turns on somewhere inside 70,000 km, at the law's own crossover (last true at %.0f km)" % inside)
+
+	# **The retention rule**, driven directly: an ancestor stays while a tile inside it is unready, and goes once
+	# they have all landed. A tile the eye has left goes at once — that is what keeps a recede from holding slots.
+	var maps := SpacesimSurfaceMaps.new()
+	var parent := SpacesimSurfaceMaps.Slot.new()
+	parent.body_id = "planet:earth"
+	parent.level = 1
+	parent.x = 1
+	parent.y = 1
+	parent.layer = 0
+	parent.ready = true
+	maps._slots.append(parent)
+	# Four children of that parent, one still baking.
+	var wanted: Array = []
+	for x in range(2, 4):
+		for y in range(2, 4):
+			wanted.append([2, x, y])
+			var child := SpacesimSurfaceMaps.Slot.new()
+			child.body_id = "planet:earth"
+			child.level = 2
+			child.x = x
+			child.y = y
+			child.layer = maps._slots.size()
+			child.ready = not (x == 2 and y == 2)
+			maps._slots.append(child)
+	maps._reconcile_slots("planet:earth", wanted)
+	var kept := false
+	for slot in maps._slots:
+		if slot != null and slot.level == 1 and slot.x == 1 and slot.y == 1:
+			kept = true
+	h.check(kept, "an ancestor is kept while a tile inside it has not landed — the fallback, not a waste")
+
+	# Make the last child ready and reconcile again: the ancestor has nothing left to cover.
+	for slot in maps._slots:
+		if slot != null and slot.level == 2 and slot.x == 2 and slot.y == 2:
+			slot.ready = true
+	maps._reconcile_slots("planet:earth", wanted)
+	var still_kept := false
+	for slot in maps._slots:
+		if slot != null and slot.level == 1:
+			still_kept = true
+	h.check(not still_kept, "and let go once every tile inside it is ready")
+
+	# A tile the eye has left is not an ancestor of anything selected, so it goes immediately.
+	var lonely := SpacesimSurfaceMaps.Slot.new()
+	lonely.body_id = "planet:earth"
+	lonely.level = 3
+	lonely.x = 0
+	lonely.y = 0
+	lonely.ready = true
+	maps._slots.append(lonely)
+	maps._reconcile_slots("planet:earth", wanted)
+	var lonely_kept := false
+	for slot in maps._slots:
+		if slot != null and slot.level == 3:
+			lonely_kept = true
+	h.check(not lonely_kept, "a tile the eye has left is released at once")
 
 
 ## **The percentile table**, measured off the map's own distribution.

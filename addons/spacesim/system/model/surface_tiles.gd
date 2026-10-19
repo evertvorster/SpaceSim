@@ -57,6 +57,14 @@ static func rect_of(level: int, x: int, y: int) -> Vector4:
 	return Vector4(float(x) * span, float(y) * span, float(x + 1) * span, float(y + 1) * span)
 
 
+## **Whether one tile's rectangle contains another's** — how the walk tells an ancestor from an unrelated tile when
+## it decides what may be let go.
+static func rect_contains(outer: Vector4, inner: Vector4) -> bool:
+	const EPSILON := 1.0e-6
+	return (inner.x >= outer.x - EPSILON and inner.y >= outer.y - EPSILON
+		and inner.z <= outer.z + EPSILON and inner.w <= outer.w + EPSILON)
+
+
 ## **The direction a uv pixel points at** — the inverse of the shaders' `equirect()`:
 ## `u = 0.5 + atan(z, x)/TAU`, `v = 0.5 - asin(y)/PI`.
 ##
