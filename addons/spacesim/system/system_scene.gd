@@ -132,6 +132,10 @@ func build(parent: Node) -> SpacesimSystemScene:
 	_place_bodies()
 	for body in bodies:
 		_build_body(body)
+	# **Every map is baked, so let go of the device.** Nothing bakes during flight by design, and a local
+	# `RenderingDevice` alive for the length of a session is both the teardown segfault and the risk
+	# `SpacesimSurfaceMaps.prepare()` exists to remove.
+	_surface_maps.close()
 
 	frame_tree.frame_changed.connect(_on_frame_changed)
 	# **Every task added must be awaited before the engine goes away**, or the exit segfaults with no
@@ -464,26 +468,33 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.set_meta("spacesim_body", body.id)
 	system_frame.add_child(body.node)
 
-	# **The ramp is built before any map exists**, from the derived bands and a *linear* placeholder for the
-	# field's distribution; the measured one replaces it when the first bake lands. A body with no bands at all
-	# — a gas giant, whose visible surface is its deck — keeps its derived colour flat, which is what it was
-	# drawn in before.
+	# **The map is baked here, and here only** — `build()` runs inside `_ready`, so this is before the first frame
+	# and outside the frame loop. `SpacesimSurfaceMaps.prepare()` records what happens when it is moved into
+	# `_process`: the engine's RID pools are exhausted in a few minutes of flight, because a local
+	# `RenderingDevice`'s calls are render-thread-only and the device shares the driver with the frame's own.
+	#
+	# The ramp is then built from the *measured* quantiles, so the picture's band edges are the ones the map
+	# actually has. A body with no bands at all — a gas giant, whose visible surface is its deck — keeps its
+	# derived colour flat, which is what it was drawn in before.
 	var light := _light_at(body)
+	var bands: Array = []
+	var entry: SpacesimSurfaceMaps.Entry = null
 	if body.content != null:
 		body.surface_ocean_fraction = SpacesimSurfaceModel.sea_level_percentile(
 			body.content, _materials(), light.x, light.y
 		)
-		var bands := SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
-		body.mesh_material = SpacesimBodyRenderer.material_for(
-			body,
-			SpacesimBodyRenderer.surface_ramp(
-				bands, SpacesimSurfaceMaps.linear_quantiles(), body.color
-			)
-		)
-	else:
-		body.mesh_material = SpacesimBodyRenderer.material_for(
-			body, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), body.color)
-		)
+		bands = SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
+		entry = _surface_maps.prepare(body.id, body.radius, body.surface_ocean_fraction)
+	var quantiles := SpacesimSurfaceMaps.linear_quantiles()
+	if entry != null and not entry.quantiles.is_empty():
+		quantiles = entry.quantiles
+	body.mesh_material = SpacesimBodyRenderer.material_for(
+		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color)
+	)
+	if entry != null and entry.map != null:
+		var surface := body.mesh_material as ShaderMaterial
+		surface.set_shader_parameter("sea_level", entry.value_at(body.surface_ocean_fraction))
+		SpacesimBodyRenderer.apply_surface_maps(surface, entry)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(
@@ -878,7 +889,6 @@ func update_lod(camera: Camera3D) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_publish_surface_maps(body, distance, pixel)
 		# **The sun's direction, for the debug views only.** Cheap, and only while a view is on: it is the one
 		# quantity a lit picture cannot show, and the views need it against the same normal the shading uses.
 		if surface_debug != 0 and body.mesh_material is ShaderMaterial:
@@ -986,36 +996,6 @@ func _build_patch_arrays(body: SpacesimSceneBody, chunks: Array, lines: bool) ->
 ## **`is_task_completed` must be asked before `wait_for_task_completion`, never after** — waiting consumes
 ## the task, so a second question about it answers *no* and the poll silently does nothing. That mistake
 ## cost a session, and it shows up as a body with no mesh rather than as a failure.
-## **Hand a body its surface maps, when they changed.** The bake is the map cache's; this is the one place a
-## map, a sea level and a colour ramp are published together, so the shader cannot be given one body's heights
-## and another body's sea.
-##
-## The sea level is **the ocean fraction resolved through the map's own measured quantiles** — so content's
-## "70.8 % of it is water" becomes a height in the field the shader actually samples, rather than a number
-## picked twice.
-func _publish_surface_maps(body: SpacesimSceneBody, distance: float, pixel: float) -> void:
-	if body.mesh_material == null or body.content == null:
-		return
-	if body.content.kind == SpacesimSystemBody.Kind.STAR:
-		return
-	var entry := _surface_maps.map(
-		body.id, body.radius, distance, pixel, body.surface_ocean_fraction
-	)
-	if entry == null or entry.width == 0 or entry.width == body.surface_map_width:
-		return
-	body.surface_map_width = entry.width
-	var surface := body.mesh_material as ShaderMaterial
-	if surface == null:
-		return
-	var light := _light_at(body)
-	var bands := SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
-	surface.set_shader_parameter(
-		"colour_ramp", SpacesimBodyRenderer.surface_ramp(bands, entry.quantiles, body.color)
-	)
-	surface.set_shader_parameter("sea_level", entry.value_at(body.surface_ocean_fraction))
-	SpacesimBodyRenderer.apply_surface_maps(surface, entry)
-
-
 ## **Which surface debug view is on**, 0 for none — set by the game's key and published to every surface
 ## material. The views exist because a *lit* picture cannot answer questions about lighting: 1 shows the
 ## quantity Godot's diffuse uses (`N.L`), 2 shows the normal on the sphere whose shading is in question, and 3

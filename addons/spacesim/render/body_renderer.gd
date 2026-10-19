@@ -289,7 +289,7 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 		"field_amplitude", SpacesimSurfaceField.plan(body.id, body.radius).amplitude
 	)
 	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
-	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.FLOOR_WIDTH)
+	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.MAP_WIDTH)
 	material.set_shader_parameter("water_roughness", WATER_ROUGHNESS)
 	material.set_shader_parameter("water_specular", WATER_SPECULAR)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
@@ -306,10 +306,10 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 ## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
 ## second texture in the shader is a second resolution to keep in step with the picture.
 static func apply_surface_maps(material: Material, entry: SpacesimSurfaceMaps.Entry) -> void:
-	if material == null or entry == null or entry.detail == null:
+	if material == null or entry == null or entry.map == null:
 		return
 	var surface := material as ShaderMaterial
 	if surface == null:
 		return
-	surface.set_shader_parameter("height_map", entry.detail)
+	surface.set_shader_parameter("height_map", entry.map)
 	surface.set_shader_parameter("map_width", entry.width)

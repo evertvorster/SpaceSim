@@ -9,35 +9,21 @@ extends RefCounted
 
 func run(h, _root: Node) -> void:
 	print("  surface maps")
-	_test_width_law(h)
+	_test_no_bake_on_lookup(h)
 	_test_quantiles(h)
 	_test_the_ramp(h)
 
 
-## **The width worth baking at a distance**, from the law the cloud maps measured and this class clamps.
-func _test_width_law(h) -> void:
-	var radius := 6.371e6
-	var pixel := 1.297e-3
-	# Far away, the floor: a map that is 1,024 wide is what a body needs to show continents at all.
-	h.check(SpacesimSurfaceMaps.required_width(radius, 1.0e12, pixel) == SpacesimSurfaceMaps.FLOOR_WIDTH,
-		"a distant body asks for the floor width")
-	# Close in, the ceiling — 4,096 rather than the cloud field's 8,192, because the surface bake is a
-	# one-off on the frame's thread and the detail below it is the ladder's job.
-	var close := SpacesimSurfaceMaps.required_width(radius, radius + 1.0e5, pixel)
-	h.check(close == SpacesimSurfaceMaps.MAX_WIDTH,
-		"a close body asks for the ceiling and no more (%d)" % close)
-	# Monotone in distance: closing in never asks for less.
-	var previous := 0
-	var monotone := true
-	for exponent in [10, 9, 8, 7, 6]:
-		var width := SpacesimSurfaceMaps.required_width(radius, radius * pow(10.0, exponent - 6), pixel)
-		if width < previous:
-			monotone = false
-		previous = width
-	h.check(monotone, "and closing in never asks for a coarser map")
-	# Degenerate inputs are the floor rather than a division by zero.
-	h.check(SpacesimSurfaceMaps.required_width(0.0, 1.0e8, pixel) >= SpacesimSurfaceMaps.FLOOR_WIDTH,
-		"a body with no radius still gets a map")
+## **A body that was never prepared has no map, and says so** — and nothing bakes inside a frame. A cache that
+## bakes on lookup is what exhausted the engine's RID pools in flight; here that is not a policy, it is the
+## shape of the API: `map()` is a lookup and `prepare()` is called once, from the scene's build.
+func _test_no_bake_on_lookup(h) -> void:
+	var maps := SpacesimSurfaceMaps.new()
+	var entry := maps.map("planet:earth")
+	h.check(entry == null, "looking a body up does not bake it one")
+	h.check(maps.bakes() == 0, "and no bake has run")
+	h.check(not SpacesimSurfaceMaps.linear_quantiles().is_empty(),
+		"the linear placeholder a material starts with is there when a bake cannot run")
 
 
 ## **The percentile table**, measured off the map's own distribution.

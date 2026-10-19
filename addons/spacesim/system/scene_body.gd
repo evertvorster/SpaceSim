@@ -71,9 +71,7 @@ var sky_top: float = 0.0
 ## and it walks the greenhouse to get there. The surface shader's `sea_level` is this percentile *resolved
 ## through the map's measured quantiles*, which is the map cache's business.
 var surface_ocean_fraction: float = 0.0
-## The width of the surface detail map currently published to the material — **so a frame that changed
-## nothing does not re-set three uniforms and rebuild a ramp**.
-var surface_map_width: int = 0
+
 
 
 static func from_content(
