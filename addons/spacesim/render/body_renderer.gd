@@ -96,6 +96,22 @@ const WAVE_RELIEF := 0.02
 ## covers a kilometre, so this is a statement about the wave rather than about the distance.
 const WAVE_NEAR_METRES := 1.0
 const WAVE_FAR_METRES := 25.0
+## **The amplitude falloff of the octaves below the map**, and the one place the ladder deviates from the field's
+## own spectrum. Evert, 2026-10-19: *"the landscape looks too smooth now. We need a little graininess coming up when
+## we are close, but only a tiny amount."*
+##
+## The field falls at `gain` 0.5 per octave, which is `2^-1` — a self-affine surface whose slope is the same at
+## every scale. Real terrain is closer to `2^-0.8 = 0.574`: its *slope* grows as you look closer, which is why a
+## 30 m hill is tens of centimetres tall rather than millimetres. At a 1 km altitude the ladder reaches octave 20,
+## where 0.5 gives **8.7 mm** of relief and 0.574 gives **about 10 cm** — both tiny, but only one of them is there
+## at all.
+##
+## **The map keeps the field's own 0.5.** That spectrum is what the far view was calibrated on and what makes the
+## continents read at 20,000 km; this number only governs the octaves the bake never carried, so the change is
+## continuous in amplitude at the seam and differs only in the tail's slope. **0.574 is `2^-0.8`** and is the
+## physical value, not a taste — and it is deliberately *not* larger: the tail is grain, not hills.
+const DETAIL_TAIL_GAIN := 0.574
+
 ## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
 ## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
 ## only so far before it becomes a hole.
@@ -348,15 +364,21 @@ static func draws_reference_sphere(content: SpacesimSystemBody) -> bool:
 
 ## **The octave of the field's own fbm that is two texels of a `width`-wide map** — where the ladder starts.
 ##
-## `surface_height`'s octave `j` carries `base_frequency * 2^j` cycles across the sphere, so its feature is
-## `1 / (base_frequency * 2^j)` radians on the unit sphere; setting that equal to two texels (`2 * TAU / width`)
-## gives `j = log2(width / (2 * base_frequency))`. **This is why the ladder is the field rather than a second
-## texture**: the octaves below `j` are in the map, the octaves from `j` up are evaluated per pixel, and there is
-## no third case. Returns -1 for a body that should have no ladder at all.
+## `surface_height`'s octave `j` has `base_frequency * 2^j` on the unit sphere, so its feature is
+## `1 / (base_frequency * 2^j)` radians; two texels of the map span `2 * (TAU / width)` = `4 pi / width`. Setting
+## the two equal gives `j = log2(width / (4 pi * base_frequency))`.
+##
+## **The `4 pi` matters, and getting it wrong cost a band of nothing.** Written as `width / (2 * base_frequency)`
+## it was off by `log2(2 pi)` — 2.65 octaves — so at a 960-wide map the ladder started at octave 8 when the map
+## had stopped at 4, and octaves 5, 6 and 7 (160 km, 80 km, 40 km features) were drawn by neither the bake nor the
+## shader. That is the "leaves a band of nothing between them" failure the `apply_surface_maps` comment warns
+## about, and it read as the ground being too smooth. `tests/test_render.gd` now asserts the seam.
+##
+## Returns -1 for a body that should have no ladder at all.
 static func first_detail_octave(base_frequency: float, width: int) -> int:
 	if base_frequency <= 0.0 or width <= 0:
 		return -1
-	return int(round(log(float(width) / (2.0 * base_frequency)) / log(2.0)))
+	return int(round(log(float(width) / (4.0 * PI * base_frequency)) / log(2.0)))
 
 
 ## **How deep the detail ladder may go on this body**: none at all where there is no sphere to put it on.
@@ -400,6 +422,7 @@ static func surface_material(
 	))
 	material.set_shader_parameter("detail_bounding", plan.continent_bounding)
 	material.set_shader_parameter("detail_gain", plan.gain)
+	material.set_shader_parameter("detail_tail_gain", DETAIL_TAIL_GAIN)
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)

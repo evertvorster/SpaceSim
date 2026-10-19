@@ -135,7 +135,7 @@ void fragment() {
 		float wave_fade = 1.0 - smoothstep(wave_near, wave_far, pixel_metres);
 		float wave_height = surface_detail(
 			up, wave_seed, 1.0 / wave_feature, 0, wave_octaves,
-			wave_gain, wave_lacunarity, 1.0, footprint_angle
+			wave_gain, wave_gain, wave_lacunarity, 1.0, footprint_angle
 		);
 		if (wave_height != 0.0 && wave_fade > 0.0) {
 			// **The same slope the land's relief uses** — metres of height per metre of water — divided by the

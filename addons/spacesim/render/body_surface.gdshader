@@ -85,6 +85,8 @@ uniform int detail_first_octave = 0;
 // The fbm's own normaliser and spectrum, straight off the plan, so the ladder's weights are the map's.
 uniform float detail_bounding = 1.0;
 uniform float detail_gain = 0.5;
+// The falloff of the octaves the map never carried — the field's own `gain` for the ones it did.
+uniform float detail_tail_gain = 0.5;
 uniform float detail_lacunarity = 2.0;
 // How much the detail moves the *colour*, as a fraction of the band's own. **Now scaled by the field's own
 // amplitude at that octave**, which for fine octaves is a fraction of a percent — this is a knob that only
@@ -236,7 +238,7 @@ float detail = 0.0;
 		if (rungs > 0) {
 			detail = surface_detail(
 				up, detail_seed, detail_base_frequency, detail_first_octave, rungs,
-				detail_gain, detail_lacunarity, detail_bounding, footprint_angle
+				detail_gain, detail_tail_gain, detail_lacunarity, detail_bounding, footprint_angle
 			);
 		}
 	}

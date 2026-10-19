@@ -270,11 +270,14 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 // detail", it is aliasing, and it is also what makes a distant body free.
 float surface_detail(
 	vec3 unit, int seed, float base_frequency, int first_octave, int octaves,
-	float gain, float lacunarity, float bounding, float footprint
+	float gain, float tail_gain, float lacunarity, float bounding, float footprint
 ) {
 	if (octaves <= 0 || first_octave < 0) {
 		return 0.0;
 	}
+	// **Continuous with the field at the seam**: octave `first_octave` carries exactly the amplitude the field
+	// gives it, and the octaves above fade at `tail_gain` instead of `gain` — see `DETAIL_TAIL_GAIN`.
+	float amplitude = bounding * pow(gain, float(first_octave));
 	float sum = 0.0;
 	for (int rung = 0; rung < octaves; rung++) {
 		int octave = first_octave + rung;
@@ -285,9 +288,9 @@ float surface_detail(
 		if (fade > 0.0) {
 			// `seed + octave` and the same frequency the map's octave `octave` had, because `fnl_fbm3` applies its
 			// transform once and then scales by the lacunarity — so this IS octave `octave` of the field's fbm.
-			sum += fnl_fbm3(unit, seed + octave, frequency, 1, gain, lacunarity, 1.0)
-				* bounding * pow(gain, float(octave)) * fade;
+			sum += fnl_fbm3(unit, seed + octave, frequency, 1, gain, lacunarity, 1.0) * amplitude * fade;
 		}
+		amplitude *= tail_gain;
 	}
 	return sum;
 }

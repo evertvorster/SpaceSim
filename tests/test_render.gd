@@ -84,6 +84,20 @@ func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemSc
 	h.check(int(earth_material.get_shader_parameter("detail_max_rungs")) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
 		"while Earth's asks for the full depth (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
 
+	# **The ladder's seam: the octave it starts at must be the first one the map did not carry.** One texel of a
+	# `width`-wide map is `TAU / width` radians, and the field's octave `j` is `1 / (base * 2^j)`, so the start has
+	# to land near two texels — within half an octave of it, because an octave is an integer.
+	#
+	# Written as `width / (2 * base)` the start was 2.65 octaves too deep, and the octaves in the gap were drawn by
+	# neither the bake nor the shader, which read as ground that was too smooth. So the assertion is the seam, not
+	# the formula that computes it.
+	for width in [256, 512, 960, 2048, 4096]:
+		var octave := SpacesimBodyRenderer.first_detail_octave(2.5, width)
+		var feature := 1.0 / (2.5 * pow(2.0, float(octave)))
+		var texels := feature / (TAU / float(width))
+		h.check(texels >= 1.4 and texels <= 2.9,
+			"at %d wide the ladder starts %.2f texels out" % [width, texels])
+
 
 ## **The background is the real sky, and it must not become the light.**
 ##
