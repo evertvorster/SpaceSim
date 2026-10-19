@@ -320,7 +320,8 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		return
 
 	# The three uniform sets are rebuilt each frame rather than cached: the colour texture's RID can
-	# change with the render target, and a stale set is a wrong frame rather than an error. The second
+	# change with the render target, and a stale set is a wrong frame rather than an error. **Rebuilt, and
+	# freed at the end of this callback** — see the note there; forgetting the free is a RID leak per frame. The second
 	# argument says which bindings are **storage buffers** rather than images — the colour image is an
 	# image, the partials and the state are buffers, and getting that wrong is a validation error naming
 	# the binding and the set.
@@ -362,6 +363,20 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		list, ceili(size.x / float(BLOCK)), ceili(size.y / float(BLOCK)), 1
 	)
 	rd.compute_list_end()
+
+	# **Free the three sets. They are the pass's only per-frame allocation, and not freeing them was a leak
+	# of three RIDs a frame.** At 340 fps that is a thousand a second, and the engine's `UniformSet` allocator
+	# runs out in about a minute — after which *"Element limit reached"* appears at `_allocate_rid`, the **2D**
+	# renderer fails with *"Failed to create uniform set for batch"*, and the whole frame stops shading.
+	# Evert flew four and a half minutes into exactly that, and it reads as a rendering crash rather than as a
+	# leak, because the damage lands in a subsystem that has nothing to do with this pass.
+	#
+	# **Safe while the compute list is still in flight**: `RenderingDevice::free_rid` pushes the resource to
+	# be disposed of when this frame index is next processed (*"means, it's safe to do it"*, RD source), which
+	# is the same guarantee `SpacesimCloudGpu` relies on when it frees a set straight after `sync()`.
+	rd.free_rid(sample_set)
+	rd.free_rid(finalize_set)
+	rd.free_rid(apply_set)
 
 	_frames += 1
 	_status = "ready"

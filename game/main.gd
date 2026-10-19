@@ -71,11 +71,6 @@ var _skip_next_motion := false
 var _bodies_visible := true
 ## Whether the body meshes are being drawn as wireframes — see [method set_wireframe].
 var _wireframe := false
-## **Which surface debug view is on**, cycled by its own key — see the shader's `debug_mode`. Off by default
-## and printed on every change, because a debug view that can silently draw nothing reads exactly like a
-## surface that is not there.
-var _surface_debug := 0
-const DEBUG_VIEWS := ["off", "N.L only", "the normal", "plain white"]
 
 
 func _ready() -> void:
@@ -190,8 +185,6 @@ func _handle_key(event: InputEventKey) -> void:
 		_set_error_budget(_error_budget_index() - 1)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.wireframe_toggle"))):
 		set_wireframe(not _wireframe)
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.surface_debug_toggle"))):
-		set_surface_debug((_surface_debug + 1) % DEBUG_VIEWS.size())
 	elif event.keycode == KEY_ESCAPE:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
@@ -213,15 +206,6 @@ func _handle_key(event: InputEventKey) -> void:
 ##
 ## It prints what it did, because a debug view that can silently draw nothing reads exactly like a mesh
 ## that is not there.
-## Cycle the surface debug views. **The reason it exists is the exposure meter**: it scales whatever is on
-## screen to middle grey, so a screenshot of a lit planet says nothing about how much light reached it. These
-## views are the quantities themselves, and a key rather than a rig frame means the flight IS the measurement.
-func set_surface_debug(mode: int) -> void:
-	_surface_debug = clampi(mode, 0, DEBUG_VIEWS.size() - 1)
-	_system.set_surface_debug(_surface_debug)
-	print("surface debug %d: %s" % [_surface_debug, DEBUG_VIEWS[_surface_debug]])
-
-
 func set_wireframe(on: bool) -> void:
 	_wireframe = on
 	_system.wireframe = on
@@ -651,7 +635,6 @@ func _update_hud() -> void:
 				"target      %s" % target,
 				"",
 				"bodies      %s, %d triangles" % [bodies, _system.triangles()],
-				"surface     debug %s" % DEBUG_VIEWS[_surface_debug],
 				(
 					"ship        %s at %s"
 					% [

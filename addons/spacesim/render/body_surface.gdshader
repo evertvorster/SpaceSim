@@ -58,22 +58,6 @@ uniform float relief_exaggeration = 12.0;
 // The detail map's width, which is what turns a texel into an angle.
 uniform int map_width = 1024;
 
-// **The debug views, cycled by a key** (`bindings.surface_debug_toggle`), and they exist because a lit picture
-// cannot answer a question about lighting: a camera exposes for what is in front of it, so a scene that is
-// darker than the meter expects simply comes back lifted, and "the night side is lit" and "the night side is
-// bright grey through the exposure" look identical. These show the quantities themselves.
-//
-//  0  the picture
-//  1  `N.L` — exactly the term Godot's diffuse multiplies, written as EMISSION so no second lighting
-//     multiply and no albedo sit between the number and the eye. **A night side that is not black here is
-//     not a lighting fault; a night side that is black here while the picture shows it lit is.**
-//  2  the normal, on the sphere it belongs to — a sphere's normals should be a smooth radial ramp, and any
-//     seam, speckle or flat patch is the gradient or the tangent basis going wrong.
-//  3  a plain white Lambertian, so the light can be judged with no texture and no specular in the way.
-uniform int debug_mode = 0;
-// The star's direction from this body, in the same space `NORMAL` is: model space here, since a body's node
-// carries scale and no rotation. Set by the scene only while a debug view is on.
-uniform vec3 sun_direction = vec3(1.0, 0.0, 0.0);
 
 // Shading by phase, two pairs of numbers in one place. **A liquid is glossy** and its sun glint is what makes
 // an ocean read as water rather than as a dark grey patch; a frozen volatile is bright and slightly glossy;
@@ -168,20 +152,4 @@ void fragment() {
 	// enough, and the same reasoning the star's splat uses when it copies the camera basis rather than
 	// billingboarding in the material.
 	NORMAL = normalize((VIEW_MATRIX * vec4(tilted, 0.0)).xyz);
-
-	// The debug views, last so they see the normal the shading will use.
-	if (debug_mode != 0) {
-		vec3 view_sun = normalize((VIEW_MATRIX * vec4(sun_direction, 0.0)).xyz);
-		ROUGHNESS = 1.0;
-		SPECULAR = 0.0;
-		if (debug_mode == 1) {
-			ALBEDO = vec3(0.0);
-			EMISSION = vec3(clamp(dot(NORMAL, view_sun), 0.0, 1.0));
-		} else if (debug_mode == 2) {
-			ALBEDO = vec3(0.0);
-			EMISSION = NORMAL * 0.5 + 0.5;
-		} else {
-			ALBEDO = vec3(1.0);
-		}
-	}
 }
