@@ -1,0 +1,401 @@
+[gd_resource type="Resource" script_class="SpacesimMaterialTable" format=3]
+
+[ext_resource type="Script" path="res://addons/spacesim/system/content/material_table.gd" id="table"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/species.gd" id="species"]
+
+; The substances a system's compositions name. Ships with the engine: changing the density of iron
+; changes physics, not art. A system may extend it.
+;
+; Density and molar mass are standard physical values. `albedo` is the material's Bond albedo and
+; `color` its visual colour, both used by the surface derivation. Condensation temperatures are at
+; one atmosphere.
+;
+; `rayleigh` is the per-channel Rayleigh scattering cross-section, in square metres per molecule, at
+; three channel wavelengths (680, 550 and 440 nm). It is populated for the gases the authored
+; atmospheres are actually made of, and the derivation sums each species' cross-section times its
+; number density to get the mix's coefficient — see `SpacesimAtmosphereModel`.
+;
+; SOURCE. Six are **computed, not recalled**, from the refractive-index dispersion relations and
+; King correction factors in Table 1 of Wilmouth & Sayres (2019), JQSRT 234, 32-39, using the n-based
+; cross-section expression from Sneep & Ubachs (2005), JQSRT 92, 293-310. Methane uses Wilmouth &
+; Sayres' own corrected dispersion (their Eq. 4), which is 22% below the older published one.
+;
+; Two are literature values taken at face value. **Oxygen** (4.0e-31 m^2 at 550 nm, scaled by
+; wavelength to the fourth). **Hydrogen**, computed with the equivalent dilute-gas form
+; `sigma = (32 pi^3 / 3 lambda^4) ((n-1)/N0)^2 * 3/(3 - 4 rho_v)` from (n-1) = 1.320e-4 at 0 C and a
+; depolarisation ratio of 0.011 — and that form was **checked against helium before it was used**,
+; where a dispersion relation does exist: it reproduces the n-based value to four digits (6.7823e-33
+; against 6.782e-33), so hydrogen sits on the same footing as the rest.
+;
+; **Close enough is the standard here** — the guard is that Earth's mixture lands on the published
+; effective coefficient, which `tests/test_render.gd` asserts.
+; `greenhouse` is the **grey infrared mass-absorption coefficient**, m^2/kg, one band per entry --
+; the array being where more bands would go. **Each value is fixed against one measured surface
+; temperature**, which is the honest way to say it: water vapour against Earth's 288 K, CO2 against
+; Venus's 737 K, methane against Titan's 94 K. Nothing else was tuned.
+;
+; Two things make that a calibration rather than a fit. N2, O2, Ar, He and H2 are explicitly **zero** --
+; transparent in the infrared, which is correct and is why Earth's air is warmed by its water vapour
+; and not by the nitrogen that makes up 78% of it. And after those three constants are fixed, **Mars
+; and Triton are untouched checks**: Mars comes out 213 K against ~210 (its residual is the albedo,
+; not the greenhouse) and Triton 37 against 38. The ordering is right too -- water vapour absorbs far
+; more per kilogram than methane, and methane more than CO2.
+
+;
+; VISIBLE ABSORPTION, `absorption`, is the per-channel **absorption** cross-section in square metres per
+; molecule at the same 680, 550 and 440 nm as `rayleigh`, and it is what makes a sky's extinction larger
+; than its scattering. Unlike the IR `greenhouse` it says what SUNLIGHT is lost to, and it is what gives
+; the mix its single-scattering albedo `w = sigma_scatter / sigma_extinct` -- the number that decides
+; whether a thick air behaves like a mirror or like a filter.
+;
+; The gases that absorb visible light are ozone, methane and NO2. **CO2, N2 and O2 are transparent right
+; through the visible**, so no amount of absorption data will darken Venus; its air has nothing to
+; absorb with and its darkness is geometry and multiple scattering.
+;
+; **Ozone is measured, not recalled.** SOURCE: Serdyuchenko, Gorshelev, Weber, Chehade & Burrows (2014),
+; Atmos. Meas. Tech. 7, 609-624, high spectral resolution ozone cross-sections; the data set itself is
+; the Zenodo deposit the IUP Bremen group publishes (doi:10.5281/ZENODO.5793206), read at 0.01 nm over
+; 213-1100 nm. The **223 K** column is used, because that is the temperature of the ozone layer rather
+; than of the air at the ground -- the Chappuis band's own temperature dependence is under 1% between
+; 193 and 293 K, so the choice is almost free, but 223 K is the honest one. Values are **vacuum
+; wavelengths**, which sit within 0.2 nm of the air wavelengths the engine's channels are named at.
+; The band peaks at 5.15e-21 cm2/molecule at 603 nm, and a 300 DU column comes to 2.6% absorbed at
+; 550 nm -- which is the check the table is judged against, rather than the values being taken on trust.
+;
+; Methane's visible bands (619, 665.7 and 703.6 nm, for Titan) are **not in yet**. That is a named gap:
+; zero here means the species is transparent at that wavelength, per the rule `rayleigh` already follows.
+
+[sub_resource type="Resource" id="Sp_iron"]
+script = ExtResource("species")
+species_name = "iron"
+domain = 0
+density = 7874.0
+molar_mass = 55.845
+albedo = 0.1
+color = Color(0.55, 0.5, 0.47, 1)
+condensation_temperature = 1811.0
+
+[sub_resource type="Resource" id="Sp_nickel"]
+script = ExtResource("species")
+species_name = "nickel"
+domain = 0
+density = 8908.0
+molar_mass = 58.693
+albedo = 0.15
+color = Color(0.62, 0.62, 0.6, 1)
+condensation_temperature = 1728.0
+
+[sub_resource type="Resource" id="Sp_silicate"]
+script = ExtResource("species")
+species_name = "silicate"
+domain = 0
+density = 3300.0
+molar_mass = 60.084
+albedo = 0.15
+color = Color(0.55, 0.45, 0.35, 1)
+condensation_temperature = 1983.0
+
+[sub_resource type="Resource" id="Sp_sulfur"]
+script = ExtResource("species")
+species_name = "sulfur"
+domain = 0
+density = 2070.0
+molar_mass = 32.06
+albedo = 0.1
+color = Color(0.85, 0.8, 0.35, 1)
+condensation_temperature = 388.0
+
+[sub_resource type="Resource" id="Sp_carbon"]
+script = ExtResource("species")
+species_name = "carbon"
+domain = 0
+density = 2267.0
+molar_mass = 12.011
+albedo = 0.05
+color = Color(0.15, 0.15, 0.16, 1)
+condensation_temperature = 3915.0
+
+[sub_resource type="Resource" id="Sp_magnesium"]
+script = ExtResource("species")
+species_name = "magnesium"
+domain = 0
+density = 1738.0
+molar_mass = 24.305
+albedo = 0.15
+color = Color(0.62, 0.62, 0.6, 1)
+condensation_temperature = 923.0
+
+[sub_resource type="Resource" id="Sp_silicon"]
+script = ExtResource("species")
+species_name = "silicon"
+domain = 0
+density = 2329.0
+molar_mass = 28.085
+albedo = 0.15
+color = Color(0.45, 0.45, 0.5, 1)
+condensation_temperature = 1687.0
+
+[sub_resource type="Resource" id="Sp_water_ice"]
+script = ExtResource("species")
+species_name = "water_ice"
+domain = 0
+density = 917.0
+molar_mass = 18.015
+albedo = 0.6
+color = Color(0.85, 0.9, 0.95, 1)
+condensation_temperature = 273.15
+; sublimation; 273.16 K is the triple point, which is the only 1-atm reference a solid has
+latent_heat = 51000.0
+
+[sub_resource type="Resource" id="Sp_ammonia_ice"]
+script = ExtResource("species")
+species_name = "ammonia_ice"
+domain = 0
+density = 817.0
+molar_mass = 17.031
+albedo = 0.55
+color = Color(0.8, 0.85, 0.8, 1)
+condensation_temperature = 195.4
+
+[sub_resource type="Resource" id="Sp_methane_ice"]
+script = ExtResource("species")
+species_name = "methane_ice"
+domain = 0
+density = 450.0
+molar_mass = 16.043
+albedo = 0.5
+color = Color(0.82, 0.78, 0.72, 1)
+; same species, solid phase: the 1-atm reference is still the boiling point
+condensation_temperature = 111.7
+latent_heat = 8170.0
+
+[sub_resource type="Resource" id="Sp_hydrogen_metallic"]
+script = ExtResource("species")
+species_name = "hydrogen_metallic"
+domain = 1
+density = 1000.0
+molar_mass = 2.016
+albedo = 0.05
+color = Color(0.55, 0.45, 0.7, 1)
+condensation_temperature = 0.0
+
+[sub_resource type="Resource" id="Sp_hydrogen"]
+script = ExtResource("species")
+species_name = "hydrogen"
+domain = 2
+density = 0.08988
+molar_mass = 2.016
+heat_capacity = 14304.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.8, 0.82, 0.9, 1)
+rayleigh = Vector3(3.789e-32, 8.854e-32, 2.162e-31)
+condensation_temperature = 20.3
+
+[sub_resource type="Resource" id="Sp_helium"]
+script = ExtResource("species")
+species_name = "helium"
+domain = 2
+density = 0.1786
+molar_mass = 4.003
+heat_capacity = 5193.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.85, 0.85, 0.88, 1)
+rayleigh = Vector3(2.887e-33, 6.782e-33, 1.670e-32)
+condensation_temperature = 4.2
+
+[sub_resource type="Resource" id="Sp_nitrogen"]
+script = ExtResource("species")
+species_name = "nitrogen"
+domain = 2
+density = 1.251
+molar_mass = 28.014
+heat_capacity = 1040.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.75, 0.78, 0.85, 1)
+rayleigh = Vector3(1.956e-31, 4.631e-31, 1.156e-30)
+condensation_temperature = 77.4
+
+[sub_resource type="Resource" id="Sp_oxygen"]
+script = ExtResource("species")
+species_name = "oxygen"
+domain = 2
+density = 1.429
+molar_mass = 31.998
+heat_capacity = 918.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.6, 0.72, 0.9, 1)
+rayleigh = Vector3(1.712e-31, 4.000e-31, 9.766e-31)
+condensation_temperature = 90.2
+
+[sub_resource type="Resource" id="Sp_carbon_dioxide"]
+script = ExtResource("species")
+species_name = "carbon_dioxide"
+domain = 2
+density = 1.977
+molar_mass = 44.009
+heat_capacity = 844.0
+greenhouse = PackedFloat32Array(0.0001397)
+albedo = 0.0
+color = Color(0.8, 0.78, 0.7, 1)
+rayleigh = Vector3(4.895e-31, 1.164e-30, 2.923e-30)
+condensation_temperature = 194.7
+; 194.7 K is the sublimation point at 1 atm, which IS a 1-atm reference
+latent_heat = 25000.0
+
+[sub_resource type="Resource" id="Sp_argon"]
+script = ExtResource("species")
+species_name = "argon"
+domain = 2
+density = 1.784
+molar_mass = 39.948
+heat_capacity = 520.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.75, 0.78, 0.85, 1)
+rayleigh = Vector3(1.687e-31, 3.991e-31, 9.943e-31)
+condensation_temperature = 83.8
+
+[sub_resource type="Resource" id="Sp_water_vapour"]
+script = ExtResource("species")
+species_name = "water_vapour"
+domain = 2
+density = 0.804
+molar_mass = 18.015
+heat_capacity = 1890.0
+greenhouse = PackedFloat32Array(0.01343)
+albedo = 0.0
+color = Color(0.85, 0.9, 0.95, 1)
+; water's 1-atm vapour pressure is at its BOILING point, 373.15 K
+; - 273.15 is its triple point, a different reference, and using it made the dew point 60 K too low
+condensation_temperature = 373.15
+latent_heat = 40650.0
+
+[sub_resource type="Resource" id="Sp_methane"]
+script = ExtResource("species")
+species_name = "methane"
+domain = 2
+density = 0.657
+molar_mass = 16.043
+heat_capacity = 2190.0
+greenhouse = PackedFloat32Array(0.0001961)
+albedo = 0.0
+color = Color(0.8, 0.75, 0.68, 1)
+rayleigh = Vector3(4.045e-31, 9.702e-31, 2.470e-30)
+; methane's normal boiling point; 90.7 is its triple point
+condensation_temperature = 111.7
+latent_heat = 8170.0
+
+[sub_resource type="Resource" id="Sp_ammonia"]
+script = ExtResource("species")
+species_name = "ammonia"
+domain = 2
+density = 0.769
+molar_mass = 17.031
+heat_capacity = 2190.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.78, 0.82, 0.78, 1)
+condensation_temperature = 239.8
+; 239.8 K is already the normal boiling point
+latent_heat = 23400.0
+
+[sub_resource type="Resource" id="Sp_sulfur_dioxide"]
+script = ExtResource("species")
+species_name = "sulfur_dioxide"
+domain = 2
+density = 2.628
+molar_mass = 64.066
+heat_capacity = 640.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.85, 0.82, 0.62, 1)
+condensation_temperature = 263.1
+
+[sub_resource type="Resource" id="Sp_neon"]
+script = ExtResource("species")
+species_name = "neon"
+domain = 2
+density = 0.9002
+molar_mass = 20.18
+heat_capacity = 1030.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.8, 0.85, 0.9, 1)
+condensation_temperature = 24.6
+
+;
+; **A trace species that carries Earth's entire visible absorption.** Its Rayleigh scattering is three
+; orders below nitrogen's at the same wavelengths *and* it is present at 0.4 parts per million, so it is
+; left at zero -- a statement about the mix, not a missing measurement. Its IR greenhouse is likewise
+; left at zero and IS a gap, but a harmless one: at this mole fraction it could not move Earth's 288 K
+; calibration either way.
+[sub_resource type="Resource" id="Sp_ozone"]
+script = ExtResource("species")
+species_name = "ozone"
+domain = 2
+density = 2.144
+molar_mass = 47.998
+heat_capacity = 820.0
+greenhouse = PackedFloat32Array(0.0)
+albedo = 0.0
+color = Color(0.6, 0.75, 0.95, 1)
+absorption = Vector3(1.31135e-25, 3.27083e-25, 1.31710e-26)
+condensation_temperature = 0.0
+
+[sub_resource type="Resource" id="Sp_ocean"]
+script = ExtResource("species")
+species_name = "ocean"
+domain = 1
+density = 1025.0
+molar_mass = 18.015
+albedo = 0.06
+color = Color(0.05, 0.15, 0.35, 1)
+condensation_temperature = 273.15
+
+[sub_resource type="Resource" id="Sp_ice_cap"]
+script = ExtResource("species")
+species_name = "ice_cap"
+domain = 0
+density = 917.0
+molar_mass = 18.015
+albedo = 0.75
+color = Color(0.95, 0.97, 1, 1)
+condensation_temperature = 273.15
+
+[sub_resource type="Resource" id="Sp_nitrogen_ice"]
+script = ExtResource("species")
+species_name = "nitrogen_ice"
+domain = 0
+density = 1026.0
+molar_mass = 28.014
+albedo = 0.6
+color = Color(0.88, 0.92, 0.96, 1)
+condensation_temperature = 63.15
+
+[sub_resource type="Resource" id="Sp_regolith"]
+script = ExtResource("species")
+species_name = "regolith"
+domain = 0
+density = 1500.0
+molar_mass = 60.084
+albedo = 0.12
+color = Color(0.45, 0.4, 0.35, 1)
+condensation_temperature = 0.0
+
+[sub_resource type="Resource" id="Sp_vegetation"]
+script = ExtResource("species")
+species_name = "vegetation"
+domain = 0
+density = 700.0
+molar_mass = 30.0
+albedo = 0.15
+color = Color(0.2, 0.4, 0.18, 1)
+condensation_temperature = 0.0
+
+[resource]
+script = ExtResource("table")
+species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ozone"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])

@@ -1,0 +1,25 @@
+# Godot 4+ generated
+.godot/
+.import/
+/android/
+
+# Imported translations
+*.translation
+
+# C# / Mono
+.mono/
+data_*/
+mono_crash.*.json
+
+# GDExtension native builds
+/build/
+*.so
+*.dll
+*.dylib
+*.dll.so
+
+# Misc
+*.tmp
+
+# NOTE: export_presets.cfg is intentionally NOT ignored — it is project
+# configuration, not a build artifact.

@@ -1,0 +1,30 @@
+shader_type spatial;
+render_mode cull_back, diffuse_burley, specular_schlick_ggx;
+
+// The surface layer: **a flat Lambertian in the body's derived albedo**, and nothing else.
+//
+// There is no mapping here and none is disabled. The previous attempt varied this albedo over a 3D noise
+// field, blended two colour stops by the field's height and bumped the normal with its gradient — and it
+// was the documented cause of a **black surface**, on airless bodies and on Earth alike. It went first to
+// zero (`relief` 0, both stops the same colour) and then out entirely, so it cannot come back by a default.
+//
+// A surface mapping is a feature to be designed, with its own document, on a surface that subdivides —
+// and the two things this shader is not allowed to do again are worth stating while the old code is still
+// in recent memory:
+//
+//   * **do not sample the field in world metres.** A planet is millions of metres across and the field is
+//     tens of voxels, so adjacent pixels land ~64 km apart in it: a dense cloud of dots rather than
+//     structure, made worse by float32 spacing at astronomical coordinates. If a field is sampled at all,
+//     it is sampled at a **unit direction**.
+//   * **do not put the air's arithmetic in a material.** Air is one integral in one place; a per-material
+//     approximation beside it applies the same air twice, and the two cannot be tuned together.
+
+uniform vec3 base_color : source_color = vec3(0.5, 0.5, 0.5);
+uniform float roughness_value : hint_range(0.0, 1.0) = 0.9;
+uniform float specular_value : hint_range(0.0, 1.0) = 0.2;
+
+void fragment() {
+	ALBEDO = base_color;
+	ROUGHNESS = roughness_value;
+	SPECULAR = specular_value;
+}

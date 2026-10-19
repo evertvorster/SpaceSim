@@ -1,0 +1,1238 @@
+[gd_resource type="Resource" script_class="SpacesimSolarSystem" format=3]
+
+[ext_resource type="Script" path="res://addons/spacesim/system/content/solar_system.gd" id="system"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/framing.gd" id="framing"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/system_body.gd" id="body"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/layer.gd" id="layer"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/orbit.gd" id="orbit"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/atmosphere.gd" id="atmosphere"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/surface.gd" id="surface"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/overrides.gd" id="overrides"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/cloud_layer.gd" id="cloud_layer"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/clouds.gd" id="clouds"]
+
+; SOL — the development and calibration system.
+;
+; There is no Sol in the shipped game: every system the player visits is generated. This file
+; exists so the derivation can be built and falsified against real values (Earth's 288 K, Venus's
+; 737 K, the Moon's day/night contrast) before a generator exists.
+;
+; SOURCES. Physical data (mass, radius, rotation, obliquity, surface pressure, composition) from
+; the NASA/NSSDC planetary fact sheets, 2025-03-18 edition. Orbital elements at J2000 from JPL
+; SSD "Approximate Positions of the Planets" (Table 1, mean ecliptic and equinox of J2000, valid
+; 1800-2050), converted here to argument of periapsis (longitude of perihelion minus longitude of
+; ascending node) and mean anomaly at epoch (mean longitude minus longitude of perihelion).
+;
+; CONVENTIONS. Metres, kilograms, seconds, kelvin, pascals, degrees. A layer's `radius` is its
+; OUTER BOUNDARY. `rotation_period` is always positive: retrograde is `axial_tilt > 90` (Venus
+; 177.4, Uranus 97.77). Angles are degrees.
+;
+; THREE THINGS THAT ARE DELIBERATELY INCOMPLETE:
+;
+; 1. MASS IS AUTHORED FOR EVERY BODY. The derivation should produce mass from the layers, and cannot
+;    yet: a constant-density layer model ignores self-compression, so Earth comes out at 4.449e24 kg
+;    against a real 5.972e24 — 26% light, because the real inner core is ~13,000 kg/m3 rather than
+;    iron's 7,874 at room pressure. That error would put every moon's period 12% out, so the real
+;    masses are authored and the layers stand ready for when a compression model exists. Gas giants
+;    have a second reason: a smoothly compressed hydrogen envelope is not a constant-density layer
+;    either. 0.0 still means "derive it", and nothing does yet.
+; 2. MOON ORBITS ARE EXPRESSED IN THE SYSTEM FRAME, not around their planet's equator. A moon's
+;    natural reference plane is its planet's equatorial or Laplace plane, and using it needs the
+;    planet's pole ORIENTATION — the content carries an obliquity but not the direction of the pole.
+;    Until it does, published inclinations are used as-is against the system frame, which for the
+;    Galileans is worth about three degrees (Jupiter's own obliquity). Each moon's initial mean
+;    anomaly is not sourced and is 0: that places it somewhere on its orbit rather than nowhere.
+;    Their interior structures are also much less well constrained than the planets', and are
+;    approximate.
+; 3. THE SUN'S LAYERS ARE ONE BULK LAYER. Its mass is authored, so no density profile is needed to
+;    get mass; the layer exists to carry composition, which the spectral and temperature derivation
+;    reads. A core/radiative/convective split adds nothing the model currently uses.
+;
+; The moons' periods are a real check rather than decoration: from a real semi-major axis and a real
+; parent mass they come out within 0.2% of the measured values (Luna 27.28 days, Io 1.769,
+; Ganymede 7.155, Titan 15.951).
+;
+; Trace solar abundances are approximate: hydrogen and helium are the standard mass fractions, the
+; minor species are close but not sourced to the last digit.
+
+[sub_resource type="Resource" id="Framing_sol"]
+script = ExtResource("framing")
+system_band = Vector2(10000, 10000000000000)
+atmosphere_band = Vector2(2000, 400000)
+surface_band = Vector2(100, 5000)
+atmosphere_altitude = 100000.0
+surface_altitude = 2000.0
+pad_size = 4000.0
+
+; ---------- layers ----------
+
+[sub_resource type="Resource" id="Ov_sol"]
+script = ExtResource("overrides")
+set = PackedStringArray("luminosity")
+luminosity = 3.828e+26
+
+[sub_resource type="Resource" id="L_sol"]
+script = ExtResource("layer")
+layer_name = "bulk"
+radius = 695700000.0
+composition = Dictionary[String, float]({
+"carbon": 0.0029,
+"helium": 0.2485,
+"hydrogen": 0.7346,
+"iron": 0.0016,
+"magnesium": 0.0008,
+"neon": 0.0012,
+"nitrogen": 0.0011,
+"oxygen": 0.0077,
+"silicon": 0.0009,
+"sulfur": 0.0007
+})
+
+[sub_resource type="Resource" id="L_mercury_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 2020000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_mercury_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 2439500.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_venus_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 3200000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_venus_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 6022000.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_venus_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 6052000.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_earth_inner_core"]
+script = ExtResource("layer")
+layer_name = "inner_core"
+radius = 1220000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_earth_outer_core"]
+script = ExtResource("layer")
+layer_name = "outer_core"
+radius = 3480000.0
+composition = Dictionary[String, float]({
+"iron": 0.8,
+"nickel": 0.05,
+"sulfur": 0.15
+})
+
+[sub_resource type="Resource" id="L_earth_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 6341000.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_earth_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 6371000.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_mars_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 1700000.0
+composition = Dictionary[String, float]({
+"iron": 0.8,
+"nickel": 0.1,
+"sulfur": 0.1
+})
+
+[sub_resource type="Resource" id="L_mars_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 3339500.0
+composition = Dictionary[String, float]({
+"iron": 0.05,
+"silicate": 0.95
+})
+
+[sub_resource type="Resource" id="L_mars_crust"]
+script = ExtResource("layer")
+layer_name = "crust"
+radius = 3389500.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_jupiter_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 14000000.0
+composition = Dictionary[String, float]({
+"iron": 0.45,
+"silicate": 0.55
+})
+
+[sub_resource type="Resource" id="L_jupiter_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 69911000.0
+composition = Dictionary[String, float]({
+"helium": 0.1,
+"hydrogen": 0.9
+})
+
+[sub_resource type="Resource" id="L_saturn_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 12000000.0
+composition = Dictionary[String, float]({
+"iron": 0.5,
+"silicate": 0.5
+})
+
+[sub_resource type="Resource" id="L_saturn_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 60268000.0
+composition = Dictionary[String, float]({
+"helium": 0.06,
+"hydrogen": 0.94
+})
+
+[sub_resource type="Resource" id="L_uranus_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 5000000.0
+composition = Dictionary[String, float]({
+"iron": 0.45,
+"silicate": 0.55
+})
+
+[sub_resource type="Resource" id="L_uranus_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 25559000.0
+composition = Dictionary[String, float]({
+"helium": 0.15,
+"hydrogen": 0.85
+})
+
+[sub_resource type="Resource" id="L_neptune_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 5000000.0
+composition = Dictionary[String, float]({
+"iron": 0.45,
+"silicate": 0.55
+})
+
+[sub_resource type="Resource" id="L_neptune_envelope"]
+script = ExtResource("layer")
+layer_name = "envelope"
+radius = 24764000.0
+composition = Dictionary[String, float]({
+"helium": 0.2,
+"hydrogen": 0.8
+})
+
+; ---------- moon layers (approximate: their interiors are much less constrained than the planets')
+
+[sub_resource type="Resource" id="L_luna_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 330000.0
+composition = Dictionary[String, float]({
+"iron": 0.8,
+"sulfur": 0.2
+})
+
+[sub_resource type="Resource" id="L_luna_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 1737400.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_io_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 940000.0
+composition = Dictionary[String, float]({
+"iron": 0.8,
+"nickel": 0.2
+})
+
+[sub_resource type="Resource" id="L_io_mantle"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 1821600.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_europa_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 650000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_europa_rock"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 1499400.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_europa_ice"]
+script = ExtResource("layer")
+layer_name = "ice_shell"
+radius = 1560800.0
+composition = Dictionary[String, float]({
+"water_ice": 1.0
+})
+
+[sub_resource type="Resource" id="L_ganymede_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 1000000.0
+composition = Dictionary[String, float]({
+"iron": 0.85,
+"nickel": 0.15
+})
+
+[sub_resource type="Resource" id="L_ganymede_rock"]
+script = ExtResource("layer")
+layer_name = "mantle"
+radius = 1834000.0
+composition = Dictionary[String, float]({
+"silicate": 1.0
+})
+
+[sub_resource type="Resource" id="L_ganymede_ice"]
+script = ExtResource("layer")
+layer_name = "ice_shell"
+radius = 2634100.0
+composition = Dictionary[String, float]({
+"water_ice": 1.0
+})
+
+[sub_resource type="Resource" id="L_callisto_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 900000.0
+composition = Dictionary[String, float]({
+"iron": 0.4,
+"silicate": 0.6
+})
+
+[sub_resource type="Resource" id="L_callisto_ice"]
+script = ExtResource("layer")
+layer_name = "ice_shell"
+radius = 2410300.0
+composition = Dictionary[String, float]({
+"water_ice": 1.0
+})
+
+[sub_resource type="Resource" id="L_titan_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 2000000.0
+composition = Dictionary[String, float]({
+"iron": 0.35,
+"silicate": 0.65
+})
+
+[sub_resource type="Resource" id="L_titan_ice"]
+script = ExtResource("layer")
+layer_name = "ice_shell"
+radius = 2574700.0
+composition = Dictionary[String, float]({
+"water_ice": 1.0
+})
+
+[sub_resource type="Resource" id="L_triton_core"]
+script = ExtResource("layer")
+layer_name = "core"
+radius = 900000.0
+composition = Dictionary[String, float]({
+"iron": 0.4,
+"silicate": 0.6
+})
+
+[sub_resource type="Resource" id="L_triton_ice"]
+script = ExtResource("layer")
+layer_name = "ice_shell"
+radius = 1353400.0
+composition = Dictionary[String, float]({
+"water_ice": 1.0
+})
+
+; ---------- atmospheres ----------
+
+[sub_resource type="Resource" id="A_venus"]
+; **Venus is why `atmospheric_rotation_period` has to exist.** Its air superrotates -- it circles the
+; planet in about 4 days while the planet itself takes 243, a factor of 61 -- which moves its band scale
+; from ~31,800 km to ~4,080 and its cells from 0.07 to 0.58. `wind_speed` is the ~100 m/s
+; superrotation, which is what puts its band scale at the planet's own size and makes the model say
+; FEATURELESS. **Both rotations give FEATURELESS**, so the field is about the numbers a map is built
+; from rather than about the verdict; `tests/test_clouds.gd` asserts both. See `SpacesimCloudModel`.
+script = ExtResource("atmosphere")
+surface_pressure = 9200000.0
+species = Dictionary[String, float]({
+"carbon_dioxide": 0.965,
+"nitrogen": 0.035
+})
+atmospheric_rotation_period = 345600.0
+wind_speed = 100.0
+
+[sub_resource type="Resource" id="A_earth"]
+; **Ozone's mole fraction is DERIVED from the column, not chosen.** The model treats every absorber as
+; well mixed with the air, while the real ozone sits in a layer around 25 km -- so the honest way to put
+; the right amount in is to match the COLUMN: Earth's 300 DU is 8.06e22 molecules per square metre, and a
+; well-mixed profile needs `n_surface * H = 8.06e22`, which at 288 K and one atmosphere is 3.8e-7.
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"argon": 0.00934,
+"carbon_dioxide": 0.00036,
+"nitrogen": 0.78084,
+"oxygen": 0.20946,
+"ozone": 0.00000038,
+"water_vapour": 0.01
+})
+variable_species = PackedStringArray("water_vapour")
+; A synoptic eddy velocity, ~10 m/s: the velocity scale the band law takes, not a peak wind. Earth has
+; no `atmospheric_rotation_period`, so its air turns with the body and `rotation_period` is right.
+wind_speed = 10.0
+
+[sub_resource type="Resource" id="A_mars"]
+script = ExtResource("atmosphere")
+surface_pressure = 610.0
+species = Dictionary[String, float]({
+"argon": 0.0193,
+"carbon_dioxide": 0.9527,
+"nitrogen": 0.028
+})
+; Mars's mean wind, from the dust-storm climatology. It has no deck to move yet - there is no
+; water in its mix - so this is here for the day there is.
+wind_speed = 10.0
+
+[sub_resource type="Resource" id="A_titan"]
+script = ExtResource("atmosphere")
+surface_pressure = 146700.0
+species = Dictionary[String, float]({
+"hydrogen": 0.0025,
+"methane": 0.0555,
+"nitrogen": 0.942
+})
+; Titan's winds are very light: about 1 m/s at the surface, and the superrotating jet aloft is
+; a separate thing this model does not carry.
+wind_speed = 1.0
+
+[sub_resource type="Resource" id="A_triton"]
+script = ExtResource("atmosphere")
+surface_pressure = 1.4
+species = Dictionary[String, float]({
+"methane": 0.0001,
+"nitrogen": 0.9999
+})
+; Triton's thin nitrogen atmosphere; a light wind is all its 1.4 Pa can move.
+wind_speed = 10.0
+
+; ---------- gas giants ----------
+;
+; **A giant's "surface" is the 1-bar level**, and that is a convention rather than a boundary: there
+; is no liquid to land on. Hydrogen's critical point is 33.15 K at 13.2 bar, and the 1-bar level of
+; every giant here is far above that, so the H2/He envelope is a **supercritical fluid** from the
+; cloud tops down to metallic hydrogen -- no sharp gas/liquid interface exists at any depth
+; (Wikipedia, Atmosphere of Jupiter). 1 bar is the standard level for a giant's radius, which is
+; what `radius` above already is.
+;
+; The visible clouds condense between roughly 0.5 and 10 bar (water deepest, then ammonium
+; hydrosulfide, then ammonia: the main deck on Jupiter sits near 1.5 bar), so the 1-bar floor sits
+; just above what you would actually see. Close enough, and it is the convention.
+;
+; **Composition is the three species that dominate**, and trace absorbers (ammonia, water, hydrogen
+; sulfide) are deliberately absent until their Rayleigh cross-sections exist -- around 0.06% of the
+; mix, so the scattering is unaffected, but they matter for the greenhouse stage later.
+;
+; Temperatures are the **measured** 1-bar values and are **pinned** through `overrides`, because a
+; giant radiates more than it receives: Jupiter's equilibrium temperature is ~101 K against a
+; measured 165 K, and internal heat is most of the budget. `reference_temperature()` reads the pin.
+
+[sub_resource type="Resource" id="A_jupiter"]
+; A ~50 m/s mean zonal wind, against peaks nearer 150: the band law wants the mean. No
+; `atmospheric_rotation_period`, because a giant's 9.9-hour rotation *is* its atmosphere's.
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+; **Ammonia and water are added because without them Jupiter has no deck to draw OR to colour.** 0.26 %
+; NH3 and 0.4 % H2O are the Galileo probe's deep values; the hydrogen takes the difference so the mix
+; still sums to one. They are what makes the ammonia deck at ~0.6 bar, the ammonium hydrosulphide deck
+; below it and the water deck below that — the stack whose colours ARE Jupiter.
+species = Dictionary[String, float]({
+"ammonia": 0.0026,
+"helium": 0.136,
+"hydrogen": 0.8544,
+"methane": 0.003,
+"water_vapour": 0.004
+})
+wind_speed = 50.0
+
+[sub_resource type="Resource" id="A_saturn"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+; Ammonia is **depleted** here relative to Jupiter — 0.02 % against 0.26 % — because Saturn's ammonia
+; rains out into the deeper cloud, which is a real measured difference and not a typo.
+species = Dictionary[String, float]({
+"ammonia": 0.0002,
+"helium": 0.0335,
+"hydrogen": 0.9608,
+"methane": 0.0045,
+"water_vapour": 0.001
+})
+; Saturn's mean zonal wind. Peaks near 400-500 in the equatorial jet; the band law wants
+; the mean, the same convention Jupiter's 50 m/s uses.
+wind_speed = 100.0
+
+[sub_resource type="Resource" id="A_uranus"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"helium": 0.15,
+"hydrogen": 0.83,
+"methane": 0.02
+})
+; Uranus's mean zonal wind. **Its winds are fast - peaks near 200 - and it is still the blandest
+; planet measured**, which is internal heat (§ `internal_heat_flux` 0.042) rather than dynamics. So the
+; band law will give it structure and the light will have to earn it back.
+wind_speed = 100.0
+
+[sub_resource type="Resource" id="A_neptune"]
+script = ExtResource("atmosphere")
+surface_pressure = 101325.0
+species = Dictionary[String, float]({
+"helium": 0.19,
+"hydrogen": 0.795,
+"methane": 0.015
+})
+; Neptune's mean zonal wind: the fastest in the system, peaks near 400.
+wind_speed = 200.0
+
+[sub_resource type="Resource" id="Ovr_jupiter"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 165.0
+
+[sub_resource type="Resource" id="Ovr_saturn"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 135.0
+
+[sub_resource type="Resource" id="Ovr_uranus"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 76.0
+
+[sub_resource type="Resource" id="Ovr_neptune"]
+script = ExtResource("overrides")
+set = PackedStringArray("mean_surface_temperature")
+mean_surface_temperature = 72.0
+
+; ---------- surfaces ----------
+
+[sub_resource type="Resource" id="S_mercury"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+[sub_resource type="Resource" id="S_venus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+[sub_resource type="Resource" id="S_earth"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"ocean": 0.708,
+"regolith": 0.192,
+"vegetation": 0.1
+})
+
+[sub_resource type="Resource" id="S_mars"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+[sub_resource type="Resource" id="S_luna"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 1.0
+})
+
+[sub_resource type="Resource" id="S_io"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 0.3,
+"sulfur": 0.7
+})
+
+[sub_resource type="Resource" id="S_europa"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"water_ice": 1.0
+})
+
+[sub_resource type="Resource" id="S_ganymede"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 0.4,
+"water_ice": 0.6
+})
+
+[sub_resource type="Resource" id="S_callisto"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"regolith": 0.7,
+"water_ice": 0.3
+})
+
+[sub_resource type="Resource" id="S_titan"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"methane_ice": 0.4,
+"regolith": 0.6
+})
+
+[sub_resource type="Resource" id="S_triton"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"methane_ice": 0.5,
+"nitrogen_ice": 0.5
+})
+
+; ---------- orbits (J2000) ----------
+
+[sub_resource type="Resource" id="O_mercury"]
+script = ExtResource("orbit")
+semi_major_axis = 57909226541.52439
+eccentricity = 0.20563593
+inclination = 7.00497902
+ascending_node = 48.33076593
+argument_of_periapsis = 29.12703035
+mean_anomaly_at_epoch = 174.79252722
+
+[sub_resource type="Resource" id="O_venus"]
+script = ExtResource("orbit")
+semi_major_axis = 108209474537.37917
+eccentricity = 0.00677672
+inclination = 3.39467605
+ascending_node = 76.67984255
+argument_of_periapsis = 54.92262463
+mean_anomaly_at_epoch = 50.37663232
+
+[sub_resource type="Resource" id="O_earth"]
+script = ExtResource("orbit")
+semi_major_axis = 149598261150.4425
+eccentricity = 0.01671123
+inclination = -1.531e-05
+ascending_node = 0.0
+argument_of_periapsis = 102.93768193
+mean_anomaly_at_epoch = -2.47311027
+
+[sub_resource type="Resource" id="O_mars"]
+script = ExtResource("orbit")
+semi_major_axis = 227943822427.57306
+eccentricity = 0.0933941
+inclination = 1.84969142
+ascending_node = 49.55953891
+argument_of_periapsis = 286.4968315
+mean_anomaly_at_epoch = 19.39019754
+
+[sub_resource type="Resource" id="O_jupiter"]
+script = ExtResource("orbit")
+semi_major_axis = 778340816692.7108
+eccentricity = 0.04838624
+inclination = 1.30439695
+ascending_node = 100.47390909
+argument_of_periapsis = 274.25457074
+mean_anomaly_at_epoch = 19.66796068
+
+[sub_resource type="Resource" id="O_saturn"]
+script = ExtResource("orbit")
+semi_major_axis = 1426666414179.921
+eccentricity = 0.05386179
+inclination = 2.48599187
+ascending_node = 113.66242448
+argument_of_periapsis = 338.93645383
+mean_anomaly_at_epoch = 317.35536592
+
+[sub_resource type="Resource" id="O_uranus"]
+script = ExtResource("orbit")
+semi_major_axis = 2870658170655.7324
+eccentricity = 0.04725744
+inclination = 0.77263783
+ascending_node = 74.01692503
+argument_of_periapsis = 96.93735127
+mean_anomaly_at_epoch = 142.28382821
+
+[sub_resource type="Resource" id="O_neptune"]
+script = ExtResource("orbit")
+semi_major_axis = 4498396417009.467
+eccentricity = 0.00859048
+inclination = 1.77004347
+ascending_node = 131.78422574
+argument_of_periapsis = 273.18053653
+mean_anomaly_at_epoch = -100.08479196
+
+; ---------- moon orbits ----------
+;
+; Measured semi-major axes, eccentricities and inclinations. The angles of orientation and the
+; initial phase are not sourced (see the header), and they are relative to the system frame rather
+; than to their planet's equator — the honest simplification until content carries a pole direction.
+
+[sub_resource type="Resource" id="O_luna"]
+script = ExtResource("orbit")
+semi_major_axis = 384400000.0
+eccentricity = 0.0549
+inclination = 5.145
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="O_io"]
+script = ExtResource("orbit")
+semi_major_axis = 421700000.0
+eccentricity = 0.0041
+inclination = 0.036
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="O_europa"]
+script = ExtResource("orbit")
+semi_major_axis = 671034000.0
+eccentricity = 0.009
+inclination = 0.466
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="O_ganymede"]
+script = ExtResource("orbit")
+semi_major_axis = 1070412000.0
+eccentricity = 0.0013
+inclination = 0.177
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="O_callisto"]
+script = ExtResource("orbit")
+semi_major_axis = 1882709000.0
+eccentricity = 0.0074
+inclination = 0.192
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="O_titan"]
+script = ExtResource("orbit")
+semi_major_axis = 1221870000.0
+eccentricity = 0.0288
+inclination = 0.34854
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="O_triton"]
+script = ExtResource("orbit")
+semi_major_axis = 354759000.0
+eccentricity = 1.6e-05
+inclination = 156.885
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+; ---------- cloud decks (authored for now; derived from the atmosphere later)
+;
+; These carry the albedo as well as the look, because **clouds dominate a planet's reflection**:
+; without them Earth derives 0.081 against a measured 0.306. They sit on the body rather than in the
+; atmosphere because a gas giant's visible surface *is* its cloud deck -- what the body looks like
+; rather than a property of its air. **The giants do carry atmospheres**: all four are authored above
+; with 101,325 Pa each. An earlier version of this comment said the opposite, and the same false claim
+; had spread to five files before it was caught.
+;
+; A gas giant's fraction is 1.0 and its albedo is its whole Bond albedo — there is nothing else to
+; reflect off. The four giant values are the measured ones: Jupiter 0.50, Saturn 0.34, Uranus 0.30,
+; Neptune 0.29.
+
+[sub_resource type="Resource" id="C_venus"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.76
+color = Color(0.98, 0.92, 0.72, 1)
+opacity = 1.0
+
+[sub_resource type="Resource" id="C_earth"]
+; **0.419 is the NET reflectance of the cloud system, and it was 0.45 under the gross accounting.**
+; `bond_albedo` is net as of 2026-10-16 — the clear column is weighted by the cloud-free fraction and the
+; air's own reflection is counted — so the deck's number had to give up the light the clear column it
+; hides would have reflected. The value is fitted to hold Earth's measured 0.306 exactly: the fit
+; `(0.306 - (1-f)*(surface + air)) / f` is printed by `tests/test_surface.gd`, and the CERES-implied
+; deck reflectance for f = 0.6 is 0.389, so this is within 8% of the published split rather than
+; 1.9x off it. Nothing else moves: with `fraction = 1.0` the clear term carries no weight at all, so
+; Venus and all four giants are untouched by the change.
+script = ExtResource("clouds")
+fraction = 0.6
+albedo = 0.419
+color = Color(0.95, 0.96, 1, 1)
+opacity = 0.9
+
+[sub_resource type="Resource" id="C_mars"]
+; Same fit as Earth's: 0.4 -> 0.488, holding Mars's measured 0.250 under the net accounting. It goes UP
+; rather than down because Mars's air reflects only 0.006 — a 610 Pa atmosphere — so its deck carries almost
+; all of the reflection the clear column does not.
+script = ExtResource("clouds")
+fraction = 0.35
+albedo = 0.488
+color = Color(0.85, 0.78, 0.68, 1)
+opacity = 0.6
+
+[sub_resource type="Resource" id="C_titan"]
+script = ExtResource("clouds")
+fraction = 0.9
+albedo = 0.22
+color = Color(0.9, 0.72, 0.42, 1)
+opacity = 0.5
+
+[sub_resource type="Resource" id="CL_jupiter_ammonia"]
+; **The deck you can see: ammonia, at 0.90 bar.** Its colour here is AUTHORED and not the species' own,
+; because the giants' visible tint is a chromophore — complex organics and phosphorus compounds mixed
+; into the cloud — and **the chromophore is not in the species table**. A pale cream stands in for it,
+; which is the honest interim: `SpacesimSpecies.color` supplies a species' true scattering colour, and a
+; chromophore needs to exist as a material before it can supply this one.
+script = ExtResource("cloud_layer")
+species = "ammonia"
+coverage = 0.6
+albedo = 0.678
+color = Color(0.93, 0.89, 0.8, 1)
+opacity = 1.0
+; The ammonia deck is optically thick in the zones and thin in the belts - which is the belt/zone
+; difference, and it now falls out of tau through the field's own thickness rather than a coverage switch.
+optical_depth = 1.5
+
+[sub_resource type="Resource" id="CL_jupiter_water"]
+; **Water at 7.3 bar, and this is the layer that MAKES THE BELTS.** Where the ammonia above is thin the
+; eye reaches this deck, and it is warmer and browner — which is the whole reason belts are dark on a gas
+; giant, and why no belt is ever painted onto a latitude. Authored colour, same chromophore caveat.
+script = ExtResource("cloud_layer")
+species = "water_vapour"
+coverage = 0.8
+albedo = 0.3
+color = Color(0.55, 0.38, 0.24, 1)
+opacity = 1.0
+; Deeper and denser than the ammonia above it.
+optical_depth = 3.0
+
+[sub_resource type="Resource" id="C_jupiter"]
+; **A stack, highest first.** The flat fields are left at zero because a body with layers ignores them;
+; the two reflectances were fitted so the COMPOSITE holds Jupiter's measured 0.503 Bond albedo, which is
+; what `bond_albedo` now computes from the stack rather than from one number.
+script = ExtResource("clouds")
+fraction = 0.0
+albedo = 0.0
+color = Color(0.85, 0.78, 0.68, 1)
+opacity = 1.0
+layers = Array[ExtResource("cloud_layer")]([SubResource("CL_jupiter_ammonia"), SubResource("CL_jupiter_water")])
+
+[sub_resource type="Resource" id="CL_saturn_ammonia"]
+script = ExtResource("cloud_layer")
+species = "ammonia"
+coverage = 0.9
+albedo = 0.36
+color = Color(0.9, 0.85, 0.7, 1)
+opacity = 1.0
+; Saturn's ammonia is thinner and more diffuse than Jupiter's.
+optical_depth = 3.0
+
+[sub_resource type="Resource" id="CL_saturn_water"]
+script = ExtResource("cloud_layer")
+species = "water_vapour"
+coverage = 0.8
+albedo = 0.22
+color = Color(0.58, 0.47, 0.33, 1)
+opacity = 1.0
+optical_depth = 5.0
+
+[sub_resource type="Resource" id="C_saturn"]
+; **A stack, because a SINGLE layer cannot show a belt.** With one deck the albedo is uniform, so only the
+; alpha varies and the belts are a brightness wobble — Saturn's field measures a row-mean span of 67-238
+; levels, exactly as banded as Jupiter's, and drew as a flat disc. A belt is a thin bright deck over a
+; browner one, so it takes two. Reflectances fitted to the composite: `0.9*0.36 + 0.1*(0.8*0.22 + ...)`
+; lands on Saturn's measured 0.342.
+; **Coverage below 1 deliberately** on both: at 1.0 the threshold pins to zero and the deck draws its floor.
+script = ExtResource("clouds")
+fraction = 0.0
+albedo = 0.0
+color = Color(0.88, 0.82, 0.65, 1)
+opacity = 1.0
+layers = Array[ExtResource("cloud_layer")]([SubResource("CL_saturn_ammonia"), SubResource("CL_saturn_water")])
+
+[sub_resource type="Resource" id="C_uranus"]
+script = ExtResource("clouds")
+fraction = 1.0
+albedo = 0.3
+color = Color(0.65, 0.85, 0.88, 1)
+opacity = 1.0
+
+[sub_resource type="Resource" id="C_neptune"]
+; Neptune HAS features - dark spots and fast methane streaks - so its coverage sits below 1 and its
+; threshold lands inside the distribution. Uranus keeps 1.0 next door, and that asymmetry is the point:
+; Uranus is genuinely the bland one.
+script = ExtResource("clouds")
+fraction = 0.85
+albedo = 0.29
+color = Color(0.42, 0.55, 0.85, 1)
+opacity = 1.0
+
+; ---------- bodies ----------
+
+[sub_resource type="Resource" id="B_sol"]
+script = ExtResource("body")
+id = "star:sol"
+display_name = "Sol"
+kind = 0
+primary = true
+radius = 695700000.0
+mass = 1.9884e+30
+overrides = SubResource("Ov_sol")
+rotation_period = 2192832.0
+axial_tilt = 7.25
+layers = Array[ExtResource("layer")]([SubResource("L_sol")])
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_mercury"]
+script = ExtResource("body")
+id = "planet:mercury"
+display_name = "Mercury"
+kind = 1
+parent_id = "star:sol"
+radius = 2439500.0
+mass = 3.3e+23
+rotation_period = 5067360.0
+axial_tilt = 0.034
+layers = Array[ExtResource("layer")]([SubResource("L_mercury_core"), SubResource("L_mercury_crust")])
+orbit = SubResource("O_mercury")
+surface = SubResource("S_mercury")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_venus"]
+script = ExtResource("body")
+id = "planet:venus"
+display_name = "Venus"
+kind = 1
+parent_id = "star:sol"
+radius = 6052000.0
+mass = 4.87e+24
+rotation_period = 20997000.0
+axial_tilt = 177.4
+layers = Array[ExtResource("layer")]([SubResource("L_venus_core"), SubResource("L_venus_mantle"), SubResource("L_venus_crust")])
+orbit = SubResource("O_venus")
+atmosphere = SubResource("A_venus")
+surface = SubResource("S_venus")
+clouds = SubResource("C_venus")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_earth"]
+script = ExtResource("body")
+id = "planet:earth"
+display_name = "Earth"
+kind = 1
+parent_id = "star:sol"
+radius = 6371000.0
+mass = 5.9722e+24
+rotation_period = 86164.2
+axial_tilt = 23.44
+layers = Array[ExtResource("layer")]([SubResource("L_earth_inner_core"), SubResource("L_earth_outer_core"), SubResource("L_earth_mantle"), SubResource("L_earth_crust")])
+orbit = SubResource("O_earth")
+atmosphere = SubResource("A_earth")
+surface = SubResource("S_earth")
+clouds = SubResource("C_earth")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_mars"]
+script = ExtResource("body")
+id = "planet:mars"
+display_name = "Mars"
+kind = 1
+parent_id = "star:sol"
+radius = 3389500.0
+mass = 6.42e+23
+rotation_period = 88642.44
+axial_tilt = 25.19
+layers = Array[ExtResource("layer")]([SubResource("L_mars_core"), SubResource("L_mars_mantle"), SubResource("L_mars_crust")])
+orbit = SubResource("O_mars")
+atmosphere = SubResource("A_mars")
+surface = SubResource("S_mars")
+clouds = SubResource("C_mars")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_jupiter"]
+script = ExtResource("body")
+id = "planet:jupiter"
+display_name = "Jupiter"
+kind = 1
+parent_id = "star:sol"
+radius = 69911000.0
+mass = 1.898e+27
+rotation_period = 35730.0
+axial_tilt = 3.13
+; Jupiter emits 1.7x what it absorbs: 5.44 W/m2 of internal heat against
+; 6.25 W/m2 of sunlight, measured from the Voyager IRIS net flux (Pearl & Conrath 1991).
+internal_heat_flux = 5.44
+layers = Array[ExtResource("layer")]([SubResource("L_jupiter_core"), SubResource("L_jupiter_envelope")])
+orbit = SubResource("O_jupiter")
+atmosphere = SubResource("A_jupiter")
+overrides = SubResource("Ovr_jupiter")
+clouds = SubResource("C_jupiter")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_saturn"]
+script = ExtResource("body")
+id = "planet:saturn"
+display_name = "Saturn"
+kind = 1
+parent_id = "star:sol"
+radius = 60268000.0
+mass = 5.68e+26
+rotation_period = 38361.6
+axial_tilt = 26.73
+; Saturn's internal flux is about a third of what it absorbs (Cassini CIRS).
+internal_heat_flux = 2.01
+layers = Array[ExtResource("layer")]([SubResource("L_saturn_core"), SubResource("L_saturn_envelope")])
+orbit = SubResource("O_saturn")
+atmosphere = SubResource("A_saturn")
+overrides = SubResource("Ovr_saturn")
+clouds = SubResource("C_saturn")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_uranus"]
+script = ExtResource("body")
+id = "planet:uranus"
+display_name = "Uranus"
+kind = 1
+parent_id = "star:sol"
+radius = 25559000.0
+mass = 8.68e+25
+rotation_period = 62064.0
+axial_tilt = 97.77
+; Uranus is the odd one: almost no internal heat, which is why it is the coldest
+; planet measured and shows so little weather.
+internal_heat_flux = 0.042
+layers = Array[ExtResource("layer")]([SubResource("L_uranus_core"), SubResource("L_uranus_envelope")])
+orbit = SubResource("O_uranus")
+atmosphere = SubResource("A_uranus")
+overrides = SubResource("Ovr_uranus")
+clouds = SubResource("C_uranus")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_neptune"]
+script = ExtResource("body")
+id = "planet:neptune"
+display_name = "Neptune"
+kind = 1
+parent_id = "star:sol"
+radius = 24764000.0
+mass = 1.02e+26
+rotation_period = 57996.0
+axial_tilt = 28.32
+; Neptune emits about 2.6x what it absorbs, from an unknown source — the standing
+; puzzle, not a modelling gap.
+internal_heat_flux = 0.43
+layers = Array[ExtResource("layer")]([SubResource("L_neptune_core"), SubResource("L_neptune_envelope")])
+orbit = SubResource("O_neptune")
+atmosphere = SubResource("A_neptune")
+overrides = SubResource("Ovr_neptune")
+clouds = SubResource("C_neptune")
+landable = false
+significant = true
+
+; ---------- moon bodies ----------
+;
+; Every moon is tidally locked, so its rotation period IS its orbital period: the same number
+; appears in both places deliberately rather than by accident.
+
+[sub_resource type="Resource" id="B_luna"]
+script = ExtResource("body")
+id = "moon:luna"
+display_name = "Luna"
+kind = 3
+parent_id = "planet:earth"
+radius = 1737400.0
+mass = 7.35e+22
+rotation_period = 2360591.5
+axial_tilt = 6.68
+layers = Array[ExtResource("layer")]([SubResource("L_luna_core"), SubResource("L_luna_mantle")])
+orbit = SubResource("O_luna")
+surface = SubResource("S_luna")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_io"]
+script = ExtResource("body")
+id = "moon:io"
+display_name = "Io"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 1821600.0
+mass = 8.93e+22
+rotation_period = 152853.5
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_io_core"), SubResource("L_io_mantle")])
+orbit = SubResource("O_io")
+surface = SubResource("S_io")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_europa"]
+script = ExtResource("body")
+id = "moon:europa"
+display_name = "Europa"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 1560800.0
+mass = 4.8e+22
+rotation_period = 306822.0
+axial_tilt = 0.1
+layers = Array[ExtResource("layer")]([SubResource("L_europa_core"), SubResource("L_europa_rock"), SubResource("L_europa_ice")])
+orbit = SubResource("O_europa")
+surface = SubResource("S_europa")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_ganymede"]
+script = ExtResource("body")
+id = "moon:ganymede"
+display_name = "Ganymede"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 2634100.0
+mass = 1.4819e+23
+rotation_period = 618153.4
+axial_tilt = 0.33
+layers = Array[ExtResource("layer")]([SubResource("L_ganymede_core"), SubResource("L_ganymede_rock"), SubResource("L_ganymede_ice")])
+orbit = SubResource("O_ganymede")
+surface = SubResource("S_ganymede")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_callisto"]
+script = ExtResource("body")
+id = "moon:callisto"
+display_name = "Callisto"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 2410300.0
+mass = 1.0759e+23
+rotation_period = 1441931.2
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_callisto_core"), SubResource("L_callisto_ice")])
+orbit = SubResource("O_callisto")
+surface = SubResource("S_callisto")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_titan"]
+script = ExtResource("body")
+id = "moon:titan"
+display_name = "Titan"
+kind = 3
+parent_id = "planet:saturn"
+radius = 2574700.0
+mass = 1.3452e+23
+rotation_period = 1377648.0
+axial_tilt = 0.3
+layers = Array[ExtResource("layer")]([SubResource("L_titan_core"), SubResource("L_titan_ice")])
+orbit = SubResource("O_titan")
+atmosphere = SubResource("A_titan")
+surface = SubResource("S_titan")
+clouds = SubResource("C_titan")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_triton"]
+script = ExtResource("body")
+id = "moon:triton"
+display_name = "Triton"
+kind = 3
+parent_id = "planet:neptune"
+radius = 1353400.0
+mass = 2.139e+22
+rotation_period = 507760.2
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_triton_core"), SubResource("L_triton_ice")])
+orbit = SubResource("O_triton")
+atmosphere = SubResource("A_triton")
+surface = SubResource("S_triton")
+landable = true
+significant = true
+
+[resource]
+script = ExtResource("system")
+content_version = 1
+epoch = "2000-01-01T12:00:00"
+framing = SubResource("Framing_sol")
+start_body_id = "planet:earth"
+start_altitude = 20000000.0
+; J2000 on the world clock, which counts from year zero. Placing the system at exactly the epoch
+; its elements are stated for is what makes the m0 values mean what JPL says they mean.
+start_world_time = 63113947200.0
+bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton")])

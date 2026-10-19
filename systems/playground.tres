@@ -1,0 +1,125 @@
+[gd_resource type="Resource" script_class="SpacesimSolarSystem" format=3]
+
+[ext_resource type="Script" path="res://addons/spacesim/system/content/solar_system.gd" id="system"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/framing.gd" id="framing"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/system_body.gd" id="body"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/overrides.gd" id="overrides"]
+
+; THE PLAYGROUND — the hand-placed test system.
+;
+; Five smooth spheres at fixed positions, for flying and landing on. It carries no compositions and
+; no orbits: it exists so the coordinate frames, the travel unit, the flight tests and the save
+; browser have a stable, small system to exercise, and so a change to those can be seen to break
+; something rather than merely change a number.
+;
+; Sol is the authored system; this is the fixture. Bodies do not move, so no orbit is authored and
+; no mass is needed. Colours are pinned through `overrides` because colour is otherwise derived from
+; composition, and these bodies have none.
+
+[sub_resource type="Resource" id="Framing_playground"]
+script = ExtResource("framing")
+system_band = Vector2(10000, 100000000000)
+atmosphere_band = Vector2(2000, 400000)
+surface_band = Vector2(100, 5000)
+atmosphere_altitude = 100000.0
+surface_altitude = 2000.0
+pad_size = 4000.0
+
+[sub_resource type="Resource" id="Ov_helios"]
+script = ExtResource("overrides")
+set = PackedStringArray("surface_color")
+surface_color = Color(1, 0.86, 0.55, 1)
+
+[sub_resource type="Resource" id="Ov_cinder"]
+script = ExtResource("overrides")
+set = PackedStringArray("surface_color")
+surface_color = Color(0.55, 0.48, 0.42, 1)
+
+[sub_resource type="Resource" id="Ov_terra"]
+script = ExtResource("overrides")
+set = PackedStringArray("surface_color")
+surface_color = Color(0.32, 0.44, 0.5, 1)
+
+[sub_resource type="Resource" id="Ov_borealis"]
+script = ExtResource("overrides")
+set = PackedStringArray("surface_color")
+surface_color = Color(0.5, 0.36, 0.3, 1)
+
+[sub_resource type="Resource" id="Ov_nix"]
+script = ExtResource("overrides")
+set = PackedStringArray("surface_color")
+surface_color = Color(0.36, 0.42, 0.62, 1)
+
+[sub_resource type="Resource" id="B_helios"]
+script = ExtResource("body")
+id = "star:helios"
+display_name = "Helios"
+kind = 0
+primary = true
+radius = 696340000.0
+fixed_position = Vector3(0, 0, 0)
+overrides = SubResource("Ov_helios")
+landable = false
+significant = true
+
+[sub_resource type="Resource" id="B_cinder"]
+script = ExtResource("body")
+id = "planet:cinder"
+display_name = "Cinder"
+kind = 1
+parent_id = "star:helios"
+radius = 2440000.0
+fixed_position = Vector3(15000000000, 0, 0)
+overrides = SubResource("Ov_cinder")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_terra"]
+script = ExtResource("body")
+id = "planet:terra"
+display_name = "Terra"
+kind = 1
+parent_id = "star:helios"
+radius = 6371000.0
+fixed_position = Vector3(30000000000, 0, 0)
+overrides = SubResource("Ov_terra")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_borealis"]
+script = ExtResource("body")
+id = "planet:borealis"
+display_name = "Borealis"
+kind = 1
+parent_id = "star:helios"
+radius = 3390000.0
+fixed_position = Vector3(52000000000, 0, 0)
+overrides = SubResource("Ov_borealis")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_nix"]
+script = ExtResource("body")
+id = "planet:nix"
+display_name = "Nix"
+kind = 1
+parent_id = "star:helios"
+radius = 24600000.0
+fixed_position = Vector3(82000000000, 0, 0)
+overrides = SubResource("Ov_nix")
+landable = true
+significant = true
+
+[resource]
+script = ExtResource("system")
+content_version = 1
+epoch = ""
+framing = SubResource("Framing_playground")
+start_body_id = "planet:terra"
+start_altitude = 20000000.0
+; Away from the star, deliberately: this system's bodies run along +X from a star at the origin, so
+; the day side of Terra faces away from all of them — and the test that flies between them needs the
+; old geometry. Sol takes the default (the day side) and starts in daylight.
+start_direction = Vector3(1, 0, 0)
+start_world_time = 0.0
+bodies = Array[ExtResource("body")]([SubResource("B_helios"), SubResource("B_cinder"), SubResource("B_terra"), SubResource("B_borealis"), SubResource("B_nix")])
