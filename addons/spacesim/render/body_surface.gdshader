@@ -112,13 +112,12 @@ void fragment() {
 
 	// **The relief, from four taps of the same map.** `eps` is one texel of *that* map, because a fixed
 	// epsilon would sample detail the map in hand does not hold and read as noise on distant ground.
-	// **Two texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
+	// **Three texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
 	// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
-	// plate belt and the waterline meet — the difference is large enough to swing the normal tens of degrees
-	// from pixel to pixel. That showed up as a black outline round every continent and as speckles on the
-	// night side, where a wild normal still catches the light. A wider baseline is the cheap fix; the
-	// principled one is the ladder, whose octaves are band-limited by the pixel footprint.
-	float texel = 2.0 / float(max(map_width, 1));
+	// plate belt and the waterline meet — the difference swings the normal tens of degrees from pixel to
+	// pixel. A wider baseline is the cheap fix; the principled one is the ladder, whose octaves are
+	// band-limited by the pixel footprint.
+	float texel = 3.0 / float(max(map_width, 1));
 	float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;
 	float toward_west = texture(height_map, uv - vec2(texel, 0.0)).r;
 	// `v` increases *southward*, so the north neighbour is the smaller `v`.
@@ -133,11 +132,19 @@ void fragment() {
 		/ (2.0 * max(metres_east, 1.0e-3));
 	float slope_north = (toward_north - toward_south) * field_amplitude * relief_exaggeration
 		/ (2.0 * max(metres_north, 1.0e-3));
-	// **And a ceiling on the tilt.** A slope steeper than 1:1 is not terrain at this scale — it is a texel
-	// pair straddling something the map cannot resolve — and letting it through turns `NORMAL` past the
-	// light's horizon on individual pixels, which is black speckle rather than relief.
-	slope_east = clamp(slope_east, -1.0, 1.0);
-	slope_north = clamp(slope_north, -1.0, 1.0);
+	// **And a ceiling on the tilt — the one that matters.** The relief here is a *shading fiction*: it tilts a
+	// normal on a sphere that has no relief at all. At a slope of 1:1 (45°) that fiction outshouts the
+	// geometry, and the symptom is specific and ugly: **the coastlines light up on the night side**. The coast
+	// is the one place the field is steep, so it is the one place the tilt is large — and a large enough tilt
+	// faces the sun from well past the terminator, so a thin, dotted outline of every continent glows in the
+	// dark while the flat interiors beside it stay black. Nothing in the picture says "relief"; it says
+	// "coastlines are lit", which is what a flown screenshot showed.
+	//
+	// 0.35 is about 19°, which is already steeper than real terrain at a 19 km sampling scale and is the most
+	// a normal may lean before it starts inventing light. The real fix is geometric relief (displacement), where
+	// a back-lit slope is genuinely back-lit.
+	slope_east = clamp(slope_east, -0.35, 0.35);
+	slope_north = clamp(slope_north, -0.35, 0.35);
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
 	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);

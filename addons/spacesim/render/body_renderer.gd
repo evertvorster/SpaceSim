@@ -38,8 +38,13 @@ const WATER_SPECULAR := 0.2
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
 ## honest and the picture is flat. This is the named concession, and it is a *uniform* rather than a constant
-## in the shader so the host owns it and it can be tuned in flight.
-const RELIEF_EXAGGERATION := 12.0
+## in the shader so the host owns it and it can be tuned.
+##
+## **5.0, down from 12, because 12 lit the coastlines on the night side.** The exaggeration tilts the normal of
+## a sphere that has no relief; past a certain tilt the fiction beats the geometry, and the symptom is a thin
+## dotted glow tracing every coast in the dark — the coast being the only steep place, and the *interiors*
+## staying correctly black. The shader also clamps the tilt at 19° for the same reason.
+const RELIEF_EXAGGERATION := 5.0
 
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
 ## interpolates the measured quantiles, so it is not quantised by this), and it is one row: the ramp is a
