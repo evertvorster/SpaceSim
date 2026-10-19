@@ -73,6 +73,17 @@ uniform float detail_relief = 0.0;
 // And how much it moves the *water*, which is a much smaller number: a sea with hills in it is the one thing
 // that reads as wrong at any distance.
 uniform float wave_relief = 0.0;
+// **Where the detail's shadows are allowed to exist, in metres per pixel.** Evert, 2026-10-19: *"we don't
+// actually need to see the shadows of fine detail until we are very close."* Past `relief_far` a pixel covers
+// more ground than a bump is wide, and what the bump does then is not shading — it is moiré toward the horizon
+// and black speckle where a sub-pixel slope is drawn as a pit. Full strength inside `relief_near`, gone by
+// `relief_far`.
+uniform float relief_near = 5.0;
+uniform float relief_far = 60.0;
+// **A ceiling on the tilt, in the same units as the gradient.** A bump's dark side drawn as absolute black is
+// the missing air as much as the relief — with no sky above it, nothing lifts a shadow — so a normal may lean
+// only so far before the fiction becomes a hole.
+uniform float relief_max_tilt = 0.6;
 
 // **Where the sea is**, in field units — `value_at(ocean_fraction)` off the measured quantiles. Zero until a
 // map lands, which draws a neutral datum rather than a wrong ocean.
@@ -177,7 +188,11 @@ void fragment() {
 	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
 	// pixel spans — the same quantity the mesh's error budget spends — so the fade needs no distance and
 	// nothing to keep in step with the camera.
-	float footprint_angle = length(fwidth(up));
+	// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
+	// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
+	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
+	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 	float detail = 0.0;
 	if (detail_octaves > 0 && detail_feature > 0.0) {
 		detail = surface_detail(
@@ -213,8 +228,19 @@ void fragment() {
 		vec3 view_y = dFdy(VERTEX);
 		vec3 tangent = normalize(cross(NORMAL, view_y));
 		vec3 bitangent = normalize(cross(view_x, NORMAL));
-		float relief = mix(detail_relief, wave_relief, water);
-		NORMAL = normalize(NORMAL - (tangent * dFdx(detail) + bitangent * dFdy(detail)) * relief);
+		// **The relief fades on the pixel's own size**, in metres of ground per pixel — full strength within
+		// `relief_near`, gone by `relief_far`. Measured in metres rather than in texels or in distance because
+		// the question it answers is "is a bump bigger than a pixel", which is the same at any altitude.
+		float pixel_metres = footprint_angle * planet_radius;
+		float relief_fade = 1.0 - smoothstep(relief_near, relief_far, pixel_metres);
+		float relief = mix(detail_relief, wave_relief, water) * relief_fade;
+		vec2 gradient = vec2(dFdx(detail), dFdy(detail)) * relief;
+		// A bump may lean only so far — see `relief_max_tilt`.
+		float magnitude = length(gradient);
+		if (magnitude > relief_max_tilt) {
+			gradient *= relief_max_tilt / magnitude;
+		}
+		NORMAL = normalize(NORMAL - (tangent * gradient.x + bitangent * gradient.y));
 		// And the colour, zero-mean and small, on land only — a sea is one colour.
 		ALBEDO *= 1.0 + detail * detail_variation * (1.0 - water);
 	}

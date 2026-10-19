@@ -62,6 +62,16 @@ const DETAIL_RELIEF := 6.0
 ## And water's, which is a tenth of it: a sea with hills in it is the one thing that reads as wrong at any
 ## distance. The glint is restored at the same time — see `WATER_ROUGHNESS`.
 const WAVE_RELIEF := 0.6
+## **Where the detail's shadows are allowed, in metres of ground per pixel.** Evert, 2026-10-19: *"we don't
+## actually need to see the shadows of fine detail until we are very close."* At 3,200 m up a pixel is ~4 m and
+## the bumps read as terrain; by 60 m a pixel they read as moiré at the horizon and as black speckle on the
+## ground, because a sub-pixel slope is drawn as a pit. Full strength inside 5 m, gone by 60.
+const RELIEF_NEAR_METRES := 5.0
+const RELIEF_FAR_METRES := 60.0
+## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
+## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
+## only so far before it becomes a hole.
+const RELIEF_MAX_TILT := 0.6
 
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
 ## interpolates the measured quantiles, so it is not quantised by this), and it is one row: the ramp is a
@@ -325,6 +335,9 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("wave_relief", WAVE_RELIEF)
+	material.set_shader_parameter("relief_near", RELIEF_NEAR_METRES)
+	material.set_shader_parameter("relief_far", RELIEF_FAR_METRES)
+	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("water_roughness", WATER_ROUGHNESS)
 	material.set_shader_parameter("water_specular", WATER_SPECULAR)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
