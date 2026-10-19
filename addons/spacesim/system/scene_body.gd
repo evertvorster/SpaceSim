@@ -31,11 +31,30 @@ var mesh_material: Material
 ## sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as
 ## geometry. Set by `SpacesimSystemScene.update_lod`.
 var point: MeshInstance3D
-## **The patch selection `mesh` currently holds**, so the tree is rebuilt only when it would differ —
-## the leaf count and the camera direction, quantised. Set by `SpacesimSystemScene.update_lod`.
-##
-## This replaced a whole-sphere icosphere level, which could only ever refine the entire body at once.
-var patch_key := Vector3i(-1, 0, 0)
+## **The walk's last answer, and what it was taken at** — the distance, the eye's direction, ε, and the
+## wireframe flag. `SpacesimPatches.walk_is_due` decides from these whether the walk has to run again, so a
+## sub-millisecond walk stays off the frame when nothing about its answer has moved.
+var patch_walk_distance := 0.0
+var patch_walk_direction := Vector3.ZERO
+var patch_walk_epsilon := -1.0
+var patch_walk_wireframe := false
+## **The selection the walk last produced**, as `[face, path, depth]` chunk references — a hundred entries
+## where it used to be thirty thousand triangles.
+var patch_chunks: Array = []
+## **The rebuild in flight**, as a `WorkerThreadPool` task id, or -1. `patch_task_chunks` is what it was
+## asked to build, so a newer selection is not lost while it runs.
+var patch_task := -1
+var patch_task_chunks: Array = []
+var patch_task_wireframe := false
+## The arrays the task produced. **Written on the worker and read on the main thread only after
+## `is_task_completed` says so** — the handoff that makes this safe without a lock.
+var patch_arrays: Array = []
+## Triangles the mesh currently on the node holds. **Zero until the first build lands**, which is why a
+## body draws nothing for its first frame or two rather than stalling the frame that asked for it.
+var patch_triangles := 0
+## Whether an empty selection has already been reported for this body, so the reason is printed once
+## rather than once a second for the rest of the session.
+var patch_empty_reported := false
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody

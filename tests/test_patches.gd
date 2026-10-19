@@ -23,42 +23,43 @@ func run(h, root: Node) -> void:
 	_test_the_horizon_is_exact(h)
 	_test_the_budget_holds(h)
 	_test_the_mesh(h)
+	_test_the_cache_makes_a_rebuild_cheap(h)
+	_test_the_drawn_triangle_is_inside_the_law(h)
+	_test_the_walk_is_gated(h)
 
 
-## Far enough out that every face is one triangle: the tree's roots, and the same triangles the level
+## Far enough out that every face is one chunk: the tree's roots, and the same triangles the level
 ## meshes are built from.
 func _test_the_roots(h) -> void:
 	# **Not all twenty**: the walk culls over the limb, and from 1e9 m nearly a hemisphere is behind it, so
 	# a root or two goes. What the test is for is that the tree IS its roots and not a subdivision.
-	var leaves := SpacesimPatches.select(
+	var chunks := SpacesimPatches.select(
 		1.0e9, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 4.0
 	)
-	h.check(leaves.size() <= 20 and leaves.size() >= 15,
-		"from far enough out the tree is its twenty roots, less the limb (%d)" % leaves.size())
+	h.check(chunks.size() <= 20 and chunks.size() >= 15,
+		"from far enough out the tree is its twenty roots, less the limb (%d chunks)" % chunks.size())
 	var area := 0.0
 	var unit := true
-	for leaf in leaves:
+	for leaf in SpacesimPatches.triangles_of(chunks):
 		for point in leaf:
 			if absf((point as Vector3).length() - 1.0) > 1.0e-9:
 				unit = false
 		area += _solid_angle(leaf[0], leaf[1], leaf[2])
 	h.check(unit, "and every patch corner is a unit vector")
-	# The faces tile the sphere, and the visible ones are most of it from far away: 4 pi is the ceiling and
-	# a hemisphere the floor, so anything in that band means "roots, covering the body, no holes doubled".
+	# A root is `4^s` of its own triangles, so the area of the sphere is covered the same way however the
+	# chunks are drawn: 4 pi is the ceiling and a hemisphere the floor.
 	h.check(area <= 4.0 * PI + 1.0e-9 and area > 1.8 * PI,
 		"and they cover the body rather than a corner of it (%.2f of 4 pi)" % (area / (4.0 * PI)))
-
-
 ## **The whole point.** The same body, the same frame, the same budget: the patches facing the camera
 ## must be finer than the ones on the far side — which cannot happen to a whole-sphere level.
 func _test_the_eye_side_is_finer(h) -> void:
 	var distance := EARTH_RADIUS + 2.0e5
-	var leaves := SpacesimPatches.select(distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 1.0)
+	var chunks := SpacesimPatches.select(distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 1.0)
 	var horizon := acos(EARTH_RADIUS / distance)
 	var near_edge := 0.0
 	var limb_edge := 0.0
 	var limb_patches := 0
-	for leaf in leaves:
+	for leaf in SpacesimPatches.triangles_of(chunks):
 		var centre: Vector3 = (leaf[0] + leaf[1] + leaf[2]).normalized()
 		var edge: float = maxf(
 			(leaf[0] as Vector3).angle_to(leaf[1]),
@@ -75,11 +76,9 @@ func _test_the_eye_side_is_finer(h) -> void:
 			limb_edge = maxf(limb_edge, edge)
 			limb_patches += 1
 	h.check(near_edge > 0.0 and limb_patches > 0,
-		"the walk produced patches under the eye and at the limb (%d at the limb)" % limb_patches)
+		"the walk produced triangles under the eye and at the limb (%d at the limb)" % limb_patches)
 	h.check(near_edge < limb_edge,
 		"and the eye's side is finer than the limb (%.5f rad against %.5f)" % [near_edge, limb_edge])
-
-
 ## Closing in can only add triangles: the budget is per patch, and each one refines on its own error.
 func _test_it_is_monotone_in_distance(h) -> void:
 	# **The finest triangle under the eye, not the total count.** Closing in *culls* more of the sphere
@@ -89,9 +88,9 @@ func _test_it_is_monotone_in_distance(h) -> void:
 	var monotone := true
 	for altitude: float in [1.0e8, 1.0e7, 1.0e6, 1.0e5]:
 		var finest := 1.0
-		for leaf in SpacesimPatches.select(
+		for leaf in SpacesimPatches.triangles_of(SpacesimPatches.select(
 			EARTH_RADIUS + altitude, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
-		):
+		)):
 			var centre: Vector3 = (leaf[0] + leaf[1] + leaf[2]).normalized()
 			if acos(clampf(centre.dot(Vector3.UP), -1.0, 1.0)) < 0.2:
 				finest = minf(finest, maxf(
@@ -109,52 +108,68 @@ func _test_it_is_monotone_in_distance(h) -> void:
 ## is over the edge of the world. From just above the ground most of the sphere is not visible at all.
 func _test_the_horizon_is_exact(h) -> void:
 	var distance := EARTH_RADIUS + 1.0e4
-	var leaves := SpacesimPatches.select(distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0)
+	var chunks := SpacesimPatches.select(distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0)
 	var horizon := acos(EARTH_RADIUS / distance)
 	var over_the_limb := 0
-	for leaf in leaves:
-		var centre: Vector3 = (leaf[0] + leaf[1] + leaf[2]).normalized()
-		var extent: float = maxf(
-			(leaf[0] as Vector3).angle_to(leaf[1]),
-			maxf((leaf[1] as Vector3).angle_to(leaf[2]), (leaf[2] as Vector3).angle_to(leaf[0]))
-		)
-		# **Widened by the patch's own size**, because the walk is allowed to keep a patch that only
-		# straddles the limb: culling to the exact horizon would delete the ground under the camera, and at
-		# 10 km a root face is 25 times the whole visible cap.
-		if centre.dot(Vector3.UP) < cos(horizon + extent) - 1.0e-9:
+	var worst := 0.0
+	# **The cull happens once per CHUNK, at the chunk's own extent**, so the bound is stated at that
+	# granularity: a chunk may straddle the limb by up to its own width. A chunk is `2^s` times a leaf, so
+	# at s = 2 it may reach four leaf-widths past the limb, and the triangles inside it inherit that — the
+	# "limb collar" the plan measured, which is vertex work behind the planet and invisible.
+	#
+	# **The centre is the chunk's, not a triangle's.** Testing each triangle against its own extent asserts
+	# something the mechanism deliberately does not do, and it fails on a *correct* walk.
+	for chunk in chunks:
+		var triangles := SpacesimPatches.triangles_of([chunk])
+		var extent := 0.0
+		var centre := Vector3.ZERO
+		for leaf in triangles:
+			var a: Vector3 = leaf[0]
+			var b: Vector3 = leaf[1]
+			var c: Vector3 = leaf[2]
+			extent = maxf(extent, maxf(a.angle_to(b), maxf(b.angle_to(c), c.angle_to(a))))
+			centre += (a + b + c).normalized()
+		var middle := (centre / maxf(float(triangles.size()), 1.0)).normalized()
+		# **The chunk's own width, which is `2^s` leaf widths** — the triangles inside it are that much
+		# smaller than the patch the walk judged.
+		var chunk_extent := extent * float(1 << SpacesimPatches.CHUNK_SUBDIVISIONS)
+		var past := acos(clampf(middle.dot(Vector3.UP), -1.0, 1.0)) - horizon
+		if past > chunk_extent:
 			over_the_limb += 1
-	h.check(over_the_limb == 0, "at 10 km nothing fully behind the limb is drawn (%d were)" % over_the_limb)
-	# A whole-sphere subdivision at this budget would be thousands; the cap is a few hundred. The bound is
-	# loose on purpose — what it must catch is the far side coming back, not a tuning change.
-	h.check(leaves.size() > 0 and leaves.size() < 2000,
-		"and the far side really is gone rather than merely coarse (%d patches)" % leaves.size())
+			worst = maxf(worst, past - chunk_extent)
+	h.check(over_the_limb == 0,
+		"at 10 km no chunk is drawn past the limb by more than its own width (%d were, worst %.4f rad over)"
+			% [over_the_limb, worst])
+	# A whole-sphere subdivision at this budget would be thousands of chunks; the cap is a hundred or so.
+	# The bound is loose on purpose — what it must catch is the far side coming back, not a tuning change.
+	h.check(chunks.size() > 0 and chunks.size() < 2000,
+		"and the far side really is gone rather than merely coarse (%d chunks)" % chunks.size())
 
 
-## The budget is what stops "the eye is on the ground" from asking for a million triangles.
+## The budget is what stops "the eye is on the ground" from asking for a million triangles — and it
+## **counts triangles**, not chunk references: a hundred references can be sixteen hundred triangles.
 func _test_the_budget_holds(h) -> void:
 	# At 100 km, which is where the budget is a real constraint: down at 1 m the visible cap is a few
 	# square kilometres and the walk never wants many triangles at all.
-	var budget := 500
-	var leaves := SpacesimPatches.select(
+	var budget := 2000
+	var chunks := SpacesimPatches.select(
 		EARTH_RADIUS + 1.0e5, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 0.5, budget
 	)
-	h.check(leaves.size() <= budget, "a tight budget is honoured (%d of %d)" % [leaves.size(), budget])
-	h.check(leaves.size() > 20, "and it still refines as far as the budget allows (%d)" % leaves.size())
-
-
+	var triangles := SpacesimPatches.triangle_count(chunks)
+	h.check(triangles <= budget, "a tight budget is honoured (%d triangles of %d)" % [triangles, budget])
+	h.check(chunks.size() > 2, "and it still refines as far as the budget allows (%d chunks)" % chunks.size())
 ## The mesh, and the two properties a renderer needs: every triangle is on the sphere, and the winding is
-## the same one the level meshes use — measured as a positive enclosed volume, which is the only thing
-## about winding that can be seen without a picture.
+## the same one the level meshes use — measured against the level meshes rather than reasoned about.
 func _test_the_mesh(h) -> void:
-	var leaves := SpacesimPatches.select(
+	var chunks := SpacesimPatches.select(
 		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
 	)
-	var mesh := SpacesimPatches.build(leaves)
-	var arrays := mesh.surface_get_arrays(0)
-	var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	h.check(points.size() == leaves.size() * 3, "one triangle per leaf, unshared")
-	h.check(indices.size() == leaves.size() * 3, "and three indices each")
+	var arrays := SpacesimPatches.arrays_of(chunks)
+	var points: PackedVector3Array = arrays[0]
+	var expected := SpacesimPatches.triangle_count(chunks)
+	h.check(points.size() == expected * 3,
+		"one triangle per chunk triangle, unshared (%d vertices for %d triangles)"
+			% [points.size(), expected])
 	# **1e-6, not 1e-9**: an `ArrayMesh` stores vertices as 32-bit floats whatever the engine build is, so
 	# a unit vector comes back at 1 ± 3e-8. At Earth's radius that is 0.2 m — no one is going to see it,
 	# and asserting double precision here would be asserting something the renderer does not keep.
@@ -163,14 +178,26 @@ func _test_the_mesh(h) -> void:
 		if absf(point.length() - 1.0) > 1.0e-6:
 			on_sphere = false
 	h.check(on_sphere, "every vertex is on the unit sphere")
+	# **The surface carries no index array**: every triangle has its own three vertices, so an index would
+	# be the identity range — and building sixty thousand of those in GDScript is the cost chunking exists
+	# to remove. Asserted, because a renderer that changes it back would be re-adding that cost silently.
+	var mesh := SpacesimPatches.mesh_from(arrays)
+	var surface := mesh.surface_get_arrays(0)
+	h.check(surface[Mesh.ARRAY_INDEX] == null, "and the mesh is non-indexed, as the builder says")
 	# **The winding as an outward normal per triangle**, not a signed volume: the mesh is an open shell
 	# (the far side is culled), so the divergence sum over it is not an enclosed volume and its sign means
-	# nothing. Whether a triangle faces away from the centre is exactly the property `cull_back` depends on.
-	# **Measured against the level meshes rather than reasoned about.** Godot's front face is clockwise seen
-	# from outside, so the *geometric* normal of a correctly wound triangle points at the centre — which is
-	# the opposite of the intuitive test, and the reason `_build` documents its single flip. Comparing signs
-	# with a known-good mesh cannot be argued with.
-	var patch_side := _winding_side(points, indices)
+	# nothing.
+	# Godot's front face is clockwise seen from outside, so the *geometric* normal of a correctly wound
+	# triangle points at the centre — which is the opposite of the intuitive test, and the reason `_build`
+	# documents its single flip. Comparing signs with a known-good mesh cannot be argued with.
+	var soup := PackedVector3Array()
+	for chunk in chunks:
+		soup.append_array(SpacesimPatches.chunk_arrays(chunk)[0])
+	var identity := PackedInt32Array()
+	identity.resize(soup.size())
+	for index in soup.size():
+		identity[index] = index
+	var patch_side := _winding_side(soup, identity)
 	var level: ArrayMesh = SpacesimIcosphere.mesh_at(1)
 	var level_points: PackedVector3Array = level.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	var level_indices: PackedInt32Array = level.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
@@ -181,13 +208,116 @@ func _test_the_mesh(h) -> void:
 	# **No skirts.** Evert, 2026-10-17: *"the cracks should be so far away that they would not be visible
 	# to the camera"* — the step between neighbours is bounded by their two sagittas, each already inside
 	# ε, so a skirt is geometry on top of a problem the budget has already bounded.
-	h.check(points.size() == leaves.size() * 3,
-		"and there is no skirt geometry — three vertices a leaf, nothing else")
-	var lines := SpacesimPatches.build_lines(leaves)
+	h.check(points.size() == expected * 3,
+		"and there is no skirt geometry — three vertices a triangle, nothing else")
+	var lines := SpacesimPatches.lines_mesh_from(SpacesimPatches.lines_of(chunks))
 	h.check(lines.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
 		"while the wireframe view is lines")
 	var segments: PackedVector3Array = lines.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-	h.check(segments.size() == leaves.size() * 6, "with three edges per leaf")
+	h.check(segments.size() == expected * 6, "with three edges per triangle")
+## **A rebuild is cache lookups, not geometry** — the claim chunking exists to make, stated as counts
+## rather than as a stopwatch, because a headless rig can say that without flaking.
+func _test_the_cache_makes_a_rebuild_cheap(h) -> void:
+	SpacesimPatches.clear_cache()
+	var chunks := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	h.check(SpacesimPatches.cached_chunks() == 0, "the cache starts empty")
+	var first := SpacesimPatches.arrays_of(chunks)
+	var after_first := SpacesimPatches.cached_chunks()
+	h.check(after_first == chunks.size(),
+		"a first build fills it, one entry a chunk (%d chunks, %d entries)" % [chunks.size(), after_first])
+	var second := SpacesimPatches.arrays_of(chunks)
+	h.check(SpacesimPatches.cached_chunks() == after_first,
+		"and a second identical build adds nothing — the geometry is built once")
+	h.check(second[0] == first[0] and second[1] == first[1],
+		"the arrays it returns are the cached ones, byte for byte")
+
+
+## **What a drawn triangle's error actually is.** The chunk is judged at its nearest corner and loosened by
+## `4^s`, so its interior triangles land back on ε — and a chunk is drawn at its *nearest* corner's detail,
+## so its far half is finer than it needs to be. The bound this asserts is the one the measurement found
+## (worst 1.64 ε with the over-refinement), and it is what stops `CHUNK_SUBDIVISIONS` being raised for
+## speed: at `s = 3` the interior is drawn a whole level finer than the budget asks for.
+func _test_the_drawn_triangle_is_inside_the_law(h) -> void:
+	var epsilon := 2.0
+	var distance := EARTH_RADIUS + 2.0e5
+	var camera := Vector3.UP * distance
+	var altitude := distance - EARTH_RADIUS
+	var worst := 0.0
+	var drawn := 0
+	for leaf in SpacesimPatches.triangles_of(SpacesimPatches.select(
+		distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, epsilon
+	)):
+		var a: Vector3 = leaf[0]
+		var b: Vector3 = leaf[1]
+		var c: Vector3 = leaf[2]
+		var edge_squared := maxf(
+			a.distance_squared_to(b), maxf(b.distance_squared_to(c), c.distance_squared_to(a))
+		)
+		# The same two quantities the walk uses, and the same floor: the eye's altitude.
+		var nearest := minf(
+			(camera - a * EARTH_RADIUS).length_squared(),
+			minf((camera - b * EARTH_RADIUS).length_squared(), (camera - c * EARTH_RADIUS).length_squared())
+		)
+		var to_patch := maxf(sqrt(nearest), altitude)
+		# `sagitta/R = phi²/8`, and the chord is `phi²` to within 1% at these angles — the identity the
+		# walk's own budget is inverted from.
+		var sagitta := EARTH_RADIUS * edge_squared / 8.0
+		worst = maxf(worst, sagitta / to_patch / PIXEL_ANGLE)
+		drawn += 1
+	h.check(drawn > 0, "the walk drew something to measure (%d triangles)" % drawn)
+	h.check(worst <= 2.0 * epsilon,
+		"no drawn triangle is more than 2 epsilon out where it counts (%.2f px against a %.1f px budget)"
+			% [worst, epsilon])
+
+
+## **The walk is gated on what its answer depends on** — distance, direction and ε. Nothing else can change
+## which chunks are drawn, so nothing else is allowed to ask for a walk.
+func _test_the_walk_is_gated(h) -> void:
+	var distance := EARTH_RADIUS + 2.0e5
+	var epsilon := 2.0
+	var up := Vector3.UP
+	h.check(SpacesimPatches.walk_is_due(
+		0.0, Vector3.ZERO, distance, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, -1.0),
+		"a body that has never been walked is always due")
+	h.check(not SpacesimPatches.walk_is_due(
+		distance, up, distance, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"and an unmoved eye asks for nothing")
+	# **At a distance where the distance *is* the altitude** — far out, `d - R ≈ d` — so this is really a
+	# test of the tenth. Near the ground the two quantities part company, and that is the case below.
+	var far_out := EARTH_RADIUS * 30.0
+	h.check(not SpacesimPatches.walk_is_due(
+		far_out, up, far_out * 1.05, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a 5% change is inside the quantisation of the tree")
+	h.check(SpacesimPatches.walk_is_due(
+		distance, up, distance * 1.2, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a 20% one is not")
+	# **The descent, and it is the trap this gate exists to not repeat.** From 164 km to 300 m is 2.5% of
+	# the *distance* — inside any distance gate — and 500x of the *altitude*, which is what the law floors
+	# on. A gate that only looked at the distance said "nothing has moved" through the whole descent, and
+	# the mesh stayed stale: "it subdivides for a little bit, and then no further."
+	var high := EARTH_RADIUS + 1.64e5
+	var low := EARTH_RADIUS + 300.0
+	h.check(absf(log(high / low)) < SpacesimPatches.LOG_TENTH,
+		"the distance from 164 km to 300 m is under a tenth, so a distance gate sees nothing")
+	h.check(SpacesimPatches.walk_is_due(
+		high, up, low, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"and the walk is due anyway, because the altitude has changed by orders of magnitude")
+	h.check(SpacesimPatches.walk_is_due(
+		distance, up, distance, up, PIXEL_ANGLE, epsilon * 2.0, EARTH_RADIUS, epsilon),
+		"and a new error budget is a new answer")
+	var finest := SpacesimPatches.finest_edge_angle(distance, PIXEL_ANGLE, epsilon, EARTH_RADIUS)
+	h.check(finest > 0.0 and finest < 0.1,
+		"the finest patch under the eye is %.4f rad at 200 km" % finest)
+	h.check(not SpacesimPatches.walk_is_due(
+		distance, up, distance, up.rotated(Vector3.RIGHT, finest * 0.1),
+		PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a swing well under half a patch cannot change the chunk under the eye")
+	h.check(SpacesimPatches.walk_is_due(
+		distance, up, distance, up.rotated(Vector3.RIGHT, finest * 2.0),
+		PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a swing of two patches across the eye does")
 
 
 ## The mean of `normal · centroid` over a mesh — positive when the geometric normals point outward,

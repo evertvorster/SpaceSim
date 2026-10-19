@@ -236,6 +236,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	# Built by the first `update_lod`, which is what decides what is worth drawing.
 	_place_at_screen_radius(camera, earth, to_earth, 200.0, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	var mesh := earth.mesh
 	h.check(mesh.mesh is ArrayMesh, "the body draws its own patch mesh")
 	h.check(mesh.scale.is_equal_approx(Vector3.ONE * earth.radius),
@@ -248,6 +249,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	var budget := float(SpacesimSettings.get_value("lod.error_budget"))
 	_place_at_screen_radius(camera, earth, to_earth, 200.0, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	var under_eye := _triangles_under_eye(earth, to_earth)
 	h.check(under_eye > 0, "at 200 px there are triangles under the eye (%d)" % under_eye)
 
@@ -257,6 +259,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	var before := earth.mesh.mesh
 	_place_at_screen_radius(camera, earth, to_earth, 4000.0, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	h.check(earth.mesh.mesh != before,
 		"and closing in replaces the mesh with the selection that distance asks for")
 
@@ -271,8 +274,10 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		if body.mesh != null and body.mesh.visible and body.mesh.mesh != null:
 			# **The patches the body is actually drawn with**, counted off its own mesh — a surface has no
 			# level any more, so this is the only honest place to read the number.
+			# **Counted off the vertices**, because the surface is non-indexed: every triangle carries its
+			# own three vertices, so `size() / 3` is the count and there is no index array to read.
 			var arrays: Array = (body.mesh.mesh as ArrayMesh).surface_get_arrays(0)
-			drawn += (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+			drawn += (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() / 3
 	h.check(scene.triangles() == drawn,
 		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 
@@ -281,6 +286,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	# phase 0); a sub-pixel body now takes twenty.
 	_place_at_screen_radius(camera, earth, to_earth, 0.4, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	h.check(scene.triangles() < 40000,
 		"and from far enough out the whole system is under 40,000 triangles against 416,000 (%d)"
 			% scene.triangles())
@@ -302,6 +308,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	_place_at_screen_radius(camera, luna, to_star_from_luna,
 		SpacesimLod.POINT_TIER_SCREEN_RADIUS * 0.9, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	h.check(not luna.mesh.visible, "under the threshold a body's mesh is not drawn")
 	h.check(luna.point.visible, "and its point of light is")
 	var luna_distance := camera.global_position.distance_to(luna.node.global_position)
@@ -338,6 +345,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	var observer := camera.global_position
 	var culled: float = scene.view_luminance_at(observer, looking, tan_half)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	var culled_again: float = scene.view_luminance_at(observer, looking, tan_half)
 	h.check(culled > 0.0, "a lit body is what the exposure follows even when it is a point (%.4f)" % culled)
 	h.check(culled == culled_again,
@@ -347,6 +355,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	_place_at_screen_radius(camera, luna, to_star_from_luna,
 		SpacesimLod.POINT_TIER_SCREEN_RADIUS * 10.0, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	h.check(luna.mesh.visible, "over the threshold the mesh comes back")
 	h.check(not luna.point.visible, "and the splat goes")
 	var marked := false
@@ -362,6 +371,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	# zero.** A star EMITS, and that is the one by-kind difference left.
 	_place_at_screen_radius(camera, star_node, Vector3(0.0, 1.0, 0.0), 2.0, pixel)
 	scene.update_lod(camera)
+	scene.await_patch_builds()
 	h.check(not star_node.mesh.visible and star_node.point.visible,
 		"far enough out, the star is a point of light rather than a sphere, like any other body")
 	var sun_colour := (star_node.point.material_override as StandardMaterial3D).albedo_color
@@ -380,6 +390,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		_place_at_screen_radius(camera, mars, to_star,
 			SpacesimLod.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		h.check(mars.point.visible, "a planet small enough is a point too")
 		# **`albedo_color` is sRGB-decoded by Godot**, so the value read back is the *encoded* one and has
 		# to be decoded to be comparable with a radiance. Verified in Godot's source: the default spatial
@@ -403,9 +414,11 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		var to_star_dir := (star_node.node.global_position - mars.node.global_position).normalized()
 		_place_at_screen_radius(camera, mars, to_star_dir, 0.5, pixel)
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		var at_half := (mars.point.material_override as StandardMaterial3D).albedo_color.srgb_to_linear()
 		_place_at_screen_radius(camera, mars, to_star_dir, 0.25, pixel)
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		var at_quarter := (mars.point.material_override as StandardMaterial3D).albedo_color.srgb_to_linear()
 		h.check(at_half.get_luminance() > 0.0 and at_quarter.get_luminance() > 0.0,
 			"a body is lit at half a pixel and at a quarter (%.6f against %.6f)"
@@ -421,6 +434,8 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		var probe := Color(0.37, 0.37, 0.37, 1.0)
 		h.check_near(probe.linear_to_srgb().srgb_to_linear().r, probe.r,
 			"and the encode is the exact inverse of what Godot decodes, so the two cancel", 1.0e-6)
+
+	_test_the_eye_inside_a_body(h, scene, camera, pixel)
 
 	# --- the point of light is in the FRAME's exposure, not the camera's ----------------------------
 	# **This check used to assert the opposite**, and the reversal is the point. Godot bakes the exposure
@@ -445,10 +460,12 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		_place_at_screen_radius(camera, venus, to_star_from_luna,
 			SpacesimLod.POINT_TIER_SCREEN_RADIUS * 0.5, pixel)
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		# Decoded, because the stored value is sRGB-encoded — see `point_colour`.
 		var at_one := venus_material.albedo_color.srgb_to_linear()
 		attributes.exposure_multiplier = 8.0
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		var at_eight := venus_material.albedo_color.srgb_to_linear()
 		h.check_near(at_eight.get_luminance(), at_one.get_luminance(),
 			"a body's point of light does NOT apply the camera's exposure — the pass applies it once",
@@ -461,9 +478,11 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		attributes.exposure_multiplier = 1.0
 		_place_at_screen_radius(camera, star_node, Vector3(0.0, 1.0, 0.0), 2.0, pixel)
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		var sun_one := (star_node.point.material_override as StandardMaterial3D).albedo_color
 		attributes.exposure_multiplier = 8.0
 		scene.update_lod(camera)
+		scene.await_patch_builds()
 		var sun_eight := (star_node.point.material_override as StandardMaterial3D).albedo_color
 		h.check_near(sun_eight.get_luminance(), sun_one.get_luminance(),
 			"and a star's point is the same either way, matching its own unshaded disc", 1.0e-6)
@@ -491,7 +510,7 @@ func _place_at_screen_radius(
 ## that the triangles there get smaller, so that is the quantity.
 static func _finest_under_eye(distance: float, radius: float, to_eye: Vector3, pixel: float, epsilon: float) -> float:
 	var finest := 1.0
-	for leaf in SpacesimPatches.select(distance, to_eye, radius, pixel, epsilon):
+	for leaf in SpacesimPatches.triangles_of(SpacesimPatches.select(distance, to_eye, radius, pixel, epsilon)):
 		var centre: Vector3 = (leaf[0] + leaf[1] + leaf[2]).normalized()
 		if centre.dot(to_eye) > 0.95:
 			finest = minf(finest, maxf(
@@ -501,14 +520,49 @@ static func _finest_under_eye(distance: float, radius: float, to_eye: Vector3, p
 	return finest
 
 
+## **An eye inside a body is a real answer, not a failure.** `SpacesimPatches.select` refuses a sphere it
+## cannot see round, so the selection is empty — and an empty *mesh* is an error from the rendering server
+## (`array_len == 0`, logged every frame it is asked). The body has to draw nothing instead, and it has to
+## stop asking: a body whose answer is "nothing" must not re-walk every frame.
+func _test_the_eye_inside_a_body(h, scene: SpacesimSystemScene, camera: Camera3D, pixel: float) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	if earth == null:
+		return
+	var saved := camera.global_position
+	# Half a radius below the surface, which is inside by any measure.
+	camera.global_position = earth.node.global_position + Vector3.UP * (earth.radius * 0.5)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	# **The mesh that is already there stays.** An empty selection is an error to hand to
+	# `add_surface_from_arrays` — the rendering server logs `array_len == 0` every frame it is asked — and
+	# clearing the mesh instead would take the ground out of the frame, which is what swings the exposure.
+	# A stale equator is worth more than no ground at all.
+	h.check(earth.patch_chunks.is_empty(), "the walk has no answer for a sphere it cannot see round")
+	h.check(earth.mesh.mesh is ArrayMesh, "so the last mesh stands rather than being thrown away")
+	# **And it stops asking.** The walk gate says nothing has moved, so a body whose answer is "nothing"
+	# does not re-walk — and re-request — on every frame.
+	var chunks_before := earth.patch_chunks.size()
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(earth.patch_chunks.size() == chunks_before, "and it does not ask again while nothing has moved")
+	# Back outside: the surface returns, which is what makes the clear above a state rather than a loss.
+	camera.global_position = earth.node.global_position + Vector3.UP * (earth.radius * 1.05)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(earth.mesh.mesh is ArrayMesh and earth.patch_triangles > 0,
+		"and stepping outside brings the surface back (%d triangles)" % earth.patch_triangles)
+	camera.global_position = saved
+
+
 ## Triangles in the mesh the body is drawn with. Kept for the report, not for the law.
 static func _triangles_under_eye(body: SpacesimSceneBody, to_eye: Vector3) -> int:
 	var arrays: Array = (body.mesh.mesh as ArrayMesh).surface_get_arrays(0)
+	# **Non-indexed**: every triangle carries its own three vertices, so the soup is read three at a time
+	# and there is no index array to walk.
 	var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 	var count := 0
-	for i in range(0, indices.size(), 3):
-		var centre := (points[indices[i]] + points[indices[i + 1]] + points[indices[i + 2]]).normalized()
+	for i in range(0, points.size() - 2, 3):
+		var centre := (points[i] + points[i + 1] + points[i + 2]).normalized()
 		if centre.dot(to_eye) > 0.95:
 			count += 1
 	return count
