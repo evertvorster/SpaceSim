@@ -961,10 +961,17 @@ func _poll_patch_builds() -> void:
 			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
 			else SpacesimPatches.mesh_from(arrays)
 		)
-		body.mesh.material_override = (
+		# **A material is published only when it is a different material**, and never a null one: assigning
+		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
+		# it reads as "the surface lost its shading", far from the line that did it.
+		var wanted := (
 			SpacesimBodyRenderer.wireframe_material() if body.patch_task_wireframe
 			else body.mesh_material
 		)
+		if wanted == null:
+			push_warning("PATCH: %s has no material to publish" % body.name)
+		elif body.mesh.material_override != wanted:
+			body.mesh.material_override = wanted
 		body.patch_triangles = (
 			arrays[0].size() / 6 if body.patch_task_wireframe
 			else arrays[0].size() / 3
