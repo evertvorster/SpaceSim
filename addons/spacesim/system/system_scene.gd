@@ -884,11 +884,11 @@ func update_lod(camera: Camera3D) -> void:
 	if pixel <= 0.0:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
-	# **The surface map's ceiling comes from the resolution the scene is being rendered at** — half the render
-	# width, rounded to a power of two — unless `surface.max_base_width` overrides it. Read per frame rather than
-	# cached: the setting exists to be moved **while flying**, to watch the cost move with it.
+	# **The surface map's ceiling is derived from the resolution the scene is being rendered at**, as a fraction
+	# of it (`surface.max_base_fraction`, 0.5 = half). Read per frame rather than cached: the setting exists to
+	# be moved **while flying**, to watch the cost move with it.
 	var surface_cap := SpacesimSurfaceMaps.base_max_width(
-		Vector2i(viewport.size), int(SpacesimSettings.get_value("surface.max_base_width"))
+		Vector2i(viewport.size), float(SpacesimSettings.get_value("surface.max_base_fraction"))
 	)
 	# **The interpolated eye**, because this runs once a drawn frame and `get_global_transform()` is
 	# only accurate to the most recent physics tick. It is the same transform the camera is drawn with,

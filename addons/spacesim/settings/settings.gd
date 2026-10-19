@@ -112,16 +112,16 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
-	# --- the surface map's ceiling, as a width in texels. **0 derives it from the resolution the scene is
-	# being rendered at** (half the render width, rounded to a power of two), which is the honest default:
-	# the ceiling is a property of the display, not of the body. Anything else overrides it, clamped to
-	# `SpacesimSurfaceMaps.MIN_WIDTH` … `MAX_WIDTH`.
+	# --- the surface map's ceiling, **as a fraction of the resolution the scene is being rendered at.** The
+	# ceiling is always derived — there is no absolute width in the file — because it is a property of the
+	# display rather than of the body: 0.5 makes the texture half the scene's resolution, and that follows the
+	# render resolution wherever it goes. Clamped to `SpacesimSurfaceMaps.MIN_WIDTH` … `MAX_WIDTH` afterwards.
 	#
 	# **It exists to be moved while flying.** The whole-body map is a ladder — a cheap 256 bake at build,
 	# then one rung per approach step — so this number is what decides where the ladder stops, and therefore
 	# the cost of a planet at close range. Read per frame in `SpacesimSystemScene.update_lod` through
 	# `SpacesimSurfaceMaps.base_max_width`, never cached: a cached setting is a cold setting.
-	"surface.max_base_width": {"default": 0, "scope": Scope.PLAYER, "min": 0, "max": 8192},
+	"surface.max_base_fraction": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.05, "max": 2.0},
 	# --- the exposure's ceiling. The metre drives the frame toward middle grey, and a frame of nothing
 	# but stars has almost no mean luminance to answer with, so it drives toward the *top* of the
 	# window — which is what this caps. In STOPS above the light-adapted floor, so 32 is the whole

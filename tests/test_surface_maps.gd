@@ -25,25 +25,27 @@ func _test_the_ladder(h) -> void:
 	h.check(SpacesimSurfaceMaps.BUILD_WIDTH == 256,
 		"a body is baked at 256 when the scene is built, not at its ceiling")
 
-	# Half the render width, nearest power of two: 640 -> 512, 960 -> 1024, 1280 -> 1024, 1920 -> 2048.
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1280, 720)) == 512,
-		"the 720p default ceiling is 512 (half of 1280, rounded)")
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080)) == 1024,
-		"1080p gives 1,024 — half the render width, not the window's")
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(2560, 1440)) == 1024, "1440p gives 1,024")
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(3840, 2160)) == 2048, "4K gives 2,048")
+	# **Half the render width, and always derived**: 0.5 of 1,280 is 640, of 1,920 is 960, of 3,840 is 1,920.
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1280, 720)) == 640,
+		"the 720p default ceiling is 640 — half of 1,280")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080)) == 960,
+		"1080p gives 960 — half the render width, not the window's")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(3840, 2160)) == 1920, "4K gives 1,920")
 	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(0, 0)) == SpacesimSurfaceMaps.MIN_WIDTH,
 		"no render size falls back to the narrowest map rather than to zero")
 
-	# The setting is the override, and it is clamped: a number moved while flying cannot ask for nonsense.
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 4096) == 4096,
-		"surface.max_base_width overrides the derived ceiling")
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 0) == 1024,
-		"and 0 means derive it")
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 99999) == SpacesimSurfaceMaps.MAX_WIDTH,
-		"an absurd ceiling is clamped")
-	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 1) == SpacesimSurfaceMaps.MIN_WIDTH,
-		"and so is an absurdly small one")
+	# The knob is a fraction of the render resolution, so moving it moves the ceiling in proportion — and it is
+	# clamped at both ends, because a number moved while flying must not be able to ask for nonsense.
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 1.0) == 1920,
+		"surface.max_base_fraction 1.0 is the render width itself")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 0.25) == 480,
+		"and 0.25 is a quarter of it")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 2.0) == 3840,
+		"above 1.0 is allowed, because it is how the headroom gets measured")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 99.0) == SpacesimSurfaceMaps.MAX_WIDTH,
+		"an absurd fraction is clamped to the hard ceiling")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 0.0) == SpacesimSurfaceMaps.MIN_WIDTH,
+		"and a zero fraction to the narrowest map rather than to nothing")
 
 	# The distance law, against the ceiling: far away it asks for the floor it already has, close in for the
 	# ceiling, and never for less than a map exists.

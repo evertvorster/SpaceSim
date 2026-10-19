@@ -34,10 +34,15 @@ extends RefCounted
 ## bodies nobody approaches. Work with no predicted need is the one thing [[SpaceSim/LOD — The Principle at Work|the
 ## LOD principle]] forbids outright.
 const BUILD_WIDTH := 256
-## The narrowest map worth baking — the clamp on the setting that overrides the derived ceiling.
+## **The fraction of the render resolution the ceiling is**, and the registry's default. A setting rather than a
+## constant because it is the one number that moves a planet's close-range cost, and it must be movable while
+## flying to be useful.
+const DEFAULT_BASE_FRACTION := 0.5
+## The narrowest map worth baking, and the clamp on anything derived or overridden.
 const MIN_WIDTH := 128
-## **The hard ceiling on any width**, and the clamp on the setting that overrides the derived one. A whole-body
-## map past this is resolution no display can show: at 4K a disc that fills the frame is 2,160 px across.
+## **The hard ceiling on any width**, whatever the fraction asks for. A whole-body map past this is resolution no
+## display can show: at 4K a disc that fills the frame is 2,160 px across, and an equirect of width `W` shows
+## `W/pi` texels across that diameter.
 const MAX_WIDTH := 8192
 
 ## Quantiles per table: 65 values, one per 1/64th of the area. 1.5 % resolution on a percentile is finer than
@@ -171,30 +176,28 @@ static func required_width(
 	return clampi(wanted, BUILD_WIDTH, clampi(cap, BUILD_WIDTH, MAX_WIDTH))
 
 
-## **The ceiling of the whole-body ladder, as a width** — half the resolution the scene is being rendered at,
-## rounded to the nearest power of two, and `BUILD_WIDTH`-clamped.
+## **The ceiling of the whole-body ladder, as a width** — **a fraction of the resolution the scene is being
+## rendered at**, and it is *always* derived: there is no absolute width to override, only the fraction.
 ##
-## Evert, 2026-10-19: *"I meant half the resolution the scene is being rendered at. However, I also want this
-## to be a tunable parameter so that I can set it to see the performance impact without having to re-code a lot
-## of things."* So `override` is the registry's `surface.max_base_width`, `0` meaning *derive it*, and the
-## setting is read per frame rather than cached — a cached setting is a cold setting, and this one exists to be
-## moved **while flying**.
+## Evert, 2026-10-19: *"surface.max_base_width should always be derived, expressed as a percentage. 0.5 would
+## be the default setting, making the texture 50% of the scene resolution."* So the knob is
+## `surface.max_base_fraction` — 0.5 by default — and it is read per frame rather than cached, because a cached
+## setting is a cold setting and this one exists to be moved **while flying**, to watch a planet's close-range
+## cost move with it.
 ##
 ## **The render resolution and not the window's**, because that is where the pixel angle comes from and where
 ## the pixels actually are ([[SpaceSim/Display and Window|Display and Window]]). A quarter of the width is the
-## map's height, since an equirect is 2:1.
+## map's height, since an equirect is 2:1: at the 1280x720 render default, half gives 640x320.
 ##
-## **Deliberately soft, and that is the point:** at 1920x1080 the cap is 1,024, and a disc that fills the frame
-## is 1,080 px across, so the map shows about 3.3 pixels per texel there. The base only has to hold the picture
-## while the disc is a fraction of the screen; the near field is the tiles' business.
-static func base_max_width(render_size: Vector2i, override: int = 0) -> int:
-	if override > 0:
-		return clampi(override, MIN_WIDTH, MAX_WIDTH)
-	var half := maxf(float(render_size.x) * 0.5, float(MIN_WIDTH))
-	var below := pow(2.0, floor(log(half) / log(2.0)))
-	var above := below * 2.0
-	var nearest := below if half - below <= above - half else above
-	return clampi(int(nearest), MIN_WIDTH, MAX_WIDTH)
+## **Deliberately soft, and that is the point:** at 1920x1080 half the width is 960, and a disc that fills the
+## frame is 1,080 px across, so the map shows `960/pi` = 306 texels across it — about 3.5 pixels per texel. The
+## base only has to hold the picture while the disc is a fraction of the screen; the near field is the tiles'
+## business.
+static func base_max_width(render_size: Vector2i, fraction: float = DEFAULT_BASE_FRACTION) -> int:
+	if render_size.x <= 0:
+		return MIN_WIDTH
+	var wanted := int(round(float(render_size.x) * maxf(fraction, 0.0)))
+	return clampi(wanted, MIN_WIDTH, MAX_WIDTH)
 
 
 ## **The refinement, if the game attached one.** Null in a headless run, in the suite and in a probe — there is
