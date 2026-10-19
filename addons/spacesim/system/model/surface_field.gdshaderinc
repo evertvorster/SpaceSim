@@ -214,9 +214,20 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 //    the map's octaves had it. A detail term with its own spectrum would look like a second geology laid over
 //    the first.
 //  - **band-limited by the PIXEL FOOTPRINT, never by distance.** A rung is faded out where a pixel is too big
-//    to resolve it: `fade = 1 - smoothstep(feature*0.5, feature*1.5, footprint)`. Detail finer than the
-//    sampling rate is not "more detail", it is aliasing — and this is also what makes a distant body free,
-//    because every rung dies long before the fragment does the work.
+//    to resolve it: `fade = 1 - smoothstep(feature*0.25, feature*0.5, footprint)` — **full while a pixel holds
+//    four samples per feature, gone by two**, which is the sampling limit. Detail finer than the sampling rate
+//    is not "more detail", it is aliasing — and this is also what makes a distant body free, because every
+//    rung dies long before the fragment does the work.
+//
+//    **The band was `0.5` to `1.5` and that was the near ground's speckle** (Evert's screenshot, 2026-10-19: the
+//    bottom half of a continent drawn as pixel-scale dots that shimmer). It kept a rung at full amplitude down
+//    to exactly TWO samples per feature — Nyquist — and only extinguished it once a pixel was 1.5x the feature,
+//    i.e. after the feature had already aliased. Because the host counts rungs with `ceil`, the deepest rung it
+//    asks for always lands between 1 and 2 samples per feature, so the worst case was not an edge case but
+//    *every* distance: measured at 1.0-1.7 samples/period with a fade of 0.53-0.98 as the eye closed from
+//    3,000 km to 3 km. Two channels carried it into the picture — the colour (`detail_variation`, 0.18) and the
+//    relief, whose screen-space derivative of an aliased height swings to the full `relief_max_tilt` and flips
+//    sign per pixel. With the band below, the deepest surviving rung sits at 2.5-4.2 samples/period instead.
 //
 // **Zero-mean, and normalised by the whole ladder.** The sum is scaled by `(1-g)/(1-g^n)`, the same shape
 // `SpacesimCloudField.fractal_bounding` uses, so the amplitude is one octave's whatever the rung count. A rung
@@ -243,7 +254,7 @@ float surface_detail(
 	float octave_feature = feature;
 	float frequency = 1.0 / feature;
 	for (int octave = 0; octave < octaves; octave++) {
-		float fade = 1.0 - smoothstep(octave_feature * 0.5, octave_feature * 1.5, footprint);
+		float fade = 1.0 - smoothstep(octave_feature * 0.25, octave_feature * 0.5, footprint);
 		if (fade > 0.0) {
 			float value = fnl_fbm3(
 				unit, seed + 4099 + octave, frequency, 1, gain, lacunarity, 1.0
