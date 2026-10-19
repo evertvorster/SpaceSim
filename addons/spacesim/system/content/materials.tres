@@ -143,8 +143,14 @@ density = 917.0
 molar_mass = 18.015
 albedo = 0.6
 color = Color(0.85, 0.9, 0.95, 1)
-condensation_temperature = 273.15
-; sublimation; 273.16 K is the triple point, which is the only 1-atm reference a solid has
+; **water's 1-atm vapour-pressure reference is its BOILING point, 373.15 K** -- the same number for every
+; phase the substance is stored in, because the field describes what the substance does at one atmosphere
+; and not what this block happens to be. It carried 273.15 (the triple point) until 2026-10-19: a different
+; reference, and it made a phase test read ice as a gas above freezing.
+condensation_temperature = 373.15
+melting_temperature = 273.15
+; below this pressure water has no liquid phase at all
+triple_point_pressure = 611.657
 latent_heat = 51000.0
 
 [sub_resource type="Resource" id="Sp_ammonia_ice"]
@@ -155,7 +161,10 @@ density = 817.0
 molar_mass = 17.031
 albedo = 0.55
 color = Color(0.8, 0.85, 0.8, 1)
-condensation_temperature = 195.4
+; the 1-atm reference is the boiling point, 239.8 K; 195.4 is the melting point and is its own field now
+condensation_temperature = 239.8
+melting_temperature = 195.4
+triple_point_pressure = 6060.0
 
 [sub_resource type="Resource" id="Sp_methane_ice"]
 script = ExtResource("species")
@@ -167,6 +176,8 @@ albedo = 0.5
 color = Color(0.82, 0.78, 0.72, 1)
 ; same species, solid phase: the 1-atm reference is still the boiling point
 condensation_temperature = 111.7
+melting_temperature = 90.69
+triple_point_pressure = 11700.0
 latent_heat = 8170.0
 
 [sub_resource type="Resource" id="Sp_hydrogen_metallic"]
@@ -217,6 +228,8 @@ albedo = 0.0
 color = Color(0.75, 0.78, 0.85, 1)
 rayleigh = Vector3(1.956e-31, 4.631e-31, 1.156e-30)
 condensation_temperature = 77.4
+melting_temperature = 63.15
+triple_point_pressure = 12520.0
 
 [sub_resource type="Resource" id="Sp_oxygen"]
 script = ExtResource("species")
@@ -244,6 +257,9 @@ color = Color(0.8, 0.78, 0.7, 1)
 rayleigh = Vector3(4.895e-31, 1.164e-30, 2.923e-30)
 condensation_temperature = 194.7
 ; 194.7 K is the sublimation point at 1 atm, which IS a 1-atm reference
+; and it is a choice of phase rather than a measurement: CO2 has no liquid below its 5.18 bar triple point
+melting_temperature = 216.6
+triple_point_pressure = 518000.0
 latent_heat = 25000.0
 
 [sub_resource type="Resource" id="Sp_argon"]
@@ -272,6 +288,8 @@ color = Color(0.85, 0.9, 0.95, 1)
 ; water's 1-atm vapour pressure is at its BOILING point, 373.15 K
 ; - 273.15 is its triple point, a different reference, and using it made the dew point 60 K too low
 condensation_temperature = 373.15
+melting_temperature = 273.15
+triple_point_pressure = 611.657
 latent_heat = 40650.0
 
 [sub_resource type="Resource" id="Sp_methane"]
@@ -287,6 +305,8 @@ color = Color(0.8, 0.75, 0.68, 1)
 rayleigh = Vector3(4.045e-31, 9.702e-31, 2.470e-30)
 ; methane's normal boiling point; 90.7 is its triple point
 condensation_temperature = 111.7
+melting_temperature = 90.69
+triple_point_pressure = 11700.0
 latent_heat = 8170.0
 
 [sub_resource type="Resource" id="Sp_ammonia"]
@@ -301,6 +321,8 @@ albedo = 0.0
 color = Color(0.78, 0.82, 0.78, 1)
 condensation_temperature = 239.8
 ; 239.8 K is already the normal boiling point
+melting_temperature = 195.4
+triple_point_pressure = 6060.0
 latent_heat = 23400.0
 
 [sub_resource type="Resource" id="Sp_sulfur_dioxide"]
@@ -314,6 +336,8 @@ greenhouse = PackedFloat32Array(0.0)
 albedo = 0.0
 color = Color(0.85, 0.82, 0.62, 1)
 condensation_temperature = 263.1
+melting_temperature = 197.7
+triple_point_pressure = 1670.0
 
 [sub_resource type="Resource" id="Sp_neon"]
 script = ExtResource("species")
@@ -354,7 +378,10 @@ density = 1025.0
 molar_mass = 18.015
 albedo = 0.06
 color = Color(0.05, 0.15, 0.35, 1)
-condensation_temperature = 273.15
+; the 1-atm vapour-pressure reference, i.e. water's boiling point -- see Sp_water_ice
+condensation_temperature = 373.15
+melting_temperature = 273.15
+triple_point_pressure = 611.657
 
 [sub_resource type="Resource" id="Sp_ice_cap"]
 script = ExtResource("species")
@@ -364,7 +391,10 @@ density = 917.0
 molar_mass = 18.015
 albedo = 0.75
 color = Color(0.95, 0.97, 1, 1)
-condensation_temperature = 273.15
+; the 1-atm vapour-pressure reference, i.e. water's boiling point -- see Sp_water_ice
+condensation_temperature = 373.15
+melting_temperature = 273.15
+triple_point_pressure = 611.657
 
 [sub_resource type="Resource" id="Sp_nitrogen_ice"]
 script = ExtResource("species")
@@ -374,7 +404,10 @@ density = 1026.0
 molar_mass = 28.014
 albedo = 0.6
 color = Color(0.88, 0.92, 0.96, 1)
-condensation_temperature = 63.15
+; the 1-atm reference is the boiling point, 77.4 K; 63.15 is the melting point
+condensation_temperature = 77.4
+melting_temperature = 63.15
+triple_point_pressure = 12520.0
 
 [sub_resource type="Resource" id="Sp_regolith"]
 script = ExtResource("species")
