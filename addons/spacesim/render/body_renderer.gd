@@ -337,34 +337,6 @@ static func flat_height(value: float) -> ImageTexture:
 	return _flat
 
 
-## **How much of the ladder moves the coastline.** The one look number in the threshold, and it exists because
-## `surface_detail` is normalised to about one octave's amplitude — which is right for a *colour* perturbation
-## (`detail_variation` is 0.18 of it) and far too much for a *boundary*: the whole field spans ±1, so a raw ladder
-## would make the coast fractal noise rather than a detailed coastline. A quarter keeps the meander sub-texel in
-## scale, which is what the map's bilinear interpolation is missing.
-##
-## **To be judged in flight.** The mechanism (threshold the resolved height) is not a look decision; this number is.
-const COAST_LADDER_SCALE := 0.25
-
-
-## **The ladder's numbers, written to a material — one writer, because two would drift.**
-##
-## Both the land and the sea threshold the *same* resolved height, so both need the same five numbers: the seed, the
-## gain, the lacunarity, the first rung's feature, and the depth available. A material given a different seed would
-## put the coastline in a different place, and the symptom would be a band along every coast where both layers draw
-## over each other or neither does — which reads as a rendering fault rather than as a mismatched uniform.
-static func _apply_detail_plan(material: ShaderMaterial, body: SpacesimSceneBody) -> void:
-	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
-	material.set_shader_parameter("detail_seed", plan.seed)
-	material.set_shader_parameter("detail_gain", plan.gain)
-	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
-	material.set_shader_parameter(
-		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.BUILD_WIDTH)
-	)
-	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
-	material.set_shader_parameter("detail_coast_scale", COAST_LADDER_SCALE)
-
-
 ## **Does this body draw a reference sphere?** — the predicate [[SpaceSim/Levels of Detail|Levels of Detail]] §4
 ## states as a table, and the question is about *drawing a sphere*, not about having "ground": a gas giant has no
 ## surface register because its datum is a reference **pressure**, and a star's photosphere is drawn by its own
@@ -404,7 +376,14 @@ static func surface_material(
 	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
 	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
 	# different field from the map it extends. `detail_feature` starts at two texels of the map in hand.
-	_apply_detail_plan(material, body)
+	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
+	material.set_shader_parameter("detail_seed", plan.seed)
+	material.set_shader_parameter("detail_gain", plan.gain)
+	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
+	material.set_shader_parameter(
+		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.BUILD_WIDTH)
+	)
+	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
@@ -435,8 +414,6 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 		return null
 	var material := ShaderMaterial.new()
 	material.shader = OCEAN_SHADER
-	# **The same ladder the land thresholds against** — see `_apply_detail_plan`.
-	_apply_detail_plan(material, body)
 	material.set_shader_parameter(
 		"shallow_color", bottom.lerp(deep, OCEAN_SHALLOW_BOTTOM_SHARE)
 	)

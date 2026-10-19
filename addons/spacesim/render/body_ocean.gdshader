@@ -37,19 +37,6 @@ uniform vec4 tile_rect[32];
 uniform int tile_layer[32];
 uniform int tile_count = 0;
 uniform float sea_level = 0.0;
-// **The ladder, which decides where the coast is.** Both layers threshold the map *plus* the field below its texel,
-// so both have to be given the same five numbers — one writer, `SpacesimBodyRenderer._apply_detail_plan`. A material
-// with a different seed would put the sea's edge where the land's is not, and the gap reads as a hole along every
-// coast.
-uniform int detail_seed = 0;
-uniform int detail_max_rungs = 0;
-uniform float detail_gain = 0.5;
-uniform float detail_lacunarity = 2.0;
-uniform float detail_feature = 0.0;
-// **How much of the ladder moves the coastline** — see `SpacesimBodyRenderer.COAST_LADDER_SCALE`. `surface_detail`
-// is normalised to about one octave's amplitude, which is the right size for a colour perturbation and far too much
-// for a boundary: the field spans ±1, so the raw ladder would make the coast fractal noise instead of a coastline.
-uniform float detail_coast_scale = 0.25;
 // The field's value times this is metres — which turns the map into a **depth**.
 uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
@@ -124,35 +111,16 @@ void fragment() {
 		}
 	}
 
-	// **The height this pixel can actually resolve** — the map plus the field below its texel, exactly as the land
-	// computes it. A threshold on the map alone draws every coast as a polyline of texel-aligned segments: at 7.5 km
-	// the map's texel is 5-20 km of ground and the horizon is 309 km away, which is the tiling Evert photographed.
-	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
-	float ladder = 0.0;
-	if (detail_max_rungs > 0 && detail_feature > 0.0) {
-		int rungs = int(ceil(log2(max(detail_feature / max(footprint_angle, 1.0e-9), 1.0))));
-		rungs = clamp(rungs, 0, detail_max_rungs);
-		if (rungs > 0) {
-			float unused_relief = 0.0;
-			ladder = surface_detail(
-				up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
-				rungs, 0.25, unused_relief
-			);
-		}
-	}
-	float resolved = height + ladder * detail_coast_scale;
-
-	// **Land is not this shader's business.** The complementary test to the land's own discard, on the same resolved
-	// height: exactly one of the two layers survives per pixel, so the two are disjoint and coplanar and nothing can
-	// z-fight. **This is why the ladder has to be here too** — a threshold on the map alone would put the sea's edge
-	// where the land's is not, and the gap reads as a hole along every coast.
-	if (resolved >= sea_level) {
+	// **Land is not this shader's business.** The complementary test to the land's own discard, on the same
+	// value and the same map: exactly one of the two layers survives per pixel, so the two are disjoint and
+	// coplanar and nothing can z-fight.
+	if (height >= sea_level) {
 		discard;
 	}
 
 	// **The depth**, in metres — the map is a height field, and everything below sea level is water over
 	// ground. This is what the shallow end of the ramp is made of.
-	float depth = (sea_level - resolved) * field_amplitude;
+	float depth = (sea_level - height) * field_amplitude;
 	float fill = smoothstep(shallow_metres, max(deep_metres, shallow_metres * 1.01), depth);
 	ALBEDO = mix(shallow_color, deep_color, fill);
 	ROUGHNESS = roughness_value;

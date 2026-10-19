@@ -71,24 +71,6 @@ func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemSc
 	h.check(not SpacesimBodyRenderer.draws_reference_sphere(sol.content),
 		"and a star does not either: its photosphere is its disc, drawn by its own shader")
 	h.check(SpacesimBodyRenderer.max_rungs_for(sol.content) == 0, "so the surface ladder is zero for it")
-	# **The land and the sea threshold the SAME resolved height**, so both materials must carry the same ladder
-	# numbers. Two writers would drift, and the symptom is not a wrong colour: it is a band along every coast where
-	# both layers draw over each other or neither does, which reads as a rendering fault rather than as a mismatch.
-	var earth_ocean := earth.ocean_material as ShaderMaterial
-	var earth_land := earth.mesh_material as ShaderMaterial
-	h.check(earth_ocean != null, "Earth has a sea layer to compare with")
-	if earth_ocean != null and earth_land != null:
-		for key in [
-			"detail_seed", "detail_gain", "detail_lacunarity", "detail_feature", "detail_max_rungs",
-			"detail_coast_scale",
-		]:
-			h.check(
-				earth_ocean.get_shader_parameter(key) == earth_land.get_shader_parameter(key),
-				"the coast's ladder is the same on both layers: %s (%s against %s)" % [
-					key, str(earth_ocean.get_shader_parameter(key)), str(earth_land.get_shader_parameter(key))
-				]
-			)
-
 	# **And the material the game actually builds carries it**, rather than the predicate being true in isolation.
 	var jupiter_material := SpacesimBodyRenderer.material_for(
 		jupiter, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), jupiter.color),
