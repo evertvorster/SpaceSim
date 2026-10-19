@@ -813,7 +813,9 @@ func update_lod(camera: Camera3D) -> void:
 	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type, so `:=`
 	# here is the `INFERENCE_ON_VARIANT` error, and everything derived from the result with it.
 	var observer: Vector3 = camera.get_global_transform_interpolated().origin
-	var total := 0
+	# **Publish whatever landed since the last frame**, before any of it is counted: a rebuild is a mesh
+	# that appears a frame or two after it was asked for, never a stall in the frame that asked.
+	_poll_patch_builds()
 	for body in bodies:
 		if body.node == null:
 			continue
@@ -829,7 +831,6 @@ func update_lod(camera: Camera3D) -> void:
 			body.point.visible = is_point
 		if is_point:
 			_place_point(body, observer, energy, distance, pixel, screen, camera)
-			total += SpacesimBodyRenderer.POINT_TRIANGLES
 			continue
 		if body.mesh == null:
 			continue
@@ -837,45 +838,124 @@ func update_lod(camera: Camera3D) -> void:
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
 		# so the triangle count is now a consequence of what is visible rather than of the body's size.
-		var leaves := SpacesimPatches.select(
-			distance, (observer - body.node.global_position).normalized(), body.radius, pixel, epsilon
-		)
-		total += leaves.size()
-		# **Rebuilt only when the selection would differ**, because building thirty thousand triangles is
-		# not a per-frame job. The key is the leaf count plus the camera's direction quantised finely enough
-		# (1/8192 of a unit vector, about 0.8 km at Earth's surface) that flying over a patch replaces it,
-		# while altitude changes that only re-order the same leaves cost nothing.
+		#
+		# **The walk is gated**, because it is a pure function of (distance, direction, ε) and only has to
+		# run when one of those has changed its answer. That replaced a brittle rebuild *key* — the selection
+		# count plus a quantised altitude and direction — which took two faults to get right (a packed int
+		# that collided, then a bucket on `log(d/R)` that went flat near the ground and stopped refining).
+		# A gate on what the law actually depends on cannot go stale in either of those ways.
 		var to_eye := (observer - body.node.global_position).normalized()
-		# **The distance has to be in the key, and its absence was a real fault**: two different selections
-		# can have the same leaf count, so a key of count-and-direction left the mesh stale while the eye
-		# moved. Altitude is bucketed logarithmically, which is how the error law itself scales.
-		# **Three separate numbers, not one packed int**: the first version packed the count and the
-		# distance bucket into a single field and two different selections collided, which left the mesh
-		# stale — the same fault as leaving the distance out, one layer down.
-		# **Bucketed on ALTITUDE, not on distance over radius** — the second fault. `log(d / R)` is flat as
-		# the eye nears the ground (one bucket covers the last two kilometres), so descending close in never
-		# changed the key and the mesh stayed stale: "it subdivides for a little bit, and then no further".
-		# Altitude is the quantity the law uses once the eye is near the surface, so it is the one bucketed,
-		# geometrically, at about 10% steps.
-		var altitude := maxf(distance - body.radius, 1.0)
-		var key := Vector3i(
-			leaves.size(),
-			int(round(log(altitude) / log(1.1))),
-			hash(Vector3i(
-				int(round(to_eye.x * 32768.0)),
-				int(round(to_eye.y * 32768.0)),
-				int(round(to_eye.z * 32768.0))
-			))
-		)
-		if key != body.patch_key or body.mesh.mesh == null:
-			body.patch_key = key
+		if SpacesimPatches.walk_is_due(
+			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
+			pixel, epsilon, body.radius, body.patch_walk_epsilon
+		) or wireframe != body.patch_walk_wireframe or body.mesh.mesh == null:
+			body.patch_chunks = SpacesimPatches.select(
+				distance, to_eye, body.radius, pixel, epsilon
+			)
+			body.patch_walk_distance = distance
+			body.patch_walk_direction = to_eye
+			body.patch_walk_epsilon = epsilon
+			body.patch_walk_wireframe = wireframe
+			_request_patch_build(body, wireframe)
+	# **Counted once, from what is visible**, rather than accumulated as the loop goes: the HUD's number and
+	# an instrument's independent count then cannot disagree about a body that landed or was culled
+	# mid-frame.
+	_triangles = _count_drawn_triangles()
+
+
+## **What is actually drawn this frame**, summed over the bodies: a point of light where a body is below
+## the tier, its patches where it is not. One place, so the HUD's number, the instruments that compare
+## against it, and the picture cannot disagree.
+func _count_drawn_triangles() -> int:
+	var total := 0
+	for body in bodies:
+		if body.node == null:
+			continue
+		if body.point != null and body.point.visible:
+			total += SpacesimBodyRenderer.POINT_TRIANGLES
+		elif body.mesh != null and body.mesh.visible:
+			total += body.patch_triangles
+	return total
+
+
+## **Ask for a rebuild, without doing it here.** The merged chunk arrays are the expensive half of a
+## rebuild and they touch nothing that needs the main thread, so they go to the pool; the mesh is built
+## from them in `_poll_patch_builds`, because `add_surface_from_arrays` is a `RenderingServer` call and
+## that is the one boundary that cannot be crossed.
+##
+## **`patch_key` is not written until the arrays land**: the triangle count on the body describes the mesh
+## that is actually there, never the one that was asked for.
+func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
+	body.patch_task_chunks = body.patch_chunks
+	body.patch_task_wireframe = lines
+	if body.patch_task != -1:
+		# A build is already in flight. Its result will be published and then seen to be stale, which
+		# starts the next one — cheaper than a queue and correct without one.
+		return
+	body.patch_arrays = []
+	body.patch_task = WorkerThreadPool.add_task(
+		Callable(self, "_build_patch_arrays").bind(body, body.patch_chunks, lines)
+	)
+
+
+## **Runs on a worker thread.** Reads the static chunk cache (which locks) and writes one field on one
+## body; touches no node, no `RenderingServer` and no settings.
+func _build_patch_arrays(body: SpacesimSceneBody, chunks: Array, lines: bool) -> void:
+	body.patch_arrays = (
+		SpacesimPatches.lines_of(chunks) if lines else SpacesimPatches.arrays_of(chunks)
+	)
+
+
+## **The main thread's half**, once a frame: the arrays become a mesh, and the body starts drawing it.
+##
+## **`is_task_completed` must be asked before `wait_for_task_completion`, never after** — waiting consumes
+## the task, so a second question about it answers *no* and the poll silently does nothing. That mistake
+## cost a session, and it shows up as a body with no mesh rather than as a failure.
+func _poll_patch_builds() -> void:
+	for body in bodies:
+		if body.patch_task == -1:
+			continue
+		if not WorkerThreadPool.is_task_completed(body.patch_task):
+			continue
+		WorkerThreadPool.wait_for_task_completion(body.patch_task)
+		body.patch_task = -1
+		var arrays := body.patch_arrays
+		body.patch_arrays = []
+		if body.mesh != null and not arrays.is_empty():
 			body.mesh.mesh = (
-				SpacesimPatches.build_lines(leaves) if wireframe else SpacesimPatches.build(leaves)
+				SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
+				else SpacesimPatches.mesh_from(arrays)
 			)
 			body.mesh.material_override = (
-				SpacesimBodyRenderer.wireframe_material() if wireframe else body.mesh_material
+				SpacesimBodyRenderer.wireframe_material() if body.patch_task_wireframe
+				else body.mesh_material
 			)
-	_triangles = total
+			body.patch_triangles = (
+				arrays[0].size() / 6 if body.patch_task_wireframe
+				else arrays[0].size() / 3
+			)
+		# The selection moved while this was building, so the answer is already out of date.
+		if body.patch_task_chunks != body.patch_chunks:
+			_request_patch_build(body, body.patch_walk_wireframe)
+
+
+## **Join every rebuild in flight**, for a rig that has to know the mesh exists before it looks.
+##
+## Part of the feature rather than a test helper: a body draws nothing until its first build lands, so
+## anything reading a mesh has to be able to wait for it. Polls between rounds because a publish can start
+## the next build.
+func await_patch_builds(rounds: int = 8) -> void:
+	for _round in rounds:
+		var waiting := false
+		for body in bodies:
+			while body.patch_task != -1 and not WorkerThreadPool.is_task_completed(body.patch_task):
+				OS.delay_usec(100)
+			if body.patch_task != -1:
+				waiting = true
+		_poll_patch_builds()
+		_triangles = _count_drawn_triangles()
+		if not waiting:
+			return
 
 
 ## Size and colour a body's point of light.
