@@ -73,16 +73,13 @@ uniform float detail_relief = 0.0;
 // And how much it moves the *water*, which is a much smaller number: a sea with hills in it is the one thing
 // that reads as wrong at any distance.
 uniform float wave_relief = 0.0;
-// **Where the detail's shadows are allowed to exist, in metres per pixel.** Evert, 2026-10-19: *"we don't
-// actually need to see the shadows of fine detail until we are very close."* Past `relief_far` a pixel covers
-// more ground than a bump is wide, and what the bump does then is not shading — it is moiré toward the horizon
-// and black speckle where a sub-pixel slope is drawn as a pit. Full strength inside `relief_near`, gone by
-// `relief_far`.
-uniform float relief_near = 5.0;
-uniform float relief_far = 60.0;
-// **A ceiling on the tilt, in the same units as the gradient.** A bump's dark side drawn as absolute black is
-// the missing air as much as the relief — with no sky above it, nothing lifts a shadow — so a normal may lean
-// only so far before the fiction becomes a hole.
+// **How fast the relief's amplitude decays per rung**, against the colour's gain. 0.25 makes each rung's SLOPE
+// half the last one, so coarse shapes carry the shading and a 76 m bump barely tilts — which is Evert's
+// *"small features should have small shadows"*, and the difference between terrain and a bed of black pits.
+uniform float relief_gain = 0.25;
+// **A ceiling on the tilt**, in the same units as the slope: a normal may lean only so far before the fiction
+// becomes a hole. A bump's dark side drawn as absolute black is the missing sky as much as the relief — with no
+// air above it, nothing lifts a shadow — and that is S4's to fix.
 uniform float relief_max_tilt = 0.6;
 
 // **Where the sea is**, in field units — `value_at(ocean_fraction)` off the measured quantiles. Zero until a
@@ -194,10 +191,11 @@ void fragment() {
 	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
 	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 	float detail = 0.0;
+	float relief_height = 0.0;
 	if (detail_octaves > 0 && detail_feature > 0.0) {
 		detail = surface_detail(
 			up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
-			detail_octaves
+			detail_octaves, relief_gain, relief_height
 		);
 	}
 
@@ -228,13 +226,16 @@ void fragment() {
 		vec3 view_y = dFdy(VERTEX);
 		vec3 tangent = normalize(cross(NORMAL, view_y));
 		vec3 bitangent = normalize(cross(view_x, NORMAL));
-		// **The relief fades on the pixel's own size**, in metres of ground per pixel — full strength within
-		// `relief_near`, gone by `relief_far`. Measured in metres rather than in texels or in distance because
-		// the question it answers is "is a bump bigger than a pixel", which is the same at any altitude.
-		float pixel_metres = footprint_angle * planet_radius;
-		float relief_fade = 1.0 - smoothstep(relief_near, relief_far, pixel_metres);
-		float relief = mix(detail_relief, wave_relief, water) * relief_fade;
-		vec2 gradient = vec2(dFdx(detail), dFdy(detail)) * relief;
+		// **The relief as a SLOPE — metres of height per metre of ground — and that is the whole fix for the
+		// black dots and the horizon moiré.** The screen-space derivative of the relief height, divided by the
+		// ground the pixel spans in that direction, is the surface's real gradient: it does not grow as the view
+		// grazes (both the derivative and the step grow together) and it does not shrink as the pixel grows, so a
+		// bump shades by its own steepness wherever it is seen. The envelope of a fixed near/far fade could not
+		// do this: it drew a pixel covered in many bumps as if it were one.
+		float step_east = max(length(view_x), 1.0e-4);
+		float step_north = max(length(view_y), 1.0e-4);
+		vec2 gradient = vec2(dFdx(relief_height) / step_east, dFdy(relief_height) / step_north)
+			* field_amplitude * mix(detail_relief, wave_relief, water);
 		// A bump may lean only so far — see `relief_max_tilt`.
 		float magnitude = length(gradient);
 		if (magnitude > relief_max_tilt) {

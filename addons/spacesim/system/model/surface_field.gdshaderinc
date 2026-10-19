@@ -223,25 +223,38 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 // that fades therefore *reduces* the detail rather than renormalising it, which is what makes the detail
 // appear and recede smoothly with distance instead of changing character.
 float surface_detail(
-	vec3 unit, int seed, float gain, float lacunarity, float feature, float footprint, int octaves
+	vec3 unit, int seed, float gain, float lacunarity, float feature, float footprint, int octaves,
+	float relief_gain, out float relief
 ) {
+	relief = 0.0;
 	if (octaves <= 0 || feature <= 0.0) {
 		return 0.0;
 	}
 	// The whole ladder's normaliser, so the sum stays inside one octave's range however many rungs run.
 	float amplitude = (1.0 - gain) / (1.0 - pow(gain, float(octaves)));
+	// **And a SECOND ladder, for the relief, that decays faster.** Evert, 2026-10-19: *"small features should
+	// have small shadows."* An fbm with the field's own gain gives every octave the *same* slope — halve the
+	// feature and halve the height — so a 76 m wide bump carries kilometres of height and shades to black. A
+	// relief amplitude that quarters per rung makes the slope halve per rung instead, so the coarse shapes
+	// carry the shading and the finest visible rung barely tilts at all. **It costs nothing**: the same noise
+	// sample, a second amplitude.
+	float relief_amplitude = (1.0 - relief_gain) / (1.0 - pow(relief_gain, float(octaves)));
 	float sum = 0.0;
 	float octave_feature = feature;
 	float frequency = 1.0 / feature;
 	for (int octave = 0; octave < octaves; octave++) {
 		float fade = 1.0 - smoothstep(octave_feature * 0.5, octave_feature * 1.5, footprint);
 		if (fade > 0.0) {
-			sum += fnl_fbm3(
+			float value = fnl_fbm3(
 				unit, seed + 4099 + octave, frequency, 1, gain, lacunarity, 1.0
-			) * amplitude * fade;
+			) * fade;
+			sum += value * amplitude;
+			relief += value * relief_amplitude;
 		}
 		octave_feature *= 0.5;
 		frequency *= 2.0;
+		amplitude *= gain;
+		relief_amplitude *= relief_gain;
 	}
 	return sum;
 }

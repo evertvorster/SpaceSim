@@ -56,18 +56,18 @@ const DETAIL_OCTAVES := 8
 ## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
 ## fitted to, and a large swing would move the drawn average away from it.
 const DETAIL_VARIATION := 0.18
-## The normal's relief per pixel of height difference. A look number, calibrated by eye, and the reason the
-## ground reads as terrain rather than as paint once the ladder is on.
-const DETAIL_RELIEF := 6.0
+## **The relief's exaggeration**, in the sloped sense: the shader computes a real slope (metres of height per
+## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
+## exactly as steep as it is.
+const DETAIL_RELIEF := 1.0
 ## And water's, which is a tenth of it: a sea with hills in it is the one thing that reads as wrong at any
 ## distance. The glint is restored at the same time — see `WATER_ROUGHNESS`.
 const WAVE_RELIEF := 0.6
-## **Where the detail's shadows are allowed, in metres of ground per pixel.** Evert, 2026-10-19: *"we don't
-## actually need to see the shadows of fine detail until we are very close."* At 3,200 m up a pixel is ~4 m and
-## the bumps read as terrain; by 60 m a pixel they read as moiré at the horizon and as black speckle on the
-## ground, because a sub-pixel slope is drawn as a pit. Full strength inside 5 m, gone by 60.
-const RELIEF_NEAR_METRES := 5.0
-const RELIEF_FAR_METRES := 60.0
+## **How fast the relief decays per rung, against the colour's own gain.** Evert, 2026-10-19: *"small features
+## should have small shadows."* At the field's gain the slope is the same on every octave, so the finest visible
+## bump shades as hard as a mountain and the ground becomes a bed of black pits. A quarter per rung halves the
+## slope each time, so the coarse shapes carry the shading.
+const RELIEF_GAIN := 0.25
 ## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
 ## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
 ## only so far before it becomes a hole.
@@ -335,8 +335,7 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("wave_relief", WAVE_RELIEF)
-	material.set_shader_parameter("relief_near", RELIEF_NEAR_METRES)
-	material.set_shader_parameter("relief_far", RELIEF_FAR_METRES)
+	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("water_roughness", WATER_ROUGHNESS)
 	material.set_shader_parameter("water_specular", WATER_SPECULAR)
