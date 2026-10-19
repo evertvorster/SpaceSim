@@ -102,6 +102,21 @@ func _process(delta: float) -> bool:
 	# **The placement waits for the ship to exist** — the scene is added at `_initialize` and the ship is built a
 	# frame or two later, the same trap `tests/screenshot.gd` documents.
 	if _frames == 2:
+		# **`COST_NO_REFINE=1` stops the whole-body ladder at its floor**, so the shader samples the 256 build map
+		# and never a refined `Texture2DRD`. It is the A/B that separates "the map is bad" from "the layer is bad":
+		# a rung that lands with the wrong contents makes the land draw everywhere AND the sea discard everywhere,
+		# which is exactly what this probe saw.
+		#
+		# **It detaches the bake pass rather than touching a setting.** The first version of this wrote
+		# `surface.max_base_fraction` through `SpacesimSettings` — and the game saved it on the way out, so the
+		# probe left the player's settings file at 0.05 and every later run was measuring a different rig. A rig
+		# may change the world for one run; it may not change the player's settings. That is the rule, and this is
+		# what obeying it looks like: no settings, no saving, one object unhooked for one process.
+		if OS.has_environment("COST_NO_REFINE"):
+			var main_node: Node = get_root().get_node_or_null("Main")
+			if main_node != null and main_node.get("_system") != null:
+				main_node.get("_system").attach_surface_bake(null)
+				print("SURFCOST: refinement OFF — the bake pass is detached, nothing can land")
 		_place()
 	if _frames < SETTLE_FRAMES or _finished:
 		_hold_exposure_identity()
@@ -261,7 +276,15 @@ func _place() -> void:
 	var to_star := Vector3.RIGHT
 	if star != null:
 		to_star = (star.global_position - target.global_position).normalized()
-	ship.global_position = target.global_position + to_star * radius * standoff
+	# **`COST_YAW` walks the viewpoint around the body**, which is not a cosmetic knob: the first measurement stood on
+	# the sub-solar point and the visible hemisphere turned out to be **all land**, so the sea discarded every pixel
+	# and the second pass measured free because it drew nothing. A view with water in it is the only view that can
+	# measure the pass.
+	var yaw := 0.0
+	if OS.has_environment("COST_YAW"):
+		yaw = float(OS.get_environment("COST_YAW"))
+	var from_body := to_star.rotated(Vector3.UP, deg_to_rad(yaw))
+	ship.global_position = target.global_position + from_body * radius * standoff
 
 	var camera: Camera3D = _find_camera(get_root())
 	if camera == null:
@@ -273,7 +296,7 @@ func _place() -> void:
 	# empty space: the frame was near-black, and painting the land red changed nothing at all because the planet
 	# was not in it.
 	var forward := (target.global_position - ship.global_position).normalized()
-	var up := to_star
+	var up := from_body
 	ship.look_at(target.global_position, up)
 	for child in ship.get_children():
 		if child is Camera3D:
@@ -390,6 +413,25 @@ func _measure_frame(delta: float) -> void:
 	if shot != null:
 		shot.save_png("/tmp/surf_cost.png")
 		print("SURFCOST: the frame it measured is at /tmp/surf_cost.png")
+	# **How much of the planet the sea level actually drowns**, measured off the map itself rather than inferred
+	# from pixels: the derivation asks for an ocean *fraction*, and the only honest check is the achieved one.
+	var main3: Node = get_root().get_node_or_null("Main")
+	if main3 != null and main3.get("_system") != null:
+		var maps3 = main3.get("_system").surface_maps()
+		var entry3 = maps3.map("planet:earth")
+		if entry3 != null and entry3.base != null:
+			var img: Image = entry3.base.get_image()
+			var level: float = entry3.value_at(0.708)
+			var below := 0
+			var total := 0
+			for row in range(0, img.get_height(), 1):
+				for column in range(0, img.get_width(), 1):
+					total += 1
+					if img.get_pixel(column, row).r < level:
+						below += 1
+			print("SURFCOST: ocean fraction — asked for 70.8 %%, sea level %.5f, **achieved %.1f %%** of %d texels" % [
+				level, 100.0 * float(below) / maxf(float(total), 1.0), total
+			])
 	var cam := _find_camera(get_root())
 	if cam != null and cam.compositor != null:
 		for effect in cam.compositor.compositor_effects:
@@ -422,7 +464,10 @@ func _sample_pixels() -> Array[float]:
 		for column in range(0, width, step):
 			var pixel := image.get_pixel(column, row)
 			values.append(pixel.get_luminance())
-			if pixel.r > 0.30 and pixel.g < 0.15 and pixel.b < 0.15:
+			# An unshaded red does not arrive as (1, 0, 0) — tone mapping and colour management make it orange —
+			# so the test is "clearly redder than everything else", not an exact colour. The first threshold here
+			# demanded g < 0.15 and counted 5,543 pixels of a disc that was plainly red on screen.
+			if pixel.r > 0.35 and pixel.r > 2.0 * pixel.g:
 				_red_pixels += 1
 			_sampled_pixels += 1
 	return values
