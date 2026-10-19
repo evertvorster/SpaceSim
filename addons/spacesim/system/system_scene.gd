@@ -488,19 +488,37 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	var quantiles := SpacesimSurfaceMaps.linear_quantiles()
 	if entry != null and not entry.quantiles.is_empty():
 		quantiles = entry.quantiles
+	# **One of these per body, and the ocean only where the derivation found liquid.** `bands()` carries each
+	# material's phase, so a body with no sea gets no sea layer rather than one with zero coverage.
+	body.ocean_material = SpacesimBodyRenderer.ocean_material(body, bands)
 	body.mesh_material = SpacesimBodyRenderer.material_for(
-		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color)
+		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color),
+		body.ocean_material != null
 	)
 	if entry != null and entry.base != null:
+		var level := entry.value_at(body.surface_ocean_fraction)
 		var surface := body.mesh_material as ShaderMaterial
-		surface.set_shader_parameter("sea_level", entry.value_at(body.surface_ocean_fraction))
+		surface.set_shader_parameter("sea_level", level)
 		SpacesimBodyRenderer.apply_surface_maps(surface, entry.base, entry.width)
+		# **The two layers share one threshold and one map** — the land culls below it and the ocean draws below
+		# it, so a published sea level that reached only one of them would put a seam along every coast.
+		if body.ocean_material != null:
+			body.ocean_material.set_shader_parameter("sea_level", level)
+			SpacesimBodyRenderer.apply_surface_maps(body.ocean_material, entry.base, entry.width)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(
 		body.node, body.radius, body.mesh_material, "%sSurface" % body.name, 0
 	)
 	body.mesh.mesh = null
+	# **The ocean is the body's own triangles, coplanar**, and it exists only where content and phase put water.
+	# Sharing the mesh is the deck's arrangement: the sea's triangles *are* the ground's, so the two cannot
+	# disagree about where the surface is, and the shore is a threshold on one map rather than a fitted edge.
+	if body.ocean_material != null:
+		body.ocean = _add_body_mesh(
+			body.node, body.radius, body.ocean_material, "%sOcean" % body.name, 0
+		)
+		body.ocean.mesh = null
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
@@ -882,6 +900,8 @@ func update_lod(camera: Camera3D) -> void:
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
+		if body.ocean != null:
+			body.ocean.visible = not is_point
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
 		# not drawn by anything yet, and a deck is not a thing this tree has.
 		if body.point != null:
@@ -1020,6 +1040,10 @@ func _publish_refined_maps() -> void:
 		SpacesimBodyRenderer.apply_surface_maps(
 			body.mesh_material as ShaderMaterial, entry.refined, entry.refined_width
 		)
+		if body.ocean_material != null:
+			SpacesimBodyRenderer.apply_surface_maps(
+				body.ocean_material, entry.refined, entry.refined_width
+			)
 
 
 ## **Hand the surface maps a render-thread bake pass** — from `main.gd`, which owns the camera's compositor.
@@ -1047,6 +1071,10 @@ func _refine_surface_map(body: SpacesimSceneBody, distance: float, pixel: float)
 		return
 	surface.set_shader_parameter("height_map", chosen["texture"])
 	surface.set_shader_parameter("map_width", chosen["width"])
+	if body.ocean_material != null:
+		SpacesimBodyRenderer.apply_surface_maps(
+			body.ocean_material, chosen["texture"], chosen["width"]
+		)
 
 
 func _poll_patch_builds() -> void:
@@ -1072,6 +1100,9 @@ func _poll_patch_builds() -> void:
 			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
 			else SpacesimPatches.mesh_from(arrays)
 		)
+		# **The ocean draws the same triangles**, so a rebuild cannot leave the sea behind on older geometry.
+		if body.ocean != null:
+			body.ocean.mesh = body.mesh.mesh
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.

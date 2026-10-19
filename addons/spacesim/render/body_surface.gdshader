@@ -70,17 +70,11 @@ uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
 // How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
 // one place the ladder's relief is calibrated.
 uniform float detail_relief = 0.0;
-// **Water is practically smooth, and that is not a compromise — it is the physics.** Waves are metres tall, so
-// a pixel 4 m across holds one and a pixel 400 m across holds the average of a hundred, and the average of waves
-// is flat. Evert, 2026-10-19: *"the ocean needs to be practically smooth until we walk around next to it... the
-// thought of waves as tall as mountains is a bit scary."* So the sea's tilt is a *hundredth* of the land's and
-// it is gated on the pixel being metres wide, which is the only moment a wave can be seen at all.
-uniform float wave_relief = 0.02;
-// Where a wave stops existing, in metres of ground per pixel: full strength inside `wave_near`, gone by
-// `wave_far`. A 2 m swell is unresolvable long before a pixel covers a kilometre, so this is a statement about
-// the wave, not about the distance.
-uniform float wave_near = 1.0;
-uniform float wave_far = 25.0;
+// **Whether this body has an ocean at all**, which decides whether the discard below exists. A body with no
+// liquid on its surface — Mercury, Luna, Io, Europa, Venus — has no sea layer, and `sea_level` then resolves to
+// the field's own minimum; a naive `height < sea_level` discard would punch a hole in whatever ground sits at
+// the bottom of the distribution. So the test is switched off rather than made true by luck.
+uniform float has_ocean = 0.0;
 // **How fast the relief's amplitude decays per rung**, against the colour's gain. 0.25 makes each rung's SLOPE
 // half the last one, so coarse shapes carry the shading and a 76 m bump barely tilts — which is Evert's
 // *"small features should have small shadows"*, and the difference between terrain and a bed of black pits.
@@ -90,8 +84,8 @@ uniform float relief_gain = 0.25;
 // air above it, nothing lifts a shadow — and that is S4's to fix.
 uniform float relief_max_tilt = 0.6;
 
-// **Where the sea is**, in field units — `value_at(ocean_fraction)` off the measured quantiles. Zero until a
-// map lands, which draws a neutral datum rather than a wrong ocean.
+// **Where the sea is**, in field units — `value_at(ocean_fraction)` off the measured quantiles. The land is
+// culled below it; the ocean draws below it. One value, one authority.
 uniform float sea_level = 0.0;
 // The field's own value times this is metres, and the metres are what the normal needs. From the plan.
 uniform float field_amplitude = 1.0;
@@ -103,11 +97,8 @@ uniform float relief_exaggeration = 12.0;
 uniform int map_width = 1024;
 
 
-// Shading by phase, two pairs of numbers in one place. **A liquid is glossy** and its sun glint is what makes
-// an ocean read as water rather than as a dark grey patch; a frozen volatile is bright and slightly glossy;
-// rock and vegetation are neither. Ice is its own band once the snow line lands (S3/E1).
-uniform float water_roughness : hint_range(0.0, 1.0) = 0.08;
-uniform float water_specular : hint_range(0.0, 1.0) = 0.5;
+// The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
+// vegetation and ice.
 uniform float land_roughness : hint_range(0.0, 1.0) = 0.9;
 uniform float land_specular : hint_range(0.0, 1.0) = 0.15;
 
@@ -142,17 +133,20 @@ void fragment() {
 	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 	float height = texture(height_map, uv).r;
 
-	// **The water line, antialiased by what a pixel can resolve.** The width of the fade is the footprint of
-	// the reading in field units, so a coast a pixel wide is a soft edge and a coast on the horizon is a level
-	// crossing — without it the sea has a staircase.
-	float footprint = max(fwidth(height), 1.0e-4);
-	float water = 1.0 - smoothstep(sea_level - footprint, sea_level + footprint, height);
+	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
+	// 2026-10-19: water and land are fundamentally different things. So the ground below sea level is culled
+	// here — which also means the eight-rung ladder only runs on the 29 % of a planet that is land — and
+	// `body_ocean.gdshader` draws the complement from the same map and the same threshold. Exactly one layer
+	// survives each pixel, so two coplanar surfaces cannot fight.
+	if (has_ocean > 0.5 && height < sea_level) {
+		discard;
+	}
 
 	// The colour, from the ramp the derivation built, indexed by the same height.
 	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
-	ROUGHNESS = mix(land_roughness, water_roughness, water);
-	SPECULAR = mix(land_specular, water_specular, water);
+	ROUGHNESS = land_roughness;
+	SPECULAR = land_specular;
 
 	// **The relief, from four taps of the same map.** `eps` is one texel of *that* map, because a fixed
 	// epsilon would sample detail the map in hand does not hold and read as noise on distant ground.
@@ -211,9 +205,7 @@ void fragment() {
 	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 	vec3 east = normalize(cross(polar, up));
 	vec3 north = cross(up, east);
-	// **Water is flat** — a glassy sea with hills in it is the one thing that reads as wrong at any distance.
-	float relief = 1.0 - water;
-	vec3 tilted = normalize(up - east * slope_east * relief - north * slope_north * relief);
+	vec3 tilted = normalize(up - east * slope_east - north * slope_north);
 	// Model space in, view space out: `NORMAL` is a view-space quantity in a spatial shader, and the
 	// fragment stage has `VIEW_MATRIX` rather than `MODELVIEW_MATRIX`. A body's node carries scale and no
 	// rotation, so its model space and world space are the same space — which is why this one matrix is
@@ -242,20 +234,16 @@ void fragment() {
 		// do this: it drew a pixel covered in many bumps as if it were one.
 		float step_east = max(length(view_x), 1.0e-4);
 		float step_north = max(length(view_y), 1.0e-4);
-		// **Water's tilt is gated on the pixel being metres wide** — see `wave_relief`. Everything else about the
-		// slope is shared with the land, so the sea's one contribution is a very small, very close ripple.
-		float pixel_metres = footprint_angle * planet_radius;
-		float wave_fade = 1.0 - smoothstep(wave_near, wave_far, pixel_metres);
-		float strength = mix(detail_relief, wave_relief * wave_fade, water);
 		vec2 gradient = vec2(dFdx(relief_height) / step_east, dFdy(relief_height) / step_north)
-			* field_amplitude * strength;
+			* field_amplitude * detail_relief;
 		// A bump may lean only so far — see `relief_max_tilt`.
 		float magnitude = length(gradient);
 		if (magnitude > relief_max_tilt) {
 			gradient *= relief_max_tilt / magnitude;
 		}
 		NORMAL = normalize(NORMAL - (tangent * gradient.x + bitangent * gradient.y));
-		// And the colour, zero-mean and small, on land only — a sea is one colour.
-		ALBEDO *= 1.0 + detail * detail_variation * (1.0 - water);
+		// And the colour, zero-mean and small — so the band's mean cannot drift from the measured distribution
+		// it was placed with.
+		ALBEDO *= 1.0 + detail * detail_variation;
 	}
 }

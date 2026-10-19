@@ -13,6 +13,7 @@ extends RefCounted
 ## measured 0.306 depends on the deck's fraction and albedo.
 
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
+const OCEAN_SHADER := preload("res://addons/spacesim/render/body_ocean.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
@@ -24,16 +25,26 @@ const STAR_INTENSITY := 24.0
 ## shape from composition is the next thing the derivation can honestly supply.
 const SURFACE_ROUGHNESS := 0.9
 const SURFACE_SPECULAR := 0.15
-## **A liquid is glossy, and that is most of what makes an ocean read as water.** The sun's glint and the
-## bright limb come out of the BRDF for free once the roughness is low; the wave normals that keep the glint
-## from being a hard dot arrive with the detail ladder.
-##
-## **0.32 and 0.2 for now, not 0.08 and 0.5.** At 0.08 the sea is a mirror: the glint is a hard dot that
-## blows out and blooms, and with no wave normals to spread it, it reads as a rendering fault rather than as
-## water. These are the values that let the *colour* be judged while the ocean is still a flat band — the
-## ocean as a feature (waves, glint, Fresnel) is its own rung.
-const WATER_ROUGHNESS := 0.16
-const WATER_SPECULAR := 0.45
+## **The ocean's own shading**, and the ocean is its own shader — water and land are fundamentally different
+## things (Evert, 2026-10-19). Glossy, so the sun's glint and the bright limb come out of the BRDF for free,
+## and the wave rungs keep the glint from being a hard dot.
+const OCEAN_ROUGHNESS := 0.14
+const OCEAN_SPECULAR := 0.45
+## **The depth ramp, in metres.** Shallow water returns light off the bottom, which is what its colour is; past
+## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through. Evert: *"it has a super-high
+## absorption, so realistically we won't see anything below a couple of meters."*
+const OCEAN_SHALLOW_METRES := 2.0
+const OCEAN_DEEP_METRES := 40.0
+## How much of the bottom's colour is left in the shallows, against the water's — a mix, not a tint, because the
+## shelf is where both are true.
+const OCEAN_SHALLOW_BOTTOM_SHARE := 0.7
+## **Waves**: two rungs of the field's generator, a swell of a few hundred metres, and a tilt of a fraction of a
+## degree. `OCEAN_WAVE_METRES` is the coarsest wavelength.
+const OCEAN_WAVE_OCTAVES := 2
+const OCEAN_WAVE_METRES := 400.0
+const OCEAN_WAVE_RELIEF := 0.02
+const OCEAN_WAVE_NEAR_METRES := 1.0
+const OCEAN_WAVE_FAR_METRES := 25.0
 
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
@@ -179,10 +190,10 @@ static func point_material() -> StandardMaterial3D:
 ##
 ## **A star is a source and everything else is a reflector**, so the choice is by kind rather than by
 ## anything a shader could work out for itself.
-static func material_for(body: SpacesimSceneBody, ramp: ImageTexture) -> Material:
+static func material_for(body: SpacesimSceneBody, ramp: ImageTexture, has_ocean: bool) -> Material:
 	if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return star_material(body)
-	return surface_material(body, ramp)
+	return surface_material(body, ramp, has_ocean)
 
 
 ## The colour a **point of light** is drawn with: the body's own radiance, tinted by the body's own
@@ -317,7 +328,9 @@ static func flat_height(value: float) -> ImageTexture:
 ## the amplitude from `SpacesimSurfaceField.plan()`, the radius from the body. **The maps and the sea level
 ## arrive later**, when the first bake lands — `apply_surface_maps()` is the one place that sets them, so the
 ## shader cannot be told one body's maps and another's sea.
-static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> ShaderMaterial:
+static func surface_material(
+	body: SpacesimSceneBody, ramp: ImageTexture, has_ocean: bool
+) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = SURFACE_SHADER
 	material.set_shader_parameter("colour_ramp", ramp)
@@ -340,16 +353,63 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	material.set_shader_parameter("detail_octaves", DETAIL_OCTAVES)
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
-	material.set_shader_parameter("wave_relief", WAVE_RELIEF)
-	material.set_shader_parameter("wave_near", WAVE_NEAR_METRES)
-	material.set_shader_parameter("wave_far", WAVE_FAR_METRES)
 	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
-	material.set_shader_parameter("water_roughness", WATER_ROUGHNESS)
-	material.set_shader_parameter("water_specular", WATER_SPECULAR)
+	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
 	return material
+
+
+## **The ocean's material**, built from the same derivation as the land's: the deep colour is the *liquid* band's
+## own, and the shallow colour is the lowest land band — what the bottom is made of — mixed with the water's,
+## because a shelf is the one place both are true.
+##
+## **A body with no liquid band gets no ocean material at all**, which is how the phase test reaches the
+## renderer: `bands()` has no liquid entry for Mars, Venus, Mercury, Luna, Io, Europa or Triton, so no sea is
+## built there rather than a sea with zero coverage.
+static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMaterial:
+	var deep := SpacesimSurfaceModel.UNPINNED_COLOR
+	var bottom := SpacesimSurfaceModel.UNPINNED_COLOR
+	for band in bands:
+		var colour: Color = band["color"]
+		if band_is_liquid(band):
+			deep = colour
+		elif bottom == SpacesimSurfaceModel.UNPINNED_COLOR:
+			bottom = colour
+	if deep == SpacesimSurfaceModel.UNPINNED_COLOR:
+		return null
+	var material := ShaderMaterial.new()
+	material.shader = OCEAN_SHADER
+	material.set_shader_parameter(
+		"shallow_color", bottom.lerp(deep, OCEAN_SHALLOW_BOTTOM_SHARE)
+	)
+	material.set_shader_parameter("deep_color", deep)
+	material.set_shader_parameter("shallow_metres", OCEAN_SHALLOW_METRES)
+	material.set_shader_parameter("deep_metres", OCEAN_DEEP_METRES)
+	material.set_shader_parameter("roughness_value", OCEAN_ROUGHNESS)
+	material.set_shader_parameter("specular_value", OCEAN_SPECULAR)
+	material.set_shader_parameter("height_map", flat_height(0.5))
+	material.set_shader_parameter("planet_radius", body.radius)
+	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
+	material.set_shader_parameter("field_amplitude", plan.amplitude)
+	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.MAP_WIDTH)
+	material.set_shader_parameter("wave_seed", plan.seed + 7331)
+	material.set_shader_parameter("wave_gain", plan.gain)
+	material.set_shader_parameter("wave_lacunarity", plan.lacunarity)
+	material.set_shader_parameter(
+		"wave_feature", OCEAN_WAVE_METRES / maxf(body.radius, 1.0)
+	)
+	material.set_shader_parameter("wave_octaves", OCEAN_WAVE_OCTAVES)
+	material.set_shader_parameter("wave_relief", OCEAN_WAVE_RELIEF)
+	material.set_shader_parameter("wave_near", OCEAN_WAVE_NEAR_METRES)
+	material.set_shader_parameter("wave_far", OCEAN_WAVE_FAR_METRES)
+	return material
+
+
+## Whether a band entry came from a liquid material — the derivation's own answer, read off the phase it carries.
+static func band_is_liquid(band: Dictionary) -> bool:
+	return int(band.get("phase", -1)) == SpacesimSurfaceModel.Phase.LIQUID
 
 
 ## **Publish a bake.** The texture and the sea level are set together and from one entry, because a sea level

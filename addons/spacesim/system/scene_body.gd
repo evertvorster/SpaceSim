@@ -27,6 +27,11 @@ var mesh: MeshInstance3D
 ## The material `mesh` is drawn with when it is **not** a wireframe, kept so the debug view can restore it.
 ## Set when the body is built; `update_lod` swaps a wireframe material over it and puts this one back.
 var mesh_material: Material
+## The ocean layer: the body's own patch mesh at the same scale, drawn by `body_ocean.gdshader`. **Null for a
+## body with no liquid on its surface** — the phase test decides, through `SpacesimSurfaceModel.bands()`.
+var ocean: MeshInstance3D
+## The ocean's material, kept so the map and the sea level can be published to it with the land's.
+var ocean_material: ShaderMaterial
 ## The **point of light** this body becomes once it is too small to be a disc: a camera-facing quad,
 ## sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as
 ## geometry. Set by `SpacesimSystemScene.update_lod`.

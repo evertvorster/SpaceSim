@@ -305,6 +305,20 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 		h.check(sea.get_luminance() < 0.12,
 			"with the sea at its own darker reflectance (%.3f)" % sea.get_luminance())
 
+	# **Water and land are two layers, and the phase decides which bodies get the sea.** `bands()` carries each
+	# material's phase, so a body with no liquid on its surface has no ocean node — not one with zero coverage.
+	h.check_near(float(material.get_shader_parameter("has_ocean")), 1.0,
+		"Earth's land layer knows it has a sea below it", 1.0e-6)
+	h.check(earth.ocean != null and earth.ocean_material != null,
+		"and it has an ocean layer of its own")
+	if earth.ocean_material != null:
+		var deep: Color = earth.ocean_material.get_shader_parameter("deep_color")
+		h.check(deep.b > deep.r and deep.b > deep.g,
+			"whose deep colour is the liquid band's own (%.3f, %.3f, %.3f)" % [deep.r, deep.g, deep.b])
+		var shallow: Color = earth.ocean_material.get_shader_parameter("shallow_color")
+		h.check(shallow.get_luminance() > deep.get_luminance(),
+			"and whose shallows are lighter, because that is the bottom showing through")
+
 	# **An airless body gets its own ramp rather than a shared one** — one band, one colour, end to end.
 	var luna_material: ShaderMaterial = luna.mesh.material_override
 	var luna_ramp: ImageTexture = luna_material.get_shader_parameter("colour_ramp")
@@ -315,6 +329,12 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 		var last := image.get_pixel(image.get_width() - 1, 0)
 		h.check(first.is_equal_approx(last),
 			"and being one material, it is one colour from the bottom to the top")
+	# **No liquid, no sea layer** — and the land's cull is switched off rather than made true by luck, or the
+	# lowest ground on an airless body would be discarded.
+		h.check(luna_material.ocean == null if false else luna.ocean == null,
+			"an airless body has no ocean layer at all")
+		h.check_near(float(luna_material.get_shader_parameter("has_ocean")), 0.0,
+			"and its land layer does not cull anything", 1.0e-6)
 
 
 ## The sky: that the shader's inputs are the derivation's, and that the derivation agrees with

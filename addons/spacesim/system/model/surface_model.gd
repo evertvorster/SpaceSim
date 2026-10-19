@@ -370,7 +370,7 @@ static func sea_level_percentile(
 ##    0.143 against an albedo of 0.06), and a ramp built straight from it would draw a planet several
 ##    times too bright while every derivation still agreed with the published numbers.
 ##
-## Each band is `{material, from, to, color, albedo, roughness, specular}` — `from`/`to` in percentile
+## Each band is `{material, phase, from, to, color, albedo, roughness, specular}` — `from`/`to` in percentile
 ## space, so the renderer needs the field's own height values to place them, and gets them by measuring.
 static func bands(
 	body: SpacesimSystemBody, materials: SpacesimMaterialTable, luminosity: float, distance: float
@@ -386,7 +386,7 @@ static func bands(
 		if material == null or phase_of(material, thermal.x, thermal.y) != Phase.LIQUID:
 			continue
 		var weight := float(body.surface.coverage[key])
-		result.append(_band(material, edge, edge + weight))
+		result.append(_band(material, edge, edge + weight, phase_of(material, thermal.x, thermal.y)))
 		edge += weight
 	# Then the solids, sharing what is above the sea surface in proportion to their own weights — so a
 	# body whose coverage sums to 1.0 does not have its land squeezed by the sea that covers part of it.
@@ -401,7 +401,7 @@ static func bands(
 			if material == null or phase_of(material, thermal.x, thermal.y) == Phase.LIQUID:
 				continue
 			var share := float(body.surface.coverage[key]) / solid_total * above
-			result.append(_band(material, edge, edge + share))
+			result.append(_band(material, edge, edge + share, phase_of(material, thermal.x, thermal.y)))
 			edge += share
 	return result
 
@@ -471,9 +471,13 @@ static func _thermal(
 
 
 ## One band, with its colour normalised and its shading chosen by what kind of material it is.
-static func _band(material: SpacesimSpecies, from: float, to: float) -> Dictionary:
+static func _band(material: SpacesimSpecies, from: float, to: float, phase: int) -> Dictionary:
 	return {
 		"material": material.species_name,
+		# **The phase travels with the band**, because a renderer draws water and rock differently: the ocean
+		# layer exists for a liquid band and for nothing else. It is the derivation's own answer rather than a
+		# second guess at what the material is.
+		"phase": phase,
 		"from": from,
 		"to": to,
 		"color": band_color(material),
