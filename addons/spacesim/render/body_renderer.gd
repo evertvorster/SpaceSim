@@ -60,9 +60,15 @@ const DETAIL_VARIATION := 0.18
 ## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
 ## exactly as steep as it is.
 const DETAIL_RELIEF := 1.0
-## And water's, which is a tenth of it: a sea with hills in it is the one thing that reads as wrong at any
-## distance. The glint is restored at the same time — see `WATER_ROUGHNESS`.
-const WAVE_RELIEF := 0.6
+## **And water's, which is a fiftieth of the land's** — waves are metres tall and a pixel 400 m across holds the
+## average of a hundred of them, which is flat. Evert, 2026-10-19: *"the ocean needs to be practically smooth
+## until we walk around next to it... waves as tall as mountains is a bit scary."* Gated as well, on the pixel
+## being metres wide: see `body_surface.gdshader`'s `wave_near`/`wave_far`.
+const WAVE_RELIEF := 0.02
+## Where a wave stops existing, in metres of ground per pixel. A 2 m swell is unresolved long before a pixel
+## covers a kilometre, so this is a statement about the wave rather than about the distance.
+const WAVE_NEAR_METRES := 1.0
+const WAVE_FAR_METRES := 25.0
 ## **How fast the relief decays per rung, against the colour's own gain.** Evert, 2026-10-19: *"small features
 ## should have small shadows."* At the field's gain the slope is the same on every octave, so the finest visible
 ## bump shades as hard as a mountain and the ground becomes a bed of black pits. A quarter per rung halves the
@@ -335,6 +341,8 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("wave_relief", WAVE_RELIEF)
+	material.set_shader_parameter("wave_near", WAVE_NEAR_METRES)
+	material.set_shader_parameter("wave_far", WAVE_FAR_METRES)
 	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("water_roughness", WATER_ROUGHNESS)

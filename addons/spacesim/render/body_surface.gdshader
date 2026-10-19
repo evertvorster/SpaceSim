@@ -70,9 +70,17 @@ uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
 // How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
 // one place the ladder's relief is calibrated.
 uniform float detail_relief = 0.0;
-// And how much it moves the *water*, which is a much smaller number: a sea with hills in it is the one thing
-// that reads as wrong at any distance.
-uniform float wave_relief = 0.0;
+// **Water is practically smooth, and that is not a compromise — it is the physics.** Waves are metres tall, so
+// a pixel 4 m across holds one and a pixel 400 m across holds the average of a hundred, and the average of waves
+// is flat. Evert, 2026-10-19: *"the ocean needs to be practically smooth until we walk around next to it... the
+// thought of waves as tall as mountains is a bit scary."* So the sea's tilt is a *hundredth* of the land's and
+// it is gated on the pixel being metres wide, which is the only moment a wave can be seen at all.
+uniform float wave_relief = 0.02;
+// Where a wave stops existing, in metres of ground per pixel: full strength inside `wave_near`, gone by
+// `wave_far`. A 2 m swell is unresolvable long before a pixel covers a kilometre, so this is a statement about
+// the wave, not about the distance.
+uniform float wave_near = 1.0;
+uniform float wave_far = 25.0;
 // **How fast the relief's amplitude decays per rung**, against the colour's gain. 0.25 makes each rung's SLOPE
 // half the last one, so coarse shapes carry the shading and a 76 m bump barely tilts — which is Evert's
 // *"small features should have small shadows"*, and the difference between terrain and a bed of black pits.
@@ -234,8 +242,13 @@ void fragment() {
 		// do this: it drew a pixel covered in many bumps as if it were one.
 		float step_east = max(length(view_x), 1.0e-4);
 		float step_north = max(length(view_y), 1.0e-4);
+		// **Water's tilt is gated on the pixel being metres wide** — see `wave_relief`. Everything else about the
+		// slope is shared with the land, so the sea's one contribution is a very small, very close ripple.
+		float pixel_metres = footprint_angle * planet_radius;
+		float wave_fade = 1.0 - smoothstep(wave_near, wave_far, pixel_metres);
+		float strength = mix(detail_relief, wave_relief * wave_fade, water);
 		vec2 gradient = vec2(dFdx(relief_height) / step_east, dFdy(relief_height) / step_north)
-			* field_amplitude * mix(detail_relief, wave_relief, water);
+			* field_amplitude * strength;
 		// A bump may lean only so far — see `relief_max_tilt`.
 		float magnitude = length(gradient);
 		if (magnitude > relief_max_tilt) {
