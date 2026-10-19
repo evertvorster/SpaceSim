@@ -252,6 +252,16 @@ origin, which defeats the frame. On entering a surface frame the system moves th
 under the observer and then puts the observer back where it was: the frame moves, the ship does
 not.
 
+**And the interpolator is reset after that move, which is not belt-and-braces.** The observer is a
+child of the frame now, and `reset_physics_interpolation()` writes the pose the *renderer* eases
+from — so resetting it before the frame moves (which is what `enter_frame` does, for the reparent)
+leaves it holding the frame's old transform, and the renderer draws one frame **gliding** out of the
+old position. On the first landing that is the build-time zone, a hemisphere away, and a frame from
+there has no ground in it. That frame reads as near-darkness to the exposure metre, which answers
+with its 32-stop ceiling: the white flash Evert saw at 1.7 km, `b38b323`. See `Lighting and Exposure`
+§4. **Any code that moves a frame's transform must reset the interpolation of what it carries
+afterwards.**
+
 **Lighting.** A single directional light cannot light a whole system from its star, so
 `aim_sun_at()` re-aims it at wherever the player is. The planet you are at is lit correctly; the
 one on the far side of the star is lit from its own side rather than the near one.
