@@ -30,6 +30,7 @@ func run(h, root: Node) -> void:
 	var luna := scene.body_by_id("moon:luna")
 
 	_test_surface_is_derived(h, earth, luna)
+	_test_the_ladder_is_only_where_there_is_a_sphere(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_exposure_follows_the_view(h, scene)
@@ -41,6 +42,47 @@ func run(h, root: Node) -> void:
 	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
+
+
+## **F6: the detail ladder exists only where there is a sphere to put it on.**
+##
+## The predicate is [[SpaceSim/Levels of Detail|Levels of Detail]] §4's table — *does this body draw a reference
+## sphere?* — and the content already encodes it: a gas giant's datum is a reference **pressure**, so it carries no
+## `surface` register, and a star's photosphere is its disc, drawn by the star's own shader. Both used to be handed
+## the full eight-rung ladder, which meant noise evaluated on every pixel of a body whose visible face is a deck.
+##
+## **The depth is the other half.** It is a ceiling now, not a count: the shader derives the rungs from the pixel
+## (`ceil(log2(feature/footprint))`, clamped), so this number decides how deep the ladder *can* go, and a ground
+## filling the frame is the only thing that reaches it. Eighteen rungs reach ~2 m on the 720p default's 512-wide
+## map, where a 1 km descent asks for 17; the constant it replaced, eight rungs, stopped at 271 m whatever the
+## altitude.
+func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemScene) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	var jupiter := scene.body_by_id("planet:jupiter")
+	var sol := scene.body_by_id("star:sol")
+	h.check(SpacesimBodyRenderer.draws_reference_sphere(earth.content),
+		"Earth draws a reference sphere")
+	h.check(SpacesimBodyRenderer.max_rungs_for(earth.content) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
+		"so its ladder is as deep as the ceiling allows (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
+	h.check(not SpacesimBodyRenderer.draws_reference_sphere(jupiter.content),
+		"a gas giant does not — its datum is a reference pressure, not a surface")
+	h.check(SpacesimBodyRenderer.max_rungs_for(jupiter.content) == 0,
+		"so it gets no detail ladder at all")
+	h.check(not SpacesimBodyRenderer.draws_reference_sphere(sol.content),
+		"and a star does not either: its photosphere is its disc, drawn by its own shader")
+	h.check(SpacesimBodyRenderer.max_rungs_for(sol.content) == 0, "so the surface ladder is zero for it")
+	# **And the material the game actually builds carries it**, rather than the predicate being true in isolation.
+	var jupiter_material := SpacesimBodyRenderer.material_for(
+		jupiter, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), jupiter.color),
+		false
+	) as ShaderMaterial
+	h.check(int(jupiter_material.get_shader_parameter("detail_max_rungs")) == 0,
+		"and the material Jupiter is drawn with asks for none")
+	var earth_material := SpacesimBodyRenderer.material_for(
+		earth, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), earth.color), true
+	) as ShaderMaterial
+	h.check(int(earth_material.get_shader_parameter("detail_max_rungs")) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
+		"while Earth's asks for the full depth (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
 
 
 ## **The background is the real sky, and it must not become the light.**
@@ -272,25 +314,69 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	if material == null:
 		return
 
-	# **A flat Lambertian at the derived albedo, and no mapping at all.** Not "the mapping is off": the
-	# noise field, the two-stop gradient and the relief normal are deleted from the shader, because that
-	# mapping was the documented cause of a **black surface** on airless bodies and on Earth alike. The
-	# material holds three numbers.
-	h.check(material.get_shader_parameter("base_color") == earth.color,
-		"the base colour is the derived colour")
-	h.check(material.get_shader_parameter("detail_color") == null,
-		"and there is no second colour stop to blend toward")
-	h.check(material.get_shader_parameter("relief") == null,
-		"nor a relief knob, nor a field to bump a normal with")
-	h.check(material.get_shader_parameter("noise_field") == null,
-		"and no noise field is bound to it")
-	h.check(material.get_shader_parameter("roughness_value") != null
-		and material.get_shader_parameter("specular_value") != null,
-		"what it does carry is roughness and specular")
-	# Every body wears the same flat material; nothing about it varies per body but the colour.
+	# **A height field, a colour ramp and a sea**, and every number off the derivation. The old flat
+	# Lambertian's three knobs are gone: the surface is no longer one colour, so what it carries is a ramp
+	# built from `SpacesimSurfaceModel.bands()` and the body's own radius and relief.
+	h.check(material.get_shader_parameter("base_color") == null,
+		"the flat colour knob is gone, because the surface is no longer one colour")
+	h.check(material.get_shader_parameter("planet_radius") == earth.radius,
+		"the shader is told the body's radius, which is what turns a texel into a slope")
+	var plan := SpacesimSurfaceField.plan(earth.content.id, earth.radius)
+	h.check_near(float(material.get_shader_parameter("field_amplitude")), plan.amplitude,
+		"and the relief amplitude the plan derives (%.0f m)" % plan.amplitude, 1.0)
+	h.check(material.get_shader_parameter("height_map") != null,
+		"with a neutral height until a bake lands")
+	# **One map, not two.** The surface shader draws from the refining map only: a second, fixed-resolution
+	# texture in it is a second resolution to keep in step with the picture, and the version that had one drew
+	# a planet at 39 km texels from low orbit.
+	h.check(material.get_shader_parameter("coarse_map") == null,
+		"and no second, fixed-resolution map for the colour to fall back to")
+
+	# **The ramp is the derivation's picture**: its bottom is Earth's sea band and its top is its land, in
+	# the order `bands()` put them.
+	var ramp: ImageTexture = material.get_shader_parameter("colour_ramp")
+	h.check(ramp != null, "and a colour ramp built from the derived bands")
+	if ramp != null:
+		var image := ramp.get_image()
+		var sea := image.get_pixel(0, 0)
+		var land := image.get_pixel(image.get_width() - 1, 0)
+		h.check(sea.b > sea.r, "whose bottom is water: blue-dominant (%.3f, %.3f)" % [sea.r, sea.b])
+		h.check(land.g > land.b, "and whose top is vegetation: green above blue (%.3f, %.3f)" % [land.g, land.b])
+		# **The luminance is the material's albedo**, which is the correction the bands carry — the authored
+		# palette is 2.3-3.4x brighter than the reflectance it claims.
+		h.check(sea.get_luminance() < 0.12,
+			"with the sea at its own darker reflectance (%.3f)" % sea.get_luminance())
+
+	# **Water and land are two layers, and the phase decides which bodies get the sea.** `bands()` carries each
+	# material's phase, so a body with no liquid on its surface has no ocean node — not one with zero coverage.
+	h.check_near(float(material.get_shader_parameter("has_ocean")), 1.0,
+		"Earth's land layer knows it has a sea below it", 1.0e-6)
+	h.check(earth.ocean != null and earth.ocean_material != null,
+		"and it has an ocean layer of its own")
+	if earth.ocean_material != null:
+		var deep: Color = earth.ocean_material.get_shader_parameter("deep_color")
+		h.check(deep.b > deep.r and deep.b > deep.g,
+			"whose deep colour is the liquid band's own (%.3f, %.3f, %.3f)" % [deep.r, deep.g, deep.b])
+		var shallow: Color = earth.ocean_material.get_shader_parameter("shallow_color")
+		h.check(shallow.get_luminance() > deep.get_luminance(),
+			"and whose shallows are lighter, because that is the bottom showing through")
+
+	# **An airless body gets its own ramp rather than a shared one** — one band, one colour, end to end.
 	var luna_material: ShaderMaterial = luna.mesh.material_override
-	h.check(luna_material != null and luna_material.get_shader_parameter("noise_field") == null,
-		"an airless body is the same flat sphere, not a differently-mapped one")
+	var luna_ramp: ImageTexture = luna_material.get_shader_parameter("colour_ramp")
+	h.check(luna_ramp != null and luna_ramp != ramp, "an airless body has a ramp of its own")
+	if luna_ramp != null:
+		var image := luna_ramp.get_image()
+		var first := image.get_pixel(0, 0)
+		var last := image.get_pixel(image.get_width() - 1, 0)
+		h.check(first.is_equal_approx(last),
+			"and being one material, it is one colour from the bottom to the top")
+	# **No liquid, no sea layer** — and the land's cull is switched off rather than made true by luck, or the
+	# lowest ground on an airless body would be discarded.
+		h.check(luna_material.ocean == null if false else luna.ocean == null,
+			"an airless body has no ocean layer at all")
+		h.check_near(float(luna_material.get_shader_parameter("has_ocean")), 0.0,
+			"and its land layer does not cull anything", 1.0e-6)
 
 
 ## The sky: that the shader's inputs are the derivation's, and that the derivation agrees with

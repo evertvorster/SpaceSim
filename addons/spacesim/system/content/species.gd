@@ -67,3 +67,22 @@ enum Domain { SOLID, LIQUID, GAS }
 ##
 ## Note that this one mixes by **mass** and not by mole fraction, because it is per kilogram.
 @export var heat_capacity: float = 0.0
+
+## **The melting point**, in kelvin — where a solid becomes a liquid.
+##
+## **`condensation_temperature` is NOT this**, and the two were one field in spirit until it was written
+## down: that one is the 1-atm *vapour-pressure* reference, which for a substance with a liquid phase is its
+## boiling point. A phase needs both ends — solid below the melting point, liquid between it and the boiling
+## point, gas above — so the end that was missing is here rather than inferred from the other.
+##
+## **Zero means "not known"**, the table's standing rule: a substance without one yields `Phase.UNKNOWN`
+## rather than a phase guessed from a plausible number.
+@export var melting_temperature: float = 0.0
+
+## **The pressure below which the substance has no liquid phase at all**, in pascals — its triple point.
+##
+## Zero means "not known" and is treated as "no such limit", which is right for nearly everything. The one
+## case that matters is the exception that proves it: **CO2 sublimes at 1 atm**, its triple point sitting
+## at 5.18 bar, which is why Mars has no liquid CO2 at 636 Pa however warm it gets. That is a derived
+## result once this number exists, not a note in a doc.
+@export var triple_point_pressure: float = 0.0

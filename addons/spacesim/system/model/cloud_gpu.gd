@@ -35,6 +35,12 @@ extends RefCounted
 ## The GLSL is **text**, not a `Shader`: it is prepended with `#version 450` and compiled from a source
 ## string, which is why it carries no version, no layout and no entry point of its own.
 const FIELD_PATH := "res://addons/spacesim/system/model/cloud_field.gdshaderinc"
+## **The noise, in its own file**, in front of the field because a source string gets no preprocessor.
+##
+## It moved out of [constant FIELD_PATH] on 2026-10-19, when the surface field became a second consumer: one
+## copy of the noise, two ways in, and `tests/test_cloud_gpu.gd` is what says the move changed nothing —
+## it bakes the same map through both paths and compares them level for level.
+const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
 
 ## The kernel: the bindings, the parameters, and the row/column -> direction mapping of `bake()`.
 ##
@@ -178,14 +184,20 @@ func open() -> bool:
 	var message := spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
 	if not message.is_empty():
 		_error = "the compute shader did not compile: " + message
+		# **The device is freed on every failure path too.** A local `RenderingDevice` left alive segfaults
+		# the process at teardown, and a shader that will not compile is exactly when that happens — the
+		# probe that found this exited 139 with the compile error above the crash.
+		device.free()
 		return false
 	_shader = device.shader_create_from_spirv(spirv)
 	if not _shader.is_valid():
 		_error = "shader_create_from_spirv() gave an invalid RID"
+		device.free()
 		return false
 	_pipeline = device.compute_pipeline_create(_shader)
 	if not _pipeline.is_valid():
 		_error = "compute_pipeline_create() gave an invalid RID"
+		device.free()
 		return false
 	_device = device
 	return true
@@ -303,7 +315,12 @@ func bake(
 ## string gets no preprocessor help: this is the whole of the "include" mechanism for a compute shader
 ## compiled at runtime.
 func _source() -> String:
-	return "#version 450\n" + FileAccess.get_file_as_string(FIELD_PATH) + KERNEL
+	return (
+		"#version 450\n"
+		+ FileAccess.get_file_as_string(NOISE_PATH)
+		+ FileAccess.get_file_as_string(FIELD_PATH)
+		+ KERNEL
+	)
 
 
 ## The eddy stack as the shader's two `vec4` arrays: centre + `1 - cos(reach)`, then the twist.
