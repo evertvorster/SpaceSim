@@ -70,6 +70,9 @@ uniform float wave_feature = 0.0;
 uniform float wave_relief = 0.02;
 uniform float wave_near = 1.0;
 uniform float wave_far = 25.0;
+// **The wind's stretch**, along the east tangent: 3 means a swell three times longer than it is wide. See
+// `OCEAN_WAVE_STRETCH` — an isotropic sea is indistinguishable from ground.
+uniform float wave_stretch = 1.0;
 
 const float OCEAN_PI = 3.141592653589793;
 const float OCEAN_TAU = 6.283185307179586;
@@ -133,8 +136,15 @@ void fragment() {
 		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 		float pixel_metres = footprint_angle * planet_radius;
 		float wave_fade = 1.0 - smoothstep(wave_near, wave_far, pixel_metres);
+		// **The swell runs downwind, so the domain is drawn out along one axis** — the same trick the cloud field
+		// uses for zonal stretching, in the tangent plane instead of in latitude. Without it the sea is an
+		// isotropic fbm, which is exactly what the land's detail is, and it reads as ground.
+		vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+		vec3 east = normalize(cross(up, polar));
+		float along = dot(up, east);
+		vec3 wave_point = up + east * (along * (1.0 / max(wave_stretch, 1.0) - 1.0));
 		float wave_height = surface_detail(
-			up, wave_seed, 1.0 / wave_feature, 0, wave_octaves,
+			wave_point, wave_seed, 1.0 / wave_feature, 0, wave_octaves,
 			wave_gain, wave_gain, wave_lacunarity, 1.0, footprint_angle
 		);
 		if (wave_height != 0.0 && wave_fade > 0.0) {

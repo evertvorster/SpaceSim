@@ -31,10 +31,19 @@ const SURFACE_SPECULAR := 0.15
 const OCEAN_ROUGHNESS := 0.14
 const OCEAN_SPECULAR := 0.45
 ## **The depth ramp, in metres.** Shallow water returns light off the bottom, which is what its colour is; past
-## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through. Evert: *"it has a super-high
-## absorption, so realistically we won't see anything below a couple of meters."*
-const OCEAN_SHALLOW_METRES := 2.0
-const OCEAN_DEEP_METRES := 40.0
+## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through.
+##
+## **It has to span real bathymetry, or the sea has no structure at all.** Evert, 2026-10-19: *"from far out, its
+## too smooth."* The ramp was 2 m to 40 m, against a field of 8,919 m on Earth — so `deep_color` arrived at 0.45 %
+## of the water column and **every pixel of the ocean was "deep"**: one flat colour from orbit, with a hairline
+## fringe at the shore. The sea floor's own structure — basins, ridges, trenches — is the only large-scale
+## variation a sea has, and the ramp was hiding all of it.
+##
+## 5 m and 3,000 m are Earth's own numbers either side of the interesting range: the shelf break is at about
+## 130-200 m, the abyssal plains are 4,000-6,000 m, and a ridge crest is 1,000-2,000 m. Filling at 3 km keeps the
+## abyss reading as one colour (it is one colour) while the ridges, rises and shelves cross the ramp.
+const OCEAN_SHALLOW_METRES := 5.0
+const OCEAN_DEEP_METRES := 3000.0
 ## How much of the bottom's colour is left in the shallows, against the water's — a mix, not a tint, because the
 ## shelf is where both are true.
 const OCEAN_SHALLOW_BOTTOM_SHARE := 0.7
@@ -45,6 +54,12 @@ const OCEAN_WAVE_METRES := 400.0
 const OCEAN_WAVE_RELIEF := 0.02
 const OCEAN_WAVE_NEAR_METRES := 1.0
 const OCEAN_WAVE_FAR_METRES := 25.0
+## **How far the swell is drawn out along the wind**, and this is what makes water look like water rather than
+## like ground. Evert, 2026-10-19: the close-up sea *"looks exactly like that mottling on land"* — because it was
+## the same isotropic generator sampled the same way, with no direction in it at all. Wind-driven swell and chop
+## are stretched downwind, and that anisotropy is the single thing that reads as sea.
+## 3.0 is a light breeze's swell; a gale would be nearer 6.
+const OCEAN_WAVE_STRETCH := 3.0
 
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
@@ -477,6 +492,7 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("wave_relief", OCEAN_WAVE_RELIEF)
 	material.set_shader_parameter("wave_near", OCEAN_WAVE_NEAR_METRES)
 	material.set_shader_parameter("wave_far", OCEAN_WAVE_FAR_METRES)
+	material.set_shader_parameter("wave_stretch", OCEAN_WAVE_STRETCH)
 	return material
 
 
