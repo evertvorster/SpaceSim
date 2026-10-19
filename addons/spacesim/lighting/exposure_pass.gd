@@ -56,26 +56,10 @@ var frame_delta := 1.0 / 60.0
 ## metre asks for the ceiling.
 var max_multiplier := SpacesimExposure.MAX_MULTIPLIER
 
-## The last metre value the *CPU* knows, which is only ever a report: it is written from the render
-## thread, so it may lag or be read mid-write. The authoritative value lives on the GPU, in `_state`.
-var last_multiplier := 0.0
-## The mean luminance and the target that produced it, alongside the multiplier — read back with
-## `read_meter()`. **A diagnostic, and a readback stalls the pipeline**, so nothing on the frame path may
-## call it: it exists so "the exposure jumped" can be answered with numbers rather than with a theory.
-var last_mean := 0.0
-var last_target := 0.0
-
-## How often the metre is read back, in frames. **A readback waits for the frame it reads**, so this is a
-## deliberate cost paid by an instrument, not something the pass needs; it exists to answer why the
-## exposure jumped on a landing, and it is counted in frames rather than seconds because frames are what
-## the stall is measured against.
-const METER_EVERY := 120
-
 ## Built in the first callback rather than in `_init`: a headless run has no `RenderingDevice`, and a
 ## construction that assumed one would fail there for no reason.
 var _built := false
 var _status := "not built"
-var _frames := 0
 
 var _shader_sample: RID
 var _shader_finalize: RID
@@ -103,40 +87,10 @@ func _notification(what: int) -> void:
 					rd.free_rid(rid)
 
 
-## **The metre's own numbers, read back from the GPU — and the read has to happen HERE.**
-##
-## `RenderingServer.get_rendering_device()` hands back the device the **render thread** owns, and its RID
-## allocator is not thread safe. Reading it from `_process` — which is exactly what a HUD readout invites —
-## races that allocator: this was tried, and four and a half minutes of flying produced thousands of
-## `Element limit reached` / `Failed to create uniform set for batch` errors as the allocator filled up,
-## ending in leaked RenderingDevice resources at exit. **The instrument wrecked the thing it measured.**
-##
-## So the read lives in the callback, which is the render thread, and it is rate limited because
-## `buffer_get_data` waits for the frame it is reading — a stall, and a stall in a pass that exists to keep
-## the frame's exposure honest is worth counting in frames rather than in seconds.
-func _read_meter(rd: RenderingDevice) -> void:
-	if not (_state as RID).is_valid():
-		return
-	var floats := rd.buffer_get_data(_state).to_float32_array()
-	var multiplier := floats[0] if floats.size() > 0 else 0.0
-	var mean := floats[1] if floats.size() > 1 else 0.0
-	var target := floats[2] if floats.size() > 2 else 0.0
-	# A jump of more than half in one read is either the scene changing or the `mean == 0` branch asking
-	# for the ceiling, and `mean` and `target` say which.
-	if last_multiplier > 0.0 and (multiplier > last_multiplier * 1.5 or multiplier < last_multiplier / 1.5):
-		print(
-			"EXPOSURE: multiplier %.3f -> %.3f  mean %.6f  target %.3f"
-			% [last_multiplier, multiplier, mean, target]
-		)
-	last_multiplier = multiplier
-	last_mean = mean
-	last_target = target
-
-
 ## What happened, for a probe or a test to read. The GPU's own value is authoritative; this is the
 ## instrument.
 func status() -> String:
-	return _status if not _built else "%s, %d frames" % [_status, _frames]
+	return _status
 
 
 # --- the shaders ------------------------------------------------------------------------------------
@@ -378,11 +332,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	rd.free_rid(finalize_set)
 	rd.free_rid(apply_set)
 
-	_frames += 1
 	_status = "ready"
-	# The metre's own numbers, read on the render thread and rate limited — see `_read_meter`.
-	if _frames % METER_EVERY == 0:
-		_read_meter(rd)
 
 
 ## A uniform set for one shader. `storage[i]` says whether entry `i` is a storage buffer rather than an

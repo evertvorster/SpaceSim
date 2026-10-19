@@ -434,10 +434,11 @@ func _physics_process(delta: float) -> void:
 const HUD_INTERVAL := 0.1
 var _hud_since := 0.0
 
-## **The exposure metre is read by the pass itself, on the render thread.** Nothing here may touch the
-## `RenderingDevice`: it belongs to the render thread and its RID allocator is not thread safe, which
-## reading it from `_process` demonstrated with thousands of `Element limit reached` errors. The pass
-## stores what it read on `last_multiplier` / `last_mean`, and the HUD reads those.
+## **Nothing here may touch the `RenderingDevice`.** It belongs to the render thread and its RID allocator
+## is not thread safe — reading it from `_process` demonstrated that with thousands of `Element limit
+## reached` errors. The exposure metre's numbers are read *inside* the pass, on the render thread, and the
+## readback that reported them (and printed every jump) was an instrument from a landing investigation; it
+## is gone, with its state, rather than left running in the game.
 
 
 
@@ -625,9 +626,6 @@ func _update_hud() -> void:
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
-				"exposure    EV %.3f   mean %.6f" % [
-					_exposure_pass.last_multiplier, _exposure_pass.last_mean
-				],
 				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
 				"nearest     %s at %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.nearest_distance)],
 				"local unit  %s" % SpacesimMarkers.format_distance(length),
