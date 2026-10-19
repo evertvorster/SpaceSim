@@ -45,6 +45,23 @@ const MIN_WIDTH := 128
 ## `W/pi` texels across that diameter.
 const MAX_WIDTH := 8192
 
+## **One slot in the tile table**: a tile of one body's map, sitting in a layer of the shared array.
+##
+## The table is fixed (`SpacesimSurfaceTiles.MAX_TILES`) and belongs to the *cache* rather than to a body, because
+## the array is one allocation for the whole scene: the eye is only ever close to one body, and a tile nobody wants
+## is simply overwritten by the next one somebody does.
+class Slot:
+	var body_id := ""
+	var level := -1
+	var x := 0
+	var y := 0
+	var layer := -1
+	var ready := false
+	## True while a bake for this slot is in flight — so a slot is never asked for twice because the pass was
+	## busy the first time.
+	var pending := false
+
+
 ## Quantiles per table: 65 values, one per 1/64th of the area. 1.5 % resolution on a percentile is finer than
 ## any band edge needs to be, and the table is 260 bytes.
 const QUANTILES := 65
@@ -160,6 +177,157 @@ func prepare(body_id: String, radius: float, ocean_fraction: float) -> Entry:
 	return entry
 
 
+## **The tiles worth drawing for one body, walked and requested** — and the near field's whole policy.
+##
+## The walk is `SpacesimSurfaceTiles.select`, gated by `walk_is_due` so it re-runs only when the answer can change.
+## A selected tile that has no slot gets one, and a slot with no bake asks the pass for it — one request at a time,
+## so the tiles land over successive frames and the ground sharpens rather than stalling.
+##
+## Returns **true when the published set changed**, so the scene republishes rects to the materials. That is the
+## whole interface: the cache owns the table, the scene owns the materials.
+func update_tiles(
+	body_id: String, radius: float, distance: float, pixel_angle: float, eye_direction: Vector3
+) -> bool:
+	if _bake_pass == null:
+		return false
+	# **The walk is gated; the requests are not.** Those are two different things and conflating them was a bug:
+	# a walk whose requests were all refused because the pass was busy with a whole-body rung would record the eye
+	# state as walked, and the gate would then keep it closed until the eye moved — so the near field never
+	# arrived at all. The walk is expensive and must be rare; asking the pass for a slot that is still empty is
+	# cheap and idempotent, and `request_tile` refuses while one is in flight anyway.
+	var entry: Entry = _entries.get(body_id)
+	var base_width: int = entry.width if entry != null else BUILD_WIDTH
+	var last: Dictionary = _tile_last.get(body_id, {})
+	if SpacesimSurfaceTiles.walk_is_due(
+		float(last.get("distance", 0.0)), last.get("direction", Vector3.ZERO),
+		float(last.get("pixel", 0.0)), int(last.get("base_width", 0)),
+		distance, eye_direction, pixel_angle, base_width
+	):
+		_tile_last[body_id] = {
+			"distance": distance, "direction": eye_direction, "pixel": pixel_angle,
+			"base_width": base_width,
+		}
+		var wanted: Array = SpacesimSurfaceTiles.select(
+			radius, distance, eye_direction, pixel_angle, base_width
+		)
+		_reconcile_slots(body_id, wanted)
+	_request_missing_slots(body_id, radius)
+	# **Republish only when what a material would be told has changed** — a slot freed, a slot made, or a tile
+	# that landed. A walk that changes nothing costs the rects nothing.
+	var version := int(_tile_version.get(body_id, 0))
+	if version == int(_published_version.get(body_id, -1)):
+		return false
+	_published_version[body_id] = version
+	return true
+
+
+## **Make the slots match the selection**: free what this body no longer wants, and make a slot for each tile that
+## has none. Nothing is baked here — a slot with no bake is what [method _request_missing_slots] fills.
+func _reconcile_slots(body_id: String, wanted: Array) -> void:
+	var keep := {}
+	for tile in wanted:
+		keep["%d/%d/%d" % [int(tile[0]), int(tile[1]), int(tile[2])]] = true
+	for index in _slots.size():
+		var slot: Variant = _slots[index]
+		if slot == null:
+			continue
+		var own: Slot = slot
+		if own.body_id != body_id:
+			continue
+		if not keep.has("%d/%d/%d" % [own.level, own.x, own.y]):
+			_slots[index] = null
+			_bump_tiles(body_id)
+	var placed := {}
+	for slot in _slots:
+		if slot == null:
+			continue
+		var own: Slot = slot
+		if own.body_id == body_id:
+			placed["%d/%d/%d" % [own.level, own.x, own.y]] = true
+	# Nearest first — the walk emitted them in that order, and the budget is the table's own size.
+	for tile in wanted:
+		var key := "%d/%d/%d" % [int(tile[0]), int(tile[1]), int(tile[2])]
+		if placed.has(key):
+			continue
+		var layer := _free_layer()
+		if layer < 0:
+			return
+		var slot := Slot.new()
+		slot.body_id = body_id
+		slot.level = int(tile[0])
+		slot.x = int(tile[1])
+		slot.y = int(tile[2])
+		slot.layer = layer
+		_slots[layer] = slot
+		placed[key] = true
+		_bump_tiles(body_id)
+
+
+## **Ask the pass for one slot that has no tiles in it yet.** One request per call, because the pass takes one at a
+## time; a refusal (the pass is baking a whole-body rung) simply leaves the slot unfilled and the next frame tries
+## again.
+func _request_missing_slots(body_id: String, radius: float) -> void:
+	if _bake_pass == null:
+		return
+	for slot in _slots:
+		if slot == null:
+			continue
+		var own: Slot = slot
+		if own.body_id != body_id or own.ready or own.pending:
+			continue
+		var requested := _bake_pass.request_tile(
+			body_id, SpacesimSurfaceField.plan(body_id, radius), own.layer,
+			own.level, own.x, own.y, SpacesimSurfaceTiles.TILE_TEXELS
+		)
+		if requested:
+			own.pending = true
+		return
+
+
+## **The rects and layers to publish for a body** — the tiles that are ready, **finest first** so the shader can
+## stop at the first rectangle that contains its uv.
+##
+## `version` is what a caller compares to know a republish is needed; the rects themselves are the answer.
+func tiles_for(body_id: String) -> Dictionary:
+	var ready: Array = []
+	for slot in _slots:
+		if slot == null:
+			continue
+		var own: Slot = slot
+		if own.body_id != body_id or not own.ready:
+			continue
+		ready.append(own)
+	# Finest first: the smallest rectangle wins a pixel, and a coarser neighbour never hides a finer one.
+	ready.sort_custom(func(a, b): return (a.level > b.level) if a.level != b.level else (a.y < b.y))
+	var rects := PackedVector4Array()
+	var layers := PackedInt32Array()
+	for slot in ready:
+		var own: Slot = slot
+		rects.append(SpacesimSurfaceTiles.rect_of(own.level, own.x, own.y))
+		layers.append(own.layer)
+	return {"rects": rects, "layers": layers, "version": int(_tile_version.get(body_id, 0))}
+
+
+## The shared array, or null before the first tile has been baked.
+func tile_array() -> Texture2DArrayRD:
+	return _bake_pass.tile_array() if _bake_pass != null else null
+
+
+## The first free layer, or -1 when the table is full.
+func _free_layer() -> int:
+	while _slots.size() < SpacesimSurfaceTiles.MAX_TILES:
+		_slots.append(null)
+	for index in SpacesimSurfaceTiles.MAX_TILES:
+		if _slots[index] == null:
+			return index
+	return -1
+
+
+## Bump the body's version when what a material would be told has changed.
+func _bump_tiles(body_id: String) -> void:
+	_tile_version[body_id] = int(_tile_version.get(body_id, 0)) + 1
+
+
 ## The cache's entry for a body, or null if it was never prepared. **Does not bake and does not refine.**
 func map(body_id: String) -> Entry:
 	return _entries.get(body_id)
@@ -200,6 +368,14 @@ static func base_max_width(render_size: Vector2i, fraction: float = DEFAULT_BASE
 	return clampi(wanted, MIN_WIDTH, MAX_WIDTH)
 
 
+## **The tile table** — one slot per layer of the shared array, `SpacesimSurfaceTiles.MAX_TILES` of them.
+var _slots: Array = []
+## Per body: the eye state the last walk was made at, so the gate can tell whether the answer moved.
+var _tile_last: Dictionary = {}
+## Per body: bumped when what a material would be told has changed, and what was last handed to a material.
+var _tile_version: Dictionary = {}
+var _published_version: Dictionary = {}
+
 ## **The refinement, if the game attached one.** Null in a headless run, in the suite and in a probe — there is
 ## no camera and no compositor there, and the build-time map is the whole answer.
 var _bake_pass: SpacesimSurfaceBakePass
@@ -222,6 +398,21 @@ func poll() -> Array:
 		if entry == null:
 			continue
 		var bake: Dictionary = ready[body_id]
+		if String(bake.get("kind", "map")) == "tile":
+			# **A tile fills its slot in place.** The pixels are already in the shared array — the pass copied them
+			# on the render thread — so there is nothing to hand over but the news that the slot is ready.
+			for slot in _slots:
+				if slot == null:
+					continue
+				var own: Slot = slot
+				if own.body_id == body_id and own.level == int(bake["level"]) \
+						and own.x == int(bake["x"]) and own.y == int(bake["y"]):
+					own.ready = true
+					own.pending = false
+					_bump_tiles(body_id)
+					changed.append(body_id)
+					break
+			continue
 		var previous := entry.refined
 		entry.refined = bake["texture"]
 		entry.refined_width = int(bake["width"])
@@ -302,6 +493,20 @@ func bakes() -> int:
 ## teardown segfaults the process on exit, and one alive across a session is the risk this class is trying to
 ## stop taking.
 func close() -> void:
+	# **Give the refining maps back before the device goes.** A refined map is a `Texture2DRD` over a RID the bake
+	# pass created and we own, so nothing else will ever free it — and the engine says so at exit with
+	# *"1 RID of type \"Texture\" was leaked"*, one line, once, only when it is true. It was true from the day the
+	# ladder landed: the base bake is an `ImageTexture` the scene owns, but a rung is ours.
+	#
+	# The pass frees what it is handed on its own thread, and frees whatever is still queued when it is torn down,
+	# so this only has to push them into its graveyard.
+	if _bake_pass != null:
+		for body_id in _entries:
+			var entry: Entry = _entries[body_id]
+			if entry.refined != null:
+				_bake_pass.release(entry.refined)
+				entry.refined = null
+				entry.refined_width = 0
 	if _gpu != null:
 		_gpu.close()
 		_gpu = null

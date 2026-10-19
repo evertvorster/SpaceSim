@@ -421,6 +421,40 @@ static func band_is_liquid(band: Dictionary) -> bool:
 ## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
 ## second texture in the shader is a second resolution to keep in step with the picture. **The same reasoning
 ## deleted the window** — the shader now samples exactly one height map, at whatever width the ladder has reached.
+## **Publish the near field**: the tile array and the rectangles that index it.
+##
+## The array itself and the rectangles are handed over together, because a rectangle names a layer and a layer
+## without its array is an index into nothing. **Padded to the table's size** rather than truncated to the live
+## count: a fixed-size uniform array is written whole, and `tile_count` is what the shader loops over.
+static func apply_surface_tiles(
+	material: Material, array: Texture2DArrayRD,
+	rects: PackedVector4Array, layers: PackedInt32Array
+) -> void:
+	var surface := material as ShaderMaterial
+	if surface == null:
+		return
+	# **A rectangle without its array is an index into nothing**, so no array means no tiles are claimed — the
+	# shader samples the whole-body map alone until the first tile has actually landed.
+	var live := rects.size() if array != null else 0
+	if array != null and surface.get_shader_parameter("tile_map") != array:
+		surface.set_shader_parameter("tile_map", array)
+	var size := SpacesimSurfaceTiles.MAX_TILES
+	var padded_rects := PackedVector4Array()
+	var padded_layers := PackedInt32Array()
+	padded_rects.resize(size)
+	padded_layers.resize(size)
+	for index in size:
+		if index < live:
+			padded_rects[index] = rects[index]
+			padded_layers[index] = layers[index]
+		else:
+			padded_rects[index] = Vector4.ZERO
+			padded_layers[index] = 0
+	surface.set_shader_parameter("tile_rect", padded_rects)
+	surface.set_shader_parameter("tile_layer", padded_layers)
+	surface.set_shader_parameter("tile_count", mini(live, size))
+
+
 static func apply_surface_maps(
 	material: Material, texture: Texture2D, width: int
 ) -> void:

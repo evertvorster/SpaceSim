@@ -58,6 +58,13 @@ uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
 // The colour ramp: **1-D, indexed by field value over [-1, 1]**, built from the derived bands and the
 // measured quantiles. Clamped, because a value past either end is a coast or a peak and not a wrap.
 uniform sampler2D colour_ramp : filter_linear, repeat_disable, hint_default_black;
+// **The tiles over the cap the eye can see**, as one array with a table of rectangles — the map's near field,
+// refined where the eye is looking (`SpacesimSurfaceTiles`). `tile_count` is zero when no tile is in hand, which is
+// the far case and the headless one.
+uniform sampler2DArray tile_map : filter_linear, repeat_disable, hint_default_black;
+uniform vec4 tile_rect[32];
+uniform int tile_layer[32];
+uniform int tile_count = 0;
 
 // ===== THE LADDER =================================================================================
 //
@@ -138,6 +145,21 @@ void fragment() {
 	// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
 	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 	float height = texture(height_map, uv).r;
+
+	// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
+	// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
+	// because a pixel just inside a boundary must not jump between two rasters; with 512-texel tiles that band is
+	// ten texels, which reads as softness rather than as a seam.
+	for (int i = 0; i < tile_count; i++) {
+		vec4 tile = tile_rect[i];
+		if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
+			vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+			vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
+				* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
+			height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
+			break;
+		}
+	}
 
 	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
 	// 2026-10-19: water and land are fundamentally different things. So the ground below sea level is culled

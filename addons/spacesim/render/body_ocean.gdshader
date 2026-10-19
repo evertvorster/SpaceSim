@@ -28,6 +28,14 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
 // The field, as the land shader receives it. Only the *mask* and the *depth* are used.
 uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
+// **The tiles over the cap the eye can see**, as one array with a table of rectangles — the map's near field,
+// refined where the eye is looking (`SpacesimSurfaceTiles`). `tile_count` is zero when no tile is in hand, which
+// is the far case and the headless one. **The land reads the same table from the same array**, so the shore is one
+// threshold on one height and two resolutions can never disagree about where the coast is.
+uniform sampler2DArray tile_map : filter_linear, repeat_disable, hint_default_black;
+uniform vec4 tile_rect[32];
+uniform int tile_layer[32];
+uniform int tile_count = 0;
 uniform float sea_level = 0.0;
 // The field's value times this is metres — which turns the map into a **depth**.
 uniform float field_amplitude = 1.0;
@@ -86,7 +94,22 @@ vec2 equirect(vec3 direction) {
 
 void fragment() {
 	vec3 up = unit_position;
-	float height = texture(height_map, equirect(up)).r;
+	vec2 uv = equirect(up);
+	float height = texture(height_map, uv).r;
+
+	// **The near field**, the same table the land shader reads and in the same order — finest first, first match
+	// wins, feathered to the whole-body map at the tile's edge. Without this the sea's threshold would be the base
+	// map's while the land's was the tile's, and the coast would be a band where both layers drew or neither did.
+	for (int i = 0; i < tile_count; i++) {
+		vec4 tile = tile_rect[i];
+		if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
+			vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+			vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
+				* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
+			height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
+			break;
+		}
+	}
 
 	// **Land is not this shader's business.** The complementary test to the land's own discard, on the same
 	// value and the same map: exactly one of the two layers survives per pixel, so the two are disjoint and

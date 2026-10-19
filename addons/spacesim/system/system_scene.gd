@@ -923,6 +923,7 @@ func update_lod(camera: Camera3D) -> void:
 		if body.mesh == null:
 			continue
 		_refine_surface_map(body, distance, pixel, surface_cap)
+		_refine_surface_tiles(body, distance, pixel, (observer - body.node.global_position).normalized())
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1062,6 +1063,32 @@ func _refine_surface_map(
 	if body.ocean_material != null:
 		SpacesimBodyRenderer.apply_surface_maps(
 			body.ocean_material, chosen["texture"], chosen["width"]
+		)
+
+
+## **The near field: the map's tiles, refined where the eye is looking**, as the mesh is.
+##
+## Called for every drawn body, and it is **cheap when nothing has moved**: the walk's own gate answers first, and a
+## still eye costs a dictionary lookup. When the selection or a landed tile changes what a material should be told,
+## the rects are republished to **both** layers — the land culls on the tiled height and the sea draws on it, so a
+## table that reached one and not the other would put a seam along every coastline inside it.
+func _refine_surface_tiles(
+	body: SpacesimSceneBody, distance: float, pixel: float, eye_direction: Vector3
+) -> void:
+	if body.mesh_material == null or body.content == null:
+		return
+	if body.content.kind == SpacesimSystemBody.Kind.STAR:
+		return
+	if not _surface_maps.update_tiles(body.id, body.radius, distance, pixel, eye_direction):
+		return
+	var tiles := _surface_maps.tiles_for(body.id)
+	var array := _surface_maps.tile_array()
+	SpacesimBodyRenderer.apply_surface_tiles(
+		body.mesh_material, array, tiles["rects"], tiles["layers"]
+	)
+	if body.ocean_material != null:
+		SpacesimBodyRenderer.apply_surface_tiles(
+			body.ocean_material, array, tiles["rects"], tiles["layers"]
 		)
 
 
