@@ -105,7 +105,13 @@ const REGISTRY := {
 	# Small is finer. It is a **trim**, the same shape as the star field's gain: it is meant to be tuned
 	# by eye while flying and then frozen to a constant once a render set justifies the number, at which
 	# point it stops being a setting and the value moves into `SpacesimLod`.
-	"lod.error_budget": {"default": 4.0, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	#
+	# **The default is 0.5, measured in flight, not chosen.** At 4.0 the walk draws a cap that is coarser
+	# than the eye is looking at and the T-junction slivers between chunks at different depths are visible
+	# as thin black lines; at 1.0 they are gone and at 0.5 Evert sees none at all. The cost is 1.2x the
+	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
+	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
+	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
 	# --- the exposure's ceiling. The metre drives the frame toward middle grey, and a frame of nothing
 	# but stars has almost no mean luminance to answer with, so it drives toward the *top* of the
 	# window — which is what this caps. In STOPS above the light-adapted floor, so 32 is the whole
