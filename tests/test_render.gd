@@ -30,6 +30,7 @@ func run(h, root: Node) -> void:
 	var luna := scene.body_by_id("moon:luna")
 
 	_test_surface_is_derived(h, earth, luna)
+	_test_the_ladder_is_only_where_there_is_a_sphere(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_exposure_follows_the_view(h, scene)
@@ -41,6 +42,47 @@ func run(h, root: Node) -> void:
 	_test_hiding_bodies_hides_their_air(h, scene)
 
 	scene.container.free()
+
+
+## **F6: the detail ladder exists only where there is a sphere to put it on.**
+##
+## The predicate is [[SpaceSim/Levels of Detail|Levels of Detail]] §4's table — *does this body draw a reference
+## sphere?* — and the content already encodes it: a gas giant's datum is a reference **pressure**, so it carries no
+## `surface` register, and a star's photosphere is its disc, drawn by the star's own shader. Both used to be handed
+## the full eight-rung ladder, which meant noise evaluated on every pixel of a body whose visible face is a deck.
+##
+## **The depth is the other half.** It is a ceiling now, not a count: the shader derives the rungs from the pixel
+## (`ceil(log2(feature/footprint))`, clamped), so this number decides how deep the ladder *can* go, and a ground
+## filling the frame is the only thing that reaches it. Eighteen rungs reach ~2 m on the 720p default's 512-wide
+## map, where a 1 km descent asks for 17; the constant it replaced, eight rungs, stopped at 271 m whatever the
+## altitude.
+func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemScene) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	var jupiter := scene.body_by_id("planet:jupiter")
+	var sol := scene.body_by_id("star:sol")
+	h.check(SpacesimBodyRenderer.draws_reference_sphere(earth.content),
+		"Earth draws a reference sphere")
+	h.check(SpacesimBodyRenderer.max_rungs_for(earth.content) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
+		"so its ladder is as deep as the ceiling allows (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
+	h.check(not SpacesimBodyRenderer.draws_reference_sphere(jupiter.content),
+		"a gas giant does not — its datum is a reference pressure, not a surface")
+	h.check(SpacesimBodyRenderer.max_rungs_for(jupiter.content) == 0,
+		"so it gets no detail ladder at all")
+	h.check(not SpacesimBodyRenderer.draws_reference_sphere(sol.content),
+		"and a star does not either: its photosphere is its disc, drawn by its own shader")
+	h.check(SpacesimBodyRenderer.max_rungs_for(sol.content) == 0, "so the surface ladder is zero for it")
+	# **And the material the game actually builds carries it**, rather than the predicate being true in isolation.
+	var jupiter_material := SpacesimBodyRenderer.material_for(
+		jupiter, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), jupiter.color),
+		false
+	) as ShaderMaterial
+	h.check(int(jupiter_material.get_shader_parameter("detail_max_rungs")) == 0,
+		"and the material Jupiter is drawn with asks for none")
+	var earth_material := SpacesimBodyRenderer.material_for(
+		earth, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), earth.color), true
+	) as ShaderMaterial
+	h.check(int(earth_material.get_shader_parameter("detail_max_rungs")) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
+		"while Earth's asks for the full depth (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
 
 
 ## **The background is the real sky, and it must not become the light.**

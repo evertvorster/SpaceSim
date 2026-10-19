@@ -71,7 +71,10 @@ uniform int tile_count = 0;
 // Everything the map cannot hold: the field's own generator sampled below the map's nyquist, with each rung
 // faded by what a pixel can resolve. **The numbers are the plan's**, handed over by the host, so the detail is
 // the same field the bake drew and not a second geology — see `surface_field.gdshaderinc`.
-uniform int detail_octaves = 0;
+// **The DEPTH available, not the count that runs.** The count is derived per pixel three lines below, because the
+// pixel is the only thing that knows how deep the ladder needs to go — and because a count fixed on the host is
+// what made detail stop arriving at 271 m however close the eye came.
+uniform int detail_max_rungs = 0;
 uniform int detail_seed = 0;
 uniform float detail_gain = 0.5;
 uniform float detail_lacunarity = 2.0;
@@ -222,11 +225,19 @@ void fragment() {
 	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 	float detail = 0.0;
 	float relief_height = 0.0;
-	if (detail_octaves > 0 && detail_feature > 0.0) {
-		detail = surface_detail(
-			up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
-			detail_octaves, relief_gain, relief_height
-		);
+	if (detail_max_rungs > 0 && detail_feature > 0.0) {
+		// **How many rungs this pixel can resolve**, in octaves: from the ladder's first rung down to the pixel.
+		// A distant body gets 0 or 1 and pays nothing; a ground filling the frame gets as many as the depth
+		// allows. The rungs still fade individually inside `surface_detail`, so this is a bound on the work and
+		// not a second band-limit.
+		int rungs = int(ceil(log2(max(detail_feature / max(footprint_angle, 1.0e-9), 1.0))));
+		rungs = clamp(rungs, 0, detail_max_rungs);
+		if (rungs > 0) {
+			detail = surface_detail(
+				up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
+				rungs, relief_gain, relief_height
+			);
+		}
 	}
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.

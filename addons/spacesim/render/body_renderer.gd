@@ -57,13 +57,28 @@ const OCEAN_WAVE_FAR_METRES := 25.0
 ## staying correctly black. The shader also clamps the tilt at 19° for the same reason.
 const RELIEF_EXAGGERATION := 5.0
 
-## **The ladder: how many rungs, how much it moves the colour, and how much it tilts the normal.**
+## **The ladder's DEPTH — how many rungs exist, not how many run.** The shader derives the count from the pixel:
 ##
-## The octave count is a *cost* decision before it is a look decision: a rung costs one FastNoiseLite octave on
-## every pixel the ground covers, and the deck measured **six** at ~5 ms a frame at 1080p on this machine. Eight
-## is chosen here because the rungs fade by what a pixel can resolve, so at a distance two or three run and
-## only a ground filling the screen pays for all eight — which is the number to watch in flight.
-const DETAIL_OCTAVES := 8
+##     rungs = clamp(ceil(log2(detail_feature / footprint)), 0, detail_max_rungs)
+##
+## so a distant body runs none, a ground filling the frame runs as many as it can resolve, and this constant is
+## only the ceiling on that. **Which fixes the fault it replaced**: `DETAIL_OCTAVES = 8` was a *count*, so the finest
+## rung was `feature / 2^8` whatever the pixel — 271 m on Earth at a 2,304-wide map, against the 13 m a pixel covers
+## at 10 km altitude. Detail stopped arriving and no amount of approach brought it back.
+##
+## **The depth is 18 because of a count, not a taste.** The ladder starts at two texels of the map in hand, and a
+## rung halves the feature: the rungs a view needs are `log2(feature / footprint)`. Measured on the two maps the
+## game actually uses, at the 720p centre pixel:
+##
+## | map | feature | 2,000 km up | 100 km | 10 km | 1 km |
+## |---|---|---|---|---|---|
+## | 512 (the 720p default's ceiling) | 156 km | 6 | 11 | 14 | **17** |
+## | 2,304 (a 4K render, half of it) | 34.7 km | 4 | 9 | 12 | 15 |
+##
+## So the finest a 1 km descent asks for is 17, and the ceiling sits one above it. **A deeper ceiling costs nothing**
+## — the count that runs is the pixel's, so a distant body evaluates one rung whatever this number is — which is
+## exactly why it can afford to be generous.
+const DETAIL_MAX_RUNGS := 18
 ## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
 ## fitted to, and a large swing would move the drawn average away from it.
 const DETAIL_VARIATION := 0.18
@@ -322,6 +337,24 @@ static func flat_height(value: float) -> ImageTexture:
 	return _flat
 
 
+## **Does this body draw a reference sphere?** — the predicate [[SpaceSim/Levels of Detail|Levels of Detail]] §4
+## states as a table, and the question is about *drawing a sphere*, not about having "ground": a gas giant has no
+## surface register because its datum is a reference **pressure**, and a star's photosphere is drawn by its own
+## shader. Naming the question that is actually being answered is what stopped the last version of this (`d57eb39`
+## wrote it as "has a ground", which is false for a star and hid the Sun's disc behind a marker).
+static func draws_reference_sphere(content: SpacesimSystemBody) -> bool:
+	return content != null and content.surface != null
+
+
+## **How deep the detail ladder may go on this body**: none at all where there is no sphere to put it on.
+##
+## A gas giant used to be handed the full eight-rung ladder for a surface that is not its visible face — noise
+## evaluated on every pixel of a body whose visible face is a deck. That is work with no need, and it is the §1.7
+## pattern: the answer to "how much detail?" being given to something that never asked the question.
+static func max_rungs_for(content: SpacesimSystemBody) -> int:
+	return DETAIL_MAX_RUNGS if draws_reference_sphere(content) else 0
+
+
 ## The surface material: **a height field, a colour ramp and a sea.**
 ##
 ## Everything it is given is derived: the ramp from `SpacesimSurfaceModel.bands()` and the measured quantiles,
@@ -350,7 +383,7 @@ static func surface_material(
 	material.set_shader_parameter(
 		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.BUILD_WIDTH)
 	)
-	material.set_shader_parameter("detail_octaves", DETAIL_OCTAVES)
+	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
