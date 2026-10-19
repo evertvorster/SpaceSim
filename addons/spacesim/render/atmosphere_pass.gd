@@ -45,14 +45,11 @@ extends CompositorEffect
 ## thing the shader does is test the ray against the atmosphere's sphere and **hand the pixel back
 ## untouched** when it misses. Empty space costs one dot product and a sqrt.
 
-## Steps of the primary march, and of the sun ray at each of them — and **these two are DEAD**: the source
-## string declares its own `I_STEPS = 16` and `J_STEPS = 8`, so editing these changes nothing in the picture.
-## Kept only because the note above quotes the numbers. The step budget becomes a runtime value when the
-## cloud volume returns, and then there is one place for it.
-const I_STEPS := 12
-const J_STEPS := 4
+## **The step budget is the SOURCE's, not this file's.** `I_STEPS = 16` and `J_STEPS = 8` are declared in
+## `SOURCE` below, and two GDScript constants claiming the same thing were dead the moment the shader took them
+## over — editing them changed nothing in the picture, which is worse than having no constant at all. Deleted.
+## They become a runtime value when the cloud volume returns, and then there is one place for them.
 
-## `local_size` of the dispatch: 8x8 keeps a wavefront's worth of invocations on the same tile of the frame.
 const BLOCK := 8
 
 var _built := false
