@@ -238,7 +238,13 @@ static func quantiles_of(image: Image) -> PackedFloat32Array:
 	table.resize(QUANTILES)
 	if total == 0 or not is_finite(low) or not is_finite(high):
 		return table
-	var span := (high - low) / float(HISTOGRAM_BINS - 1)
+	# **The reconstruction uses the SAME mapping the binning did** — `-1 .. 1`, fixed — and not the observed
+	# `low .. high`. Using the observed range was a real bug for two days: every quantile came back shifted
+	# toward the top of the distribution, Earth's sea level landed near the 95th percentile instead of the
+	# 70.8th, and the planet drew as a featureless blue ball with a few specks of land. A test on a *linear*
+	# ramp over exactly `-1 .. 1` cannot catch it, because there the two conventions coincide — which is the
+	# documented trap of testing the degenerate case.
+	var span := 2.0 / float(HISTOGRAM_BINS - 1)
 	var walked := 0
 	var target_index := 0
 	for bin in HISTOGRAM_BINS:
@@ -247,12 +253,17 @@ static func quantiles_of(image: Image) -> PackedFloat32Array:
 		# Every quantile the cumulative count has reached, filled in order — so the table is monotone even
 		# where a bin holds many texels.
 		while target_index < QUANTILES and share >= float(target_index) / float(QUANTILES - 1):
-			table[target_index] = low + span * float(bin)
+			table[target_index] = -1.0 + span * float(bin)
 			target_index += 1
 	# Anything left (a histogram that ended early on a clamped tail) takes the top value.
 	while target_index < QUANTILES:
 		table[target_index] = high
 		target_index += 1
+	# **The ends are the observed extremes, not the clamped bin edges.** Everything outside the field's own
+	# range lands in the first or last bin, which reconstructs as ±1 and is a lie of up to the field's headroom
+	# — harmless for a band edge, and wrong for a probe or a print that reads the first quantile as a minimum.
+	table[0] = low
+	table[QUANTILES - 1] = high
 	return table
 
 

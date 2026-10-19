@@ -27,8 +27,13 @@ const SURFACE_SPECULAR := 0.15
 ## **A liquid is glossy, and that is most of what makes an ocean read as water.** The sun's glint and the
 ## bright limb come out of the BRDF for free once the roughness is low; the wave normals that keep the glint
 ## from being a hard dot arrive with the detail ladder.
-const WATER_ROUGHNESS := 0.08
-const WATER_SPECULAR := 0.5
+##
+## **0.32 and 0.2 for now, not 0.08 and 0.5.** At 0.08 the sea is a mirror: the glint is a hard dot that
+## blows out and blooms, and with no wave normals to spread it, it reads as a rendering fault rather than as
+## water. These are the values that let the *colour* be judged while the ocean is still a flat band — the
+## ocean as a feature (waves, glint, Fresnel) is its own rung.
+const WATER_ROUGHNESS := 0.32
+const WATER_SPECULAR := 0.2
 
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is

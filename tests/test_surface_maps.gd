@@ -77,6 +77,32 @@ func _test_quantiles(h) -> void:
 	h.check_near(SpacesimSurfaceMaps.value_at(PackedFloat32Array(), 0.5), 0.0,
 		"an empty table answers the datum rather than a NaN", 1.0e-9)
 
+	# **The trap this test was written into, and out of.** A linear ramp over exactly `-1 .. 1` cannot tell
+	# the binning's convention from the reconstruction's, because there the fixed range and the observed range
+	# coincide — and the version that reconstructed from the *observed* min and max was wrong for two days,
+	# putting Earth's sea level at the 95th percentile and drawing a featureless blue ball. So: an
+	# **asymmetric** field, and the invariant stated as behaviour rather than as arithmetic.
+	var skewed := Image.create_empty(256, 1, false, Image.FORMAT_RH)
+	for column in 256:
+		var value := lerpf(-0.6, 1.0, float(column) / 255.0)
+		skewed.set_pixel(column, 0, Color(value, 0.0, 0.0, 1.0))
+	var skewed_table := SpacesimSurfaceMaps.quantiles_of(skewed)
+	h.check_near(skewed_table[0], -0.6, "an asymmetric field's lowest quantile is its own minimum", 0.01)
+	h.check_near(skewed_table[skewed_table.size() - 1], 1.0,
+		"and its highest is its own maximum", 0.01)
+	h.check_near(SpacesimSurfaceMaps.value_at(skewed_table, 0.5), 0.2,
+		"a distribution from -0.6 to 1.0 has its median at 0.2", 0.02)
+	# **The invariant the picture rests on**: the value at an ocean fraction puts that fraction below it.
+	var fractions := [0.25, 0.5, 0.708, 0.9]
+	for share in fractions:
+		var level := SpacesimSurfaceMaps.value_at(skewed_table, share)
+		var below := 0
+		for column in 256:
+			if skewed.get_pixel(column, 0).r < level:
+				below += 1
+		h.check_near(float(below) / 256.0, share,
+			"%.1f %% of the field lies below value_at(%.3f)" % [share * 100.0, share], 0.02)
+
 	# The placeholder a material is built with, before any map exists.
 	var linear := SpacesimSurfaceMaps.linear_quantiles()
 	h.check_near(linear[0], -1.0, "the linear placeholder starts at the field's floor", 1.0e-6)
