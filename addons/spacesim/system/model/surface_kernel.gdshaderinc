@@ -38,6 +38,11 @@ layout(push_constant, std430) uniform Params {
 	float lacunarity;
 	float continent_bounding;
 	float warp_bounding;
+	float region_frequency;
+	int region_octaves;
+	float region_share;
+	float region_bounding;
+	float mottle_plain_gain;
 } params;
 
 const float SURFACE_PI = 3.141592653589793;
@@ -78,6 +83,11 @@ void main() {
 	plan.lacunarity = params.lacunarity;
 	plan.continent_bounding = params.continent_bounding;
 	plan.warp_bounding = params.warp_bounding;
+	plan.region_frequency = params.region_frequency;
+	plan.region_octaves = params.region_octaves;
+	plan.region_share = params.region_share;
+	plan.region_bounding = params.region_bounding;
+	plan.mottle_plain_gain = params.mottle_plain_gain;
 
 	imageStore(out_map, pos, vec4(surface_height(direction, plan), 0.0, 0.0, 1.0));
 }

@@ -41,6 +41,9 @@
 //    multiplied by how close the sample is to a plate edge, and by nothing else.
 //  - **Ridged noise for the crests themselves** (`1 - |n|`, squared), which is the one mechanism that reads
 //    as "mountain" rather than as "bumpy".
+//  - **A region term**, slower than a plate, multiplied into the level — so one continent stands higher than
+//    another and one basin floods deeper, with the plate interiors still flat. Added 2026-10-19 because
+//    nothing in the field was slower than a plate, and a planet of one place repeated is what that looks like.
 //
 // **The result is a field, not a height in metres, and it is not sea-levelled.** The datum is 0 and the
 // spread is about ±1; sea level is a *percentile* of this distribution, measured after the bake, so the
@@ -64,6 +67,11 @@ struct SurfacePlan {
 	float lacunarity;
 	float continent_bounding;
 	float warp_bounding;
+	float region_frequency;
+	int region_octaves;
+	float region_share;
+	float region_bounding;
+	float mottle_plain_gain;
 };
 
 // **How many plates.** Fourteen, which is Earth's count of major plates, and it is a *shape* number rather
@@ -182,6 +190,34 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 	float belt;
 	surface_plates(q, plan.plate_phase, plan.belt_width, level, belt);
 
+	// **The region term: what makes one continent stand higher than another, and one basin sit deeper.**
+	// Evert, 2026-10-19: *"the noise is far too uniform. It needs an extra slow octave to make higher and
+	// lower peaks, as well as create flat areas."* Nothing in the field was slower than a plate, so every
+	// continent had the same relief budget and the same grain — a planet of one place repeated.
+	//
+	// **Multiplied into the level rather than added to it**, because the property asked for is a *scaling* of
+	// ground that is already flat: a standing plate stands higher where the region is high and lower where it
+	// is low, a sagging plate floods deeper somewhere than elsewhere, and the interior of a plate stays flat
+	// while a slow field varies across it. An additive term would tilt those interiors instead of scaling
+	// them, which is the opposite of a plain.
+	float region = fnl_fbm3(
+		q, plan.seed + 733, plan.region_frequency, plan.region_octaves,
+		plan.gain, plan.lacunarity, plan.region_bounding
+	);
+	float standing = level * (1.0 + plan.region_share * region);
+
+	// **How much texture this ground is allowed.** `surface_plates` gives a plate a *constant* level, so a
+	// plate interior has no shape of its own at all — `variation` is its whole character, and it was laid over
+	// every plate at one strength. Evert, 2026-10-19: *"for most of the planet the mottling should be much
+	// less, so we have some flat plains too... it stretches all the way to the coast, so it needs to be less at
+	// low altitudes."* So the low ground gets a fraction of it and the uplands keep the grain.
+	//
+	// **The proxy is the plate level, deliberately, and NOT the sea level.** Sea level is a *percentile of this
+	// field*, measured after the bake, so attenuating by it would be circular — the attenuation would move the
+	// percentile that decided the attenuation, and a second bake would be needed to settle it. Plate level is
+	// causal, needs nothing measured, and already means "this ground is low".
+	float mottle = mix(plan.mottle_plain_gain, 1.0, smoothstep(-0.5, 0.5, level));
+
 	// **Structure within a plate**: the broad shape inside a continent, not the continents themselves —
 	// those are the plate levels, and a low-frequency fbm big enough to make its own continents would
 	// fight them and produce a planet that is neither.
@@ -195,8 +231,11 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 	// Squared, so a belt is a *chain* with a crest rather than a wide band of hills.
 	float crest = belt * belt;
 
-	return plan.plate_bias_share * level
-		+ plan.continent_share * variation
+	// **The ridges are not scaled by `mottle`**: they are already gated to plate boundaries by `crest`, and a
+	// belt that vanished over a low plate would leave a plain with no edge, which is the one place a plain
+	// should have relief.
+	return plan.plate_bias_share * standing
+		+ plan.continent_share * mottle * variation
 		+ plan.ridge_strength * mountains * crest;
 }
 

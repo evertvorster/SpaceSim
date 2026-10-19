@@ -45,11 +45,21 @@ const CONTINENT_FREQUENCY := 2.5
 const RIDGE_FREQUENCY := 11.0
 const WARP_FREQUENCY := 3.0
 
+## **The region frequency: slower than a plate, by design.** Evert, 2026-10-19: *"the noise is far too
+## uniform. It needs an extra slow octave to make higher and lower peaks, as well as create flat areas."*
+## A plate is about 1/14 of the sphere, so 0.7 is a handful of regions across a planet — things a continent can
+## sit inside rather than things a continent is made of. **Aggressive on purpose for the first flight**: the
+## point of this rung is to find out whether the lever does what it says, and a lever that has to be judged at
+## 5 % is a lever nobody can judge.
+const REGION_FREQUENCY := 0.7
+
 ## Octaves per mechanism. The interior wants five to carry a coastline's worth of shape; the ridges want
 ## four for a crest; the warp wants three, because a warp is a displacement and not a texture.
 const CONTINENT_OCTAVES := 5
 const RIDGE_OCTAVES := 4
 const WARP_OCTAVES := 3
+## Three for the region: it is one slow shape, and octaves below it are the continent frequency's job.
+const REGION_OCTAVES := 3
 
 ## The FBM gain and lacunarity — **0.5 and 2.0**, half the amplitude per doubling, the ordinary pair and the
 ## cloud field's own. They describe a spectrum, not a planet, so sharing them is right.
@@ -74,8 +84,19 @@ const WARP_STRENGTH := 0.35
 ## meandering *strip* of coast rather than a landmass. A plate now stands clear of the water as a body, with
 ## the belts as its mountains, which is the shape a continent actually has.
 const PLATE_BIAS_SHARE := 0.85
-const CONTINENT_SHARE := 0.12
+const CONTINENT_SHARE := 0.07
 const RIDGE_STRENGTH := 0.5
+
+## **How far the region may scale a plate's level**, and it is a multiplier rather than a share: `0.5` lets a
+## standing plate reach 1.5x its own height in a high region and a third of it in a low one. Multiplied because
+## a plate's *interior* is a constant level — the property wanted is "this ground is higher here and lower
+## there", which is a scaling of that constant and keeps it flat. An added term would tilt a plain.
+const REGION_SHARE := 0.5
+
+## **How much of the within-plate texture a sagging plate gets.** `0.15` is a sixth of what a standing plate
+## gets: the low ground reads as plains, the uplands keep their grain. This is the number to raise if the plains
+## come out looking like paint rather than like ground.
+const MOTTLE_PLAIN_GAIN := 0.15
 
 ## **How wide a mountain belt is, in the units `1 - dot` is measured in** (0 at a plate centre, 2 at the
 ## antipode). A belt is where the two nearest centres are within this gap of each other, so it scales with
@@ -120,6 +141,11 @@ class Plan:
 	## The FBM normalisers, `1 / (1 + g + g² + …)` per octave count, so a sum of octaves comes back on ±1.
 	var continent_bounding := 1.0
 	var warp_bounding := 1.0
+	var region_frequency := REGION_FREQUENCY
+	var region_octaves := REGION_OCTAVES
+	var region_share := REGION_SHARE
+	var mottle_plain_gain := MOTTLE_PLAIN_GAIN
+	var region_bounding := 1.0
 	## The field's own value times this is metres. Zero for a body with no radius to speak of.
 	var amplitude := 0.0
 
@@ -142,10 +168,10 @@ static func source() -> String:
 ## **The push-constant block**, written field by field so the layout is readable beside the kernel's.
 ##
 ## **Every number comes off the plan**, including the FBM normalisers — a constant typed into the GLSL would be
-## a second copy of a number the plan already knows, and it would drift. The block is `ivec2` plus seventeen
-## 4-byte fields: **92 bytes, and it must be supplied at exactly that size** — the driver rejects both more and
-## less (*"requires (76) bytes of push constant data, supplied: (80)"*), unlike a uniform block where padding is
-## the caller's to choose.
+## a second copy of a number the plan already knows, and it would drift. The block is `ivec2` plus four
+## 4-byte fields, then eighteen more: **112 bytes, and it must be supplied at exactly that size** — the driver
+## rejects both more and less (*"requires (76) bytes of push constant data, supplied: (80)"*), unlike a uniform
+## block where padding is the caller's to choose.
 static func push_constants(
 	plan_data: Plan, width: int, height: int,
 	uv_origin: Vector2 = Vector2.ZERO, uv_size: Vector2 = Vector2.ONE
@@ -175,14 +201,21 @@ static func push_constants(
 	bytes.encode_float(80, plan_data.lacunarity)
 	bytes.encode_float(84, plan_data.continent_bounding)
 	bytes.encode_float(88, plan_data.warp_bounding)
+	## **Appended, never inserted**: these offsets are the kernel's struct order, so a field put in the middle
+	## would silently shift every number after it.
+	bytes.encode_float(92, plan_data.region_frequency)
+	bytes.encode_s32(96, plan_data.region_octaves)
+	bytes.encode_float(100, plan_data.region_share)
+	bytes.encode_float(104, plan_data.region_bounding)
+	bytes.encode_float(108, plan_data.mottle_plain_gain)
 	return bytes
 
 
 const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
 const FIELD_PATH := "res://addons/spacesim/system/model/surface_field.gdshaderinc"
 const KERNEL_PATH := "res://addons/spacesim/system/model/surface_kernel.gdshaderinc"
-## 92: `ivec2`, two `vec2`, then seventeen 4-byte fields. Exact, not padded — see [method push_constants].
-const PUSH_CONSTANT_BYTES := 92
+## 112: `ivec2`, two `vec2`, then twenty-two 4-byte fields. Exact, not padded — see [method push_constants].
+const PUSH_CONSTANT_BYTES := 112
 
 
 ## A body's address, as the seed its surface grows from.
@@ -199,6 +232,7 @@ static func plan(body_id: String, radius: float) -> Plan:
 	result.lacunarity = NOISE_LACUNARITY
 	result.continent_bounding = _bounding(result.continent_octaves, result.gain)
 	result.warp_bounding = _bounding(result.warp_octaves, result.gain)
+	result.region_bounding = _bounding(result.region_octaves, result.gain)
 	# **The lattice's turn, not its points.** A Fibonacci sphere is the same lattice for every body, so the
 	# phase is what makes one world's plates sit somewhere other than another's — and because it moves whole
 	# plate boundaries rather than each centre independently, two bodies do not look like one map with the
