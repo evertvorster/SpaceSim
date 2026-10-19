@@ -436,6 +436,8 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 			"and the encode is the exact inverse of what Godot decodes, so the two cancel", 1.0e-6)
 
 	_test_the_eye_inside_a_body(h, scene, camera, pixel)
+	_test_a_frame_change_pays_for_its_geometry(h, scene, camera, earth, pixel)
+	_leak(h, scene, camera, earth, pixel)
 
 	# --- the point of light is in the FRAME's exposure, not the camera's ----------------------------
 	# **This check used to assert the opposite**, and the reversal is the point. Godot bakes the exposure
@@ -518,6 +520,62 @@ static func _finest_under_eye(distance: float, radius: float, to_eye: Vector3, p
 				maxf((leaf[1] as Vector3).angle_to(leaf[2]), (leaf[2] as Vector3).angle_to(leaf[0]))
 			))
 	return finest
+
+
+## **A rebuild must not leak.** Evert, 2026-10-19: a four and a half minute flight ended in thousands of
+## `Element limit reached` errors as the RenderingDevice's RID allocator filled up. The patch path was
+## innocent — this is the check that says so, and it stays because the failure mode (a leak per rebuild) is
+## invisible until it is catastrophic.
+##
+## A descent that rebuilds on every frame, which is what flying does, with a census of the engine's own
+## object counts: a leaked RID is a leaked Object or Resource before it is anything else.
+func _leak(h, scene: SpacesimSystemScene, camera: Camera3D, earth: SpacesimSceneBody, pixel: float) -> void:
+	var start_resources := Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)
+	var start_objects := Performance.get_monitor(Performance.OBJECT_COUNT)
+	var samples := []
+	for step in 1200:
+		var altitude: float = 2.0e6 * pow(10.0, -3.0 * float(step) / 1200.0)
+		camera.global_position = earth.node.global_position \
+			+ Vector3(1.0, 0.0, 0.0).rotated(Vector3.UP, float(step) * 0.0005) * (earth.radius + altitude)
+		scene.update_lod(camera)
+		if step % 300 == 0:
+			samples.append(int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)))
+	var end_resources := Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)
+	var end_objects := Performance.get_monitor(Performance.OBJECT_COUNT)
+	h.check(end_resources - start_resources <= 8 and end_objects - start_objects <= 8,
+		"1200 rebuild frames leak nothing (resources %+d, objects %+d)"
+			% [end_resources - start_resources, end_objects - start_objects])
+
+
+## **A frame change is a synchronous rebuild.** Evert, 2026-10-19: *"can't we load the next frame before we
+## switch to it?"* — yes, and this is where. The mesh belongs to a viewpoint, so crossing into a new frame
+## has to leave a mesh that belongs to the new one, not the previous regime's. What is observable headlessly
+## is that the transition pays for the build: no task is left in flight when `update_lod` returns.
+func _test_a_frame_change_pays_for_its_geometry(
+	h, scene: SpacesimSystemScene, camera: Camera3D, earth: SpacesimSceneBody, pixel: float
+) -> void:
+	var surface := earth.surface
+	if surface == null:
+		return
+	var atmosphere := earth.atmosphere
+	# Into the atmosphere first, from far enough out that the selection is a coarse one.
+	if atmosphere != null:
+		scene.frame_tree.enter_frame(atmosphere)
+	camera.global_position = earth.node.global_position + Vector3(0.0, earth.radius + 1.0e5, 0.0)
+	scene.update_lod(camera)
+	# Then the landing, **without awaiting between**: the transition itself must join the work.
+	scene.frame_tree.enter_frame(surface)
+	camera.global_position = earth.node.global_position + Vector3(0.0, earth.radius + 1.5e3, 0.0)
+	scene.update_lod(camera)
+	h.check(earth.patch_task == -1,
+		"crossing into the surface frame leaves no rebuild in flight — the transition paid for it")
+	h.check(earth.mesh.mesh is ArrayMesh and earth.patch_triangles > 0,
+		"and the mesh it draws is the landing's own (%d triangles)" % earth.patch_triangles)
+	# The count is the selection's, not the previous frame's: re-walking the same viewpoint changes nothing.
+	var at_landing := earth.patch_triangles
+	scene.update_lod(camera)
+	h.check(earth.patch_triangles == at_landing,
+		"and it is stable — a second frame at the same viewpoint draws the same mesh")
 
 
 ## **An eye inside a body is a real answer, not a failure.** `SpacesimPatches.select` refuses a sphere it

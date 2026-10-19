@@ -74,6 +74,7 @@ var _wireframe := false
 
 
 func _ready() -> void:
+	_print_build()
 	_system = SpacesimSystemScene.from_file(SYSTEM_PATH)
 	if _system == null:
 		push_error("cannot load %s" % SYSTEM_PATH)
@@ -428,6 +429,28 @@ func _physics_process(delta: float) -> void:
 const HUD_INTERVAL := 0.1
 var _hud_since := 0.0
 
+## **The exposure metre is read by the pass itself, on the render thread.** Nothing here may touch the
+## `RenderingDevice`: it belongs to the render thread and its RID allocator is not thread safe, which
+## reading it from `_process` demonstrated with thousands of `Element limit reached` errors. The pass
+## stores what it read on `last_multiplier` / `last_mean`, and the HUD reads those.
+
+
+
+## **Which code is running, said once at startup.**
+##
+## A session outlives commits: a three-minute flight spans a fix, and the console it leaves behind then
+## names line numbers that no longer exist in the tree — which is unfalsifiable from outside and cost a
+## round of it already. One `git rev-parse` costs nothing and makes every pasted console self-describing,
+## including whether the tree had uncommitted changes when it started.
+func _print_build() -> void:
+	var git := SpacesimGit.new(ProjectSettings.globalize_path("res://"))
+	var result := git.run(["rev-parse", "--short", "HEAD"])
+	var head := git.text(result).strip_edges() if result["ok"] else ""
+	if head.is_empty():
+		print("SpaceSim: build unknown — no git metadata in the project directory")
+		return
+	print("SpaceSim: build %s%s" % [head, "" if git.is_clean() else ", with uncommitted changes"])
+
 
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
@@ -450,6 +473,7 @@ func _update_view(delta: float) -> void:
 	if _hud_since >= HUD_INTERVAL:
 		_hud_since = 0.0
 		_update_hud()
+
 
 
 ## The player is *inside* the ship while flying, so their location follows it. They are separate
@@ -531,6 +555,20 @@ func _range_key(kind: int) -> String:
 			return "camera.range_space"
 
 
+## **A black outline, because the readout has to survive a blown-out frame.** The exposure's own flash is the
+## case that matters: while the frame is white, an unoutlined label is white on white and the one instrument
+## that would say what the metre is doing is the thing that disappears. The marker labels already do this
+## (`SpacesimMarkers`); the HUD did not.
+const HUD_OUTLINE := Color(0.0, 0.0, 0.0, 0.9)
+const HUD_OUTLINE_SIZE := 6
+
+
+func _outline(label: Label, font_size: int) -> void:
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_outline_color", HUD_OUTLINE)
+	label.add_theme_constant_override("outline_size", HUD_OUTLINE_SIZE)
+
+
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HUD"
@@ -540,7 +578,7 @@ func _build_hud() -> void:
 	var label := Label.new()
 	label.name = "Readout"
 	label.position = Vector2(24.0, 18.0)
-	label.add_theme_font_size_override("font_size", 17)
+	_outline(label, 17)
 	layer.add_child(label)
 	_hud = label
 
@@ -554,7 +592,7 @@ func _build_hud() -> void:
 	fps.offset_top = 18.0
 	fps.offset_bottom = 46.0
 	fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	fps.add_theme_font_size_override("font_size", 17)
+	_outline(fps, 17)
 	layer.add_child(fps)
 	_fps = fps
 
@@ -582,6 +620,9 @@ func _update_hud() -> void:
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
+				"exposure    EV %.3f   mean %.6f" % [
+					_exposure_pass.last_multiplier, _exposure_pass.last_mean
+				],
 				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
 				"nearest     %s at %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.nearest_distance)],
 				"local unit  %s" % SpacesimMarkers.format_distance(length),

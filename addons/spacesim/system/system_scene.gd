@@ -50,6 +50,8 @@ var _framing: SpacesimFraming
 ## `update_lod`, which swaps the line meshes and an unshaded white material in and out. Off, and nothing
 ## changes — it is a debug view, not a mode the renderer has to reason about.
 var wireframe := false
+## The frame the last `update_lod` ran in, so a change of frame can be seen and paid for.
+var _last_frame_id := ""
 ## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
 ## summing it walks the whole catalogue, so it is recomputed when this changes rather than every frame.
 var _ambient_depth := -1.0
@@ -349,6 +351,19 @@ func _aim_zone_under(subject: Node3D, frame: SpacesimFrame) -> void:
 	var keep := subject.global_transform
 	place_landing_zone(body, keep.origin)
 	subject.global_transform = keep
+	# **And reset the interpolator AGAIN, because the subject's PARENT moved — not the subject.**
+	#
+	# This is the same trap `SpacesimFrameTree.enter_frame` documents, one step further on: it resets the
+	# interpolation when the observer is reparented, and then this function moves the frame the observer is
+	# now a child of. The pose is written back so nothing has moved, but the *interpolator* was reset
+	# against the frame's old transform, so the pose it holds is the one from before the move. With physics
+	# interpolation on, the renderer then draws the ship — and the camera hanging off it — **gliding** from
+	# where the frame used to be, which on the first landing is the build-time landing zone, a hemisphere
+	# away. A frame rendered from there has no ground in it at all: the metre's mean collapses, it clamps to
+	# `MAX_MULTIPLIER`, and a 32-stop correction in one frame is the white flash Evert sees at 1.7 km, at
+	# exactly the moment the frame changes to `surface` — and only the first time, because afterwards the
+	# zone is already under the ship and the move is nothing.
+	subject.reset_physics_interpolation()
 
 
 ## Put the observer where a save says it was, and answer whether the system still had the frame that
@@ -871,6 +886,17 @@ func update_lod(camera: Camera3D) -> void:
 			body.patch_walk_epsilon = epsilon
 			body.patch_walk_wireframe = wireframe
 			_request_patch_build(body, wireframe)
+	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
+	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
+	# different scene. Drawing it with the geometry selected for the previous one is wrong however it looks,
+	# and a frame carrying the previous regime's surface is a large change of luminance to the exposure metre:
+	# from orbit, the selection's facets sag up to half a kilometre, so from 1.5 km up you are looking at a
+	# surface built for a viewpoint 100 km away. Paying the build here is a few milliseconds at a moment that
+	# already costs a teleport; a frame of the wrong geometry is not.
+	var frame_id := frame_tree.active_frame.frame_id if frame_tree.active_frame != null else ""
+	if frame_id != _last_frame_id:
+		_last_frame_id = frame_id
+		await_patch_builds()
 	# **Counted once, from what is visible**, rather than accumulated as the loop goes: the HUD's number and
 	# an instrument's independent count then cannot disagree about a body that landed or was culled
 	# mid-frame.
@@ -948,10 +974,17 @@ func _poll_patch_builds() -> void:
 			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
 			else SpacesimPatches.mesh_from(arrays)
 		)
-		body.mesh.material_override = (
+		# **A material is published only when it is a different material**, and never a null one: assigning
+		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
+		# it reads as "the surface lost its shading", far from the line that did it.
+		var wanted := (
 			SpacesimBodyRenderer.wireframe_material() if body.patch_task_wireframe
 			else body.mesh_material
 		)
+		if wanted == null:
+			push_warning("PATCH: %s has no material to publish" % body.name)
+		elif body.mesh.material_override != wanted:
+			body.mesh.material_override = wanted
 		body.patch_triangles = (
 			arrays[0].size() / 6 if body.patch_task_wireframe
 			else arrays[0].size() / 3
