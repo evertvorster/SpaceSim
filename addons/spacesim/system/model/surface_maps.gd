@@ -20,15 +20,22 @@ extends RefCounted
 
 ## **The one width.** 2,048 × 1,024 puts a texel at 19.5 km on Earth, which is a pixel at 15,000 km altitude
 ## and four pixels at 4,000 km. Everything finer is the ladder's, and the ladder costs nothing at distance.
-const MAP_WIDTH := 2048
+const MAP_WIDTH := 4096
 ## **The ceiling for a refined map.** 8,192 × 4,096 is a 4.9 km texel on Earth and 67 MB — affordable for the one
-## body the eye is close to, and the point past which only the ladder can help (S3): no whole-body map serves a
+## body the eye is close to, and the point past which only the ladder can help: no whole-body map serves a
 ## landing, because at 10 km altitude a pixel is 13 m.
 const MAX_WIDTH := 8192
 
 ## Quantiles per table: 65 values, one per 1/64th of the area. 1.5 % resolution on a percentile is finer than
 ## any band edge needs to be, and the table is 260 bytes.
 const QUANTILES := 65
+
+## **How many texels may be read for the quantiles, and the step that keeps it there.** `get_pixel()` is a
+## GDScript call, so an exhaustive pass over a 4,096 map would be 8.4 million of them and over an 8,192 map
+## 33.5 million — seconds per body, at build, to estimate a percentile. The step doubles until the sample fits
+## the budget, so **small images are read exactly** and a big one is subsampled regularly, which is unbiased for
+## a distribution.
+const QUANTILE_BUDGET := 1 << 18
 
 ## The histogram's bins, over the field's ±1: a 0.1 % resolution in height, which at Earth's 8.9 km amplitude
 ## is 9 m — well below anything a coastline or a band edge cares about.
@@ -246,8 +253,10 @@ func _open() -> bool:
 ## **The value at each 1/64th of the area, ascending** — the table every band edge and the sea level is read
 ## from, measured off the map that will be used rather than assumed from the field's formula.
 ##
-## A histogram rather than a sort: 2 Mtexels is 2 M `get_pixel()` calls, and sorting them in GDScript is
-## hundreds of milliseconds for a number a single pass gets in one.
+## **Sampled, not exhaustive.** `get_pixel()` is a GDScript call, so a full pass over a 2,048 map was already
+## two million of them and an 8,192 map would be thirty-three — measured in seconds per body, at build, for a
+## percentile. Every `QUANTILE_STEP`th texel in each axis is a regular subsample: unbiased for a distribution,
+## and it makes the cost independent of the map's size.
 static func quantiles_of(image: Image) -> PackedFloat32Array:
 	var bins := PackedInt32Array()
 	bins.resize(HISTOGRAM_BINS)
@@ -255,8 +264,11 @@ static func quantiles_of(image: Image) -> PackedFloat32Array:
 	var total := 0
 	var low := INF
 	var high := -INF
-	for row in image.get_height():
-		for column in image.get_width():
+	var step := 1
+	while (image.get_width() / step) * (image.get_height() / step) > QUANTILE_BUDGET:
+		step *= 2
+	for row in range(0, image.get_height(), step):
+		for column in range(0, image.get_width(), step):
 			var value := image.get_pixel(column, row).r
 			low = minf(low, value)
 			high = maxf(high, value)
