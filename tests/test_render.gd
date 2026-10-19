@@ -98,6 +98,18 @@ func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemSc
 		h.check(texels >= 1.4 and texels <= 2.9,
 			"at %d wide the ladder starts %.2f texels out" % [width, texels])
 
+	# **A material with no ladder must not crash the map landing.** The ocean has no `detail_base_frequency` and
+	# no ladder, and reading the parameter back off the material to derive the octave returned `null` — which in
+	# GDScript is *"Invalid call. Nonexistent 'float' constructor"*, once per ocean per map, in flight only. The
+	# headless suite never saw it because a headless run has no surface maps at all, so this calls the function
+	# the way a landing does, with a material that has no ladder parameters.
+	var bare := ShaderMaterial.new()
+	SpacesimBodyRenderer.apply_surface_maps(
+		bare, ImageTexture.create_from_image(Image.create(4, 4, false, Image.FORMAT_RF)), 512
+	)
+	h.check(int(bare.get_shader_parameter("detail_first_octave")) == -1,
+		"and a material with no ladder is told to draw none, not made to throw")
+
 
 ## **The background is the real sky, and it must not become the light.**
 ##

@@ -529,7 +529,7 @@ static func apply_surface_tiles(
 
 
 static func apply_surface_maps(
-	material: Material, texture: Texture2D, width: int
+	material: Material, texture: Texture2D, width: int, base_frequency: float = 0.0
 ) -> void:
 	if material == null or texture == null:
 		return
@@ -544,6 +544,10 @@ static func apply_surface_maps(
 		# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
 		# duplicate what the new map shows or leave a band of nothing between them. The ladder is the field's own
 		# octaves, so what moves is *which octave* is the first one the map did not carry.
-		surface.set_shader_parameter("detail_first_octave", first_detail_octave(
-			float(surface.get_shader_parameter("detail_base_frequency")), width
-		))
+		#
+		# **`base_frequency` arrives as an argument, not read back off the material.** Reading it back was a crash
+		# in flight: the ocean material has no `detail_base_frequency` (it has no ladder), so the read returned
+		# `null` and `float(null)` is *"Invalid call. Nonexistent 'float' constructor"* — once per ocean per map
+		# landing, and invisible to the suite because a headless run has no surface maps at all. A caller that
+		# passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
+		surface.set_shader_parameter("detail_first_octave", first_detail_octave(base_frequency, width))
