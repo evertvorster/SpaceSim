@@ -642,7 +642,8 @@ func _add_lighting() -> void:
 ## the framing's own atmosphere altitude, because the atmosphere frame begins there.
 ##
 ## **Nothing here draws anything.** The shell that used to be built from these numbers is gone, and the
-## march that will draw the air is not written yet: what survives is the arithmetic, because the camera's
+## march that draws the air (`SpacesimAtmospherePass`, merged as `416294b`) is given the numbers, and the
+## camera's
 ## far plane reads it (`sky_reach`) and it is a fact about the body rather than about a renderer.
 ## **Which body's air the frame is looking through** — the nearest one that has any, from the observer, with
 ## everything the march needs. Empty when there is nothing to draw.

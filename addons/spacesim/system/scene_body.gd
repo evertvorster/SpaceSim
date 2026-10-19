@@ -68,8 +68,8 @@ var scale_body: SpacesimScaleBody
 ##
 ## Kept on the body rather than recomputed because the camera's far plane needs it
 ## (`SpacesimSystemScene.sky_reach`), which falls short of the air's top otherwise. Zero for a body with
-## no air. **Nothing draws anything from it**: the shell that used to be built at this radius is gone, and
-## the march that will draw the air is not written yet.
+## no air. It is what `SpacesimAtmospherePass` marches to — the shell that used to be built at this radius is
+## gone, and the air is one volumetric march over the frame (`416294b`).
 var sky_top: float = 0.0
 ## **The air's scattering numbers, derived once at build** — the per-channel Rayleigh coefficient, the
 ## absorption, the scale height, the Mie constants and the sun's intensity in frame units. Empty for a body

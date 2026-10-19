@@ -7,7 +7,9 @@ extends RefCounted
 ## the constants below rather than buried in the shader, because a hidden constant is one nobody can find
 ## when the picture is wrong.
 ##
-## **Nothing here draws air or cloud.** The air shell, the cloud deck shells and the surface-texture
+## **Nothing here draws air.** The air is one volumetric march over the frame (`SpacesimAtmospherePass`), and a
+## material that applied air of its own beside it would apply the same air twice. The cloud deck shells and the
+## surface-texture
 ## mapping are all gone; the next features are built from their plans, not from these materials.
 ## `SpacesimClouds` stays and is still read: `bond_albedo` needs it, and Earth's calibrated 0.302 against a
 ## measured 0.306 depends on the deck's fraction and albedo.
