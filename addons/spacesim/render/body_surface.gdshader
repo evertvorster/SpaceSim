@@ -15,14 +15,20 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // its own albedo; the sea level is a percentile of the map's own distribution, measured by
 // `SpacesimSurfaceMaps`. The shader places them on the sphere and shades them.
 //
-// ---------------------------------------------------------------- TWO MAPS, TWO JOBS
+// ---------------------------------------------------------------- ONE MAP, AND WHY THAT IS SAFE
 //
-// `coarse_map` is an **absolute** resolution — baked once per body and never refined — and it decides the
-// ocean mask and the colour bands. `height_map` is the one that refines as the eye approaches, and it carries
-// the shading height and the gradient the normals are made from.
+// **Everything drawn comes from `height_map`**, the map that refines as the eye approaches. An earlier version
+// of this shader took the ocean mask and the colour bands from a separate, fixed-width coarse map, on the
+// theory that a refining map would make every shore move outward as detail arrived. **That reasoning was
+// wrong, and it cost the picture**: it is true only when the threshold is a *percentile of the map being
+// read*, and this one is not — the sea level is an absolute **value**, so any map can threshold it and the
+// coast lands in the same place in the field's own terms, just at higher resolution. Locking the colour to a
+// fixed 1,024-wide map bought a stability the value comparison already had, and paid for it with **39 km
+// texels at every distance** — a planet drawn at a seventh of the screen's resolution from low orbit, which
+// reads as a featureless ball.
 //
-// **The coastline reads the coarse map only.** If it thresholded the refining map, every shore would move
-// outward as detail arrived on approach — a shimmer along exactly the thing being looked at.
+// So: one sampler here. The coarse bake still exists, and its job is the one thing a formula cannot do —
+// **measure** the field's distribution — and that measurement is a number on the host, not a texture here.
 //
 // ---------------------------------------------------------------- THE RELIEF IS A SHADING TRICK
 //
@@ -35,7 +41,6 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // coordinates, which on an equirect map is correct except at the poles, where the longitude derivative blows
 // up and the map is read at its coarsest levels. That failure mode is *blur*, which is the safe direction,
 // and the fine detail at the poles comes from the ladder rather than from the map.
-uniform sampler2D coarse_map : filter_linear, repeat_enable, hint_default_black;
 uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
 // The colour ramp: **1-D, indexed by field value over [-1, 1]**, built from the derived bands and the
 // measured quantiles. Clamped, because a value past either end is a coast or a peak and not a wrap.
@@ -88,23 +93,23 @@ void fragment() {
 	vec3 up = unit_position;
 	vec2 uv = equirect(up);
 
-	// The coarse reading: the mask and the bands, and neither of them ever consults the detail map.
-	float coarse = texture(coarse_map, uv).r;
+	// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
+	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
+	float height = texture(height_map, uv).r;
 
 	// **The water line, antialiased by what a pixel can resolve.** The width of the fade is the footprint of
-	// the coarse reading in field units, so a coast a pixel wide is a soft edge and a coast on the horizon is
-	// a level crossing — without it the sea has a staircase.
-	float footprint = max(length(fwidth(vec2(coarse))), 1.0e-4);
-	float water = 1.0 - smoothstep(sea_level - footprint, sea_level + footprint, coarse);
+	// the reading in field units, so a coast a pixel wide is a soft edge and a coast on the horizon is a level
+	// crossing — without it the sea has a staircase.
+	float footprint = max(fwidth(height), 1.0e-4);
+	float water = 1.0 - smoothstep(sea_level - footprint, sea_level + footprint, height);
 
-	// The colour, from the ramp the derivation built. **The coarse height indexes it** — using the detailed
-	// one would move every band edge as the map refined, which is the coastline problem one layer up.
-	float ramp_position = clamp(coarse * 0.5 + 0.5, 0.0, 1.0);
+	// The colour, from the ramp the derivation built, indexed by the same height.
+	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
 	ROUGHNESS = mix(land_roughness, water_roughness, water);
 	SPECULAR = mix(land_specular, water_specular, water);
 
-	// **The relief, from four taps of the detail map.** `eps` is one texel of *that* map, because a fixed
+	// **The relief, from four taps of the same map.** `eps` is one texel of *that* map, because a fixed
 	// epsilon would sample detail the map in hand does not hold and read as noise on distant ground.
 	float texel = 1.0 / float(max(map_width, 1));
 	float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;

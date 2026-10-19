@@ -278,7 +278,6 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	var material := ShaderMaterial.new()
 	material.shader = SURFACE_SHADER
 	material.set_shader_parameter("colour_ramp", ramp)
-	material.set_shader_parameter("coarse_map", flat_height(0.5))
 	material.set_shader_parameter("height_map", flat_height(0.5))
 	material.set_shader_parameter("planet_radius", body.radius)
 	material.set_shader_parameter(
@@ -293,14 +292,19 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	return material
 
 
-## **Publish a bake.** The two textures and the sea level are set together and from one entry, because a sea
-## level from one body and a map from another is a coastline in the wrong place that nothing would catch.
+## **Publish a bake.** The texture and the sea level are set together and from one entry, because a sea level
+## from one body and a map from another is a coastline in the wrong place that nothing would catch.
+##
+## **Only the refining map is published**, and the coarse bake is not: the shader thresholds and colours from
+## whatever resolution it is handed, and the fixed-width map's job is the *measurement* (the quantiles the sea
+## level and the band edges come from), which happens on the host.
+## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
+## second texture in the shader is a second resolution to keep in step with the picture.
 static func apply_surface_maps(material: Material, entry: SpacesimSurfaceMaps.Entry) -> void:
-	if material == null or entry == null or entry.detail == null or entry.coarse == null:
+	if material == null or entry == null or entry.detail == null:
 		return
 	var surface := material as ShaderMaterial
 	if surface == null:
 		return
-	surface.set_shader_parameter("coarse_map", entry.coarse)
 	surface.set_shader_parameter("height_map", entry.detail)
 	surface.set_shader_parameter("map_width", entry.width)

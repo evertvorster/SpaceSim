@@ -282,9 +282,13 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	var plan := SpacesimSurfaceField.plan(earth.content.id, earth.radius)
 	h.check_near(float(material.get_shader_parameter("field_amplitude")), plan.amplitude,
 		"and the relief amplitude the plan derives (%.0f m)" % plan.amplitude, 1.0)
-	h.check(material.get_shader_parameter("coarse_map") != null
-			and material.get_shader_parameter("height_map") != null,
-		"with a neutral height in both maps until a bake lands")
+	h.check(material.get_shader_parameter("height_map") != null,
+		"with a neutral height until a bake lands")
+	# **One map, not two.** The surface shader draws from the refining map only: a second, fixed-resolution
+	# texture in it is a second resolution to keep in step with the picture, and the version that had one drew
+	# a planet at 39 km texels from low orbit.
+	h.check(material.get_shader_parameter("coarse_map") == null,
+		"and no second, fixed-resolution map for the colour to fall back to")
 
 	# **The ramp is the derivation's picture**: its bottom is Earth's sea band and its top is its land, in
 	# the order `bands()` put them.
