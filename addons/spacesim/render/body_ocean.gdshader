@@ -126,16 +126,16 @@ void fragment() {
 	ROUGHNESS = roughness_value;
 	SPECULAR = specular_value;
 
-	// **The waves.** Flat by default; a ripple only where a pixel spans metres. `surface_detail`'s colour output
-	// is ignored — a sea's colour is its depth, not its height.
+	// **The waves.** Flat by default; a ripple only where a pixel spans metres. The sea's ripple is not an octave
+	// of the planet's height field, so it is expressed as its own ladder of the same generator: octave 0 sits at
+	// `1 / wave_feature`, and `wave_relief` is the amplitude that makes it a sea rather than a landscape.
 	if (wave_octaves > 0 && wave_feature > 0.0) {
 		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 		float pixel_metres = footprint_angle * planet_radius;
 		float wave_fade = 1.0 - smoothstep(wave_near, wave_far, pixel_metres);
-		float wave_height = 0.0;
-		surface_detail(
-			up, wave_seed, wave_gain, wave_lacunarity, wave_feature, footprint_angle, wave_octaves,
-			0.5, wave_height
+		float wave_height = surface_detail(
+			up, wave_seed, 1.0 / wave_feature, 0, wave_octaves,
+			wave_gain, wave_lacunarity, 1.0, footprint_angle
 		);
 		if (wave_height != 0.0 && wave_fade > 0.0) {
 			// **The same slope the land's relief uses** — metres of height per metre of water — divided by the

@@ -68,20 +68,27 @@ uniform int tile_count = 0;
 
 // ===== THE LADDER =================================================================================
 //
-// Everything the map cannot hold: the field's own generator sampled below the map's nyquist, with each rung
-// faded by what a pixel can resolve. **The numbers are the plan's**, handed over by the host, so the detail is
-// the same field the bake drew and not a second geology — see `surface_field.gdshaderinc`.
-// **The DEPTH available, not the count that runs.** The count is derived per pixel three lines below, because the
-// pixel is the only thing that knows how deep the ladder needs to go — and because a count fixed on the host is
-// what made detail stop arriving at 271 m however close the eye came.
+// **The field's own octaves, below what the map could hold** — not a second generator. `surface_height` is a
+// sum of octaves, the bake stops at the one its width resolves, and this evaluates the ones above it: the same
+// seed lineage, the same frequencies, and `gain^octave` amplitudes, so the fine detail IS the field's small
+// features rather than noise laid over them. See `surface_field.gdshaderinc` for the correction this replaced.
+//
+// **The DEPTH available, not the count that runs.** The count is derived per pixel below, because the pixel is
+// the only thing that knows how deep the ladder needs to go.
 uniform int detail_max_rungs = 0;
+// **Where the field's octave 0 sits**: `plan.seed`, whose octave `j` is `seed + j` at `base_frequency * 2^j`.
 uniform int detail_seed = 0;
+uniform float detail_base_frequency = 1.0;
+// **The first octave the map did not carry**, from `log2(width / (2 * base_frequency))` on the host — the map's
+// two-texel feature. The ladder starts there and walks up.
+uniform int detail_first_octave = 0;
+// The fbm's own normaliser and spectrum, straight off the plan, so the ladder's weights are the map's.
+uniform float detail_bounding = 1.0;
 uniform float detail_gain = 0.5;
 uniform float detail_lacunarity = 2.0;
-// The feature size the ladder starts at, in radians on the unit sphere — two texels of the map in hand.
-uniform float detail_feature = 0.0;
-// How much the detail moves the *colour*, as a fraction of the band's own — zero-mean, so the drawn average
-// cannot drift away from the measured distribution the bands were placed with.
+// How much the detail moves the *colour*, as a fraction of the band's own. **Now scaled by the field's own
+// amplitude at that octave**, which for fine octaves is a fraction of a percent — this is a knob that only
+// becomes visible again if the field's spectrum gets rougher.
 uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
 // How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
 // one place the ladder's relief is calibrated.
@@ -91,10 +98,6 @@ uniform float detail_relief = 0.0;
 // the field's own minimum; a naive `height < sea_level` discard would punch a hole in whatever ground sits at
 // the bottom of the distribution. So the test is switched off rather than made true by luck.
 uniform float has_ocean = 0.0;
-// **How fast the relief's amplitude decays per rung**, against the colour's gain. 0.25 makes each rung's SLOPE
-// half the last one, so coarse shapes carry the shading and a 76 m bump barely tilts — which is Evert's
-// *"small features should have small shadows"*, and the difference between terrain and a bed of black pits.
-uniform float relief_gain = 0.25;
 // **A ceiling on the tilt**, in the same units as the slope: a normal may lean only so far before the fiction
 // becomes a hole. A bump's dark side drawn as absolute black is the missing sky as much as the relief — with no
 // air above it, nothing lifts a shadow — and that is S4's to fix.
@@ -223,22 +226,17 @@ void fragment() {
 	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
 	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
 	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
-	float detail = 0.0;
-	float relief_height = 0.0;
-	if (detail_max_rungs > 0 && detail_feature > 0.0) {
-		// **How many rungs this pixel can resolve**, in octaves: from the ladder's first rung down to the pixel.
-		// A distant body gets 0 and pays nothing; a ground filling the frame gets as many as the depth allows.
-		// **The count is `ceil(F / 2*fp)`, not `ceil(F / fp)`**, because it has to match the band the fade draws:
-		// a rung survives only while a pixel holds more than two samples per feature, so the ladder stops one
-		// octave earlier than the raw ratio suggests. `ceil(F/fp)` asked for exactly that one extra rung, which
-		// `surface_detail` then faded to zero — one noise tap a pixel of pure waste, and, before the band was
-		// widened, the mechanism that put the deepest rung *below* the sampling limit at every distance.
-		int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+float detail = 0.0;
+	if (detail_max_rungs > 0 && detail_first_octave >= 0 && detail_base_frequency > 0.0) {
+		// **The ladder's first feature**, in radians: octave `first_octave` of the field. Everything below is the
+		// sampling law, unchanged — the count is `ceil(F / 2*fp)` so it matches the band the fade draws.
+		float first_feature = 1.0 / (detail_base_frequency * exp2(float(detail_first_octave)));
+		int rungs = int(ceil(log2(max(first_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
 		rungs = clamp(rungs, 0, detail_max_rungs);
 		if (rungs > 0) {
 			detail = surface_detail(
-				up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
-				rungs, relief_gain, relief_height
+				up, detail_seed, detail_base_frequency, detail_first_octave, rungs,
+				detail_gain, detail_lacunarity, detail_bounding, footprint_angle
 			);
 		}
 	}
@@ -284,7 +282,7 @@ void fragment() {
 		// do this: it drew a pixel covered in many bumps as if it were one.
 		float step_east = max(length(view_x), 1.0e-4);
 		float step_north = max(length(view_y), 1.0e-4);
-		vec2 gradient = vec2(dFdx(relief_height) / step_east, dFdy(relief_height) / step_north)
+		vec2 gradient = vec2(dFdx(detail) / step_east, dFdy(detail) / step_north)
 			* field_amplitude * detail_relief;
 		// A bump may lean only so far — see `relief_max_tilt`.
 		float magnitude = length(gradient);

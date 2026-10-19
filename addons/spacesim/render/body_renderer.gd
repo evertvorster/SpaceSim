@@ -59,10 +59,11 @@ const RELIEF_EXAGGERATION := 5.0
 
 ## **The ladder's DEPTH — how many rungs exist, not how many run.** The shader derives the count from the pixel:
 ##
-##     rungs = clamp(ceil(log2(detail_feature / footprint)), 0, detail_max_rungs)
+##     rungs = clamp(ceil(log2(first_feature / (2 * footprint))), 0, detail_max_rungs)
 ##
-## so a distant body runs none, a ground filling the frame runs as many as it can resolve, and this constant is
-## only the ceiling on that. **Which fixes the fault it replaced**: `DETAIL_OCTAVES = 8` was a *count*, so the finest
+## where `first_feature` is the field's octave `first_detail_octave` — the first one the map did not carry. So a
+## distant body runs none, a ground filling the frame runs as many as it can resolve, and this constant is only the
+## ceiling on that. **Which fixes the fault it replaced**: `DETAIL_OCTAVES = 8` was a *count*, so the finest
 ## rung was `feature / 2^8` whatever the pixel — 271 m on Earth at a 2,304-wide map, against the 13 m a pixel covers
 ## at 10 km altitude. Detail stopped arriving and no amount of approach brought it back.
 ##
@@ -95,14 +96,13 @@ const WAVE_RELIEF := 0.02
 ## covers a kilometre, so this is a statement about the wave rather than about the distance.
 const WAVE_NEAR_METRES := 1.0
 const WAVE_FAR_METRES := 25.0
-## **How fast the relief decays per rung, against the colour's own gain.** Evert, 2026-10-19: *"small features
-## should have small shadows."* At the field's gain the slope is the same on every octave, so the finest visible
-## bump shades as hard as a mountain and the ground becomes a bed of black pits. A quarter per rung halves the
-## slope each time, so the coarse shapes carry the shading.
-const RELIEF_GAIN := 0.25
 ## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
 ## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
 ## only so far before it becomes a hole.
+##
+## (There was a second decay here, `RELIEF_GAIN`, that quartered each rung's relief amplitude. It existed to stop
+## an inflated ladder shading like a bed of black pits, and it went with that ladder: the field's own spectrum
+## already halves the amplitude per octave, so the slope of a fine octave is half the coarse one's for free.)
 const RELIEF_MAX_TILT := 0.6
 
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
@@ -346,6 +346,19 @@ static func draws_reference_sphere(content: SpacesimSystemBody) -> bool:
 	return content != null and content.surface != null
 
 
+## **The octave of the field's own fbm that is two texels of a `width`-wide map** — where the ladder starts.
+##
+## `surface_height`'s octave `j` carries `base_frequency * 2^j` cycles across the sphere, so its feature is
+## `1 / (base_frequency * 2^j)` radians on the unit sphere; setting that equal to two texels (`2 * TAU / width`)
+## gives `j = log2(width / (2 * base_frequency))`. **This is why the ladder is the field rather than a second
+## texture**: the octaves below `j` are in the map, the octaves from `j` up are evaluated per pixel, and there is
+## no third case. Returns -1 for a body that should have no ladder at all.
+static func first_detail_octave(base_frequency: float, width: int) -> int:
+	if base_frequency <= 0.0 or width <= 0:
+		return -1
+	return int(round(log(float(width) / (2.0 * base_frequency)) / log(2.0)))
+
+
 ## **How deep the detail ladder may go on this body**: none at all where there is no sphere to put it on.
 ##
 ## A gas giant used to be handed the full eight-rung ladder for a surface that is not its visible face — noise
@@ -375,18 +388,22 @@ static func surface_material(
 	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
 	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
 	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
-	# different field from the map it extends. `detail_feature` starts at two texels of the map in hand.
+	# different field from the map it extends. **The ladder is the field's own octaves**, so what it needs is not a
+	# feature size but the field's own base frequency, its seed, and which octave the map stopped at:
+	# `first_octave = log2(width / (2 * base_frequency))`, the octave whose feature is two texels of the brick in
+	# hand (`surface_detail` carries the reasoning).
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	material.set_shader_parameter("detail_seed", plan.seed)
+	material.set_shader_parameter("detail_base_frequency", plan.continent_frequency)
+	material.set_shader_parameter("detail_first_octave", first_detail_octave(
+		plan.continent_frequency, SpacesimSurfaceMaps.BUILD_WIDTH
+	))
+	material.set_shader_parameter("detail_bounding", plan.continent_bounding)
 	material.set_shader_parameter("detail_gain", plan.gain)
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
-	material.set_shader_parameter(
-		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.BUILD_WIDTH)
-	)
 	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
-	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
@@ -502,5 +519,8 @@ static func apply_surface_maps(
 		surface.set_shader_parameter("height_map", texture)
 		surface.set_shader_parameter("map_width", width)
 		# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
-		# duplicate what the new map shows or leave a band of nothing between them.
-		surface.set_shader_parameter("detail_feature", 2.0 * TAU / float(maxi(width, 1)))
+		# duplicate what the new map shows or leave a band of nothing between them. The ladder is the field's own
+		# octaves, so what moves is *which octave* is the first one the map did not carry.
+		surface.set_shader_parameter("detail_first_octave", first_detail_octave(
+			float(surface.get_shader_parameter("detail_base_frequency")), width
+		))

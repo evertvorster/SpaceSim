@@ -240,87 +240,54 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 }
 
 
-// ===== THE LADDER: THE FIELD BELOW THE MAP'S OWN TEXEL ==============================================
+// ===== THE LADDER: THE FIELD'S OWN OCTAVES, BELOW WHAT THE MAP COULD HOLD ==========================
 //
-// **The map is a sample of a field that is still a formula, and this reads the same generator under it.** The
-// bake stops at its own Nyquist — 4.9 km on an 8,192 map of Earth — and everything finer has to come from
-// here, because a texture cannot hold it: at 10 km altitude a pixel is 13 m, and no whole-body map serves that.
+// **`surface_height` is a sum of octaves, and a bake stops at the octave its width can resolve.** The rest of
+// the sum is still a formula, and this is where it is evaluated. So the ladder is not a second texture: it is the
+// *same* fbm at octaves the map never carried, with the field's own seeds, frequencies and amplitudes.
 //
-// Two rules, both paid for elsewhere in this project:
+// **Why that is a correction and not a nicety.** Evert, 2026-10-19: *"my idea for this texture was that it
+// contains both large and small features, and since the shader is a mathematical function, it should not matter if
+// it's drawing the whole texture or a smaller patch at a higher detail."* The ladder did not do that. It ran its
+// own `fnl_fbm3` from the map's Nyquist with its own seeds and its own frequencies, and — the part that decided
+// the picture — **its own normalisation, which re-inflated every rung to one octave's full amplitude.**
 //
-//  - **the same generator, not a second kind of noise.** The seed lineage, the gain and the lacunarity are the
-//    field's. A detail term with its own spectrum would look like a second geology laid over the first.
+// The field's spectrum falls at `gain` per octave, so the octave at a 30 m wavelength (the nineteenth) carries
+// 0.5^19 of the first one's amplitude: **about 2 cm of Earth's 8,919 m range.** Renormalised, those octaves were
+// drawn at full strength instead, and that is what covered the near ground in uniform grain and tilted the normal
+// far enough to catch sunlight past the terminator. Reproduced octave for octave, at their own weights, they are
+// what the field says they are: almost nothing.
 //
-//    **The old note here said that one octave per rung meant "the R3 rotation is applied exactly as the map's
-//    octaves had it". That was the opposite of the truth, and it is what the near ground's regular stipple was
-//    made of.** `fnl_fbm3` applies its coordinate transform **once, before its octave loop**, so a call with ONE
-//    octave always gets the same transform — the identity case. Every rung therefore landed on a lattice of the
-//    same orientation and at a frequency that is an exact power of two of the last, so their cells coincided:
-//    the classic *"octaves sampled at the same origin are correlated at the lattice points, and you get a
-//    visible cross or grid"* artefact (`shaders` skill, `04-noise.md` §9), worst at low octave counts — and this
-//    ladder runs two to four. The per-rung seed changes the gradients, never the lattice geometry, so it cannot
-//    help. Each rung is now turned by a per-rung rotation, which is that section's own fix.
-//  - **band-limited by the PIXEL FOOTPRINT, never by distance.** A rung is faded out where a pixel is too big
-//    to resolve it: `fade = 1 - smoothstep(feature*0.25, feature*0.5, footprint)` — **full while a pixel holds
-//    four samples per feature, gone by two**, which is the sampling limit. Detail finer than the sampling rate
-//    is not "more detail", it is aliasing — and this is also what makes a distant body free, because every
-//    rung dies long before the fragment does the work.
+// **The honest consequence, stated here so nobody rediscovers it as a bug:** with this spectrum there is
+// *almost no detail below the map*, at any distance. Real terrain is rougher than a `gain` of 0.5 (its amplitude
+// falls more like 0.7 per octave, which is what makes a 30 m hill metres tall rather than centimetres), so if the
+// ground should have fine relief, the FIELD's spectrum is what has to change — one constant, and a look change to
+// the map as well, which is why it is its own decision.
 //
-//    **The band was `0.5` to `1.5` and that was the near ground's speckle** (Evert's screenshot, 2026-10-19: the
-//    bottom half of a continent drawn as pixel-scale dots that shimmer). It kept a rung at full amplitude down
-//    to exactly TWO samples per feature — Nyquist — and only extinguished it once a pixel was 1.5x the feature,
-//    i.e. after the feature had already aliased. Because the host counts rungs with `ceil`, the deepest rung it
-//    asks for always lands between 1 and 2 samples per feature, so the worst case was not an edge case but
-//    *every* distance: measured at 1.0-1.7 samples/period with a fade of 0.53-0.98 as the eye closed from
-//    3,000 km to 3 km. Two channels carried it into the picture — the colour (`detail_variation`, 0.18) and the
-//    relief, whose screen-space derivative of an aliased height swings to the full `relief_max_tilt` and flips
-//    sign per pixel. With the band below, the deepest surviving rung sits at 2.5-4.2 samples/period instead.
-//
-// **Zero-mean, and normalised by the whole ladder.** The sum is scaled by `(1-g)/(1-g^n)`, the same shape
-// `SpacesimCloudField.fractal_bounding` uses, so the amplitude is one octave's whatever the rung count. A rung
-// that fades therefore *reduces* the detail rather than renormalising it, which is what makes the detail
-// appear and recede smoothly with distance instead of changing character.
+// **Band-limited by the PIXEL FOOTPRINT, never by distance.** A rung is faded out where a pixel is too big to
+// resolve it: `fade = 1 - smoothstep(feature*0.25, feature*0.5, footprint)` — full while a pixel holds four
+// samples per feature, gone by two, which is the sampling limit. Detail finer than the sampling rate is not "more
+// detail", it is aliasing, and it is also what makes a distant body free.
 float surface_detail(
-	vec3 unit, int seed, float gain, float lacunarity, float feature, float footprint, int octaves,
-	float relief_gain, out float relief
+	vec3 unit, int seed, float base_frequency, int first_octave, int octaves,
+	float gain, float lacunarity, float bounding, float footprint
 ) {
-	relief = 0.0;
-	if (octaves <= 0 || feature <= 0.0) {
+	if (octaves <= 0 || first_octave < 0) {
 		return 0.0;
 	}
-	// The whole ladder's normaliser, so the sum stays inside one octave's range however many rungs run.
-	float amplitude = (1.0 - gain) / (1.0 - pow(gain, float(octaves)));
-	// **And a SECOND ladder, for the relief, that decays faster.** Evert, 2026-10-19: *"small features should
-	// have small shadows."* An fbm with the field's own gain gives every octave the *same* slope — halve the
-	// feature and halve the height — so a 76 m wide bump carries kilometres of height and shades to black. A
-	// relief amplitude that quarters per rung makes the slope halve per rung instead, so the coarse shapes
-	// carry the shading and the finest visible rung barely tilts at all. **It costs nothing**: the same noise
-	// sample, a second amplitude.
-	float relief_amplitude = (1.0 - relief_gain) / (1.0 - pow(relief_gain, float(octaves)));
 	float sum = 0.0;
-	float octave_feature = feature;
-	float frequency = 1.0 / feature;
-	for (int octave = 0; octave < octaves; octave++) {
-		float fade = 1.0 - smoothstep(octave_feature * 0.25, octave_feature * 0.5, footprint);
+	for (int rung = 0; rung < octaves; rung++) {
+		int octave = first_octave + rung;
+		// The octave's own frequency and feature size, in radians on the unit sphere.
+		float frequency = base_frequency * exp2(float(octave));
+		float feature = 1.0 / frequency;
+		float fade = 1.0 - smoothstep(feature * 0.25, feature * 0.5, footprint);
 		if (fade > 0.0) {
-			// **Turn each rung's domain.** See the header: the generator's transform is fixed, so commensurate
-			// rungs share a lattice orientation and their cells line up. A rotation per rung decorrelates them,
-			// and it costs one `sincos` against the ~40 operations an `fnl_sos2s3` sample pays — the golden
-			// angle is already here for the plate lattice, so this reuses it rather than adding a constant.
-			float angle = float(octave) * SURFACE_GOLDEN_ANGLE;
-			float ca = cos(angle);
-			float sa = sin(angle);
-			vec3 turned = vec3(unit.x * ca + unit.z * sa, unit.y, -unit.x * sa + unit.z * ca);
-			float value = fnl_fbm3(
-				turned, seed + 4099 + octave, frequency, 1, gain, lacunarity, 1.0
-			) * fade;
-			sum += value * amplitude;
-			relief += value * relief_amplitude;
+			// `seed + octave` and the same frequency the map's octave `octave` had, because `fnl_fbm3` applies its
+			// transform once and then scales by the lacunarity — so this IS octave `octave` of the field's fbm.
+			sum += fnl_fbm3(unit, seed + octave, frequency, 1, gain, lacunarity, 1.0)
+				* bounding * pow(gain, float(octave)) * fade;
 		}
-		octave_feature *= 0.5;
-		frequency *= 2.0;
-		amplitude *= gain;
-		relief_amplitude *= relief_gain;
 	}
 	return sum;
 }
