@@ -249,9 +249,17 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 // Two rules, both paid for elsewhere in this project:
 //
 //  - **the same generator, not a second kind of noise.** The seed lineage, the gain and the lacunarity are the
-//    field's, and each rung goes through `fnl_fbm3` with ONE octave so the R3 rotation is applied exactly as
-//    the map's octaves had it. A detail term with its own spectrum would look like a second geology laid over
-//    the first.
+//    field's. A detail term with its own spectrum would look like a second geology laid over the first.
+//
+//    **The old note here said that one octave per rung meant "the R3 rotation is applied exactly as the map's
+//    octaves had it". That was the opposite of the truth, and it is what the near ground's regular stipple was
+//    made of.** `fnl_fbm3` applies its coordinate transform **once, before its octave loop**, so a call with ONE
+//    octave always gets the same transform — the identity case. Every rung therefore landed on a lattice of the
+//    same orientation and at a frequency that is an exact power of two of the last, so their cells coincided:
+//    the classic *"octaves sampled at the same origin are correlated at the lattice points, and you get a
+//    visible cross or grid"* artefact (`shaders` skill, `04-noise.md` §9), worst at low octave counts — and this
+//    ladder runs two to four. The per-rung seed changes the gradients, never the lattice geometry, so it cannot
+//    help. Each rung is now turned by a per-rung rotation, which is that section's own fix.
 //  - **band-limited by the PIXEL FOOTPRINT, never by distance.** A rung is faded out where a pixel is too big
 //    to resolve it: `fade = 1 - smoothstep(feature*0.25, feature*0.5, footprint)` — **full while a pixel holds
 //    four samples per feature, gone by two**, which is the sampling limit. Detail finer than the sampling rate
@@ -295,8 +303,16 @@ float surface_detail(
 	for (int octave = 0; octave < octaves; octave++) {
 		float fade = 1.0 - smoothstep(octave_feature * 0.25, octave_feature * 0.5, footprint);
 		if (fade > 0.0) {
+			// **Turn each rung's domain.** See the header: the generator's transform is fixed, so commensurate
+			// rungs share a lattice orientation and their cells line up. A rotation per rung decorrelates them,
+			// and it costs one `sincos` against the ~40 operations an `fnl_sos2s3` sample pays — the golden
+			// angle is already here for the plate lattice, so this reuses it rather than adding a constant.
+			float angle = float(octave) * SURFACE_GOLDEN_ANGLE;
+			float ca = cos(angle);
+			float sa = sin(angle);
+			vec3 turned = vec3(unit.x * ca + unit.z * sa, unit.y, -unit.x * sa + unit.z * ca);
 			float value = fnl_fbm3(
-				unit, seed + 4099 + octave, frequency, 1, gain, lacunarity, 1.0
+				turned, seed + 4099 + octave, frequency, 1, gain, lacunarity, 1.0
 			) * fade;
 			sum += value * amplitude;
 			relief += value * relief_amplitude;
