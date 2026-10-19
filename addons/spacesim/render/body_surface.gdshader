@@ -244,9 +244,17 @@ void fragment() {
 	}
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
+	// **`east` must be the direction `slope_east` was measured in, and it was not.** The slopes above come from
+	// `texture(uv + vec2(texel, 0.0))` — that is **+u**, increasing longitude — while `cross(polar, up)` is the
+	// **−u** direction: at the +X equator `cross(Y, X)` is −Z, and `equirect` puts +u on +Z. Measured against the
+	// true basis the old line was `dot(shader_east, +u) = −1.00` at every latitude, so the relief's east–west
+	// tilt was inverted and its north–south tilt was right — which is exactly an Evert report of *"shadows on the
+	// wrong side of the high areas"* that also looks half-correct, and why it does not read as a clean inversion.
+	// The two lines change together: `north` is derived from `east`, so flipping one would invert both.
+	// (`cross(up, polar)` is +u, and `cross(east, up)` is then +north.)
 	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-	vec3 east = normalize(cross(polar, up));
-	vec3 north = cross(up, east);
+	vec3 east = normalize(cross(up, polar));
+	vec3 north = cross(east, up);
 	vec3 tilted = normalize(up - east * slope_east - north * slope_north);
 	// Model space in, view space out: `NORMAL` is a view-space quantity in a spatial shader, and the
 	// fragment stage has `VIEW_MATRIX` rather than `MODELVIEW_MATRIX`. A body's node carries scale and no
