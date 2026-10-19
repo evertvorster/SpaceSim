@@ -183,7 +183,8 @@ static func walk_is_due(
 	# is needed, and this is one that no eye movement caused.
 	if base_width != last_base_width:
 		return true
-	if absf(log(distance / last_distance)) > LOG_TENTH:
+	# **The patch walk's own constant, not a copy of it** — see `SpacesimPatches.LOG_TENTH`.
+	if absf(log(distance / last_distance)) > SpacesimPatches.LOG_TENTH:
 		return true
 	# Half of the finest tile the budget can be spending, as the angle the eye may swing before the tile under it
 	# changes: a tile at `MAX_LEVEL` is `TAU/2^MAX_LEVEL` of the map across.
@@ -191,5 +192,3 @@ static func walk_is_due(
 	return last_direction.angle_to(direction) > finest
 
 
-## `log(1.1)`: a tenth, the same loose end the patch walk uses.
-const LOG_TENTH := 0.09531017980432486

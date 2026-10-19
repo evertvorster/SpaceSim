@@ -88,6 +88,15 @@ class Entry:
 	var refined_width := 0
 	## The width of what is being drawn: `BUILD_WIDTH` until a rung lands, then that rung's.
 	var width := 0
+	## **The eye this body's request was last decided at** — the gate's state, kept where the answer's inputs
+	## live. Zero distance means "never decided", which is due.
+	var last_distance := 0.0
+	var last_pixel := 0.0
+	var last_cap := 0
+	## Bumped when a rung lands; compared with what a material was last told, so a bake reaches the picture
+	## without every frame republishing on the chance that it has.
+	var version := 0
+	var published_version := 0
 	## The value at each 1/64th of the area, ascending — the percentile table.
 	var quantiles := PackedFloat32Array()
 	## Why this body has no map, or an empty string.
@@ -478,32 +487,53 @@ func poll() -> Array:
 		entry.refined = bake["texture"]
 		entry.refined_width = int(bake["width"])
 		entry.width = entry.refined_width
+		entry.version += 1
 		if previous != null:
 			_bake_pass.release(previous)
 		changed.append(body_id)
 	return changed
 
 
-## **What to draw this body with, and at what width — and the one place a bake is ever asked for.**
+## **Whether the whole-body map's request has to be reconsidered at all** — the gate, of the same shape as
+## `SpacesimPatches.walk_is_due` and `SpacesimSurfaceTiles.walk_is_due`, because they answer the same kind of
+## question and a project with three different conventions has three things to keep in step.
 ##
-## The law gives the width the eye wants; the map in hand is what it has. If the law wants more, **the NEXT RUNG**
-## is asked for — not the final width — so the ladder climbs 256 → 512 → … one bake in flight, and each rung is
-## on screen while the next is baked. That is the reverse mipmap: cheap and coarse first, and it means a ladder
+## The inputs are the only things `required_width` depends on: the distance (a tenth, `log`, the loose end the patch
+## walk measured), the pixel angle, and the ceiling — which moves when `surface.max_base_fraction` is changed, so
+## the knob stays hot. **The width in hand is deliberately not an input**: a rung landing is not the eye moving, and
+## it is handled by [member Entry.version] rather than by re-deciding.
+static func map_is_due(
+	last_distance: float, last_pixel: float, last_cap: int,
+	distance: float, pixel_angle: float, cap: int
+) -> bool:
+	if last_distance <= 0.0 or last_pixel <= 0.0 or last_cap <= 0:
+		return true
+	if not is_equal_approx(pixel_angle, last_pixel):
+		return true
+	if cap != last_cap:
+		return true
+	# **The patch walk's own constant, not a copy of it.** Three gates now decide "has this moved enough", and
+	# three copies of 0.0953 is three things to keep in step.
+	return absf(log(distance / last_distance)) > SpacesimPatches.LOG_TENTH
+
+
+## **Reconsider this body's width, and ask for the next rung if the law wants one.** The only place a whole-body
+## bake is ever requested, and it is called only when [method map_is_due] says so.
+##
+## **The next rung, not the final width**: the ladder climbs 256 → 512 → … one bake in flight, and each rung is on
+## screen while the next is baked. That is the reverse mipmap — cheap and coarse first — and it is why a ladder
 ## started late still shows something immediately.
-##
-## **Nothing is baked because a frame happened.** A width is asked for only when the law asks for one the map does
-## not have; with the eye still, this returns the same texture and asks for nothing.
-##
-## The texture becomes visible the frame after it lands, so this returns the old one until then; that is why
-## `poll()` reports *changes* rather than the scene asking "is it different".
-func map_for(
+func note_map_eye(
 	body_id: String, radius: float, distance: float, pixel_angle: float, cap: int
-) -> Dictionary:
+) -> void:
 	var entry: Entry = _entries.get(body_id)
 	if entry == null:
-		return {}
+		return
+	entry.last_distance = distance
+	entry.last_pixel = pixel_angle
+	entry.last_cap = cap
 	if _bake_pass == null:
-		return {"texture": entry.base, "width": entry.width}
+		return
 	var wanted := required_width(radius, distance, pixel_angle, cap)
 	if wanted <= entry.width:
 		# **The map is already as fine as the eye can use, and the extra rungs are given back** — a recede costs
@@ -513,13 +543,33 @@ func map_for(
 			entry.refined = null
 			entry.refined_width = 0
 			entry.width = BUILD_WIDTH
-		return _drawn(entry)
-	# **One rung up, or straight to the width the law wants if that is nearer.** The pass refuses a second request
-	# while one is in flight, so the next rung is asked for the frame after this one lands.
+			entry.version += 1
+		return
+	# The pass refuses a second request while one is in flight, so the next rung is asked for the frame after this
+	# one lands.
 	_bake_pass.request(
 		body_id, SpacesimSurfaceField.plan(body_id, radius), next_bake_width(entry.width, wanted)
 	)
+
+
+## **What this body's material should sample** — the widest thing that has landed. A lookup; it asks for nothing.
+func drawn_for(body_id: String) -> Dictionary:
+	var entry: Entry = _entries.get(body_id)
+	if entry == null:
+		return {}
 	return _drawn(entry)
+
+
+## **Whether a material is holding an older map than the cache has**, and the two halves of saying so.
+func needs_publish(body_id: String) -> bool:
+	var entry: Entry = _entries.get(body_id)
+	return entry != null and entry.version != entry.published_version
+
+
+func mark_published(body_id: String) -> void:
+	var entry: Entry = _entries.get(body_id)
+	if entry != null:
+		entry.published_version = entry.version
 
 
 ## **Whether the near field is worth walking at all** — and the answer is the same law: tiles exist to give what the

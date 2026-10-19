@@ -1052,11 +1052,23 @@ func _refine_surface_map(
 		return
 	if body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return
-	# **The request happens here** — the next rung of the ladder when the law wants a wider map than is in hand —
-	# and the entry already holds whatever has landed, so the draw below needs no separate publish step.
-	var chosen := _surface_maps.map_for(body.id, body.radius, distance, pixel, cap)
+	# **Gated, and split from the publishing.** The request is reconsidered only when an input of the law has
+	# moved — the distance a tenth, the pixel angle, or the ceiling when the setting is changed — and the material
+	# is repointed only when a bake has actually landed. Between those two events this costs a comparison per
+	# body per frame, and nothing is baked because a frame happened.
+	var entry := _surface_maps.map(body.id)
+	if entry == null:
+		return
+	if SpacesimSurfaceMaps.map_is_due(
+		entry.last_distance, entry.last_pixel, entry.last_cap, distance, pixel, cap
+	):
+		_surface_maps.note_map_eye(body.id, body.radius, distance, pixel, cap)
+	if not _surface_maps.needs_publish(body.id):
+		return
+	var chosen := _surface_maps.drawn_for(body.id)
 	if chosen.is_empty():
 		return
+	_surface_maps.mark_published(body.id)
 	SpacesimBodyRenderer.apply_surface_maps(
 		body.mesh_material, chosen["texture"], chosen["width"]
 	)

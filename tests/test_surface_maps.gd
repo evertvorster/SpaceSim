@@ -12,6 +12,7 @@ func run(h, _root: Node) -> void:
 	_test_no_bake_on_lookup(h)
 	_test_the_ladder(h)
 	_test_the_near_field_policy(h)
+	_test_the_map_gate(h)
 	_test_quantiles(h)
 	_test_the_ramp(h)
 
@@ -83,6 +84,33 @@ func _test_no_bake_on_lookup(h) -> void:
 	h.check(maps.bakes() == 0, "and no bake has run")
 	h.check(not SpacesimSurfaceMaps.linear_quantiles().is_empty(),
 		"the linear placeholder a material starts with is there when a bake cannot run")
+
+
+## **When the whole-body request is reconsidered at all** — the gate F4 added, and it has to answer the same three
+## questions the tile walk's gate answers, because they are the same question about a different quantity.
+##
+## The three inputs are the only things `required_width` depends on: the distance, the pixel angle, and the ceiling.
+## **The width in hand is deliberately not one of them** — a rung landing is not the eye moving, and it is what
+## `Entry.version` carries instead.
+func _test_the_map_gate(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	h.check(SpacesimSurfaceMaps.map_is_due(0.0, 0.0, 0, earth * 2.0, pixel, 640),
+		"a body that has never been decided is due")
+	h.check(not SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel, 640),
+		"a still eye is not due — no frame ever asks for a bake")
+	h.check(not SpacesimSurfaceMaps.map_is_due(
+		earth * 2.0, pixel, 640, earth * 2.0 * 1.05, pixel, 640),
+		"nor is a distance change of a twentieth")
+	h.check(SpacesimSurfaceMaps.map_is_due(
+		earth * 2.0, pixel, 640, earth * 2.0 * 1.2, pixel, 640),
+		"but a fifth is")
+	h.check(SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel * 1.5, 640),
+		"a change of render resolution is due at once")
+	# **The ceiling is an input, which is what keeps `surface.max_base_fraction` hot**: moving it while flying has to
+	# re-decide the ladder, or the knob would need a restart to take effect.
+	h.check(SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel, 2304),
+		"and so is the ceiling — moving the setting while flying re-decides the ladder")
 
 
 ## **When the near field is worth walking at all**, and **what may be let go while it is.**
