@@ -555,6 +555,20 @@ func _range_key(kind: int) -> String:
 			return "camera.range_space"
 
 
+## **A black outline, because the readout has to survive a blown-out frame.** The exposure's own flash is the
+## case that matters: while the frame is white, an unoutlined label is white on white and the one instrument
+## that would say what the metre is doing is the thing that disappears. The marker labels already do this
+## (`SpacesimMarkers`); the HUD did not.
+const HUD_OUTLINE := Color(0.0, 0.0, 0.0, 0.9)
+const HUD_OUTLINE_SIZE := 6
+
+
+func _outline(label: Label, font_size: int) -> void:
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_outline_color", HUD_OUTLINE)
+	label.add_theme_constant_override("outline_size", HUD_OUTLINE_SIZE)
+
+
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HUD"
@@ -564,7 +578,7 @@ func _build_hud() -> void:
 	var label := Label.new()
 	label.name = "Readout"
 	label.position = Vector2(24.0, 18.0)
-	label.add_theme_font_size_override("font_size", 17)
+	_outline(label, 17)
 	layer.add_child(label)
 	_hud = label
 
@@ -578,7 +592,7 @@ func _build_hud() -> void:
 	fps.offset_top = 18.0
 	fps.offset_bottom = 46.0
 	fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	fps.add_theme_font_size_override("font_size", 17)
+	_outline(fps, 17)
 	layer.add_child(fps)
 	_fps = fps
 
