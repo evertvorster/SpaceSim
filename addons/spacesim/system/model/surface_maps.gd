@@ -88,8 +88,13 @@ class Entry:
 	var refined_width := 0
 	## The width of what is being drawn: `BUILD_WIDTH` until a rung lands, then that rung's.
 	var width := 0
-	## **The eye this body's request was last decided at** — the gate's state, kept where the answer's inputs
-	## live. Zero distance means "never decided", which is due.
+	## **The eye's last two distances**: `prev_distance` is the previous *frame*, so the closing rate is a frame
+	## quantity. Watching it is free and happens every frame; it never asks for a bake by itself.
+	var prev_distance := 0.0
+	## Metres a second the eye is closing, signed: positive is approaching.
+	var closing_rate := 0.0
+	## **The eye the last DECISION was made at** — the gate's state. Zero distance means "decide again", which is
+	## what a rung landing sets it to.
 	var last_distance := 0.0
 	var last_pixel := 0.0
 	var last_cap := 0
@@ -514,20 +519,53 @@ func poll() -> Array:
 		entry.refined_width = int(bake["width"])
 		entry.width = entry.refined_width
 		entry.version += 1
+		# **A rung landing makes the next decision due**, because the width in hand is an input to what is needed
+		# next: without this the ladder would climb one rung per gate opening — every tenth of a distance change —
+		# and sit a rung or two behind the law through a slow approach.
+		entry.last_distance = 0.0
 		if previous != null:
 			_bake_pass.release(previous)
 		changed.append(body_id)
 	return changed
 
 
-## **Whether the whole-body map's request has to be reconsidered at all** — the gate, of the same shape as
-## `SpacesimPatches.walk_is_due` and `SpacesimSurfaceTiles.walk_is_due`, because they answer the same kind of
-## question and a project with three different conventions has three things to keep in step.
+## **How far ahead the projection looks, in seconds.** A bound on how *early* a speculative rung may be asked for —
+## not a schedule, and deliberately small: it is the lead needed for one bake to land, and the ladder's own ascent
+## does the rest.
+const SPECULATION_SECONDS := 1.0
+
+## Below this closing rate nothing is coming that a bake could meet, so nothing is speculated.
+const MIN_CLOSING_RATE := 1.0
+
+
+## **The next width worth baking AHEAD of the law** — the pure half of F5, and the whole of its arithmetic.
 ##
-## The inputs are the only things `required_width` depends on: the distance (a tenth, `log`, the loose end the patch
-## walk measured), the pixel angle, and the ceiling — which moves when `surface.max_base_fraction` is changed, so
-## the knob stays hot. **The width in hand is deliberately not an input**: a rung landing is not the eye moving, and
-## it is handled by [member Entry.version] rather than by re-deciding.
+## The projection is one subtraction: at `closing_rate` metres a second the eye will be `projected` metres away in
+## `SPECULATION_SECONDS`, and the width the law will ask for there is the width worth having *now*. It returns the next
+## rung above what is in hand (never more than one, and never beyond what the projection asks), or 0 when there is
+## nothing to do — a stationary eye, a receding one, or a map already as fine as the projection wants.
+##
+## **This is the one place movement is a legitimate trigger**, and the distinction matters: the *required* ladder is
+## driven by what the eye needs (see [method pump_map]); this is the "a bit of speculative work" that starts a step
+## before it is needed. A still eye gets nothing, which is the assertion that keeps it from becoming a cadence.
+static func speculative_width(
+	radius: float, distance: float, closing_rate: float, pixel_angle: float,
+	cap: int, width_in_hand: int
+) -> int:
+	if closing_rate < MIN_CLOSING_RATE:
+		return 0
+	var projected := maxf(distance - closing_rate * SPECULATION_SECONDS, radius + 1.0)
+	if projected >= distance:
+		return 0
+	var wanted_then := required_width(radius, projected, pixel_angle, cap)
+	if wanted_then <= width_in_hand:
+		return 0
+	return next_bake_width(width_in_hand, wanted_then)
+
+
+## **Whether the request has to be reconsidered at all** — F4's gate, unchanged in shape and now with one more
+## trigger: **a rung landing invalidates the last decision**, because the width in hand is an input to what is needed
+## next. `poll()` sets [member Entry.last_distance] to zero when a bake arrives, which is how that shows up here.
 static func map_is_due(
 	last_distance: float, last_pixel: float, last_cap: int,
 	distance: float, pixel_angle: float, cap: int
@@ -543,12 +581,30 @@ static func map_is_due(
 	return absf(log(distance / last_distance)) > SpacesimPatches.LOG_TENTH
 
 
-## **Reconsider this body's width, and ask for the next rung if the law wants one.** The only place a whole-body
-## bake is ever requested, and it is called only when [method map_is_due] says so.
+## **Watch the eye — every frame, and it asks for nothing.**
 ##
-## **The next rung, not the final width**: the ladder climbs 256 → 512 → … one bake in flight, and each rung is on
-## screen while the next is baked. That is the reverse mipmap — cheap and coarse first — and it is why a ladder
-## started late still shows something immediately.
+## This is the separation Evert drew, 2026-10-19: *"Watching a number increase or decrease per frame is not the same
+## as baking. We should still only bake when it might become necessary."* So the closing rate is maintained per frame
+## because a rate is a frame quantity, and **no bake is requested here** — the decisions that can ask are
+## [method note_map_eye], which runs only when the gate opens or a rung has landed.
+func observe_eye(body_id: String, distance: float, delta: float) -> void:
+	var entry: Entry = _entries.get(body_id)
+	if entry == null:
+		return
+	if delta > 0.0 and entry.prev_distance > 0.0:
+		entry.closing_rate = (entry.prev_distance - distance) / delta
+	entry.prev_distance = distance
+
+
+## **Reconsider this body's width, and ask for the next rung if one is wanted.** The only place a whole-body bake is
+## ever requested, and it is called only when [method map_is_due] says so — never because a frame happened.
+##
+## Two reasons to ask, and they are different in kind:
+##
+## - **the law is ahead of the map** — the rung the eye needs now, which is required work;
+## - **the projection is ahead of the law** — F5, one rung that the closing rate says is coming. It is asked for only
+##   when required work is finished, and the pass's one-request-in-flight rule is what makes it yield to a required
+##   bake without either of them knowing about the other.
 func note_map_eye(
 	body_id: String, radius: float, distance: float, pixel_angle: float, cap: int
 ) -> void:
@@ -561,21 +617,26 @@ func note_map_eye(
 	if _bake_pass == null:
 		return
 	var wanted := required_width(radius, distance, pixel_angle, cap)
-	if wanted <= entry.width:
-		# **The map is already as fine as the eye can use, and the extra rungs are given back** — a recede costs
-		# no memory, because the build map is still the floor.
-		if entry.refined != null and wanted <= BUILD_WIDTH:
-			_bake_pass.release(entry.refined)
-			entry.refined = null
-			entry.refined_width = 0
-			entry.width = BUILD_WIDTH
-			entry.version += 1
+	if wanted > entry.width:
+		# **The next rung, not the final width**: the ladder climbs 256 → 512 → … one bake in flight, so each rung is
+		# on screen while the next is baked.
+		_bake_pass.request(
+			body_id, SpacesimSurfaceField.plan(body_id, radius), next_bake_width(entry.width, wanted)
+		)
 		return
-	# The pass refuses a second request while one is in flight, so the next rung is asked for the frame after this
-	# one lands.
-	_bake_pass.request(
-		body_id, SpacesimSurfaceField.plan(body_id, radius), next_bake_width(entry.width, wanted)
+	if entry.refined != null and wanted <= BUILD_WIDTH:
+		# **The eye has receded past the point of the ladder**: give the rungs back, since the build map is the floor.
+		_bake_pass.release(entry.refined)
+		entry.refined = null
+		entry.refined_width = 0
+		entry.width = BUILD_WIDTH
+		entry.version += 1
+		return
+	var speculative := speculative_width(
+		radius, distance, entry.closing_rate, pixel_angle, cap, entry.width
 	)
+	if speculative > entry.width:
+		_bake_pass.request(body_id, SpacesimSurfaceField.plan(body_id, radius), speculative)
 
 
 ## **What this body's material should sample** — the widest thing that has landed. A lookup; it asks for nothing.

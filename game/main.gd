@@ -476,7 +476,7 @@ func _update_view(delta: float) -> void:
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.
-	_system.update_lod(_camera)
+	_system.update_lod(_camera, delta)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.

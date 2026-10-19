@@ -873,7 +873,9 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## screen is its own emission, over the same area, so its glare survives the handoff exactly as a
 ## planet's brightness does. See `SpacesimBodyRenderer.point_colour` for the one by-kind difference
 ## that remains, which is that a star **emits** and everything else reflects.
-func update_lod(camera: Camera3D) -> void:
+## `delta` is the frame's own — the only thing F5's projection needs, and **optional**, because an instrument (the
+## profiler, a probe) may call this without a clock and should then get no speculative work rather than a wrong rate.
+func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 	if camera == null:
 		return
 	var viewport := camera.get_viewport()
@@ -922,7 +924,7 @@ func update_lod(camera: Camera3D) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_refine_surface_map(body, distance, pixel, surface_cap)
+		_refine_surface_map(body, distance, pixel, surface_cap, delta)
 		_refine_surface_tiles(
 			body, distance, pixel, (observer - body.node.global_position).normalized(), surface_cap
 		)
@@ -1046,19 +1048,20 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 ## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
 ## want more than the build map has. Called from `update_lod` for every drawn body.
 func _refine_surface_map(
-	body: SpacesimSceneBody, distance: float, pixel: float, cap: int
+	body: SpacesimSceneBody, distance: float, pixel: float, cap: int, delta: float
 ) -> void:
 	if body.mesh_material == null or body.content == null:
 		return
 	if body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return
-	# **Gated, and split from the publishing.** The request is reconsidered only when an input of the law has
-	# moved — the distance a tenth, the pixel angle, or the ceiling when the setting is changed — and the material
-	# is repointed only when a bake has actually landed. Between those two events this costs a comparison per
-	# body per frame, and nothing is baked because a frame happened.
+	# **Watching is per frame; deciding is not; publishing is on arrival.** The rate is maintained every frame because
+	# it is a frame quantity, and it asks for nothing. A decision — which is the only thing that can request a bake —
+	# happens when the gate opens or when a rung has landed, and publishing happens when there is something new to
+	# draw. Evert, 2026-10-19: *"watching a number increase or decrease per frame is not the same as baking."*
 	var entry := _surface_maps.map(body.id)
 	if entry == null:
 		return
+	_surface_maps.observe_eye(body.id, distance, delta)
 	if SpacesimSurfaceMaps.map_is_due(
 		entry.last_distance, entry.last_pixel, entry.last_cap, distance, pixel, cap
 	):

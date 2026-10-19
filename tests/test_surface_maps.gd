@@ -13,6 +13,7 @@ func run(h, _root: Node) -> void:
 	_test_the_ladder(h)
 	_test_the_near_field_policy(h)
 	_test_the_map_gate(h)
+	_test_the_speculation(h)
 	_test_quantiles(h)
 	_test_the_ramp(h)
 
@@ -86,12 +87,8 @@ func _test_no_bake_on_lookup(h) -> void:
 		"the linear placeholder a material starts with is there when a bake cannot run")
 
 
-## **When the whole-body request is reconsidered at all** — the gate F4 added, and it has to answer the same three
-## questions the tile walk's gate answers, because they are the same question about a different quantity.
-##
-## The three inputs are the only things `required_width` depends on: the distance, the pixel angle, and the ceiling.
-## **The width in hand is deliberately not one of them** — a rung landing is not the eye moving, and it is what
-## `Entry.version` carries instead.
+## **When a decision is made at all** — F4's gate, plus the trigger F5 needed: a rung landing invalidates the last
+## decision, because the width in hand is an input to what is needed next.
 func _test_the_map_gate(h) -> void:
 	var earth := 6.371e6
 	var pixel := 1.2966806e-3
@@ -107,10 +104,52 @@ func _test_the_map_gate(h) -> void:
 		"but a fifth is")
 	h.check(SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel * 1.5, 640),
 		"a change of render resolution is due at once")
-	# **The ceiling is an input, which is what keeps `surface.max_base_fraction` hot**: moving it while flying has to
-	# re-decide the ladder, or the knob would need a restart to take effect.
 	h.check(SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel, 2304),
 		"and so is the ceiling — moving the setting while flying re-decides the ladder")
+	# A landed rung is a change in what is needed, and `poll()` signals it by zeroing the recorded distance.
+	h.check(SpacesimSurfaceMaps.map_is_due(0.0, pixel, 640, earth * 2.0, pixel, 640),
+		"a rung landing makes the next decision due, without the eye having moved at all")
+
+
+## **F5: the one step of speculative work, and the assertion that keeps it from being a cadence.**
+##
+## The projection is one subtraction — where the eye will be in `SPECULATION_SECONDS` at its closing rate — and the
+## width the law would ask for there is the width worth having now. It returns the next rung above what is in hand,
+## never more than one, and never beyond what the projection asks.
+##
+## **A still eye gets nothing.** That is the difference between predicting and polling, and it is the check that
+## would catch speculation quietly turning into a bake every frame.
+func _test_the_speculation(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var cap := 640
+	var distance := earth + 4.0e4
+
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, 0.0, pixel, cap, 256) == 0,
+		"a STILL eye speculates nothing — prediction must never become a cadence")
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, -50.0, pixel, cap, 256) == 0,
+		"and neither does a receding one")
+
+	var closing := 2000.0 # metres a second, closing
+	var speculative := SpacesimSurfaceMaps.speculative_width(earth, distance, closing, pixel, cap, 256)
+	h.check(speculative > 256, "a closing eye asks for a wider map than it holds (%d)" % speculative)
+	h.check(speculative == SpacesimSurfaceMaps.next_bake_width(
+		256, SpacesimSurfaceMaps.required_width(
+			earth, maxf(distance - closing * SpacesimSurfaceMaps.SPECULATION_SECONDS, earth + 1.0), pixel, cap
+		)),
+		"and it is ONE rung of the ladder, capped by what the projection asks (%d)" % speculative)
+
+	# **At the ceiling there is nothing to speculate**: a projection cannot exceed the ceiling the law is clamped to.
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, closing, pixel, cap, cap) == 0,
+		"a map already at the ceiling speculates nothing")
+	# **And a map already ahead of the projection is left alone**, which is what stops a recede-then-approach from
+	# baking the same rung twice.
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, 1.0, pixel, cap, 4096) == 0,
+		"nor does a map finer than the projection asks for")
+
+	# The projection never puts the eye inside the body, however fast it is closing.
+	var absurd := SpacesimSurfaceMaps.speculative_width(earth, earth + 1.0e3, 1.0e9, pixel, cap, 256)
+	h.check(absurd <= cap, "a nonsense closing rate cannot ask for more than the ceiling (%d)" % absurd)
 
 
 ## **When the near field is worth walking at all**, and **what may be let go while it is.**
