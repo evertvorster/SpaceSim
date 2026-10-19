@@ -80,6 +80,10 @@ uniform float detail_gain = 0.5;
 uniform float detail_lacunarity = 2.0;
 // The feature size the ladder starts at, in radians on the unit sphere — two texels of the map in hand.
 uniform float detail_feature = 0.0;
+// **How much of the ladder moves the coastline** — see `SpacesimBodyRenderer.COAST_LADDER_SCALE`. `surface_detail`
+// is normalised to about one octave's amplitude, which is the right size for a colour perturbation and far too much
+// for a boundary: the field spans ±1, so the raw ladder would make the coast fractal noise instead of a coastline.
+uniform float detail_coast_scale = 0.25;
 // How much the detail moves the *colour*, as a fraction of the band's own — zero-mean, so the drawn average
 // cannot drift away from the measured distribution the bands were placed with.
 uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
@@ -164,17 +168,55 @@ void fragment() {
 		}
 	}
 
+	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
+	// pixel spans — the same quantity the mesh's error budget spends — so the fade needs no distance and
+	// nothing to keep in step with the camera.
+	// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
+	// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
+	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
+	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+	float detail = 0.0;
+	float relief_height = 0.0;
+	if (detail_max_rungs > 0 && detail_feature > 0.0) {
+		// **How many rungs this pixel can resolve**, in octaves: from the ladder's first rung down to the pixel.
+		// A distant body gets 0 or 1 and pays nothing; a ground filling the frame gets as many as the depth
+		// allows. The rungs still fade individually inside `surface_detail`, so this is a bound on the work and
+		// not a second band-limit.
+		int rungs = int(ceil(log2(max(detail_feature / max(footprint_angle, 1.0e-9), 1.0))));
+		rungs = clamp(rungs, 0, detail_max_rungs);
+		if (rungs > 0) {
+			detail = surface_detail(
+				up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
+				rungs, relief_gain, relief_height
+			);
+		}
+	}
+
+
+	// **The height this pixel can actually resolve: the map, plus the field below its texel.** The ladder used to be
+	// consulted for the colour and the normal only, so the *coastline* stayed a threshold on the map — at 7.5 km
+	// altitude the map's texel is 5-20 km of ground and the horizon is 309 km away, which is why every coast drew as
+	// a polyline of straight, texel-aligned segments (Evert's screenshot, 2026-10-19). The ladder already evaluates
+	// the same field at the pixel's own scale; it is now what the sea level is compared against.
+	//
+	// **Before the discard, and that is a cost.** The ladder now runs on every pixel of the disc rather than only on
+	// the 29 % that is land. It is the price of a coastline at pixel resolution, and if it turns out to be too much
+	// at 4K then the answer is one merged shader — measuring once per pixel instead of twice — which is F3 reviewed
+	// with a number rather than with an opinion.
+	float resolved = height + detail * detail_coast_scale;
+	float ramp_position = clamp(resolved * 0.5 + 0.5, 0.0, 1.0);
+
 	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
 	// 2026-10-19: water and land are fundamentally different things. So the ground below sea level is culled
-	// here — which also means the eight-rung ladder only runs on the 29 % of a planet that is land — and
-	// `body_ocean.gdshader` draws the complement from the same map and the same threshold. Exactly one layer
-	// survives each pixel, so two coplanar surfaces cannot fight.
-	if (has_ocean > 0.5 && height < sea_level) {
+	// here — **on the resolved height**, so `body_ocean.gdshader` must threshold identically or the two layers
+	// leave a band where both or neither survive. Exactly one layer survives each pixel, so two coplanar
+	// surfaces cannot fight.
+	if (has_ocean > 0.5 && resolved < sea_level) {
 		discard;
 	}
 
 	// The colour, from the ramp the derivation built, indexed by the same height.
-	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
 	ROUGHNESS = land_roughness;
 	SPECULAR = land_specular;
@@ -214,31 +256,6 @@ void fragment() {
 	// a back-lit slope is genuinely back-lit.
 	slope_east = clamp(slope_east, -0.35, 0.35);
 	slope_north = clamp(slope_north, -0.35, 0.35);
-
-	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
-	// pixel spans — the same quantity the mesh's error budget spends — so the fade needs no distance and
-	// nothing to keep in step with the camera.
-	// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
-	// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
-	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
-	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
-	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
-	float detail = 0.0;
-	float relief_height = 0.0;
-	if (detail_max_rungs > 0 && detail_feature > 0.0) {
-		// **How many rungs this pixel can resolve**, in octaves: from the ladder's first rung down to the pixel.
-		// A distant body gets 0 or 1 and pays nothing; a ground filling the frame gets as many as the depth
-		// allows. The rungs still fade individually inside `surface_detail`, so this is a bound on the work and
-		// not a second band-limit.
-		int rungs = int(ceil(log2(max(detail_feature / max(footprint_angle, 1.0e-9), 1.0))));
-		rungs = clamp(rungs, 0, detail_max_rungs);
-		if (rungs > 0) {
-			detail = surface_detail(
-				up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
-				rungs, relief_gain, relief_height
-			);
-		}
-	}
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
 	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
