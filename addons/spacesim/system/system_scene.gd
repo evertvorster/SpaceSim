@@ -504,12 +504,14 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		var level := entry.value_at(body.surface_ocean_fraction)
 		var surface := body.mesh_material as ShaderMaterial
 		surface.set_shader_parameter("sea_level", level)
-		SpacesimBodyRenderer.apply_surface_maps(surface, entry.base, entry.width)
+		SpacesimBodyRenderer.apply_surface_maps(surface, entry.base, entry.width,
+			SpacesimSurfaceField.plan(body.id, body.radius).continent_frequency)
 		# **The two layers share one threshold and one map** — the land culls below it and the ocean draws below
 		# it, so a published sea level that reached only one of them would put a seam along every coast.
 		if body.ocean_material != null:
 			body.ocean_material.set_shader_parameter("sea_level", level)
 			SpacesimBodyRenderer.apply_surface_maps(body.ocean_material, entry.base, entry.width)
+			# 0.0 = no ladder on this material, which is what the ocean has.
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(
@@ -1073,7 +1075,8 @@ func _refine_surface_map(
 		return
 	_surface_maps.mark_published(body.id)
 	SpacesimBodyRenderer.apply_surface_maps(
-		body.mesh_material, chosen["texture"], chosen["width"]
+		body.mesh_material, chosen["texture"], chosen["width"],
+		SpacesimSurfaceField.plan(body.id, body.radius).continent_frequency
 	)
 	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a map
 	# that reached one and not the other would put a seam along every coastline.

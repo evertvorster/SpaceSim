@@ -31,20 +31,56 @@ const SURFACE_SPECULAR := 0.15
 const OCEAN_ROUGHNESS := 0.14
 const OCEAN_SPECULAR := 0.45
 ## **The depth ramp, in metres.** Shallow water returns light off the bottom, which is what its colour is; past
-## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through. Evert: *"it has a super-high
-## absorption, so realistically we won't see anything below a couple of meters."*
-const OCEAN_SHALLOW_METRES := 2.0
-const OCEAN_DEEP_METRES := 40.0
+## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through.
+##
+## **It has to span real bathymetry, or the sea has no structure at all.** Evert, 2026-10-19: *"from far out, its
+## too smooth."* The ramp was 2 m to 40 m, against a field of 8,919 m on Earth — so `deep_color` arrived at 0.45 %
+## of the water column and **every pixel of the ocean was "deep"**: one flat colour from orbit, with a hairline
+## fringe at the shore. The sea floor's own structure — basins, ridges, trenches — is the only large-scale
+## variation a sea has, and the ramp was hiding all of it.
+##
+## 5 m and 3,000 m are Earth's own numbers either side of the interesting range: the shelf break is at about
+## 130-200 m, the abyssal plains are 4,000-6,000 m, and a ridge crest is 1,000-2,000 m. Filling at 3 km keeps the
+## abyss reading as one colour (it is one colour) while the ridges, rises and shelves cross the ramp.
+const OCEAN_SHALLOW_METRES := 5.0
+const OCEAN_DEEP_METRES := 3000.0
 ## How much of the bottom's colour is left in the shallows, against the water's — a mix, not a tint, because the
 ## shelf is where both are true.
 const OCEAN_SHALLOW_BOTTOM_SHARE := 0.7
 ## **Waves**: two rungs of the field's generator, a swell of a few hundred metres, and a tilt of a fraction of a
 ## degree. `OCEAN_WAVE_METRES` is the coarsest wavelength.
-const OCEAN_WAVE_OCTAVES := 2
+## **Eight octaves, from a 400 m swell down to 3 m of chop**, and there is no separate near/far gate any more.
+## Evert, 2026-10-19: *"The sea still renders absolutely smooth all the way down to 10 km. Then, we get a rough
+## texture. We need a finer texture, and that needs to start resolving at about the same height that the mottling
+## on land starts to resolve."* Two octaves reached 200 m and a `wave_fade` clamped everything to a pixel under
+## 25 m — full below 0.8 km, gone above 20.8 km — so the *gate* decided when the sea appeared, not the sampling
+## law, and it appeared at the altitude he named. The per-rung footprint fade was always the law (**reuse the law;
+## never restate it**), and with the clamp gone a 400 m swell resolves from 166 km; eight octaves carry it down to
+## 3 m, which keeps resolving below a kilometre of altitude.
+const OCEAN_WAVE_OCTAVES := 8
 const OCEAN_WAVE_METRES := 400.0
-const OCEAN_WAVE_RELIEF := 0.02
-const OCEAN_WAVE_NEAR_METRES := 1.0
-const OCEAN_WAVE_FAR_METRES := 25.0
+## **The wave's own steepness, and the reason it is 0.0015 and not 0.02.** A wave's height is a fraction of its
+## wavelength — a moderate sea is about a twentieth — so a 400 m swell is ~13 m tall, and 13 m is 0.0015 of the
+## 8,919 m field. At 0.02 the swell would have been 178 m: waves as tall as mountains, which is the *"bit scary"*
+## the earlier number was trying to avoid.
+const OCEAN_WAVE_RELIEF := 0.0015
+## **How far the swell is drawn out along the wind**, and this is what makes water look like water rather than
+## like ground. Evert, 2026-10-19: the close-up sea *"looks exactly like that mottling on land"* — because it was
+## the same isotropic generator sampled the same way, with no direction in it at all. Wind-driven swell and chop
+## are stretched downwind, and that anisotropy is the single thing that reads as sea.
+## 3.0 is a light breeze's swell; a gale would be nearer 6.
+const OCEAN_WAVE_STRETCH := 3.0
+## **The sea's own colour structure**, which is the only thing an ocean shows at range: eddies, fronts and slicks.
+## Waves are geometry — nothing under 400 m can be seen from 1,000 km — so without this the far sea is one colour,
+## which is what Evert reported.
+##
+## **It starts where the land's ladder starts**: two texels of the map in hand, which the shader derives from
+## `map_width`, so the two layers begin to show texture at the same distance and by the same law. Evert,
+## 2026-10-19: *"I just wanted to reduce the strength, not the distance at which it started drawing."* The
+## strength is `OCEAN_TONE_VARIATION`; the distance is the sampling law and is not a knob.
+const OCEAN_TONE_OCTAVES := 3
+## A few per cent of the water's colour — enough to read as water moving, not enough to be paint.
+const OCEAN_TONE_VARIATION := 0.12
 
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
@@ -59,10 +95,11 @@ const RELIEF_EXAGGERATION := 5.0
 
 ## **The ladder's DEPTH — how many rungs exist, not how many run.** The shader derives the count from the pixel:
 ##
-##     rungs = clamp(ceil(log2(detail_feature / footprint)), 0, detail_max_rungs)
+##     rungs = clamp(ceil(log2(first_feature / (2 * footprint))), 0, detail_max_rungs)
 ##
-## so a distant body runs none, a ground filling the frame runs as many as it can resolve, and this constant is
-## only the ceiling on that. **Which fixes the fault it replaced**: `DETAIL_OCTAVES = 8` was a *count*, so the finest
+## where `first_feature` is the field's octave `first_detail_octave` — the first one the map did not carry. So a
+## distant body runs none, a ground filling the frame runs as many as it can resolve, and this constant is only the
+## ceiling on that. **Which fixes the fault it replaced**: `DETAIL_OCTAVES = 8` was a *count*, so the finest
 ## rung was `feature / 2^8` whatever the pixel — 271 m on Earth at a 2,304-wide map, against the 13 m a pixel covers
 ## at 10 km altitude. Detail stopped arriving and no amount of approach brought it back.
 ##
@@ -95,14 +132,29 @@ const WAVE_RELIEF := 0.02
 ## covers a kilometre, so this is a statement about the wave rather than about the distance.
 const WAVE_NEAR_METRES := 1.0
 const WAVE_FAR_METRES := 25.0
-## **How fast the relief decays per rung, against the colour's own gain.** Evert, 2026-10-19: *"small features
-## should have small shadows."* At the field's gain the slope is the same on every octave, so the finest visible
-## bump shades as hard as a mountain and the ground becomes a bed of black pits. A quarter per rung halves the
-## slope each time, so the coarse shapes carry the shading.
-const RELIEF_GAIN := 0.25
+## **The amplitude falloff of the octaves below the map**, and the one place the ladder deviates from the field's
+## own spectrum. Evert, 2026-10-19: *"the landscape looks too smooth now. We need a little graininess coming up when
+## we are close, but only a tiny amount."*
+##
+## The field falls at `gain` 0.5 per octave, which is `2^-1` — a self-affine surface whose slope is the same at
+## every scale. Real terrain is closer to `2^-0.8 = 0.574`: its *slope* grows as you look closer, which is why a
+## 30 m hill is tens of centimetres tall rather than millimetres. At a 1 km altitude the ladder reaches octave 20,
+## where 0.5 gives **8.7 mm** of relief and 0.574 gives **about 10 cm** — both tiny, but only one of them is there
+## at all.
+##
+## **The map keeps the field's own 0.5.** That spectrum is what the far view was calibrated on and what makes the
+## continents read at 20,000 km; this number only governs the octaves the bake never carried, so the change is
+## continuous in amplitude at the seam and differs only in the tail's slope. **0.574 is `2^-0.8`** and is the
+## physical value, not a taste — and it is deliberately *not* larger: the tail is grain, not hills.
+const DETAIL_TAIL_GAIN := 0.574
+
 ## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
 ## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
 ## only so far before it becomes a hole.
+##
+## (There was a second decay here, `RELIEF_GAIN`, that quartered each rung's relief amplitude. It existed to stop
+## an inflated ladder shading like a bed of black pits, and it went with that ladder: the field's own spectrum
+## already halves the amplitude per octave, so the slope of a fine octave is half the coarse one's for free.)
 const RELIEF_MAX_TILT := 0.6
 
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
@@ -346,6 +398,25 @@ static func draws_reference_sphere(content: SpacesimSystemBody) -> bool:
 	return content != null and content.surface != null
 
 
+## **The octave of the field's own fbm that is two texels of a `width`-wide map** — where the ladder starts.
+##
+## `surface_height`'s octave `j` has `base_frequency * 2^j` on the unit sphere, so its feature is
+## `1 / (base_frequency * 2^j)` radians; two texels of the map span `2 * (TAU / width)` = `4 pi / width`. Setting
+## the two equal gives `j = log2(width / (4 pi * base_frequency))`.
+##
+## **The `4 pi` matters, and getting it wrong cost a band of nothing.** Written as `width / (2 * base_frequency)`
+## it was off by `log2(2 pi)` — 2.65 octaves — so at a 960-wide map the ladder started at octave 8 when the map
+## had stopped at 4, and octaves 5, 6 and 7 (160 km, 80 km, 40 km features) were drawn by neither the bake nor the
+## shader. That is the "leaves a band of nothing between them" failure the `apply_surface_maps` comment warns
+## about, and it read as the ground being too smooth. `tests/test_render.gd` now asserts the seam.
+##
+## Returns -1 for a body that should have no ladder at all.
+static func first_detail_octave(base_frequency: float, width: int) -> int:
+	if base_frequency <= 0.0 or width <= 0:
+		return -1
+	return int(round(log(float(width) / (4.0 * PI * base_frequency)) / log(2.0)))
+
+
 ## **How deep the detail ladder may go on this body**: none at all where there is no sphere to put it on.
 ##
 ## A gas giant used to be handed the full eight-rung ladder for a surface that is not its visible face — noise
@@ -375,18 +446,23 @@ static func surface_material(
 	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
 	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
 	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
-	# different field from the map it extends. `detail_feature` starts at two texels of the map in hand.
+	# different field from the map it extends. **The ladder is the field's own octaves**, so what it needs is not a
+	# feature size but the field's own base frequency, its seed, and which octave the map stopped at:
+	# `first_octave = log2(width / (2 * base_frequency))`, the octave whose feature is two texels of the brick in
+	# hand (`surface_detail` carries the reasoning).
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	material.set_shader_parameter("detail_seed", plan.seed)
+	material.set_shader_parameter("detail_base_frequency", plan.continent_frequency)
+	material.set_shader_parameter("detail_first_octave", first_detail_octave(
+		plan.continent_frequency, SpacesimSurfaceMaps.BUILD_WIDTH
+	))
+	material.set_shader_parameter("detail_bounding", plan.continent_bounding)
 	material.set_shader_parameter("detail_gain", plan.gain)
+	material.set_shader_parameter("detail_tail_gain", DETAIL_TAIL_GAIN)
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
-	material.set_shader_parameter(
-		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.BUILD_WIDTH)
-	)
 	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
-	material.set_shader_parameter("relief_gain", RELIEF_GAIN)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
@@ -435,8 +511,12 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	)
 	material.set_shader_parameter("wave_octaves", OCEAN_WAVE_OCTAVES)
 	material.set_shader_parameter("wave_relief", OCEAN_WAVE_RELIEF)
-	material.set_shader_parameter("wave_near", OCEAN_WAVE_NEAR_METRES)
-	material.set_shader_parameter("wave_far", OCEAN_WAVE_FAR_METRES)
+	material.set_shader_parameter("wave_stretch", OCEAN_WAVE_STRETCH)
+	material.set_shader_parameter("tone_seed", plan.seed + 5501)
+	material.set_shader_parameter("tone_gain", plan.gain)
+	material.set_shader_parameter("tone_lacunarity", plan.lacunarity)
+	material.set_shader_parameter("tone_octaves", OCEAN_TONE_OCTAVES)
+	material.set_shader_parameter("tone_variation", OCEAN_TONE_VARIATION)
 	return material
 
 
@@ -489,7 +569,7 @@ static func apply_surface_tiles(
 
 
 static func apply_surface_maps(
-	material: Material, texture: Texture2D, width: int
+	material: Material, texture: Texture2D, width: int, base_frequency: float = 0.0
 ) -> void:
 	if material == null or texture == null:
 		return
@@ -502,5 +582,12 @@ static func apply_surface_maps(
 		surface.set_shader_parameter("height_map", texture)
 		surface.set_shader_parameter("map_width", width)
 		# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
-		# duplicate what the new map shows or leave a band of nothing between them.
-		surface.set_shader_parameter("detail_feature", 2.0 * TAU / float(maxi(width, 1)))
+		# duplicate what the new map shows or leave a band of nothing between them. The ladder is the field's own
+		# octaves, so what moves is *which octave* is the first one the map did not carry.
+		#
+		# **`base_frequency` arrives as an argument, not read back off the material.** Reading it back was a crash
+		# in flight: the ocean material has no `detail_base_frequency` (it has no ladder), so the read returned
+		# `null` and `float(null)` is *"Invalid call. Nonexistent 'float' constructor"* — once per ocean per map
+		# landing, and invisible to the suite because a headless run has no surface maps at all. A caller that
+		# passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
+		surface.set_shader_parameter("detail_first_octave", first_detail_octave(base_frequency, width))

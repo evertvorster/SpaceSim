@@ -33,9 +33,9 @@ if grep -qiE "SHADER ERROR|Shader compilation failed" "$LOG"; then
 	exit 1
 fi
 
-if grep -qE "^ERROR:" "$LOG"; then
+if grep -qE "^ERROR:|^SCRIPT ERROR:" "$LOG"; then
 	echo "FAILED: the run reported errors (which may hide a shader failure)"
-	grep -E "^ERROR:" "$LOG" | head -10
+	grep -E "^ERROR:|^SCRIPT ERROR:" "$LOG" | head -10
 	exit 1
 fi
 

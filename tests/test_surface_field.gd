@@ -37,10 +37,26 @@ func _test_plan(h) -> void:
 	# Everything the shader reads has to be a number rather than a zero: a frequency of 0 would make a
 	# mechanism constant, and a belt width of 0 a field with no boundaries.
 	for value in [earth.continent_frequency, earth.ridge_frequency, earth.warp_frequency,
-			earth.belt_width, earth.gain, earth.lacunarity]:
+			earth.region_frequency, earth.belt_width, earth.gain, earth.lacunarity]:
 		h.check(value > 0.0, "no mechanism is switched off by a zero (%.3f)" % value)
-	for octaves in [earth.continent_octaves, earth.ridge_octaves, earth.warp_octaves]:
+	for octaves in [earth.continent_octaves, earth.ridge_octaves, earth.warp_octaves,
+			earth.region_octaves]:
 		h.check(octaves >= 1, "and every octave count is at least one (%d)" % octaves)
+
+	# **The region is slower than a plate, and that is the whole point of it**: a plate is about 1/14 of the
+	# sphere, so a frequency at or above the continental one would be texture rather than regions.
+	h.check(earth.region_frequency < earth.continent_frequency,
+		"the region is slower than the within-plate structure (%.2f against %.2f)" % [
+			earth.region_frequency, earth.continent_frequency
+		])
+	# **A share of 0 would make the term a constant and a share of 1 a level that can invert sign**, and either
+	# is the mechanism removed by a wrong number rather than by a decision.
+	h.check(earth.region_share > 0.0 and earth.region_share < 1.0,
+		"the region scales the level by up to %.2fx" % (1.0 + earth.region_share))
+	# **The mottling is thinned over low ground, never removed and never amplified**: 0 would make a plain a
+	# painted surface with no grain at all, 1 would make the attenuation a no-op.
+	h.check(earth.mottle_plain_gain > 0.0 and earth.mottle_plain_gain < 1.0,
+		"a sagging plate keeps %.0f %% of the texture" % (earth.mottle_plain_gain * 100.0))
 	h.check(earth.gain < 1.0 and earth.lacunarity > 1.0,
 		"the spectrum falls off: gain %.2f, lacunarity %.2f" % [earth.gain, earth.lacunarity])
 	# The normalisers are the FBM's own, so a sum of octaves comes back on ±1 rather than growing with the
