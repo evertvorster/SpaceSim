@@ -111,7 +111,13 @@ void fragment() {
 
 	// **The relief, from four taps of the same map.** `eps` is one texel of *that* map, because a fixed
 	// epsilon would sample detail the map in hand does not hold and read as noise on distant ground.
-	float texel = 1.0 / float(max(map_width, 1));
+	// **Two texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
+	// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
+	// plate belt and the waterline meet — the difference is large enough to swing the normal tens of degrees
+	// from pixel to pixel. That showed up as a black outline round every continent and as speckles on the
+	// night side, where a wild normal still catches the light. A wider baseline is the cheap fix; the
+	// principled one is the ladder, whose octaves are band-limited by the pixel footprint.
+	float texel = 2.0 / float(max(map_width, 1));
 	float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;
 	float toward_west = texture(height_map, uv - vec2(texel, 0.0)).r;
 	// `v` increases *southward*, so the north neighbour is the smaller `v`.
@@ -126,6 +132,11 @@ void fragment() {
 		/ (2.0 * max(metres_east, 1.0e-3));
 	float slope_north = (toward_north - toward_south) * field_amplitude * relief_exaggeration
 		/ (2.0 * max(metres_north, 1.0e-3));
+	// **And a ceiling on the tilt.** A slope steeper than 1:1 is not terrain at this scale — it is a texel
+	// pair straddling something the map cannot resolve — and letting it through turns `NORMAL` past the
+	// light's horizon on individual pixels, which is black speckle rather than relief.
+	slope_east = clamp(slope_east, -1.0, 1.0);
+	slope_north = clamp(slope_north, -1.0, 1.0);
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
 	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);

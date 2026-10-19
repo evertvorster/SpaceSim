@@ -66,8 +66,14 @@ const WARP_STRENGTH := 0.35
 ## dominate for the elevation histogram to have the two modes that Earth's has — continents and ocean
 ## basins. The interior variation and the ridges are smaller on purpose, because they are detail *on* a plate
 ## rather than the shape of one.
-const PLATE_BIAS_SHARE := 0.6
-const CONTINENT_SHARE := 0.25
+##
+## **0.85 and 0.12 rather than 0.6 and 0.25, and the first flight is why.** At 0.6 the within-plate variation
+## was large enough that a standing plate wandered back and forth across the sea level: its interior was half
+## drowned and only the higher parts — the belts — broke the surface, so every "continent" was a thin
+## meandering *strip* of coast rather than a landmass. A plate now stands clear of the water as a body, with
+## the belts as its mountains, which is the shape a continent actually has.
+const PLATE_BIAS_SHARE := 0.85
+const CONTINENT_SHARE := 0.12
 const RIDGE_STRENGTH := 0.5
 
 ## **How wide a mountain belt is, in the units `1 - dot` is measured in** (0 at a plate centre, 2 at the
@@ -246,8 +252,8 @@ const GOLDEN_ANGLE := 2.3999632297286535
 const PLATE_COUNT := 14
 ## `surface_plate_level()`'s gain and bias: the pair that makes a *minority* of plates stand, so the sea
 ## level's percentile lands at the foot of the continental mode rather than in the gap between the modes.
-const PLATE_LEVEL_GAIN := 2.2
-const PLATE_LEVEL_BIAS := 0.45
+const PLATE_LEVEL_GAIN := 3.0
+const PLATE_LEVEL_BIAS := 0.55
 
 
 ## `fnl_fbm3()`'s job on the CPU side: `GetNoise` is the R3 rotation and the octave loop, which

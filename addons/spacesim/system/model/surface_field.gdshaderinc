@@ -106,7 +106,7 @@ vec3 surface_plate_centre(int index, float phase) {
 // which is what a look at Earth's own hypsometry asks for: a floor with most of the area, and a minority
 // standing clear of it. What the fraction of *water* is stays content's business.
 float surface_plate_level(int index, float phase) {
-	return clamp(2.2 * sin(float(index) * 12.9898 + phase * 7.0) - 0.45, -1.0, 1.0);
+	return clamp(3.0 * sin(float(index) * 12.9898 + phase * 7.0) - 0.55, -1.0, 1.0);
 }
 
 
