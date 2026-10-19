@@ -48,6 +48,7 @@ var _camera: Camera3D
 var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass
+var _surface_bake: SpacesimSurfaceBakePass
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -105,10 +106,17 @@ func _ready() -> void:
 	# convention and the scene renders about 95x too bright (`light_storage.cpp:764`).
 	_exposure.identity()
 	_exposure_pass = SpacesimExposurePass.new()
+	# **The surface maps refine on the render thread**, through a pass of this camera's compositor: a bake is a
+	# `RenderingDevice` dispatch, and a callback *is* the render thread. After the exposure pass, because it
+	# writes no colour and must not sit between the frame and the metre.
+	_surface_bake = SpacesimSurfaceBakePass.new()
 	var compositor := Compositor.new()
-	var effects: Array[CompositorEffect] = [_exposure_pass]
+	var effects: Array[CompositorEffect] = [_exposure_pass, _surface_bake]
 	compositor.compositor_effects = effects
 	_camera.compositor = compositor
+	# The system was built before this camera existed, so the bake pass is handed over now: the maps baked at
+	# build are already in place, and refinement begins with the first frame the eye asks for more.
+	_system.attach_surface_bake(_surface_bake)
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_build_hud()

@@ -310,11 +310,11 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 ## level and the band edges come from), which happens on the host.
 ## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
 ## second texture in the shader is a second resolution to keep in step with the picture.
-static func apply_surface_maps(material: Material, entry: SpacesimSurfaceMaps.Entry) -> void:
-	if material == null or entry == null or entry.map == null:
+static func apply_surface_maps(material: Material, texture: Texture2D, width: int) -> void:
+	if material == null or texture == null:
 		return
 	var surface := material as ShaderMaterial
 	if surface == null:
 		return
-	surface.set_shader_parameter("height_map", entry.map)
-	surface.set_shader_parameter("map_width", entry.width)
+	surface.set_shader_parameter("height_map", texture)
+	surface.set_shader_parameter("map_width", width)

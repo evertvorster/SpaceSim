@@ -125,6 +125,60 @@ class Plan:
 	var amplitude := 0.0
 
 
+## **The compute source, assembled once for every caller**: `#version`, the noise, the field, the kernel.
+##
+## A source string handed to `shader_compile_spirv_from_source()` gets no preprocessor, so `#include` is not
+## available to it — the concatenation *is* the include mechanism. Two bakes compile this: the build-time one
+## in `SpacesimSurfaceGpu` (which reads the map back so the distribution can be measured) and the render-thread
+## one in `SpacesimSurfaceBakePass`. **One assembler, so they cannot be two fields.**
+static func source() -> String:
+	return (
+		"#version 450\n"
+		+ FileAccess.get_file_as_string(NOISE_PATH)
+		+ FileAccess.get_file_as_string(FIELD_PATH)
+		+ FileAccess.get_file_as_string(KERNEL_PATH)
+	)
+
+
+## **The push-constant block**, written field by field so the layout is readable beside the kernel's.
+##
+## **Every number comes off the plan**, including the FBM normalisers — a constant typed into the GLSL would be
+## a second copy of a number the plan already knows, and it would drift. The block is `ivec2` plus seventeen
+## 4-byte fields: **76 bytes, and it must be supplied at exactly that size** — the driver rejects both more and
+## less (*"requires (76) bytes of push constant data, supplied: (80)"*), unlike a uniform block where padding is
+## the caller's to choose.
+static func push_constants(plan_data: Plan, width: int, height: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(PUSH_CONSTANT_BYTES)
+	bytes.encode_s32(0, width)
+	bytes.encode_s32(4, height)
+	bytes.encode_s32(8, plan_data.seed)
+	bytes.encode_float(12, plan_data.continent_frequency)
+	bytes.encode_s32(16, plan_data.continent_octaves)
+	bytes.encode_float(20, plan_data.ridge_frequency)
+	bytes.encode_s32(24, plan_data.ridge_octaves)
+	bytes.encode_float(28, plan_data.warp_frequency)
+	bytes.encode_s32(32, plan_data.warp_octaves)
+	bytes.encode_float(36, plan_data.warp_strength)
+	bytes.encode_float(40, plan_data.ridge_strength)
+	bytes.encode_float(44, plan_data.continent_share)
+	bytes.encode_float(48, plan_data.plate_bias_share)
+	bytes.encode_float(52, plan_data.belt_width)
+	bytes.encode_float(56, plan_data.plate_phase)
+	bytes.encode_float(60, plan_data.gain)
+	bytes.encode_float(64, plan_data.lacunarity)
+	bytes.encode_float(68, plan_data.continent_bounding)
+	bytes.encode_float(72, plan_data.warp_bounding)
+	return bytes
+
+
+const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
+const FIELD_PATH := "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+const KERNEL_PATH := "res://addons/spacesim/system/model/surface_kernel.gdshaderinc"
+## 76: `ivec2` plus seventeen 4-byte fields. Exact, not padded — see [method push_constants].
+const PUSH_CONSTANT_BYTES := 76
+
+
 ## A body's address, as the seed its surface grows from.
 static func seed_for(body_id: String) -> int:
 	return hash(body_id)

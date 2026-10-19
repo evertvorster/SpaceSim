@@ -27,89 +27,11 @@ extends RefCounted
 ## `create_local_rendering_device()` returns `null` under `--headless`, which is why a bake is a real-run
 ## thing.
 
-## The GLSL, as **text**: prepended with `#version 450` and compiled from a source string, which is why it
-## carries no version, no layout and no entry point of its own.
-const FIELD_PATH := "res://addons/spacesim/system/model/surface_field.gdshaderinc"
-## The noise, in front of it, because a source string gets no preprocessor. One home for two consumers.
-const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
+## **The source is assembled by the field**, not here: `SpacesimSurfaceField.source()` is `#version`, the
+## noise, the field and the kernel, so this bake and the render-thread one compile the same program.
 
-## The kernel: the storage image, the plan's numbers, and the row/column → direction mapping that the shader
-## inverts. **No `#[compute]` marker** — that is Godot's *file* convention, and a source string handed to
-## `shader_compile_spirv_from_source()` gets no such treatment, so `#version` has to be the first thing.
-const KERNEL := """
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(r16f, set = 0, binding = 0) uniform image2D out_map;
 
-layout(push_constant, std430) uniform Params {
-	ivec2 size;
-	int seed;
-	float continent_frequency;
-	int continent_octaves;
-	float ridge_frequency;
-	int ridge_octaves;
-	float warp_frequency;
-	int warp_octaves;
-	float warp_strength;
-	float ridge_strength;
-	float continent_share;
-	float plate_bias_share;
-	float belt_width;
-	float plate_phase;
-	float gain;
-	float lacunarity;
-	float continent_bounding;
-	float warp_bounding;
-} params;
-
-const float SURFACE_PI = 3.141592653589793;
-const float SURFACE_TAU = 6.283185307179586;
-
-void main() {
-	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-	if (pos.x >= params.size.x || pos.y >= params.size.y) {
-		return;
-	}
-	// The map's own `(u, v)`: `u` around the equator, `v` pole to pole, north at the top row. **Pixel
-	// centres, half a texel in**, so the seam and the poles land where the CPU path puts them and the
-	// shader's inverse is exact.
-	float u = (float(pos.x) + 0.5) / float(params.size.x);
-	float v = (float(pos.y) + 0.5) / float(params.size.y);
-	float latitude = SURFACE_PI * 0.5 - v * SURFACE_PI;
-	float longitude = (u - 0.5) * SURFACE_TAU;
-	float cos_latitude = cos(latitude);
-	// Unit by construction: every direction is on the sphere the field is a function of.
-	vec3 direction = vec3(
-		cos_latitude * cos(longitude), sin(latitude), cos_latitude * sin(longitude));
-
-	SurfacePlan plan;
-	plan.seed = params.seed;
-	plan.continent_frequency = params.continent_frequency;
-	plan.continent_octaves = params.continent_octaves;
-	plan.ridge_frequency = params.ridge_frequency;
-	plan.ridge_octaves = params.ridge_octaves;
-	plan.warp_frequency = params.warp_frequency;
-	plan.warp_octaves = params.warp_octaves;
-	plan.warp_strength = params.warp_strength;
-	plan.ridge_strength = params.ridge_strength;
-	plan.continent_share = params.continent_share;
-	plan.plate_bias_share = params.plate_bias_share;
-	plan.belt_width = params.belt_width;
-	plan.plate_phase = params.plate_phase;
-	plan.gain = params.gain;
-	plan.lacunarity = params.lacunarity;
-	plan.continent_bounding = params.continent_bounding;
-	plan.warp_bounding = params.warp_bounding;
-
-	imageStore(out_map, pos, vec4(surface_height(direction, plan), 0.0, 0.0, 1.0));
-}
-"""
-
-## The push-constant block's size in bytes: `ivec2` plus seventeen 4-byte fields, which is 76 and **must be
-## supplied exactly** — the driver rejects both more and less (*"requires (76) bytes of push constant data,
-## supplied: (80)"*), unlike a uniform block where padding is the caller's to choose. Layout is in
-## [constant KERNEL]; the offsets are written out in [method _params].
-const PARAMS_SIZE := 76
 
 var _device: RenderingDevice
 var _shader: RID
@@ -223,7 +145,7 @@ func bake(plan_data: SpacesimSurfaceField.Plan, width: int, height: int) -> Imag
 		_device.free_rid(texture)
 		return null
 
-	var params := _params(w, h, plan_data)
+	var params := SpacesimSurfaceField.push_constants(plan_data, w, h)
 	# Every `compute_list_*` call takes the list handle FIRST, and it is an `int`.
 	var list := _device.compute_list_begin()
 	_device.compute_list_bind_compute_pipeline(list, _pipeline)
@@ -255,39 +177,4 @@ func bake(plan_data: SpacesimSurfaceField.Plan, width: int, height: int) -> Imag
 ## The noise, then the field, then the kernel, under one `#version`. Assembled rather than `#include`d
 ## because a source string gets no preprocessor help.
 func _source() -> String:
-	return (
-		"#version 450\n"
-		+ FileAccess.get_file_as_string(NOISE_PATH)
-		+ FileAccess.get_file_as_string(FIELD_PATH)
-		+ KERNEL
-	)
-
-
-## The push-constant block, written field by field so the layout is readable beside the shader's.
-##
-## **Every number comes off the plan**, including the three FBM normalisers — a constant typed into the GLSL
-## would be a second copy of a number the plan already knows, and it would drift away from the one the
-## GDScript side uses.
-func _params(w: int, h: int, plan_data: SpacesimSurfaceField.Plan) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(PARAMS_SIZE)
-	bytes.encode_s32(0, w)
-	bytes.encode_s32(4, h)
-	bytes.encode_s32(8, plan_data.seed)
-	bytes.encode_float(12, plan_data.continent_frequency)
-	bytes.encode_s32(16, plan_data.continent_octaves)
-	bytes.encode_float(20, plan_data.ridge_frequency)
-	bytes.encode_s32(24, plan_data.ridge_octaves)
-	bytes.encode_float(28, plan_data.warp_frequency)
-	bytes.encode_s32(32, plan_data.warp_octaves)
-	bytes.encode_float(36, plan_data.warp_strength)
-	bytes.encode_float(40, plan_data.ridge_strength)
-	bytes.encode_float(44, plan_data.continent_share)
-	bytes.encode_float(48, plan_data.plate_bias_share)
-	bytes.encode_float(52, plan_data.belt_width)
-	bytes.encode_float(56, plan_data.plate_phase)
-	bytes.encode_float(60, plan_data.gain)
-	bytes.encode_float(64, plan_data.lacunarity)
-	bytes.encode_float(68, plan_data.continent_bounding)
-	bytes.encode_float(72, plan_data.warp_bounding)
-	return bytes
+	return SpacesimSurfaceField.source()

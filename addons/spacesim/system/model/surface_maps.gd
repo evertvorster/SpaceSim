@@ -21,6 +21,10 @@ extends RefCounted
 ## **The one width.** 2,048 × 1,024 puts a texel at 19.5 km on Earth, which is a pixel at 15,000 km altitude
 ## and four pixels at 4,000 km. Everything finer is the ladder's, and the ladder costs nothing at distance.
 const MAP_WIDTH := 2048
+## **The ceiling for a refined map.** 8,192 × 4,096 is a 4.9 km texel on Earth and 67 MB — affordable for the one
+## body the eye is close to, and the point past which only the ladder can help (S3): no whole-body map serves a
+## landing, because at 10 km altitude a pixel is 13 m.
+const MAX_WIDTH := 8192
 
 ## Quantiles per table: 65 values, one per 1/64th of the area. 1.5 % resolution on a percentile is finer than
 ## any band edge needs to be, and the table is 260 bytes.
@@ -33,7 +37,13 @@ const HISTOGRAM_BINS := 2048
 
 ## One body's map and everything measured from it.
 class Entry:
-	var map: ImageTexture
+	## The build-time map: mipmapped, and the one that is *measured*. It is what is drawn until a refined map
+	## lands, and again if the eye recedes.
+	var base: ImageTexture
+	## The refined map, on the rendering device, with no mips — it is only ever magnified.
+	var refined: Texture2DRD
+	var refined_width := 0
+	## The width of what is being drawn.
 	var width := 0
 	## The value at each 1/64th of the area, ascending — the percentile table.
 	var quantiles := PackedFloat32Array()
@@ -116,7 +126,7 @@ func prepare(body_id: String, radius: float, ocean_fraction: float) -> Entry:
 	# blurring.
 	image.generate_mipmaps()
 	entry.quantiles = quantiles_of(image)
-	entry.map = ImageTexture.create_from_image(image)
+	entry.base = ImageTexture.create_from_image(image)
 	entry.width = MAP_WIDTH
 	# The sea level is not stored — it belongs to the caller's ocean fraction — but measuring it here is what
 	# makes the table's meaning checkable, and `tests/probe_surface_maps` prints it.
@@ -124,9 +134,79 @@ func prepare(body_id: String, radius: float, ocean_fraction: float) -> Entry:
 	return entry
 
 
-## The map for a body, or null if it was never prepared.
+## The cache's entry for a body, or null if it was never prepared. **Does not bake and does not refine.**
 func map(body_id: String) -> Entry:
 	return _entries.get(body_id)
+
+
+## **The width worth having at a distance.** The law is `SpacesimCloudMaps.required_width` — a texel stops
+## resolving when it projects past a pixel — clamped to this class's own floor and ceiling. It lives there
+## because the two maps answer the same question, and one home for a law is one place for it to be wrong.
+static func required_width(radius: float, distance: float, pixel_angle: float) -> int:
+	var wanted := SpacesimCloudMaps.required_width(radius, distance, pixel_angle)
+	return clampi(wanted, MAP_WIDTH, MAX_WIDTH)
+
+
+## **The refinement, if the game attached one.** Null in a headless run, in the suite and in a probe — there is
+## no camera and no compositor there, and the build-time map is the whole answer.
+var _bake_pass: SpacesimSurfaceBakePass
+
+
+## Hand the cache the render-thread bake pass. From then on, approaching a body asks for a wider map.
+func attach_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
+	_bake_pass = bake_pass
+
+
+## **Collect finished bakes.** Main thread, once a frame. Returns the bodies whose map changed, so the scene
+## can repoint a material — the cache does not own materials and will not reach into one.
+func poll() -> Array:
+	var changed: Array = []
+	if _bake_pass == null:
+		return changed
+	var ready := _bake_pass.take_ready()
+	for body_id in ready:
+		var entry: Entry = _entries.get(body_id)
+		if entry == null:
+			continue
+		var bake: Dictionary = ready[body_id]
+		var previous := entry.refined
+		entry.refined = bake["texture"]
+		entry.refined_width = int(bake["width"])
+		entry.width = entry.refined_width
+		if previous != null:
+			_bake_pass.release(previous)
+		changed.append(body_id)
+	return changed
+
+
+## **What to draw this body with, and at what width.** The refining map when the distance law asks for more than
+## the build map has, the build map otherwise — and a request to the bake pass when neither is enough yet.
+##
+## The refined texture becomes visible the frame after it lands, so this returns the old one until then; that is
+## why `poll()` reports *changes* rather than the scene asking "is it different".
+func map_for(body_id: String, radius: float, distance: float, pixel_angle: float) -> Dictionary:
+	var entry: Entry = _entries.get(body_id)
+	if entry == null:
+		return {}
+	if _bake_pass == null:
+		return {"texture": entry.base, "width": entry.width}
+	var wanted := required_width(radius, distance, pixel_angle)
+	if wanted <= MAP_WIDTH:
+		# Back to the build map, which is finer than the screen needs and carries mips for the far end.
+		if entry.refined != null:
+			_bake_pass.release(entry.refined)
+			entry.refined = null
+			entry.refined_width = 0
+			entry.width = MAP_WIDTH
+		return {"texture": entry.base, "width": MAP_WIDTH}
+	if entry.refined != null and entry.refined_width >= wanted:
+		return {"texture": entry.refined, "width": entry.refined_width}
+	# **One bake in flight**, and a request only while the map is short of what the law asks for: a fast approach
+	# then costs a handful of dispatches rather than one a frame.
+	_bake_pass.request(body_id, SpacesimSurfaceField.plan(body_id, radius), wanted)
+	if entry.refined != null:
+		return {"texture": entry.refined, "width": entry.refined_width}
+	return {"texture": entry.base, "width": MAP_WIDTH}
 
 
 func entry_for(body_id: String) -> Entry:
