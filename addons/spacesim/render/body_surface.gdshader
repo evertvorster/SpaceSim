@@ -1,6 +1,13 @@
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
+// **The field, in a fragment shader.** `noise.gdshaderinc` is FastNoiseLite in GLSL with no `shared` memory —
+// which is exactly what makes it legal here — and `surface_field.gdshaderinc` is the same generator the bake
+// compiles, so the detail below the map's texel belongs to the map's spectrum rather than being a second
+// geology. The include is the whole mechanism: one field, two compilers.
+#include "res://addons/spacesim/system/model/noise.gdshaderinc"
+#include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+
 // **The surface layer: a height field, a colour ramp, and a sea.**
 //
 // A surface is not a cloud, and this is its own shader rather than the deck's: opaque, culled, lit, with a
@@ -45,6 +52,27 @@ uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
 // The colour ramp: **1-D, indexed by field value over [-1, 1]**, built from the derived bands and the
 // measured quantiles. Clamped, because a value past either end is a coast or a peak and not a wrap.
 uniform sampler2D colour_ramp : filter_linear, repeat_disable, hint_default_black;
+
+// ===== THE LADDER =================================================================================
+//
+// Everything the map cannot hold: the field's own generator sampled below the map's nyquist, with each rung
+// faded by what a pixel can resolve. **The numbers are the plan's**, handed over by the host, so the detail is
+// the same field the bake drew and not a second geology — see `surface_field.gdshaderinc`.
+uniform int detail_octaves = 0;
+uniform int detail_seed = 0;
+uniform float detail_gain = 0.5;
+uniform float detail_lacunarity = 2.0;
+// The feature size the ladder starts at, in radians on the unit sphere — two texels of the map in hand.
+uniform float detail_feature = 0.0;
+// How much the detail moves the *colour*, as a fraction of the band's own — zero-mean, so the drawn average
+// cannot drift away from the measured distribution the bands were placed with.
+uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
+// How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
+// one place the ladder's relief is calibrated.
+uniform float detail_relief = 0.0;
+// And how much it moves the *water*, which is a much smaller number: a sea with hills in it is the one thing
+// that reads as wrong at any distance.
+uniform float wave_relief = 0.0;
 
 // **Where the sea is**, in field units — `value_at(ocean_fraction)` off the measured quantiles. Zero until a
 // map lands, which draws a neutral datum rather than a wrong ocean.
@@ -146,6 +174,18 @@ void fragment() {
 	slope_east = clamp(slope_east, -0.35, 0.35);
 	slope_north = clamp(slope_north, -0.35, 0.35);
 
+	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
+	// pixel spans — the same quantity the mesh's error budget spends — so the fade needs no distance and
+	// nothing to keep in step with the camera.
+	float footprint_angle = length(fwidth(up));
+	float detail = 0.0;
+	if (detail_octaves > 0 && detail_feature > 0.0) {
+		detail = surface_detail(
+			up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
+			detail_octaves
+		);
+	}
+
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
 	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
 	vec3 east = normalize(cross(polar, up));
@@ -159,4 +199,23 @@ void fragment() {
 	// enough, and the same reasoning the star's splat uses when it copies the camera basis rather than
 	// billingboarding in the material.
 	NORMAL = normalize((VIEW_MATRIX * vec4(tilted, 0.0)).xyz);
+
+	// **The detail's own relief, and it costs two derivatives rather than four more noise evaluations.** A
+	// procedural height computed per pixel can be bumped by its *screen-space* gradient: the position's
+	// derivatives give a tangent frame in view space, and `dFdx/dFdy` of the detail value is its slope per
+	// pixel. That is also self-band-limiting — the derivative of a band-limited function is only meaningful at
+	// the frequency the pixel resolves — so it needs no epsilon and cannot alias.
+	//
+	// Water gets a smaller tilt than land, and land's is the one that makes a coaster-sized pixel read as
+	// terrain rather than as paint.
+	if (detail != 0.0) {
+		vec3 view_x = dFdx(VERTEX);
+		vec3 view_y = dFdy(VERTEX);
+		vec3 tangent = normalize(cross(NORMAL, view_y));
+		vec3 bitangent = normalize(cross(view_x, NORMAL));
+		float relief = mix(detail_relief, wave_relief, water);
+		NORMAL = normalize(NORMAL - (tangent * dFdx(detail) + bitangent * dFdy(detail)) * relief);
+		// And the colour, zero-mean and small, on land only — a sea is one colour.
+		ALBEDO *= 1.0 + detail * detail_variation * (1.0 - water);
+	}
 }

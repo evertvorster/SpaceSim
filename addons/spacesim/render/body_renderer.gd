@@ -32,8 +32,8 @@ const SURFACE_SPECULAR := 0.15
 ## blows out and blooms, and with no wave normals to spread it, it reads as a rendering fault rather than as
 ## water. These are the values that let the *colour* be judged while the ocean is still a flat band — the
 ## ocean as a feature (waves, glint, Fresnel) is its own rung.
-const WATER_ROUGHNESS := 0.32
-const WATER_SPECULAR := 0.2
+const WATER_ROUGHNESS := 0.16
+const WATER_SPECULAR := 0.45
 
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
@@ -45,6 +45,23 @@ const WATER_SPECULAR := 0.2
 ## dotted glow tracing every coast in the dark — the coast being the only steep place, and the *interiors*
 ## staying correctly black. The shader also clamps the tilt at 19° for the same reason.
 const RELIEF_EXAGGERATION := 5.0
+
+## **The ladder: how many rungs, how much it moves the colour, and how much it tilts the normal.**
+##
+## The octave count is a *cost* decision before it is a look decision: a rung costs one FastNoiseLite octave on
+## every pixel the ground covers, and the deck measured **six** at ~5 ms a frame at 1080p on this machine. Eight
+## is chosen here because the rungs fade by what a pixel can resolve, so at a distance two or three run and
+## only a ground filling the screen pays for all eight — which is the number to watch in flight.
+const DETAIL_OCTAVES := 8
+## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
+## fitted to, and a large swing would move the drawn average away from it.
+const DETAIL_VARIATION := 0.18
+## The normal's relief per pixel of height difference. A look number, calibrated by eye, and the reason the
+## ground reads as terrain rather than as paint once the ladder is on.
+const DETAIL_RELIEF := 6.0
+## And water's, which is a tenth of it: a sea with hills in it is the one thing that reads as wrong at any
+## distance. The glint is restored at the same time — see `WATER_ROUGHNESS`.
+const WAVE_RELIEF := 0.6
 
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
 ## interpolates the measured quantiles, so it is not quantised by this), and it is one row: the ramp is a
@@ -295,6 +312,19 @@ static func surface_material(body: SpacesimSceneBody, ramp: ImageTexture) -> Sha
 	)
 	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
 	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.MAP_WIDTH)
+	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
+	# different field from the map it extends. `detail_feature` starts at two texels of the map in hand.
+	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
+	material.set_shader_parameter("detail_seed", plan.seed)
+	material.set_shader_parameter("detail_gain", plan.gain)
+	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
+	material.set_shader_parameter(
+		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.MAP_WIDTH)
+	)
+	material.set_shader_parameter("detail_octaves", DETAIL_OCTAVES)
+	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
+	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
+	material.set_shader_parameter("wave_relief", WAVE_RELIEF)
 	material.set_shader_parameter("water_roughness", WATER_ROUGHNESS)
 	material.set_shader_parameter("water_specular", WATER_SPECULAR)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
@@ -318,3 +348,6 @@ static func apply_surface_maps(material: Material, texture: Texture2D, width: in
 		return
 	surface.set_shader_parameter("height_map", texture)
 	surface.set_shader_parameter("map_width", width)
+	# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
+	# duplicate what the new map shows or leave a band of nothing between them.
+	surface.set_shader_parameter("detail_feature", 2.0 * TAU / float(maxi(width, 1)))

@@ -199,3 +199,57 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 		+ plan.continent_share * variation
 		+ plan.ridge_strength * mountains * crest;
 }
+
+
+// ===== THE LADDER: THE FIELD BELOW THE MAP'S OWN TEXEL ==============================================
+//
+// **The map is a sample of a field that is still a formula, and this reads the same generator under it.** The
+// bake stops at its own Nyquist — 4.9 km on an 8,192 map of Earth — and everything finer has to come from
+// here, because a texture cannot hold it: at 10 km altitude a pixel is 13 m, and no whole-body map serves that.
+//
+// Two rules, both paid for elsewhere in this project:
+//
+//  - **the same generator, not a second kind of noise.** The seed lineage, the gain and the lacunarity are the
+//    field's, and each rung goes through `fnl_fbm3` with ONE octave so the R3 rotation is applied exactly as
+//    the map's octaves had it. A detail term with its own spectrum would look like a second geology laid over
+//    the first.
+//  - **band-limited by the PIXEL FOOTPRINT, never by distance.** A rung is faded out where a pixel is too big
+//    to resolve it: `fade = 1 - smoothstep(feature*0.5, feature*1.5, footprint)`. Detail finer than the
+//    sampling rate is not "more detail", it is aliasing — and this is also what makes a distant body free,
+//    because every rung dies long before the fragment does the work.
+//
+// **Zero-mean, and normalised by the whole ladder.** The sum is scaled by `(1-g)/(1-g^n)`, the same shape
+// `SpacesimCloudField.fractal_bounding` uses, so the amplitude is one octave's whatever the rung count. A rung
+// that fades therefore *reduces* the detail rather than renormalising it, which is what makes the detail
+// appear and recede smoothly with distance instead of changing character.
+float surface_detail(
+	vec3 unit, int seed, float gain, float lacunarity, float feature, float footprint, int octaves
+) {
+	if (octaves <= 0 || feature <= 0.0) {
+		return 0.0;
+	}
+	// The whole ladder's normaliser, so the sum stays inside one octave's range however many rungs run.
+	float amplitude = (1.0 - gain) / (1.0 - pow(gain, float(octaves)));
+	float sum = 0.0;
+	float octave_feature = feature;
+	float frequency = 1.0 / feature;
+	for (int octave = 0; octave < octaves; octave++) {
+		float fade = 1.0 - smoothstep(octave_feature * 0.5, octave_feature * 1.5, footprint);
+		if (fade > 0.0) {
+			sum += fnl_fbm3(
+				unit, seed + 4099 + octave, frequency, 1, gain, lacunarity, 1.0
+			) * amplitude * fade;
+		}
+		octave_feature *= 0.5;
+		frequency *= 2.0;
+	}
+	return sum;
+}
+
+
+// The feature size, in radians on the unit sphere, of the finest thing the map can hold -- **two texels of a
+// map `width` wide**. The ladder starts there, so it can never duplicate what the map already shows, and it
+// moves when the map refines because the host recomputes it.
+float surface_map_feature(int width) {
+	return 2.0 * 6.283185307179586 / float(max(width, 1));
+}
