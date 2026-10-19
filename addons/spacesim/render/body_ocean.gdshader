@@ -175,20 +175,25 @@ void fragment() {
 		}
 	}
 
-	// **The sea's colour structure**: what an ocean shows at range, where no wave can be seen at all. It starts at
-	// **the same feature the land's ladder starts at** — two texels of the map in hand, so the two layers begin
-	// showing texture at the same distance — and it is band-limited by the same law, which is why `map_width` is a
-	// uniform here and no longer a dead one.
+	// **The sea's colour structure**: eddies, fronts and slicks, and it is drawn at EVERY distance on purpose.
+	// Evert, 2026-10-19: *"We can live with the aliasing... Mottling on land now has no aliasing, because it is
+	// implemented correctly."*
+	//
+	// **This is the one place in the project that deliberately breaks the band-limit, and the reason it may.**
+	// Land's detail drives *shading*, so detail below the sampling rate moves the normal and becomes shimmer — the
+	// near ground's carpet. This is a static *albedo* modulation: sub-pixel detail in it averages to a slightly
+	// noisier colour rather than to crawling light, so the cost of drawing it far out is small and the gain is a sea
+	// that is not one flat colour from orbit. `footprint` is passed as 0.0, which makes every rung's fade exactly
+	// 1 — full amplitude at any distance — and `tone_variation` is the only strength knob.
+	//
+	// **`first_feature` is still two texels of the map in hand**, so the pattern's *scale* follows the raster and
+	// the two layers share one notion of "finest thing on the surface".
 	if (tone_octaves > 0) {
 		float first_feature = 2.0 * OCEAN_TAU / float(max(map_width, 1));
-		int rungs = int(ceil(log2(max(first_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
-		rungs = clamp(rungs, 0, tone_octaves);
-		if (rungs > 0) {
-			float tone = surface_detail(
-				wave_point, tone_seed, 1.0 / first_feature, 0, rungs,
-				tone_gain, tone_gain, tone_lacunarity, 1.0, footprint_angle
-			);
-			ALBEDO *= 1.0 + tone * tone_variation;
-		}
+		float tone = surface_detail(
+			wave_point, tone_seed, 1.0 / first_feature, 0, tone_octaves,
+			tone_gain, tone_gain, tone_lacunarity, 1.0, 0.0
+		);
+		ALBEDO *= 1.0 + tone * tone_variation;
 	}
 }
