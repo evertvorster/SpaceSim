@@ -27,6 +27,7 @@ const Harness := preload("res://tests/harness.gd")
 ## A path here is also checked: a missing file is the same failure and deserves the same report.
 var suite_paths: Array = [
 	"res://tests/test_frame_transition.gd",
+	"res://tests/test_air.gd",
 	"res://tests/test_solar_system.gd",
 	"res://tests/test_sol.gd",
 	"res://tests/test_surface.gd",

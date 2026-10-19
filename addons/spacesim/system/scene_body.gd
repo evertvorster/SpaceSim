@@ -71,6 +71,13 @@ var scale_body: SpacesimScaleBody
 ## no air. **Nothing draws anything from it**: the shell that used to be built at this radius is gone, and
 ## the march that will draw the air is not written yet.
 var sky_top: float = 0.0
+## **The air's scattering numbers, derived once at build** — the per-channel Rayleigh coefficient, the
+## absorption, the scale height, the Mie constants and the sun's intensity in frame units. Empty for a body
+## with no air, which is how both the scene and the pass know to skip it. Kept here because
+## `rayleigh_coefficient` walks the species table and the temperature chain, and the march wants the numbers
+## every frame.
+var air := {}
+
 ## **The fraction of this body's surface that is under water**, from
 ## `SpacesimSurfaceModel.sea_level_percentile()` — derived once at build, because it is asked for every frame
 ## and it walks the greenhouse to get there. The surface shader's `sea_level` is this percentile *resolved

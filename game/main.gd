@@ -49,6 +49,7 @@ var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass
 var _surface_bake: SpacesimSurfaceBakePass
+var _atmosphere_pass: SpacesimAtmospherePass
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -110,8 +111,12 @@ func _ready() -> void:
 	# `RenderingDevice` dispatch, and a callback *is* the render thread. After the exposure pass, because it
 	# writes no colour and must not sit between the frame and the metre.
 	_surface_bake = SpacesimSurfaceBakePass.new()
+	# **The air goes before the exposure**, so the metre measures the finished frame: the march writes the air
+	# into the colour buffer and the exposure pass reads it. A pass placed after would leave the exposure
+	# metering an intermediate frame — the same class of fault as metering the 2D layer.
+	_atmosphere_pass = SpacesimAtmospherePass.new()
 	var compositor := Compositor.new()
-	var effects: Array[CompositorEffect] = [_exposure_pass, _surface_bake]
+	var effects: Array[CompositorEffect] = [_atmosphere_pass, _exposure_pass, _surface_bake]
 	compositor.compositor_effects = effects
 	_camera.compositor = compositor
 	# The system was built before this camera existed, so the bake pass is handed over now: the maps baked at
@@ -466,13 +471,49 @@ func _print_build() -> void:
 	print("SpaceSim: build %s%s" % [head, "" if git.is_clean() else ", with uncommitted changes"])
 
 
+## **The air, as one volumetric march over the frame**, when the setting asks for it, or nothing at all.
+##
+## The gate is the setting, read through `get_value` so it stays hot, and the pass is told `blend = 0` when the
+## air should not be drawn — a frame with it off is left exactly as it was drawn.
+##
+## **The tier test is `update_lod`'s own**, not a second opinion about size. The pass dispatches over the whole
+## frame, so an atmosphere too small to be a disc costs a full-screen compute pass to draw nothing — measured
+## as 340 -> 240 fps in empty space. `SpacesimLod` owns the arithmetic and the threshold, and borrowing both is
+## what keeps "too small to draw" one rule in the project. **A distance gate was tried and is wrong in the
+## other direction**: four atmosphere-radii made the air vanish until the body covered a quarter of the screen,
+## which reads as the LOD being skipped.
+func _update_atmosphere_volume(observer: Vector3) -> void:
+	if _atmosphere_pass == null or _camera == null:
+		return
+	if not bool(SpacesimSettings.get_value("render.atmosphere_volume")):
+		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
+		return
+	var air := _system.air_for_eye(observer)
+	if air.is_empty():
+		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
+		return
+	var distance := observer.distance_to(air["centre"])
+	var pixel := SpacesimLod.pixel_angle(_camera.fov, float(_camera.get_viewport().size.y))
+	var screen := SpacesimLod.screen_radius_pixels(
+		SpacesimLod.angular_radius(float(air["atmosphere_radius"]), distance), pixel
+	)
+	if screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS:
+		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
+		return
+	_atmosphere_pass.prepare(
+		_camera, air["centre"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
+		air["sun_direction"], air["air"], 1.0
+	)
+
+
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
 	_system.aim_sun_at(observer)
-	# **Nothing here draws air or cloud.** The shell that drew air and the decks that drew cloud are gone;
-	# the air is a march to be written (`Atmospheres` §9a) and the cloud a volume or a shell to be decided
-	# (`Cloud Volumes` §6a). What the frame owes the sky today is the star field and the exposure.
+	# **The air is one march over the whole frame** (`SpacesimAtmospherePass`), told which body to march — or
+	# nothing — below. The decks are not built: their mechanism is `Cloud Volumes` §6a's decision, and a deck
+	# drawn before this pass gets its air in front for free, because this pass attenuates what is already in
+	# the colour buffer.
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.
@@ -481,6 +522,7 @@ func _update_view(delta: float) -> void:
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
 	_exposure_pass.frame_delta = delta
+	_update_atmosphere_volume(observer)
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_hud_since += delta
