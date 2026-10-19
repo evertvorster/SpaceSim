@@ -54,11 +54,6 @@ uniform float deep_metres = 40.0;
 // Water's shading: glossy, with the sun's glint and the bright limb coming out of the BRDF for nothing.
 uniform float roughness_value : hint_range(0.0, 1.0) = 0.14;
 uniform float specular_value : hint_range(0.0, 1.0) = 0.45;
-// **Where the roughness goes when the ripples stop being resolvable**, and the band it crosses in — see
-// `OCEAN_FAR_ROUGHNESS`. This is the sea's shimmer leaving the geometry and entering the lobe.
-uniform float far_roughness : hint_range(0.0, 1.0) = 0.14;
-uniform float rough_metres_near = 10.0;
-uniform float rough_metres_far = 220.0;
 
 // ===== THE WAVES =====
 //
@@ -112,8 +107,6 @@ vec2 equirect(vec3 direction) {
 
 void fragment() {
 	vec3 up = unit_position;
-	// The pixel's own footprint, needed before the shading choices rather than only by the waves.
-	float footprint_angle_early = max(length(dFdx(up)), length(dFdy(up)));
 	vec2 uv = equirect(up);
 	float height = texture(height_map, uv).r;
 
@@ -143,19 +136,14 @@ void fragment() {
 	float depth = (sea_level - height) * field_amplitude;
 	float fill = smoothstep(shallow_metres, max(deep_metres, shallow_metres * 1.01), depth);
 	ALBEDO = mix(shallow_color, deep_color, fill);
-	// **The swell fades out of the geometry and into the lobe.** A pixel that spans 200 m of water cannot be
-	// given a 400 m wave, but the ripples at that scale are still there and still scatter — so the surface stops
-	// being a mirror and becomes a broad-highlight sea, which is what a glitter path running to the horizon is
-	// made of. Without this the sea simply goes smooth and the glitter dies halfway out.
-	float pixel_metres = footprint_angle_early * planet_radius;
-	ROUGHNESS = mix(roughness_value, far_roughness, smoothstep(rough_metres_near, rough_metres_far, pixel_metres));
+	ROUGHNESS = roughness_value;
 	SPECULAR = specular_value;
 
 	// **One sampling law for everything here**: a feature is drawn while a pixel holds at least four samples of
 	// it, gone by two. There is no near/far gate — there was, `wave_fade = 1 - smoothstep(1 m, 25 m, pixel)`, and it
 	// decided when the sea appeared rather than the law doing it: full below 0.8 km and zero above 20.8 km, which
 	// is why a descent saw nothing until 10 km. See `OCEAN_WAVE_OCTAVES`.
-	float footprint_angle = footprint_angle_early;
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 
 	// **The swell runs downwind, so the domain is drawn out along one axis** — the same trick the cloud field uses
 	// for zonal stretching, in the tangent plane instead of in latitude. Without it the sea is an isotropic fbm,
