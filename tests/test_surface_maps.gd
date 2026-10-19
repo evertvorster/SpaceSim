@@ -10,8 +10,69 @@ extends RefCounted
 func run(h, _root: Node) -> void:
 	print("  surface maps")
 	_test_no_bake_on_lookup(h)
+	_test_the_ladder(h)
+	_test_the_near_field_policy(h)
+	_test_the_map_gate(h)
+	_test_the_speculation(h)
 	_test_quantiles(h)
 	_test_the_ramp(h)
+
+
+## **The ladder: a floor, a ceiling derived from the display, and one rung at a time.**
+##
+## Everything here is arithmetic, which is the point — the ceiling and the ascent are what decide the cost of a
+## planet at close range, and neither needs a rendering device to be checked. The numbers are Evert's: **the
+## ceiling is half the resolution the scene is being rendered at**, rounded to a power of two, and it is a
+## tunable so the cost can be watched while it moves.
+func _test_the_ladder(h) -> void:
+	h.check(SpacesimSurfaceMaps.BUILD_WIDTH == 256,
+		"a body is baked at 256 when the scene is built, not at its ceiling")
+
+	# **Half the render width, and always derived**: 0.5 of 1,280 is 640, of 1,920 is 960, of 3,840 is 1,920.
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1280, 720)) == 640,
+		"the 720p default ceiling is 640 — half of 1,280")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080)) == 960,
+		"1080p gives 960 — half the render width, not the window's")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(3840, 2160)) == 1920, "4K gives 1,920")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(0, 0)) == SpacesimSurfaceMaps.MIN_WIDTH,
+		"no render size falls back to the narrowest map rather than to zero")
+
+	# The knob is a fraction of the render resolution, so moving it moves the ceiling in proportion — and it is
+	# clamped at both ends, because a number moved while flying must not be able to ask for nonsense.
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 1.0) == 1920,
+		"surface.max_base_fraction 1.0 is the render width itself")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 0.25) == 480,
+		"and 0.25 is a quarter of it")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 2.0) == 3840,
+		"above 1.0 is allowed, because it is how the headroom gets measured")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 99.0) == SpacesimSurfaceMaps.MAX_WIDTH,
+		"an absurd fraction is clamped to the hard ceiling")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 0.0) == SpacesimSurfaceMaps.MIN_WIDTH,
+		"and a zero fraction to the narrowest map rather than to nothing")
+
+	# The distance law, against the ceiling: far away it asks for the floor it already has, close in for the
+	# ceiling, and never for less than a map exists.
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var far := SpacesimSurfaceMaps.required_width(earth, 1.0e11, pixel, 1024)
+	var near := SpacesimSurfaceMaps.required_width(earth, earth + 1000.0, pixel, 1024)
+	h.check(far == SpacesimSurfaceMaps.BUILD_WIDTH,
+		"a body at 1e11 m asks for the floor (%d)" % far)
+	h.check(near == 1024, "and a body a kilometre up asks for the ceiling (%d)" % near)
+	h.check(SpacesimSurfaceMaps.required_width(earth, earth + 1000.0, pixel, 256) == 256,
+		"a ceiling below the floor is the floor")
+	h.check(far <= near, "closing never asks for a coarser map")
+
+	# The ascent: double, and never past what the law wants.
+	h.check(SpacesimSurfaceMaps.next_bake_width(256, 1024) == 512,
+		"one rung up from 256 is 512, not 1,024 — the ladder is climbed, not jumped")
+	h.check(SpacesimSurfaceMaps.next_bake_width(512, 1024) == 1024, "and from 512 it is 1,024")
+	h.check(SpacesimSurfaceMaps.next_bake_width(1024, 1024) == 1024,
+		"a map that is already fine enough is asked for nothing")
+	h.check(SpacesimSurfaceMaps.next_bake_width(256, 384) == 384,
+		"and a request never overshoots what the law wants")
+	h.check(SpacesimSurfaceMaps.next_bake_width(0, 512) == 512,
+		"a body with no map yet starts at the floor")
 
 
 ## **A body that was never prepared has no map, and says so** — and nothing bakes inside a frame. A cache that
@@ -24,6 +85,186 @@ func _test_no_bake_on_lookup(h) -> void:
 	h.check(maps.bakes() == 0, "and no bake has run")
 	h.check(not SpacesimSurfaceMaps.linear_quantiles().is_empty(),
 		"the linear placeholder a material starts with is there when a bake cannot run")
+
+
+## **When a decision is made at all** — F4's gate, plus the trigger F5 needed: a rung landing invalidates the last
+## decision, because the width in hand is an input to what is needed next.
+func _test_the_map_gate(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	h.check(SpacesimSurfaceMaps.map_is_due(0.0, 0.0, 0, earth * 2.0, pixel, 640),
+		"a body that has never been decided is due")
+	h.check(not SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel, 640),
+		"a still eye is not due — no frame ever asks for a bake")
+	h.check(not SpacesimSurfaceMaps.map_is_due(
+		earth * 2.0, pixel, 640, earth * 2.0 * 1.05, pixel, 640),
+		"nor is a distance change of a twentieth")
+	h.check(SpacesimSurfaceMaps.map_is_due(
+		earth * 2.0, pixel, 640, earth * 2.0 * 1.2, pixel, 640),
+		"but a fifth is")
+	h.check(SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel * 1.5, 640),
+		"a change of render resolution is due at once")
+	h.check(SpacesimSurfaceMaps.map_is_due(earth * 2.0, pixel, 640, earth * 2.0, pixel, 2304),
+		"and so is the ceiling — moving the setting while flying re-decides the ladder")
+	# A landed rung is a change in what is needed, and `poll()` signals it by zeroing the recorded distance.
+	h.check(SpacesimSurfaceMaps.map_is_due(0.0, pixel, 640, earth * 2.0, pixel, 640),
+		"a rung landing makes the next decision due, without the eye having moved at all")
+
+
+## **F5: the one step of speculative work, and the assertion that keeps it from being a cadence.**
+##
+## The projection is one subtraction — where the eye will be in `SPECULATION_SECONDS` at its closing rate — and the
+## width the law would ask for there is the width worth having now. It returns the next rung above what is in hand,
+## never more than one, and never beyond what the projection asks.
+##
+## **A still eye gets nothing.** That is the difference between predicting and polling, and it is the check that
+## would catch speculation quietly turning into a bake every frame.
+func _test_the_speculation(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var cap := 640
+	var distance := earth + 4.0e4
+
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, 0.0, pixel, cap, 256) == 0,
+		"a STILL eye speculates nothing — prediction must never become a cadence")
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, -50.0, pixel, cap, 256) == 0,
+		"and neither does a receding one")
+
+	var closing := 2000.0 # metres a second, closing
+	var speculative := SpacesimSurfaceMaps.speculative_width(earth, distance, closing, pixel, cap, 256)
+	h.check(speculative > 256, "a closing eye asks for a wider map than it holds (%d)" % speculative)
+	h.check(speculative == SpacesimSurfaceMaps.next_bake_width(
+		256, SpacesimSurfaceMaps.required_width(
+			earth, maxf(distance - closing * SpacesimSurfaceMaps.SPECULATION_SECONDS, earth + 1.0), pixel, cap
+		)),
+		"and it is ONE rung of the ladder, capped by what the projection asks (%d)" % speculative)
+
+	# **At the ceiling there is nothing to speculate**: a projection cannot exceed the ceiling the law is clamped to.
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, closing, pixel, cap, cap) == 0,
+		"a map already at the ceiling speculates nothing")
+	# **And a map already ahead of the projection is left alone**, which is what stops a recede-then-approach from
+	# baking the same rung twice.
+	h.check(SpacesimSurfaceMaps.speculative_width(earth, distance, 1.0, pixel, cap, 4096) == 0,
+		"nor does a map finer than the projection asks for")
+
+	# The projection never puts the eye inside the body, however fast it is closing.
+	var absurd := SpacesimSurfaceMaps.speculative_width(earth, earth + 1.0e3, 1.0e9, pixel, cap, 256)
+	h.check(absurd <= cap, "a nonsense closing rate cannot ask for more than the ceiling (%d)" % absurd)
+
+
+## **When the near field is worth walking at all**, and **what may be let go while it is.**
+##
+## Both are arithmetic, so both are checked here rather than in flight. The first is the rule that stopped a
+## 20-pixel moon at 400,000 km eating four of the table's thirty-two slots; the second is the rule that stopped a
+## level change from dropping a tile's pixels before its children had landed, which Evert saw as refinements
+## *reverting* in patches.
+func _test_the_near_field_policy(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var cap := 640
+	h.check(SpacesimSurfaceMaps.near_field_is_worth_it(earth, earth + 2.0e6, pixel, cap),
+		"a body 2,000 km away is worth a near field — the map is at its ceiling and the disc wants more")
+	h.check(not SpacesimSurfaceMaps.near_field_is_worth_it(earth, earth + 4.0e8, pixel, cap),
+		"a body 400,000 km away is not: its whole disc is 20 px and the map already covers it")
+	h.check(not SpacesimSurfaceMaps.near_field_is_worth_it(earth, 1.0e11, pixel, cap),
+		"nor is one at 1 au")
+	# The crossover is the law's own: the width the eye asks for reaching the ceiling.
+	var inside := -1.0
+	var outside := -1.0
+	for km in range(1000, 120000, 1000):
+		var d := earth + float(km) * 1000.0
+		if SpacesimSurfaceMaps.near_field_is_worth_it(earth, d, pixel, cap):
+			inside = float(km)
+		elif inside >= 0.0:
+			outside = float(km)
+			break
+	# The crossover is the law's own, **including its power-of-two quantisation**: the rung the distance asks for is
+	# rounded up, so the ceiling is reached a little farther out than the raw arithmetic says — 60,000 km here
+	# rather than the 48,000 the exact form gives. That is the quantiser doing its job (a map that grows by a few
+	# texels at a time is a map that re-bakes on every metre of approach), and it is why the bound is generous.
+	h.check(inside >= 48000.0 and inside <= 70000.0,
+		"and it turns on somewhere inside 70,000 km, at the law's own crossover (last true at %.0f km)" % inside)
+
+	# **The retention rule**, driven directly: an ancestor stays while a tile inside it is unready, and goes once
+	# they have all landed. A tile the eye has left goes at once — that is what keeps a recede from holding slots.
+	var maps := SpacesimSurfaceMaps.new()
+	var parent := SpacesimSurfaceMaps.Slot.new()
+	parent.body_id = "planet:earth"
+	parent.level = 1
+	parent.x = 1
+	parent.y = 1
+	parent.layer = 0
+	parent.ready = true
+	maps._slots.append(parent)
+	# Four children of that parent, one still baking.
+	var wanted: Array = []
+	for x in range(2, 4):
+		for y in range(2, 4):
+			wanted.append([2, x, y])
+			var child := SpacesimSurfaceMaps.Slot.new()
+			child.body_id = "planet:earth"
+			child.level = 2
+			child.x = x
+			child.y = y
+			child.layer = maps._slots.size()
+			child.ready = not (x == 2 and y == 2)
+			maps._slots.append(child)
+	maps._reconcile_slots("planet:earth", wanted)
+	var kept := false
+	for slot in maps._slots:
+		if slot != null and slot.level == 1 and slot.x == 1 and slot.y == 1:
+			kept = true
+	h.check(kept, "an ancestor is kept while a tile inside it has not landed — the fallback, not a waste")
+
+	# Make the last child ready and reconcile again: the ancestor has nothing left to cover.
+	for slot in maps._slots:
+		if slot != null and slot.level == 2 and slot.x == 2 and slot.y == 2:
+			slot.ready = true
+	maps._reconcile_slots("planet:earth", wanted)
+	var still_kept := false
+	for slot in maps._slots:
+		if slot != null and slot.level == 1:
+			still_kept = true
+	h.check(not still_kept, "and let go once every tile inside it is ready")
+
+	# **A full table must never starve a tile the eye is asking for.** The reserve makes this rare, but a fast descent
+	# or a second body can fill it, and the failure mode is silent: the walk stops placing, and the regions that
+	# needed refining fall back to the whole-body map — the pulse, arriving by another route.
+	var full := SpacesimSurfaceMaps.new()
+	for index in SpacesimSurfaceTiles.MAX_TILES:
+		var keeper := SpacesimSurfaceMaps.Slot.new()
+		keeper.body_id = "planet:earth"
+		keeper.level = 6
+		keeper.x = index
+		keeper.y = 0
+		keeper.layer = index
+		keeper.ready = true
+		full._slots.append(keeper)
+	var wanted_fresh: Array = []
+	for x in range(0, 4):
+		wanted_fresh.append([8, x, 0])
+	full._reconcile_slots("planet:earth", wanted_fresh)
+	var placed_fresh := 0
+	for slot in full._slots:
+		if slot != null and slot.level == 8:
+			placed_fresh += 1
+	h.check(placed_fresh == 4,
+		"a full table still places every tile the eye asks for, by reclaiming fallbacks (%d of 4)" % placed_fresh)
+
+	# A tile the eye has left is not an ancestor of anything selected, so it goes immediately.
+	var lonely := SpacesimSurfaceMaps.Slot.new()
+	lonely.body_id = "planet:earth"
+	lonely.level = 3
+	lonely.x = 0
+	lonely.y = 0
+	lonely.ready = true
+	maps._slots.append(lonely)
+	maps._reconcile_slots("planet:earth", wanted)
+	var lonely_kept := false
+	for slot in maps._slots:
+		if slot != null and slot.level == 3:
+			lonely_kept = true
+	h.check(not lonely_kept, "a tile the eye has left is released at once")
 
 
 ## **The percentile table**, measured off the map's own distribution.

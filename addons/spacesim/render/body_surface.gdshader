@@ -49,26 +49,32 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // up and the map is read at its coarsest levels. That failure mode is *blur*, which is the safe direction,
 // and the fine detail at the poles comes from the ladder rather than from the map.
 uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
-// **The window: a sub-rectangle of the same equirect space at a much finer raster**, baked for the cap the eye
-// can actually see. `window_size.x <= 0` means there is none.
-//
-// **It LAYERS on the base map — it never replaces it.** That is the fault the cloud version had (`57b8f0a`): its
-// window replaced the whole-body map, so outside the window the shader sampled window data and the picture was
-// wrong in a way that looked like a mapping bug. Here the base map is always what draws, and the window is
-// blended over it only where the pixel is inside it.
-uniform sampler2D window_map : filter_linear, repeat_enable, hint_default_black;
-uniform vec2 window_origin = vec2(0.0, 0.0);
-uniform vec2 window_size = vec2(0.0, 0.0);
+// **One height map, and no window.** There was a second texture here — a sub-rectangle of the same equirect at a
+// finer raster, blended over the base map — and it is gone: its gate compared the cap's desired *pixels* against
+// the whole map's *texel count*, so it could never fire below a 4K render, and where it could it asked for a
+// raster four times coarser than the map it layered on. The base map's width follows the distance instead (a
+// ladder, `SpacesimSurfaceMaps`), and a second resolution to keep in step with the picture is exactly the thing
+// this shader has twice been bitten by. The near field is the tiles' business, not a window's.
 // The colour ramp: **1-D, indexed by field value over [-1, 1]**, built from the derived bands and the
 // measured quantiles. Clamped, because a value past either end is a coast or a peak and not a wrap.
 uniform sampler2D colour_ramp : filter_linear, repeat_disable, hint_default_black;
+// **The tiles over the cap the eye can see**, as one array with a table of rectangles — the map's near field,
+// refined where the eye is looking (`SpacesimSurfaceTiles`). `tile_count` is zero when no tile is in hand, which is
+// the far case and the headless one.
+uniform sampler2DArray tile_map : filter_linear, repeat_disable, hint_default_black;
+uniform vec4 tile_rect[32];
+uniform int tile_layer[32];
+uniform int tile_count = 0;
 
 // ===== THE LADDER =================================================================================
 //
 // Everything the map cannot hold: the field's own generator sampled below the map's nyquist, with each rung
 // faded by what a pixel can resolve. **The numbers are the plan's**, handed over by the host, so the detail is
 // the same field the bake drew and not a second geology — see `surface_field.gdshaderinc`.
-uniform int detail_octaves = 0;
+// **The DEPTH available, not the count that runs.** The count is derived per pixel three lines below, because the
+// pixel is the only thing that knows how deep the ladder needs to go — and because a count fixed on the host is
+// what made detail stop arriving at 271 m however close the eye came.
+uniform int detail_max_rungs = 0;
 uniform int detail_seed = 0;
 uniform float detail_gain = 0.5;
 uniform float detail_lacunarity = 2.0;
@@ -143,16 +149,18 @@ void fragment() {
 	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 	float height = texture(height_map, uv).r;
 
-	// **And the window over it**, where the eye is close enough for the base raster to be too coarse. The feather
-	// is a few percent of the window's own edge, so the two rasters cross-fade instead of stepping — a seam here
-	// would be a visible rectangle in the terrain.
-	if (window_size.x > 0.0 && window_size.y > 0.0) {
-		vec2 local = (uv - window_origin) / window_size;
-		vec2 edge = smoothstep(vec2(0.0), vec2(0.03), local)
-			* (1.0 - smoothstep(vec2(0.97), vec2(1.0), local));
-		float blend = edge.x * edge.y;
-		if (blend > 0.0) {
-			height = mix(height, texture(window_map, local).r, blend);
+	// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
+	// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
+	// because a pixel just inside a boundary must not jump between two rasters; with 512-texel tiles that band is
+	// ten texels, which reads as softness rather than as a seam.
+	for (int i = 0; i < tile_count; i++) {
+		vec4 tile = tile_rect[i];
+		if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
+			vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+			vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
+				* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
+			height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
+			break;
 		}
 	}
 
@@ -217,11 +225,19 @@ void fragment() {
 	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 	float detail = 0.0;
 	float relief_height = 0.0;
-	if (detail_octaves > 0 && detail_feature > 0.0) {
-		detail = surface_detail(
-			up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
-			detail_octaves, relief_gain, relief_height
-		);
+	if (detail_max_rungs > 0 && detail_feature > 0.0) {
+		// **How many rungs this pixel can resolve**, in octaves: from the ladder's first rung down to the pixel.
+		// A distant body gets 0 or 1 and pays nothing; a ground filling the frame gets as many as the depth
+		// allows. The rungs still fade individually inside `surface_detail`, so this is a bound on the work and
+		// not a second band-limit.
+		int rungs = int(ceil(log2(max(detail_feature / max(footprint_angle, 1.0e-9), 1.0))));
+		rungs = clamp(rungs, 0, detail_max_rungs);
+		if (rungs > 0) {
+			detail = surface_detail(
+				up, detail_seed, detail_gain, detail_lacunarity, detail_feature, footprint_angle,
+				rungs, relief_gain, relief_height
+			);
+		}
 	}
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.

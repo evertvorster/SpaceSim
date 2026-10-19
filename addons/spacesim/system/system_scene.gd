@@ -479,7 +479,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	var light := _light_at(body)
 	var bands: Array = []
 	var entry: SpacesimSurfaceMaps.Entry = null
-	if body.content != null:
+	# **A star samples no height map**, so it gets no bake: `material_for` picks the material by kind, and a star's
+	# is `body_star.gdshader`, which has no `height_map` at all — so the bake would measure a field nothing draws.
+	# The test is on the kind because the kind is what chooses the material (`a star emits, everything else
+	# reflects`, the distinction that has been needed twice here), and naming the question is what stopped the
+	# last version of this bug (`d57eb39`).
+	if body.content != null and body.content.kind != SpacesimSystemBody.Kind.STAR:
 		body.surface_ocean_fraction = SpacesimSurfaceModel.sea_level_percentile(
 			body.content, _materials(), light.x, light.y
 		)
@@ -868,7 +873,9 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## screen is its own emission, over the same area, so its glare survives the handoff exactly as a
 ## planet's brightness does. See `SpacesimBodyRenderer.point_colour` for the one by-kind difference
 ## that remains, which is that a star **emits** and everything else reflects.
-func update_lod(camera: Camera3D) -> void:
+## `delta` is the frame's own — the only thing F5's projection needs, and **optional**, because an instrument (the
+## profiler, a probe) may call this without a clock and should then get no speculative work rather than a wrong rate.
+func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 	if camera == null:
 		return
 	var viewport := camera.get_viewport()
@@ -879,6 +886,12 @@ func update_lod(camera: Camera3D) -> void:
 	if pixel <= 0.0:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
+	# **The surface map's ceiling is derived from the resolution the scene is being rendered at**, as a fraction
+	# of it (`surface.max_base_fraction`, 0.5 = half). Read per frame rather than cached: the setting exists to
+	# be moved **while flying**, to watch the cost move with it.
+	var surface_cap := SpacesimSurfaceMaps.base_max_width(
+		Vector2i(viewport.size), float(SpacesimSettings.get_value("surface.max_base_fraction"))
+	)
 	# **The interpolated eye**, because this runs once a drawn frame and `get_global_transform()` is
 	# only accurate to the most recent physics tick. It is the same transform the camera is drawn with,
 	# so the level chosen belongs to the frame on screen — see `game/main.gd::_update_view`.
@@ -911,8 +924,9 @@ func update_lod(camera: Camera3D) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_refine_surface_map(
-			body, distance, pixel, (observer - body.node.global_position).normalized()
+		_refine_surface_map(body, distance, pixel, surface_cap, delta)
+		_refine_surface_tiles(
+			body, distance, pixel, (observer - body.node.global_position).normalized(), surface_cap
 		)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
@@ -1034,33 +1048,66 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 ## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
 ## want more than the build map has. Called from `update_lod` for every drawn body.
 func _refine_surface_map(
-	body: SpacesimSceneBody, distance: float, pixel: float, eye_direction: Vector3
+	body: SpacesimSceneBody, distance: float, pixel: float, cap: int, delta: float
 ) -> void:
 	if body.mesh_material == null or body.content == null:
 		return
 	if body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return
-	# **The request happens here** — a wider whole-body map, or a window over the cap the eye can see — and the
-	# entry already holds whatever has landed, so the draw below needs no separate publish step.
-	var chosen := _surface_maps.map_for(body.id, body.radius, distance, pixel, eye_direction)
+	# **Watching is per frame; deciding is not; publishing is on arrival.** The rate is maintained every frame because
+	# it is a frame quantity, and it asks for nothing. A decision — which is the only thing that can request a bake —
+	# happens when the gate opens or when a rung has landed, and publishing happens when there is something new to
+	# draw. Evert, 2026-10-19: *"watching a number increase or decrease per frame is not the same as baking."*
+	var entry := _surface_maps.map(body.id)
+	if entry == null:
+		return
+	_surface_maps.observe_eye(body.id, distance, delta)
+	if SpacesimSurfaceMaps.map_is_due(
+		entry.last_distance, entry.last_pixel, entry.last_cap, distance, pixel, cap
+	):
+		_surface_maps.note_map_eye(body.id, body.radius, distance, pixel, cap)
+	if not _surface_maps.needs_publish(body.id):
+		return
+	var chosen := _surface_maps.drawn_for(body.id)
 	if chosen.is_empty():
 		return
-	var entry := _surface_maps.map(body.id)
-	var window: Texture2D = null
-	var window_origin := Vector2.ZERO
-	var window_size := Vector2.ZERO
-	if entry != null and entry.window != null:
-		window = entry.window
-		window_origin = entry.window_origin
-		window_size = entry.window_size
+	_surface_maps.mark_published(body.id)
 	SpacesimBodyRenderer.apply_surface_maps(
-		body.mesh_material, chosen["texture"], chosen["width"], window, window_origin, window_size
+		body.mesh_material, chosen["texture"], chosen["width"]
 	)
-	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a window
-	# that reached one and not the other would put a seam along every coastline inside it.
+	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a map
+	# that reached one and not the other would put a seam along every coastline.
 	if body.ocean_material != null:
 		SpacesimBodyRenderer.apply_surface_maps(
-			body.ocean_material, chosen["texture"], chosen["width"], window, window_origin, window_size
+			body.ocean_material, chosen["texture"], chosen["width"]
+		)
+
+
+## **The near field: the map's tiles, refined where the eye is looking**, as the mesh is.
+##
+## Called for every drawn body, and it is **cheap when nothing has moved**: the walk's own gate answers first, and a
+## still eye costs a dictionary lookup. When the selection or a landed tile changes what a material should be told,
+## the rects are republished to **both** layers — the land culls on the tiled height and the sea draws on it, so a
+## table that reached one and not the other would put a seam along every coastline inside it.
+func _refine_surface_tiles(
+	body: SpacesimSceneBody, distance: float, pixel: float, eye_direction: Vector3, cap: int
+) -> void:
+	if body.mesh_material == null or body.content == null:
+		return
+	if body.content.kind == SpacesimSystemBody.Kind.STAR:
+		return
+	if not _surface_maps.update_tiles(
+		body.id, body.radius, distance, pixel, eye_direction, cap
+	):
+		return
+	var tiles := _surface_maps.tiles_for(body.id)
+	var array := _surface_maps.tile_array()
+	SpacesimBodyRenderer.apply_surface_tiles(
+		body.mesh_material, array, tiles["rects"], tiles["layers"]
+	)
+	if body.ocean_material != null:
+		SpacesimBodyRenderer.apply_surface_tiles(
+			body.ocean_material, array, tiles["rects"], tiles["layers"]
 		)
 
 
