@@ -66,6 +66,14 @@ var scale_body: SpacesimScaleBody
 ## no air. **Nothing draws anything from it**: the shell that used to be built at this radius is gone, and
 ## the march that will draw the air is not written yet.
 var sky_top: float = 0.0
+## **The fraction of this body's surface that is under water**, from
+## `SpacesimSurfaceModel.sea_level_percentile()` — derived once at build, because it is asked for every frame
+## and it walks the greenhouse to get there. The surface shader's `sea_level` is this percentile *resolved
+## through the map's measured quantiles*, which is the map cache's business.
+var surface_ocean_fraction: float = 0.0
+## The width of the surface detail map currently published to the material — **so a frame that changed
+## nothing does not re-set three uniforms and rebuild a ramp**.
+var surface_map_width: int = 0
 
 
 static func from_content(

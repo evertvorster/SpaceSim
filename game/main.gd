@@ -270,6 +270,11 @@ func _on_exit_requested() -> void:
 	# Unapplied edits are discarded, not applied: the Close button's colour said so. The file is
 	# written for anything already applied.
 	SpacesimSettings.save()
+	# **The scene owns a local `RenderingDevice`** (the surface maps bake on it), and one left alive to be
+	# destroyed at teardown segfaults the process on exit — after everything else has shut down cleanly, which
+	# is what makes it look unrelated.
+	if _system != null:
+		_system.close()
 	get_tree().quit()
 
 

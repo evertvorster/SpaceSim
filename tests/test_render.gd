@@ -272,25 +272,45 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	if material == null:
 		return
 
-	# **A flat Lambertian at the derived albedo, and no mapping at all.** Not "the mapping is off": the
-	# noise field, the two-stop gradient and the relief normal are deleted from the shader, because that
-	# mapping was the documented cause of a **black surface** on airless bodies and on Earth alike. The
-	# material holds three numbers.
-	h.check(material.get_shader_parameter("base_color") == earth.color,
-		"the base colour is the derived colour")
-	h.check(material.get_shader_parameter("detail_color") == null,
-		"and there is no second colour stop to blend toward")
-	h.check(material.get_shader_parameter("relief") == null,
-		"nor a relief knob, nor a field to bump a normal with")
-	h.check(material.get_shader_parameter("noise_field") == null,
-		"and no noise field is bound to it")
-	h.check(material.get_shader_parameter("roughness_value") != null
-		and material.get_shader_parameter("specular_value") != null,
-		"what it does carry is roughness and specular")
-	# Every body wears the same flat material; nothing about it varies per body but the colour.
+	# **A height field, a colour ramp and a sea**, and every number off the derivation. The old flat
+	# Lambertian's three knobs are gone: the surface is no longer one colour, so what it carries is a ramp
+	# built from `SpacesimSurfaceModel.bands()` and the body's own radius and relief.
+	h.check(material.get_shader_parameter("base_color") == null,
+		"the flat colour knob is gone, because the surface is no longer one colour")
+	h.check(material.get_shader_parameter("planet_radius") == earth.radius,
+		"the shader is told the body's radius, which is what turns a texel into a slope")
+	var plan := SpacesimSurfaceField.plan(earth.content.id, earth.radius)
+	h.check_near(float(material.get_shader_parameter("field_amplitude")), plan.amplitude,
+		"and the relief amplitude the plan derives (%.0f m)" % plan.amplitude, 1.0)
+	h.check(material.get_shader_parameter("coarse_map") != null
+			and material.get_shader_parameter("height_map") != null,
+		"with a neutral height in both maps until a bake lands")
+
+	# **The ramp is the derivation's picture**: its bottom is Earth's sea band and its top is its land, in
+	# the order `bands()` put them.
+	var ramp: ImageTexture = material.get_shader_parameter("colour_ramp")
+	h.check(ramp != null, "and a colour ramp built from the derived bands")
+	if ramp != null:
+		var image := ramp.get_image()
+		var sea := image.get_pixel(0, 0)
+		var land := image.get_pixel(image.get_width() - 1, 0)
+		h.check(sea.b > sea.r, "whose bottom is water: blue-dominant (%.3f, %.3f)" % [sea.r, sea.b])
+		h.check(land.g > land.b, "and whose top is vegetation: green above blue (%.3f, %.3f)" % [land.g, land.b])
+		# **The luminance is the material's albedo**, which is the correction the bands carry — the authored
+		# palette is 2.3-3.4x brighter than the reflectance it claims.
+		h.check(sea.get_luminance() < 0.12,
+			"with the sea at its own darker reflectance (%.3f)" % sea.get_luminance())
+
+	# **An airless body gets its own ramp rather than a shared one** — one band, one colour, end to end.
 	var luna_material: ShaderMaterial = luna.mesh.material_override
-	h.check(luna_material != null and luna_material.get_shader_parameter("noise_field") == null,
-		"an airless body is the same flat sphere, not a differently-mapped one")
+	var luna_ramp: ImageTexture = luna_material.get_shader_parameter("colour_ramp")
+	h.check(luna_ramp != null and luna_ramp != ramp, "an airless body has a ramp of its own")
+	if luna_ramp != null:
+		var image := luna_ramp.get_image()
+		var first := image.get_pixel(0, 0)
+		var last := image.get_pixel(image.get_width() - 1, 0)
+		h.check(first.is_equal_approx(last),
+			"and being one material, it is one colour from the bottom to the top")
 
 
 ## The sky: that the shader's inputs are the derivation's, and that the derivation agrees with

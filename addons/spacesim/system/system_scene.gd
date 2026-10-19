@@ -46,6 +46,8 @@ var environment: Environment
 ## environment keeps a flat background colour rather than rendering a black sky that reads as a bug.
 var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
+## The baked surface maps, one cache for the whole system.
+var _surface_maps := SpacesimSurfaceMaps.new()
 ## **Draw the bodies' tessellation instead of the bodies.** Set by the game's wireframe toggle; read by
 ## `update_lod`, which swaps the line meshes and an unshaded white material in and out. Off, and nothing
 ## changes — it is a debug view, not a mode the renderer has to reason about.
@@ -136,6 +138,10 @@ func build(parent: Node) -> SpacesimSystemScene:
 	# output at all — the pool has to free what the task allocated. A rebuild is milliseconds, so the join
 	# is one poll long.
 	container.tree_exiting.connect(await_patch_builds)
+	# **And the bake device, on the same signal.** A local `RenderingDevice` left alive to be destroyed at
+	# teardown segfaults the process on exit, and the exit that matters here is not the player's: the engine's
+	# own `--quit-after` tears the tree down without going anywhere near `main.gd`'s exit button.
+	container.tree_exiting.connect(close)
 	return self
 
 
@@ -458,7 +464,26 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.set_meta("spacesim_body", body.id)
 	system_frame.add_child(body.node)
 
-	body.mesh_material = SpacesimBodyRenderer.material_for(body)
+	# **The ramp is built before any map exists**, from the derived bands and a *linear* placeholder for the
+	# field's distribution; the measured one replaces it when the first bake lands. A body with no bands at all
+	# — a gas giant, whose visible surface is its deck — keeps its derived colour flat, which is what it was
+	# drawn in before.
+	var light := _light_at(body)
+	if body.content != null:
+		body.surface_ocean_fraction = SpacesimSurfaceModel.sea_level_percentile(
+			body.content, _materials(), light.x, light.y
+		)
+		var bands := SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
+		body.mesh_material = SpacesimBodyRenderer.material_for(
+			body,
+			SpacesimBodyRenderer.surface_ramp(
+				bands, SpacesimSurfaceMaps.linear_quantiles(), body.color
+			)
+		)
+	else:
+		body.mesh_material = SpacesimBodyRenderer.material_for(
+			body, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), body.color)
+		)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(
@@ -853,6 +878,7 @@ func update_lod(camera: Camera3D) -> void:
 			continue
 		if body.mesh == null:
 			continue
+		_publish_surface_maps(body, distance, pixel)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -951,6 +977,49 @@ func _build_patch_arrays(body: SpacesimSceneBody, chunks: Array, lines: bool) ->
 ## **`is_task_completed` must be asked before `wait_for_task_completion`, never after** — waiting consumes
 ## the task, so a second question about it answers *no* and the poll silently does nothing. That mistake
 ## cost a session, and it shows up as a body with no mesh rather than as a failure.
+## **Hand a body its surface maps, when they changed.** The bake is the map cache's; this is the one place a
+## map, a sea level and a colour ramp are published together, so the shader cannot be given one body's heights
+## and another body's sea.
+##
+## The sea level is **the ocean fraction resolved through the map's own measured quantiles** — so content's
+## "70.8 % of it is water" becomes a height in the field the shader actually samples, rather than a number
+## picked twice.
+func _publish_surface_maps(body: SpacesimSceneBody, distance: float, pixel: float) -> void:
+	if body.mesh_material == null or body.content == null:
+		return
+	if body.content.kind == SpacesimSystemBody.Kind.STAR:
+		return
+	var entry := _surface_maps.map(
+		body.id, body.radius, distance, pixel, body.surface_ocean_fraction
+	)
+	if entry == null or entry.width == 0 or entry.width == body.surface_map_width:
+		return
+	body.surface_map_width = entry.width
+	var surface := body.mesh_material as ShaderMaterial
+	if surface == null:
+		return
+	var light := _light_at(body)
+	var bands := SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
+	surface.set_shader_parameter(
+		"colour_ramp", SpacesimBodyRenderer.surface_ramp(bands, entry.quantiles, body.color)
+	)
+	surface.set_shader_parameter("sea_level", entry.value_at(body.surface_ocean_fraction))
+	SpacesimBodyRenderer.apply_surface_maps(surface, entry)
+
+
+## The surface map cache, for the probes that drive it and for anything that wants to ask what was measured.
+## Read-only in practice: the cache owns its entries.
+func surface_maps() -> SpacesimSurfaceMaps:
+	return _surface_maps
+
+
+## **Let go of the GPU bake's device.** A local `RenderingDevice` left alive to be destroyed at process
+## teardown segfaults the process on exit, and the cache owns the only one the scene has. `main.gd` calls this
+## on the way out.
+func close() -> void:
+	_surface_maps.close()
+
+
 func _poll_patch_builds() -> void:
 	for body in bodies:
 		if body.patch_task == -1:
