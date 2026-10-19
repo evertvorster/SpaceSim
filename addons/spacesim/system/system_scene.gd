@@ -644,6 +644,24 @@ func _add_lighting() -> void:
 ## **Nothing here draws anything.** The shell that used to be built from these numbers is gone, and the
 ## march that will draw the air is not written yet: what survives is the arithmetic, because the camera's
 ## far plane reads it (`sky_reach`) and it is a fact about the body rather than about a renderer.
+## **The body whose air the frame draws** — the nearest one that has any, from the eye.
+##
+## A star is excluded: a star is not a body with air, and its own disc is drawn by its shader. Ties go to the
+## nearer disc, and a body with no atmosphere never wins, so the pass is simply not given anyone to draw when
+## there is no air in the frame.
+func air_subject(eye: Vector3) -> SpacesimSceneBody:
+	var best: SpacesimSceneBody = null
+	var best_distance := INF
+	for body in bodies:
+		if body.sky_top <= 0.0 or body.air_scale_height <= 0.0:
+			continue
+		var distance := eye.distance_to(body.position)
+		if distance < best_distance:
+			best_distance = distance
+			best = body
+	return best
+
+
 func _derive_air(body: SpacesimSceneBody) -> void:
 	if body.content == null or body.content.atmosphere == null:
 		return
@@ -653,9 +671,18 @@ func _derive_air(body: SpacesimSceneBody) -> void:
 	var temperature := SpacesimAtmosphereModel.reference_temperature(
 		body.content, _materials(), light.x, light.y
 	)
+	var gravity := SpacesimAtmosphereModel.surface_gravity(body.content)
+	body.air_scale_height = SpacesimAtmosphereModel.scale_height(
+		body.content.atmosphere, _materials(), temperature, gravity
+	)
+	body.air_rayleigh = SpacesimAtmosphereModel.rayleigh_coefficient(
+		body.content.atmosphere, _materials(), temperature
+	)
+	body.air_absorption = SpacesimAtmosphereModel.absorption_coefficient(
+		body.content.atmosphere, _materials(), temperature
+	)
 	var air_reach := SpacesimAtmosphereModel.shell_reach(
-		body.content.atmosphere, _materials(), temperature,
-		SpacesimAtmosphereModel.surface_gravity(body.content)
+		body.content.atmosphere, _materials(), temperature, gravity
 	)
 	body.sky_top = maxf(air_reach, _framing.atmosphere_altitude)
 

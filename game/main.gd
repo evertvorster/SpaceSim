@@ -49,6 +49,8 @@ var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass
 var _surface_bake: SpacesimSurfaceBakePass
+var _air_pass: SpacesimAtmospherePass
+var _air_said := false
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -110,8 +112,12 @@ func _ready() -> void:
 	# `RenderingDevice` dispatch, and a callback *is* the render thread. After the exposure pass, because it
 	# writes no colour and must not sit between the frame and the metre.
 	_surface_bake = SpacesimSurfaceBakePass.new()
+	# **The air goes before the exposure**, because the metre has to measure the finished frame: the march writes
+	# the air into the colour buffer and the exposure pass then reads it. A pass placed after would leave the
+	# exposure metering an intermediate frame, which is the same class of fault as metering the 2D layer.
+	_air_pass = SpacesimAtmospherePass.new()
 	var compositor := Compositor.new()
-	var effects: Array[CompositorEffect] = [_exposure_pass, _surface_bake]
+	var effects: Array[CompositorEffect] = [_air_pass, _exposure_pass, _surface_bake]
 	compositor.compositor_effects = effects
 	_camera.compositor = compositor
 	# The system was built before this camera existed, so the bake pass is handed over now: the maps baked at
@@ -466,6 +472,62 @@ func _print_build() -> void:
 	print("SpaceSim: build %s%s" % [head, "" if git.is_clean() else ", with uncommitted changes"])
 
 
+## **Hand the air pass this frame's numbers**, or switch it off. The gate is the setting, read through
+## `get_value` every frame so it stays hot.
+##
+## **The offset and the rotation happen here, in `double`**: a GLSL float holds seven digits, so a world
+## coordinate of 1.5e11 m cannot be subtracted inside the shader — the answer is below its noise. The camera's
+## basis inverse rotates a world direction into view space and does not translate it, which is why the offset is
+## taken first and rotated after.
+func _update_air(camera: Camera3D) -> void:
+	if not bool(SpacesimSettings.get_value("render.atmosphere_volume")):
+		_air_pass.blend = 0.0
+		if not _air_said:
+			_air_said = true
+			print("AIR: switched off by render.atmosphere_volume")
+		return
+	var eye := camera.get_global_transform_interpolated()
+	var subject := _system.air_subject(eye.origin)
+	if subject == null:
+		_air_pass.blend = 0.0
+		if not _air_said:
+			_air_said = true
+			print("AIR: no subject — %d bodies, none with air" % _system.bodies.size())
+		return
+	var star := _system.star()
+	if star == null or star.content == null:
+		_air_pass.blend = 0.0
+		return
+	var basis := eye.basis.inverse()
+	# **From the body to the eye**, which is what the sphere test's ray origin requires. Backwards, every ray
+	# marches away from the planet and the frame comes back unchanged — the most misleading failure this pass has.
+	var offset := SpacesimAtmospherePass.view_offset(basis, eye.origin, subject.position)
+	var to_star := SpacesimAtmospherePass.view_direction(
+		basis, star.position - subject.position
+	)
+	# The frame's own currency: radiance / UNIT_LUX_PER_SR, which `sky_scale` already is.
+	var sun_scale := SpacesimAtmosphereModel.sky_scale(SpacesimStarLight.illuminance(
+		SpacesimStarModel.luminosity(star.content), eye.origin.distance_to(star.position)
+	))
+	_air_pass.set_air(
+		offset, to_star,
+		subject.air_rayleigh, subject.air_scale_height,
+		subject.air_absorption,
+		SpacesimAtmosphereModel.MIE_COEFFICIENT,
+		SpacesimAtmosphereModel.MIE_SCALE_HEIGHT,
+		SpacesimAtmosphereModel.MIE_ANISOTROPY,
+		sun_scale,
+		subject.radius, subject.radius + subject.sky_top,
+		tan(deg_to_rad(camera.fov) * 0.5)
+	)
+	_air_pass.blend = 1.0
+	if not _air_said:
+		_air_said = true
+		print("AIR: subject %s at %s m, air top +%s m, rayleigh %s, H %s m"
+			% [subject.name, str(eye.origin.distance_to(subject.position)), str(subject.sky_top),
+				str(subject.air_rayleigh), str(subject.air_scale_height)])
+
+
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
@@ -481,6 +543,7 @@ func _update_view(delta: float) -> void:
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
 	_exposure_pass.frame_delta = delta
+	_update_air(_camera)
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_hud_since += delta
