@@ -30,6 +30,18 @@ const SURFACE_SPECULAR := 0.15
 ## and the wave rungs keep the glint from being a hard dot.
 const OCEAN_ROUGHNESS := 0.14
 const OCEAN_SPECULAR := 0.45
+## **What the roughness becomes once the ripples are too small to draw**, and this is where the sea's shimmer goes
+## when it leaves the geometry. Evert, 2026-10-19: *"I like the up close shimmer, but there is none of that further
+## out."* The wave rungs fade out with the pixel footprint — correctly, they are geometry and sub-pixel swell is
+## aliasing — but **unresolved ripples do not stop existing, they stop being resolvable**, and what they do to the
+## light is broaden the specular lobe. A distant sea is not a mirror: a real glitter path runs to the horizon as a
+## smooth bright column. So the roughness is interpolated from the resolved sea's own 0.14 to this over the band
+## where the swell is dying, and the glitter survives the detail.
+const OCEAN_FAR_ROUGHNESS := 0.34
+## The band the roughness crosses in, in metres of ground per pixel: where the 400 m swell fades (100-200 m) and
+## a little wider, because a sea roughens gradually as you pull away rather than switching.
+const OCEAN_ROUGH_METRES_NEAR := 10.0
+const OCEAN_ROUGH_METRES_FAR := 220.0
 ## **The depth ramp, in metres.** Shallow water returns light off the bottom, which is what its colour is; past
 ## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through.
 ##
@@ -498,6 +510,9 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("deep_metres", OCEAN_DEEP_METRES)
 	material.set_shader_parameter("roughness_value", OCEAN_ROUGHNESS)
 	material.set_shader_parameter("specular_value", OCEAN_SPECULAR)
+	material.set_shader_parameter("far_roughness", OCEAN_FAR_ROUGHNESS)
+	material.set_shader_parameter("rough_metres_near", OCEAN_ROUGH_METRES_NEAR)
+	material.set_shader_parameter("rough_metres_far", OCEAN_ROUGH_METRES_FAR)
 	material.set_shader_parameter("height_map", flat_height(0.5))
 	material.set_shader_parameter("planet_radius", body.radius)
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
