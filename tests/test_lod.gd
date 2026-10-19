@@ -437,6 +437,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 
 	_test_the_eye_inside_a_body(h, scene, camera, pixel)
 	_test_a_frame_change_pays_for_its_geometry(h, scene, camera, earth, pixel)
+	_leak(h, scene, camera, earth, pixel)
 
 	# --- the point of light is in the FRAME's exposure, not the camera's ----------------------------
 	# **This check used to assert the opposite**, and the reversal is the point. Godot bakes the exposure
@@ -519,6 +520,31 @@ static func _finest_under_eye(distance: float, radius: float, to_eye: Vector3, p
 				maxf((leaf[1] as Vector3).angle_to(leaf[2]), (leaf[2] as Vector3).angle_to(leaf[0]))
 			))
 	return finest
+
+
+## **A rebuild must not leak.** Evert, 2026-10-19: a four and a half minute flight ended in thousands of
+## `Element limit reached` errors as the RenderingDevice's RID allocator filled up. The patch path was
+## innocent — this is the check that says so, and it stays because the failure mode (a leak per rebuild) is
+## invisible until it is catastrophic.
+##
+## A descent that rebuilds on every frame, which is what flying does, with a census of the engine's own
+## object counts: a leaked RID is a leaked Object or Resource before it is anything else.
+func _leak(h, scene: SpacesimSystemScene, camera: Camera3D, earth: SpacesimSceneBody, pixel: float) -> void:
+	var start_resources := Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)
+	var start_objects := Performance.get_monitor(Performance.OBJECT_COUNT)
+	var samples := []
+	for step in 1200:
+		var altitude: float = 2.0e6 * pow(10.0, -3.0 * float(step) / 1200.0)
+		camera.global_position = earth.node.global_position \
+			+ Vector3(1.0, 0.0, 0.0).rotated(Vector3.UP, float(step) * 0.0005) * (earth.radius + altitude)
+		scene.update_lod(camera)
+		if step % 300 == 0:
+			samples.append(int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)))
+	var end_resources := Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)
+	var end_objects := Performance.get_monitor(Performance.OBJECT_COUNT)
+	h.check(end_resources - start_resources <= 8 and end_objects - start_objects <= 8,
+		"1200 rebuild frames leak nothing (resources %+d, objects %+d)"
+			% [end_resources - start_resources, end_objects - start_objects])
 
 
 ## **A frame change is a synchronous rebuild.** Evert, 2026-10-19: *"can't we load the next frame before we
