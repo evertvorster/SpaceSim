@@ -74,6 +74,7 @@ var _wireframe := false
 
 
 func _ready() -> void:
+	_print_build()
 	_system = SpacesimSystemScene.from_file(SYSTEM_PATH)
 	if _system == null:
 		push_error("cannot load %s" % SYSTEM_PATH)
@@ -437,6 +438,22 @@ var _meter_since := 0.0
 var _meter := PackedFloat32Array()
 ## The multiplier the last spike test was taken against, and when the last one was reported.
 var _meter_previous := 0.0
+
+
+## **Which code is running, said once at startup.**
+##
+## A session outlives commits: a three-minute flight spans a fix, and the console it leaves behind then
+## names line numbers that no longer exist in the tree — which is unfalsifiable from outside and cost a
+## round of it already. One `git rev-parse` costs nothing and makes every pasted console self-describing,
+## including whether the tree had uncommitted changes when it started.
+func _print_build() -> void:
+	var git := SpacesimGit.new(ProjectSettings.globalize_path("res://"))
+	var result := git.run(["rev-parse", "--short", "HEAD"])
+	var head := git.text(result).strip_edges() if result["ok"] else ""
+	if head.is_empty():
+		print("SpaceSim: build unknown — no git metadata in the project directory")
+		return
+	print("SpaceSim: build %s%s" % [head, "" if git.is_clean() else ", with uncommitted changes"])
 
 
 func _update_view(delta: float) -> void:
