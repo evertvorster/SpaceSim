@@ -1,69 +1,81 @@
 extends RefCounted
-## **The air march's parameter arithmetic** — the one part of the pass a headless run can assert.
+## **The seam between the scene and the air march**: which body the frame marches, and what it hands over.
 ##
-## `Atmospheres` §9a is precise about what is testable here and what is not: the picture is flown, the source is
-## compiled by `tests/shader_check.sh`, and the *arithmetic* is a pure function. This is that function's test,
-## and it exists because the fault it guards is silent — a backwards `eye_offset` produces a frame that looks
-## exactly like a pass that did nothing at all.
+## The march itself is `SpacesimAtmospherePass`'s, its source is compiled by `tests/shader_check.sh`, and the
+## picture is flown. What can be asserted here is the contract either side of it, and it has failed before in
+## both directions: a pass given air for the wrong body, and a pass given *no* air by a scene that could not
+## find one. Both look exactly like a working pass drawing nothing.
 
 
 func run(h, _root: Node) -> void:
-	print("  air march")
-	_test_eye_is_relative_to_the_body(h)
-	_test_direction_rotates_without_translating(h)
-	_test_the_scene_names_a_subject(h)
+	print("  air")
+	_test_the_nearest_body_with_air_is_named(h)
+	_test_a_star_is_never_the_subject(h)
+	_test_the_dictionary_carries_everything_the_march_reads(h)
 
 
-## **`eye_offset` points from the body to the eye**: `basis.inverse() * (eye - body)`.
-##
-## Two checks, and the second is the one that catches the tempting mistake. With the camera at +10 on X looking
-## back along -X, the body is 10 m in front of it and so sits at **+10 on Z in view space** (the camera looks
-## down -Z), not -10. A vector the wrong way round puts the body behind the camera, and the march then finds
-## nothing.
-func _test_eye_is_relative_to_the_body(h) -> void:
-	var eye := Vector3(10.0, 0.0, 0.0)
-	var body := Vector3.ZERO
-	# Facing -X from +X: the basis the camera has, and its inverse, which is what the pass is handed.
-	var facing := Basis.looking_at(Vector3(-1.0, 0.0, 0.0), Vector3.UP)
-	var offset := SpacesimAtmospherePass.view_offset(facing.inverse(), eye, body)
-	h.check_near(offset.length(), 10.0, "the body is 10 m away in view space", 1.0e-4)
-	h.check_near(offset.z, 10.0, "and in front of the camera, not behind it (+Z, %.3f)" % offset.z, 1.0e-4)
-	# And it is the *body's* centre relative to the eye, not the eye's relative to the body.
-	h.check_near(
-		SpacesimAtmospherePass.view_offset(facing.inverse(), body, eye).z, -10.0,
-		"with the two swapped the vector flips, which is the fault this pins", 1.0e-4
-	)
-
-
-## A direction is **rotated, never translated**: the eye's own position must not enter it, and neither may the
-## body's. The same world direction from two different places gives the same view-space direction.
-func _test_direction_rotates_without_translating(h) -> void:
-	var basis := Basis.looking_at(Vector3(-1.0, 0.0, 0.0), Vector3.UP).inverse()
-	var one := SpacesimAtmospherePass.view_direction(basis, Vector3(-1.0, 0.0, 0.0))
-	var two := SpacesimAtmospherePass.view_direction(basis, Vector3(-7.0, 0.0, 0.0))
-	h.check_near(one.length(), 1.0, "a direction comes back unit-length", 1.0e-4)
-	# **Forward is -Z in view space**, which is the convention the march's ray uses
-	# (`direction = normalize(vec3(ndc.x * tan_x, ndc.y * tan_y, -1.0))`). Asserting +Z here would pin the
-	# opposite of what the shader does, and the test would be the thing that was wrong.
-	h.check_near(one.z, -1.0, "the star straight ahead lands on -Z, which is forward", 1.0e-4)
-	h.check(one.is_equal_approx(two), "and its magnitude does not scale the answer")
-
-
-## **The scene must name nobody for a body without air**, and the nearest of those that have it otherwise. A pass
-## given no subject is off, which is the state most frames are in.
-func _test_the_scene_names_a_subject(h) -> void:
+## A body with no air is empty, so it is never named even when it is nearest.
+func _test_the_nearest_body_with_air_is_named(h) -> void:
 	var scene := SpacesimSystemScene.new()
+	var airless := SpacesimSceneBody.new()
+	airless.name = "Airless"
+	airless.position = Vector3(1.0, 0.0, 0.0)
 	var with_air := SpacesimSceneBody.new()
 	with_air.name = "WithAir"
 	with_air.position = Vector3(100.0, 0.0, 0.0)
+	with_air.radius = 6.371e6
 	with_air.sky_top = 1.0e5
-	with_air.air_scale_height = 8.5e3
-	var without := SpacesimSceneBody.new()
-	without.name = "Without"
-	without.position = Vector3(10.0, 0.0, 0.0)
-	scene.bodies = [with_air, without]
-	h.check(scene.air_subject(Vector3.ZERO) == with_air,
-		"the nearest body WITH air is the subject, not the nearest body")
-	with_air.sky_top = 0.0
-	h.check(scene.air_subject(Vector3.ZERO) == null,
-		"and with no air anywhere there is no subject at all")
+	with_air.air = {"rayleigh": Vector3.ONE}
+	scene.bodies = [airless, with_air]
+	var found := scene.air_for_eye(Vector3.ZERO)
+	h.check(not found.is_empty(), "a body with air is found")
+	h.check(found.get("body") == with_air, "and it is the one with air, not the nearest body")
+	h.check_near(float(found.get("atmosphere_radius")), 6.471e6,
+		"the air top is the radius plus `sky_top`", 1.0)
+	scene.bodies = [airless]
+	h.check(scene.air_for_eye(Vector3.ZERO).is_empty(),
+		"and with no air in the system there is nothing to march")
+
+
+## **A star is a photosphere, not an atmosphere the march can draw.** Marched as air, its own disc is
+## extinguished — the one failure here that would be obvious and confusing at the same time.
+func _test_a_star_is_never_the_subject(h) -> void:
+	var scene := SpacesimSystemScene.new()
+	var sun := SpacesimSceneBody.new()
+	sun.name = "Sun"
+	sun.position = Vector3.ZERO
+	sun.radius = 6.957e8
+	sun.sky_top = 1.0e6
+	sun.air = {"rayleigh": Vector3.ONE}
+	var content := SpacesimSystemBody.new()
+	content.kind = SpacesimSystemBody.Kind.STAR
+	sun.content = content
+	scene.bodies = [sun]
+	h.check(scene.air_for_eye(Vector3(1.0e11, 0.0, 0.0)).is_empty(),
+		"a star with air-shaped numbers is still not the subject")
+
+
+## Everything the shader reads must be present: a missing key reads as a zero, and a zero coefficient is a
+## transparent sky that looks like a pass doing nothing.
+func _test_the_dictionary_carries_everything_the_march_reads(h) -> void:
+	var scene := SpacesimSystemScene.new()
+	var body := SpacesimSceneBody.new()
+	body.name = "Earth"
+	body.position = Vector3(1.5e11, 0.0, 0.0)
+	body.radius = 6.371e6
+	body.sky_top = 1.0e5
+	body.air = {
+		"rayleigh": Vector3(4.8e-6, 1.1e-5, 2.8e-5),
+		"rayleigh_scale_height": 8427.0,
+		"absorption": Vector3.ZERO,
+		"mie": SpacesimAtmosphereModel.MIE_COEFFICIENT,
+		"mie_scale_height": SpacesimAtmosphereModel.MIE_SCALE_HEIGHT,
+		"mie_anisotropy": SpacesimAtmosphereModel.MIE_ANISOTROPY,
+		"sun_intensity": 4.0,
+	}
+	scene.bodies = [body]
+	var found := scene.air_for_eye(Vector3(1.5e11 + 2.1e7, 0.0, 0.0))
+	for key in ["rayleigh", "rayleigh_scale_height", "absorption", "mie", "mie_scale_height",
+			"mie_anisotropy", "sun_intensity"]:
+		h.check((found["air"] as Dictionary).has(key), "the air dictionary carries %s" % key)
+	h.check_near(float(found["planet_radius"]), 6.371e6, "the planet radius is the body's", 1.0)

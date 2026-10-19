@@ -644,21 +644,36 @@ func _add_lighting() -> void:
 ## **Nothing here draws anything.** The shell that used to be built from these numbers is gone, and the
 ## march that will draw the air is not written yet: what survives is the arithmetic, because the camera's
 ## far plane reads it (`sky_reach`) and it is a fact about the body rather than about a renderer.
-## **The body whose air the frame draws** — the nearest one that has any, from the eye.
+## **Which body's air the frame is looking through** — the nearest one that has any, from the observer, with
+## everything the march needs. Empty when there is nothing to draw.
 ##
-## A star is excluded: a star is not a body with air, and its own disc is drawn by its shader. Ties go to the
-## nearer disc, and a body with no atmosphere never wins, so the pass is simply not given anyone to draw when
-## there is no air in the frame.
-func air_subject(eye: Vector3) -> SpacesimSceneBody:
-	var best: SpacesimSceneBody = null
+## **A star is not one of these.** A star's register is a photosphere, not an atmosphere this pass can march:
+## treating the space around a star as air would extinguish its own disc. That is the accurate test; a distance
+## limit is not.
+func air_for_eye(observer: Vector3) -> Dictionary:
+	var best := {}
 	var best_distance := INF
 	for body in bodies:
-		if body.sky_top <= 0.0 or body.air_scale_height <= 0.0:
+		if body.air.is_empty():
 			continue
-		var distance := eye.distance_to(body.position)
-		if distance < best_distance:
-			best_distance = distance
-			best = body
+		if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
+			continue
+		var distance := observer.distance_to(body.position)
+		if distance >= best_distance:
+			continue
+		var sun := Vector3.UP
+		var star_body := star()
+		if star_body != null:
+			sun = (star_body.position - body.position).normalized()
+		best_distance = distance
+		best = {
+			"body": body,
+			"centre": body.position,
+			"planet_radius": body.radius,
+			"atmosphere_radius": body.radius + body.sky_top,
+			"sun_direction": sun,
+			"air": body.air,
+		}
 	return best
 
 
@@ -672,19 +687,34 @@ func _derive_air(body: SpacesimSceneBody) -> void:
 		body.content, _materials(), light.x, light.y
 	)
 	var gravity := SpacesimAtmosphereModel.surface_gravity(body.content)
-	body.air_scale_height = SpacesimAtmosphereModel.scale_height(
-		body.content.atmosphere, _materials(), temperature, gravity
-	)
-	body.air_rayleigh = SpacesimAtmosphereModel.rayleigh_coefficient(
-		body.content.atmosphere, _materials(), temperature
-	)
-	body.air_absorption = SpacesimAtmosphereModel.absorption_coefficient(
-		body.content.atmosphere, _materials(), temperature
-	)
 	var air_reach := SpacesimAtmosphereModel.shell_reach(
 		body.content.atmosphere, _materials(), temperature, gravity
 	)
 	body.sky_top = maxf(air_reach, _framing.atmosphere_altitude)
+	# **The air's scattering numbers, derived once**, in the one dictionary `SpacesimAtmospherePass` reads. A
+	# second derivation on the draw side would be a second sky, and it is the numbers rather than the shader
+	# that decide what colour the air is. `sun_intensity` is `sky_scale(illuminance)` — the frame's own
+	# currency (`radiance / UNIT_LUX_PER_SR`), not lux.
+	body.air = {
+		"rayleigh": SpacesimAtmosphereModel.rayleigh_coefficient(
+			body.content.atmosphere, _materials(), temperature
+		),
+		"rayleigh_scale_height": SpacesimAtmosphereModel.scale_height(
+			body.content.atmosphere, _materials(), temperature, gravity
+		),
+		"absorption": SpacesimAtmosphereModel.absorption_coefficient(
+			body.content.atmosphere, _materials(), temperature
+		),
+		"mie": SpacesimAtmosphereModel.MIE_COEFFICIENT,
+		"mie_scale_height": SpacesimAtmosphereModel.MIE_SCALE_HEIGHT,
+		"mie_anisotropy": SpacesimAtmosphereModel.MIE_ANISOTROPY,
+		"sun_intensity": SpacesimAtmosphereModel.sky_scale(
+			SpacesimStarLight.illuminance(SpacesimStarModel.luminosity(
+				star().content if star() != null and star().content != null else null
+			), _light_at(body).y)
+		),
+		"temperature": temperature,
+	}
 
 
 ## The star's luminosity and this body's distance from it — the pair every per-body derivation needs and
