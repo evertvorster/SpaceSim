@@ -428,6 +428,16 @@ func _physics_process(delta: float) -> void:
 const HUD_INTERVAL := 0.1
 var _hud_since := 0.0
 
+## **The exposure metre, read back for the HUD.** A readback stalls the GPU pipeline, so it runs at a
+## quarter of the HUD's rate and only as an instrument: `mean` says whether the scene changed and `target`
+## says what the metre asked for, which is the difference between a real scene change and the
+## "no light at all" branch asking for the ceiling.
+const METER_INTERVAL := 0.25
+var _meter_since := 0.0
+var _meter := PackedFloat32Array()
+## The multiplier the last spike test was taken against, and when the last one was reported.
+var _meter_previous := 0.0
+
 
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
@@ -450,6 +460,10 @@ func _update_view(delta: float) -> void:
 	if _hud_since >= HUD_INTERVAL:
 		_hud_since = 0.0
 		_update_hud()
+	_meter_since += delta
+	if _meter_since >= METER_INTERVAL:
+		_meter_since = 0.0
+		_read_meter()
 
 
 ## The player is *inside* the ship while flying, so their location follows it. They are separate
@@ -559,6 +573,22 @@ func _build_hud() -> void:
 	_fps = fps
 
 
+## **Read the exposure metre, and shout when it jumps.** The multiplier moving by more than half in a
+## quarter of a second is either a real change of scene or the metre's own "no light at all" branch, and
+## the mean and the target together say which — so the line is printed rather than merely displayed.
+func _read_meter() -> void:
+	var meter := _exposure_pass.read_meter()
+	if meter.is_empty():
+		return
+	if _meter_previous > 0.0 and (meter[0] > _meter_previous * 1.5 or meter[0] < _meter_previous / 1.5):
+		print(
+			"EXPOSURE: multiplier %.3f -> %.3f  mean %.6f  target %.3f  frame %s"
+			% [_meter_previous, meter[0], meter[1], meter[2], _system.frame_tree.active_frame.name]
+		)
+	_meter_previous = meter[0]
+	_meter = meter
+
+
 ## The limit is shown alongside the speed, not instead of it: a limit the player cannot see
 ## reads as a bug.
 func _update_hud() -> void:
@@ -582,6 +612,10 @@ func _update_hud() -> void:
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
+				"exposure    EV %.3f   mean %.6f" % [
+					_meter[0] if _meter.size() > 0 else 0.0,
+					_meter[1] if _meter.size() > 1 else 0.0,
+				],
 				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
 				"nearest     %s at %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.nearest_distance)],
 				"local unit  %s" % SpacesimMarkers.format_distance(length),

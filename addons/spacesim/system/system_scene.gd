@@ -50,6 +50,8 @@ var _framing: SpacesimFraming
 ## `update_lod`, which swaps the line meshes and an unshaded white material in and out. Off, and nothing
 ## changes — it is a debug view, not a mode the renderer has to reason about.
 var wireframe := false
+## The frame the last `update_lod` ran in, so a change of frame can be seen and paid for.
+var _last_frame_id := ""
 ## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
 ## summing it walks the whole catalogue, so it is recomputed when this changes rather than every frame.
 var _ambient_depth := -1.0
@@ -871,6 +873,17 @@ func update_lod(camera: Camera3D) -> void:
 			body.patch_walk_epsilon = epsilon
 			body.patch_walk_wireframe = wireframe
 			_request_patch_build(body, wireframe)
+	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
+	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
+	# different scene. Drawing it with the geometry selected for the previous one is wrong however it looks,
+	# and a frame carrying the previous regime's surface is a large change of luminance to the exposure metre:
+	# from orbit, the selection's facets sag up to half a kilometre, so from 1.5 km up you are looking at a
+	# surface built for a viewpoint 100 km away. Paying the build here is a few milliseconds at a moment that
+	# already costs a teleport; a frame of the wrong geometry is not.
+	var frame_id := frame_tree.active_frame.frame_id if frame_tree.active_frame != null else ""
+	if frame_id != _last_frame_id:
+		_last_frame_id = frame_id
+		await_patch_builds()
 	# **Counted once, from what is visible**, rather than accumulated as the loop goes: the HUD's number and
 	# an instrument's independent count then cannot disagree about a body that landed or was culled
 	# mid-frame.

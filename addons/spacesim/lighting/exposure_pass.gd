@@ -59,6 +59,11 @@ var max_multiplier := SpacesimExposure.MAX_MULTIPLIER
 ## The last metre value the *CPU* knows, which is only ever a report: it is written from the render
 ## thread, so it may lag or be read mid-write. The authoritative value lives on the GPU, in `_state`.
 var last_multiplier := 0.0
+## The mean luminance and the target that produced it, alongside the multiplier — read back with
+## `read_meter()`. **A diagnostic, and a readback stalls the pipeline**, so nothing on the frame path may
+## call it: it exists so "the exposure jumped" can be answered with numbers rather than with a theory.
+var last_mean := 0.0
+var last_target := 0.0
 
 ## Built in the first callback rather than in `_init`: a headless run has no `RenderingDevice`, and a
 ## construction that assumed one would fail there for no reason.
@@ -90,6 +95,23 @@ func _notification(what: int) -> void:
 					_shader_finalize, _shader_apply, _partials, _state]:
 				if (rid as RID).is_valid():
 					rd.free_rid(rid)
+
+
+## **The metre's own numbers, read back from the GPU**: `[multiplier, mean, target]`.
+##
+## This stalls the pipeline (it waits for the frame the state was written in), so it belongs at a debug
+## readout's rate and never on the frame path. It is the instrument that says *why* the exposure moved:
+## a mean that collapsed, or the `mean == 0` branch asking for the ceiling.
+func read_meter() -> PackedFloat32Array:
+	var rd := RenderingServer.get_rendering_device()
+	if rd == null or not _built or not (_state as RID).is_valid():
+		return PackedFloat32Array()
+	var bytes := rd.buffer_get_data(_state)
+	var floats := bytes.to_float32_array()
+	last_multiplier = floats[0] if floats.size() > 0 else 0.0
+	last_mean = floats[1] if floats.size() > 1 else 0.0
+	last_target = floats[2] if floats.size() > 2 else 0.0
+	return PackedFloat32Array([last_multiplier, last_mean, last_target])
 
 
 ## What happened, for a probe or a test to read. The GPU's own value is authoritative; this is the
@@ -186,6 +208,11 @@ void main() {
 	// `previous <= 0` is the first frame: snap rather than easing up from nothing.
 	float t = clamp(params.rate * params.delta, 0.0, 1.0);
 	state.value.x = previous <= 0.0 ? target : mix(previous, target, t);
+	// **`y` is the mean the target was computed from**, and `z` the target itself: the multiplier alone
+	// cannot say whether a jump came from the scene changing or from the "no light at all" branch asking
+	// for the ceiling. Instrument only — nothing reads them on the GPU.
+	state.value.y = mean;
+	state.value.z = target;
 }
 """
 
