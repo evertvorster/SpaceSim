@@ -10,8 +10,64 @@ extends RefCounted
 func run(h, _root: Node) -> void:
 	print("  surface maps")
 	_test_no_bake_on_lookup(h)
+	_test_the_ladder(h)
 	_test_quantiles(h)
 	_test_the_ramp(h)
+
+
+## **The ladder: a floor, a ceiling derived from the display, and one rung at a time.**
+##
+## Everything here is arithmetic, which is the point — the ceiling and the ascent are what decide the cost of a
+## planet at close range, and neither needs a rendering device to be checked. The numbers are Evert's: **the
+## ceiling is half the resolution the scene is being rendered at**, rounded to a power of two, and it is a
+## tunable so the cost can be watched while it moves.
+func _test_the_ladder(h) -> void:
+	h.check(SpacesimSurfaceMaps.BUILD_WIDTH == 256,
+		"a body is baked at 256 when the scene is built, not at its ceiling")
+
+	# Half the render width, nearest power of two: 640 -> 512, 960 -> 1024, 1280 -> 1024, 1920 -> 2048.
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1280, 720)) == 512,
+		"the 720p default ceiling is 512 (half of 1280, rounded)")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080)) == 1024,
+		"1080p gives 1,024 — half the render width, not the window's")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(2560, 1440)) == 1024, "1440p gives 1,024")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(3840, 2160)) == 2048, "4K gives 2,048")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(0, 0)) == SpacesimSurfaceMaps.MIN_WIDTH,
+		"no render size falls back to the narrowest map rather than to zero")
+
+	# The setting is the override, and it is clamped: a number moved while flying cannot ask for nonsense.
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 4096) == 4096,
+		"surface.max_base_width overrides the derived ceiling")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 0) == 1024,
+		"and 0 means derive it")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 99999) == SpacesimSurfaceMaps.MAX_WIDTH,
+		"an absurd ceiling is clamped")
+	h.check(SpacesimSurfaceMaps.base_max_width(Vector2i(1920, 1080), 1) == SpacesimSurfaceMaps.MIN_WIDTH,
+		"and so is an absurdly small one")
+
+	# The distance law, against the ceiling: far away it asks for the floor it already has, close in for the
+	# ceiling, and never for less than a map exists.
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var far := SpacesimSurfaceMaps.required_width(earth, 1.0e11, pixel, 1024)
+	var near := SpacesimSurfaceMaps.required_width(earth, earth + 1000.0, pixel, 1024)
+	h.check(far == SpacesimSurfaceMaps.BUILD_WIDTH,
+		"a body at 1e11 m asks for the floor (%d)" % far)
+	h.check(near == 1024, "and a body a kilometre up asks for the ceiling (%d)" % near)
+	h.check(SpacesimSurfaceMaps.required_width(earth, earth + 1000.0, pixel, 256) == 256,
+		"a ceiling below the floor is the floor")
+	h.check(far <= near, "closing never asks for a coarser map")
+
+	# The ascent: double, and never past what the law wants.
+	h.check(SpacesimSurfaceMaps.next_bake_width(256, 1024) == 512,
+		"one rung up from 256 is 512, not 1,024 — the ladder is climbed, not jumped")
+	h.check(SpacesimSurfaceMaps.next_bake_width(512, 1024) == 1024, "and from 512 it is 1,024")
+	h.check(SpacesimSurfaceMaps.next_bake_width(1024, 1024) == 1024,
+		"a map that is already fine enough is asked for nothing")
+	h.check(SpacesimSurfaceMaps.next_bake_width(256, 384) == 384,
+		"and a request never overshoots what the law wants")
+	h.check(SpacesimSurfaceMaps.next_bake_width(0, 512) == 512,
+		"a body with no map yet starts at the floor")
 
 
 ## **A body that was never prepared has no map, and says so** — and nothing bakes inside a frame. A cache that

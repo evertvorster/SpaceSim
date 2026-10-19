@@ -92,13 +92,11 @@ const BELT_WIDTH := 0.08
 ## right before anything can be drawn, and the picture does not depend on the third digit.
 const RELIEF_FRACTION := 0.0014
 
-## The width a map is baked at before anything asks for better, and the width of the **absolute low-pass**
-## every distance-invariant reading is taken at (`coarse_lod()` is `log2(width / COARSE_WIDTH)`).
-##
-## **The second one is a rule, not a tuning**: mip N of a 1,024-wide map and mip N of an 8,192-wide map are
-## different low-passes, so a fixed mip index would move the coastline every time the map refined.
-const FLOOR_WIDTH := 256
-const COARSE_WIDTH := 1024
+## **There is no width constant here, and that is deliberate.** A map's widths belong to
+## `SpacesimSurfaceMaps` — the build width, the ceiling the display implies, and the rungs between them — so a
+## second copy of those numbers in the field could only drift from the one the ladder actually bakes at. Two
+## constants used to live here (`FLOOR_WIDTH`, `COARSE_WIDTH`) and **nothing read either**; they are gone rather
+## than left as a skeleton that looks like a decision.
 
 
 ## Every number the bake and the shader share, derived once by [method plan].

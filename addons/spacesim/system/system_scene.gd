@@ -479,7 +479,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	var light := _light_at(body)
 	var bands: Array = []
 	var entry: SpacesimSurfaceMaps.Entry = null
-	if body.content != null:
+	# **A star samples no height map**, so it gets no bake: `material_for` picks the material by kind, and a star's
+	# is `body_star.gdshader`, which has no `height_map` at all — so the bake would measure a field nothing draws.
+	# The test is on the kind because the kind is what chooses the material (`a star emits, everything else
+	# reflects`, the distinction that has been needed twice here), and naming the question is what stopped the
+	# last version of this bug (`d57eb39`).
+	if body.content != null and body.content.kind != SpacesimSystemBody.Kind.STAR:
 		body.surface_ocean_fraction = SpacesimSurfaceModel.sea_level_percentile(
 			body.content, _materials(), light.x, light.y
 		)
@@ -879,6 +884,12 @@ func update_lod(camera: Camera3D) -> void:
 	if pixel <= 0.0:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
+	# **The surface map's ceiling comes from the resolution the scene is being rendered at** — half the render
+	# width, rounded to a power of two — unless `surface.max_base_width` overrides it. Read per frame rather than
+	# cached: the setting exists to be moved **while flying**, to watch the cost move with it.
+	var surface_cap := SpacesimSurfaceMaps.base_max_width(
+		Vector2i(viewport.size), int(SpacesimSettings.get_value("surface.max_base_width"))
+	)
 	# **The interpolated eye**, because this runs once a drawn frame and `get_global_transform()` is
 	# only accurate to the most recent physics tick. It is the same transform the camera is drawn with,
 	# so the level chosen belongs to the frame on screen — see `game/main.gd::_update_view`.
@@ -911,9 +922,7 @@ func update_lod(camera: Camera3D) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_refine_surface_map(
-			body, distance, pixel, (observer - body.node.global_position).normalized()
-		)
+		_refine_surface_map(body, distance, pixel, surface_cap)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1034,33 +1043,25 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 ## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
 ## want more than the build map has. Called from `update_lod` for every drawn body.
 func _refine_surface_map(
-	body: SpacesimSceneBody, distance: float, pixel: float, eye_direction: Vector3
+	body: SpacesimSceneBody, distance: float, pixel: float, cap: int
 ) -> void:
 	if body.mesh_material == null or body.content == null:
 		return
 	if body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return
-	# **The request happens here** — a wider whole-body map, or a window over the cap the eye can see — and the
-	# entry already holds whatever has landed, so the draw below needs no separate publish step.
-	var chosen := _surface_maps.map_for(body.id, body.radius, distance, pixel, eye_direction)
+	# **The request happens here** — the next rung of the ladder when the law wants a wider map than is in hand —
+	# and the entry already holds whatever has landed, so the draw below needs no separate publish step.
+	var chosen := _surface_maps.map_for(body.id, body.radius, distance, pixel, cap)
 	if chosen.is_empty():
 		return
-	var entry := _surface_maps.map(body.id)
-	var window: Texture2D = null
-	var window_origin := Vector2.ZERO
-	var window_size := Vector2.ZERO
-	if entry != null and entry.window != null:
-		window = entry.window
-		window_origin = entry.window_origin
-		window_size = entry.window_size
 	SpacesimBodyRenderer.apply_surface_maps(
-		body.mesh_material, chosen["texture"], chosen["width"], window, window_origin, window_size
+		body.mesh_material, chosen["texture"], chosen["width"]
 	)
-	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a window
-	# that reached one and not the other would put a seam along every coastline inside it.
+	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a map
+	# that reached one and not the other would put a seam along every coastline.
 	if body.ocean_material != null:
 		SpacesimBodyRenderer.apply_surface_maps(
-			body.ocean_material, chosen["texture"], chosen["width"], window, window_origin, window_size
+			body.ocean_material, chosen["texture"], chosen["width"]
 		)
 
 

@@ -91,6 +91,12 @@ func _notification(what: int) -> void:
 
 ## **Ask for a wider map.** One request at a time; a request for a body that is already in flight is dropped,
 ## because by the time it lands the eye will have moved anyway and the next frame will ask again.
+##
+## **`uv_origin`/`uv_size` bake a sub-rectangle**, and they are kept deliberately even though the whole-body ladder
+## is the only caller today: the next rung of the map's resolution is *tiles over the cap the eye can see*, which
+## is exactly a sub-rectangle bake, and the dispatch already carries it. They are not dead arguments — they are the
+## pass's one remaining unused capability, and the window that used them was deleted because its *gate* was wrong
+## rather than because a sub-rectangle bake is.
 func request(
 	body_id: String, plan: SpacesimSurfaceField.Plan, width: int,
 	uv_origin: Vector2 = Vector2.ZERO, uv_size: Vector2 = Vector2.ONE

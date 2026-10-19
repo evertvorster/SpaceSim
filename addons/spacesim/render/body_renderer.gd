@@ -340,7 +340,7 @@ static func surface_material(
 		"field_amplitude", SpacesimSurfaceField.plan(body.id, body.radius).amplitude
 	)
 	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
-	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.MAP_WIDTH)
+	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
 	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
 	# different field from the map it extends. `detail_feature` starts at two texels of the map in hand.
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
@@ -348,7 +348,7 @@ static func surface_material(
 	material.set_shader_parameter("detail_gain", plan.gain)
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
 	material.set_shader_parameter(
-		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.MAP_WIDTH)
+		"detail_feature", 2.0 * TAU / float(SpacesimSurfaceMaps.BUILD_WIDTH)
 	)
 	material.set_shader_parameter("detail_octaves", DETAIL_OCTAVES)
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
@@ -393,7 +393,7 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("planet_radius", body.radius)
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	material.set_shader_parameter("field_amplitude", plan.amplitude)
-	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.MAP_WIDTH)
+	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
 	material.set_shader_parameter("wave_seed", plan.seed + 7331)
 	material.set_shader_parameter("wave_gain", plan.gain)
 	material.set_shader_parameter("wave_lacunarity", plan.lacunarity)
@@ -415,14 +415,14 @@ static func band_is_liquid(band: Dictionary) -> bool:
 ## **Publish a bake.** The texture and the sea level are set together and from one entry, because a sea level
 ## from one body and a map from another is a coastline in the wrong place that nothing would catch.
 ##
-## **Only the refining map is published**, and the coarse bake is not: the shader thresholds and colours from
-## whatever resolution it is handed, and the fixed-width map's job is the *measurement* (the quantiles the sea
-## level and the band edges come from), which happens on the host.
+## **Only the refining map is published**, and the build bake is not: the shader thresholds and colours from
+## whatever resolution it is handed, and the build map's job is the *measurement* (the quantiles the sea level
+## and the band edges come from), which happens on the host.
 ## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
-## second texture in the shader is a second resolution to keep in step with the picture.
+## second texture in the shader is a second resolution to keep in step with the picture. **The same reasoning
+## deleted the window** — the shader now samples exactly one height map, at whatever width the ladder has reached.
 static func apply_surface_maps(
-	material: Material, texture: Texture2D, width: int, window: Texture2D = null,
-	window_origin: Vector2 = Vector2.ZERO, window_size: Vector2 = Vector2.ZERO
+	material: Material, texture: Texture2D, width: int
 ) -> void:
 	if material == null or texture == null:
 		return
@@ -437,11 +437,3 @@ static func apply_surface_maps(
 		# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
 		# duplicate what the new map shows or leave a band of nothing between them.
 		surface.set_shader_parameter("detail_feature", 2.0 * TAU / float(maxi(width, 1)))
-	if surface.get_shader_parameter("window_map") != window:
-		surface.set_shader_parameter("window_map", window)
-		surface.set_shader_parameter("window_origin", window_origin)
-		# **A zero size is how "no window" is said**, and the shader reads it as such. The base map is what draws
-		# then, which is the layering rule: the window is an addition, never a substitution.
-		surface.set_shader_parameter(
-			"window_size", window_size if window != null else Vector2.ZERO
-		)
