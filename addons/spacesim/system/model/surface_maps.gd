@@ -270,12 +270,19 @@ func _reconcile_slots(body_id: String, wanted: Array) -> void:
 		var own: Slot = slot
 		if own.body_id == body_id:
 			placed["%d/%d/%d" % [own.level, own.x, own.y]] = true
-	# Nearest first — the walk emitted them in that order, and the budget is the table's own size.
+	# Nearest first — the walk emitted them in that order, and the budget leaves room for exactly this.
 	for tile in wanted:
 		var key := "%d/%d/%d" % [int(tile[0]), int(tile[1]), int(tile[2])]
 		if placed.has(key):
 			continue
 		var layer := _free_layer()
+		if layer < 0:
+			# **Required work outranks a retained fallback.** The reserve is meant to keep this from happening, but a
+			# table can still fill — a second body inside its own crossover, or a fast descent crossing two levels
+			# before the first one's children land — and the right casualty is an ancestor that is only being kept as
+			# a fallback, never the tile that is actually needed. Without this the walk silently stops placing, which
+			# is the pulse arriving by another route.
+			layer = _reclaim_layer(body_id, keep)
 		if layer < 0:
 			return
 		var slot := Slot.new()
@@ -331,6 +338,25 @@ func _release_tiles(body_id: String) -> bool:
 	# **Forget the eye state**, so the next approach walks at once rather than waiting for a tenth of the distance.
 	_tile_last.erase(body_id)
 	return freed and _republish_if_changed(body_id)
+
+
+## **Free a slot this body is only holding as a fallback**, and hand its layer back. The tiles worth sacrificing are
+## exactly the ones no longer in the selection — everything still wanted is in `requested` — so a reclaim never costs
+## a tile the eye is asking for.
+func _reclaim_layer(body_id: String, requested: Dictionary) -> int:
+	for index in _slots.size():
+		var slot: Variant = _slots[index]
+		if slot == null:
+			continue
+		var own: Slot = slot
+		if own.body_id != body_id:
+			continue
+		if requested.has("%d/%d/%d" % [own.level, own.x, own.y]):
+			continue
+		_slots[index] = null
+		_bump_tiles(body_id)
+		return index
+	return -1
 
 
 ## **Ask the pass for one slot that has no tiles in it yet.** One request per call, because the pass takes one at a

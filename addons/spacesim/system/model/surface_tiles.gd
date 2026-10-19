@@ -37,12 +37,25 @@ extends RefCounted
 ## `MAX_TILES` of them, so the whole tiled raster is 16 MiB whatever the eye does.
 const TILE_TEXELS := 512
 
-## **The table the shader can hold, and therefore the walk's budget.** At 32 tiles the near field is
-## 8 Mtexel — enough to be a texel per pixel over a few hundred kilometres of ground and not enough over a few
-## thousand at low altitude, where the shader's own detail ladder carries what the map cannot. That is the
-## intended split, not a shortfall: a whole-body tiling of the ground under a 10 km descent would be some
-## 700 Mtexel.
+## **The table the shader can hold.** 32 tiles is 8 Mtexel of near field — enough to be a texel per pixel over a few
+## hundred kilometres of ground and not enough over a few thousand at low altitude, where the shader's own detail
+## ladder carries what the map cannot. That is the intended split, not a shortfall: a whole-body tiling of the ground
+## under a 10 km descent would be some 700 Mtexel.
 const MAX_TILES := 32
+
+## **How many of those the walk may select, and it is deliberately fewer than the table holds.** A selection change
+## has to keep the tiles it is *replacing* until their children land — that is the fix for the pulse — and those two
+## sets have to fit at once. With the budget equal to the table there is no room for both, so a level change cannot
+## place anything, the regions that needed refining fall back to the whole-body map, and the ground **softens then
+## sharpens**: exactly what Evert saw on the F4/F6 flight, *"a couple of cases where a texture refinement was drawn,
+## and then reverted"*.
+##
+## Eight spare layers is a quarter of the table: enough to hold a whole level's worth of ancestors at a time, and the
+## loss of eight tiles of near field is not visible against the budget's own truncation.
+const RESERVE := 8
+
+## The walk's default budget: the table, less the reserve that makes replaced tiles survivable.
+const TILE_BUDGET := MAX_TILES - RESERVE
 
 ## How deep the uv tree may go before the walk stops on its own. `2^12` of the map in each axis is a texel
 ## finer than any display can resolve at the altitudes the budget allows, so this is a guard rather than a
@@ -85,7 +98,7 @@ static func direction_of(u: float, v: float) -> Vector3:
 ## a pixel falls back to when the budget stopped the walk above it.
 static func select(
 	radius: float, distance: float, eye_direction: Vector3, pixel_angle: float,
-	base_width: int, budget: int = MAX_TILES
+	base_width: int, budget: int = TILE_BUDGET
 ) -> Array:
 	var tiles: Array = []
 	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or budget <= 0:

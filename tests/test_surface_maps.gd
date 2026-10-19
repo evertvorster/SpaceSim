@@ -188,6 +188,30 @@ func _test_the_near_field_policy(h) -> void:
 			still_kept = true
 	h.check(not still_kept, "and let go once every tile inside it is ready")
 
+	# **A full table must never starve a tile the eye is asking for.** The reserve makes this rare, but a fast descent
+	# or a second body can fill it, and the failure mode is silent: the walk stops placing, and the regions that
+	# needed refining fall back to the whole-body map — the pulse, arriving by another route.
+	var full := SpacesimSurfaceMaps.new()
+	for index in SpacesimSurfaceTiles.MAX_TILES:
+		var keeper := SpacesimSurfaceMaps.Slot.new()
+		keeper.body_id = "planet:earth"
+		keeper.level = 6
+		keeper.x = index
+		keeper.y = 0
+		keeper.layer = index
+		keeper.ready = true
+		full._slots.append(keeper)
+	var wanted_fresh: Array = []
+	for x in range(0, 4):
+		wanted_fresh.append([8, x, 0])
+	full._reconcile_slots("planet:earth", wanted_fresh)
+	var placed_fresh := 0
+	for slot in full._slots:
+		if slot != null and slot.level == 8:
+			placed_fresh += 1
+	h.check(placed_fresh == 4,
+		"a full table still places every tile the eye asks for, by reclaiming fallbacks (%d of 4)" % placed_fresh)
+
 	# A tile the eye has left is not an ancestor of anything selected, so it goes immediately.
 	var lonely := SpacesimSurfaceMaps.Slot.new()
 	lonely.body_id = "planet:earth"
