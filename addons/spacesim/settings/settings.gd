@@ -156,6 +156,10 @@ const REGISTRY := {
 	"bindings.detail_down": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.detail_up": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding"},
+	## Cycles the surface debug views: the lighting term (`N.L`), the normal, a plain white surface. **A key
+	## rather than a screenshot rig**, because a rig frame goes through the exposure meter and a metered frame
+	## cannot answer a question about lighting — it scales whatever is there to middle grey.
+	"bindings.surface_debug_toggle": {"default": "K", "scope": Scope.PLAYER, "validator": "key_binding"},
 }
 
 ## Emitted after a value changes, with the value that now stands.

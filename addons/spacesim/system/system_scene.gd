@@ -879,6 +879,15 @@ func update_lod(camera: Camera3D) -> void:
 		if body.mesh == null:
 			continue
 		_publish_surface_maps(body, distance, pixel)
+		# **The sun's direction, for the debug views only.** Cheap, and only while a view is on: it is the one
+		# quantity a lit picture cannot show, and the views need it against the same normal the shading uses.
+		if surface_debug != 0 and body.mesh_material is ShaderMaterial:
+			var star_body := star()
+			if star_body != null and star_body.node != null:
+				var to_star := (star_body.node.global_position - body.node.global_position).normalized()
+				var surface := body.mesh_material as ShaderMaterial
+				surface.set_shader_parameter("debug_mode", surface_debug)
+				surface.set_shader_parameter("sun_direction", to_star)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1005,6 +1014,21 @@ func _publish_surface_maps(body: SpacesimSceneBody, distance: float, pixel: floa
 	)
 	surface.set_shader_parameter("sea_level", entry.value_at(body.surface_ocean_fraction))
 	SpacesimBodyRenderer.apply_surface_maps(surface, entry)
+
+
+## **Which surface debug view is on**, 0 for none — set by the game's key and published to every surface
+## material. The views exist because a *lit* picture cannot answer questions about lighting: 1 shows the
+## quantity Godot's diffuse uses (`N.L`), 2 shows the normal on the sphere whose shading is in question, and 3
+## draws a plain white Lambertian so the light can be judged with no texture in the way.
+var surface_debug := 0
+
+
+## Show one of the surface debug views on every body, or none.
+func set_surface_debug(mode: int) -> void:
+	surface_debug = clampi(mode, 0, 3)
+	for body in bodies:
+		if body.mesh_material is ShaderMaterial:
+			(body.mesh_material as ShaderMaterial).set_shader_parameter("debug_mode", surface_debug)
 
 
 ## The surface map cache, for the probes that drive it and for anything that wants to ask what was measured.
