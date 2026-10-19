@@ -351,6 +351,19 @@ func _aim_zone_under(subject: Node3D, frame: SpacesimFrame) -> void:
 	var keep := subject.global_transform
 	place_landing_zone(body, keep.origin)
 	subject.global_transform = keep
+	# **And reset the interpolator AGAIN, because the subject's PARENT moved — not the subject.**
+	#
+	# This is the same trap `SpacesimFrameTree.enter_frame` documents, one step further on: it resets the
+	# interpolation when the observer is reparented, and then this function moves the frame the observer is
+	# now a child of. The pose is written back so nothing has moved, but the *interpolator* was reset
+	# against the frame's old transform, so the pose it holds is the one from before the move. With physics
+	# interpolation on, the renderer then draws the ship — and the camera hanging off it — **gliding** from
+	# where the frame used to be, which on the first landing is the build-time landing zone, a hemisphere
+	# away. A frame rendered from there has no ground in it at all: the metre's mean collapses, it clamps to
+	# `MAX_MULTIPLIER`, and a 32-stop correction in one frame is the white flash Evert sees at 1.7 km, at
+	# exactly the moment the frame changes to `surface` — and only the first time, because afterwards the
+	# zone is already under the ship and the move is nothing.
+	subject.reset_physics_interpolation()
 
 
 ## Put the observer where a save says it was, and answer whether the system still had the frame that
