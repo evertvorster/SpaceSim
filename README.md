@@ -14,11 +14,25 @@ saved, loaded and browsed, a body whose surface **subdivides as you approach it*
 the real sky above Sol, from the HYG catalogue, with an exposure that can be tuned to the observer
 rather than metered from the frame.
 
-**The air and the clouds are not drawn.** Both were shells, and both were deleted in the 2026-10-19 reset
-rather than switched off — the shells came before the subdivision, so they were built around a surface that
-did not refine and every later fault came from that. The order now is: finish the subdivision, then surface
-textures on it, then the air as a volumetric march, then the clouds. The derivation of both is intact and
-tested; the mechanisms are specs in the vault, not code. There is no terrain, no physics and no simulation.
+**The surface is derived, not authored.** What a body's surface *is* comes from the phase of its
+composition — a Voronoi plate partition with each plate standing or sagging, a region term slower than a plate
+so one continent stands higher than another, structure inside each plate, and mountain belts where plates meet.
+The field is baked to an `R16F` map on the GPU, refined on the render thread as the eye approaches, and the near
+field is a quadtree of tiles. Below the map's texel a **detail ladder continues the field's own octaves** — the
+same function, evaluated deeper — and the sea is its own layer, coplanar with the land and complementary to it by
+one threshold.
+
+**The air is one volumetric march over the whole frame.** A `CompositorEffect` at `POST_TRANSPARENT`, before the
+exposure pass, marching one ray per pixel with sixteen samples along it and eight toward the sun, light scattered
+by the species mix the body is made of. It draws the air over a planet's *disk* from space, the limb, and the sky
+from underneath, because it owns every pixel rather than a shell that can only be where the geometry is. Measured
+in flight the same day the surface landed: **339 fps / 2.9 ms**, from 423 m inside it.
+
+**The clouds are not drawn.** The map, its percentile threshold and a reflectance ramp fitted to the measured mean
+all exist and are tested, and the direction is a **baked deck for the far regime** composited inside the air pass
+— which stands behind the switch argument in a vault doc rather than in the code. The near regime (parallax, a
+silver lining, an underside) is deliberately unbuilt. There is no terrain displacement, no physics and no
+simulation.
 
 **The star data is third-party and is licensed separately from the code.** `addons/spacesim/sky/`
 holds HYG v4.4 (Hipparcos + Yale Bright Star + Gliese) under **CC BY-SA 4.0**, which is compatible
@@ -46,7 +60,8 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
     content/       the authored content as Godot Resources — bodies, orbits, layers, species
     model/         the derivation: what a body's numbers are, from what it is made of
   lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
-  render/          what a body looks like: the surface shader, the patch quadtree, the level law
+  render/          what is drawn: the surface, the ocean, the patch quadtree, the level law, the
+                   render-thread map bake, and the air as one volumetric march over the frame
   player/          the player's own state (attributes and assets) and the screen for it
   navigation/      the overlay: a ring at each object, a short line, and its label, placed
                    so labels never overlap and a moon yields to its planet only where the two
