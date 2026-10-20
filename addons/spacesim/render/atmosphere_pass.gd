@@ -584,9 +584,23 @@ void main() {
 		float eye_share = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
-		float tau = params.deck.y * min(eye_altitude, params.deck.w * eye_share);
-		L += T * params.deck_radiance.rgb * (1.0 - exp(-tau)) * params.radii.w;
-		T *= 1.0 - (1.0 - exp(-tau)) * params.radii.w;
+		float column = params.deck.w * eye_share;
+		// **The opacity of the layer where the player is** — the number this ramps up TO, and it is already
+		// known: the column's own depth through the layer's extinction. A thick column is near-opaque and a
+		// wisp is nearly clear, so the map's brightness decides how far you can see.
+		// **A ramp at each boundary and full inside**, rather than a linear build from the base. Evert, 2026-10-20:
+		// *"Running up through thick clouds, I expected a quick ramp to thick fog, and a ramp down when I punch
+		// out of the fog. We already know the exact amount of opacity of the cloud layer where the player is we
+		// should ramp up to that, and down from it while we fly through the cloud layer."* The edge is a fifth
+		// of the column, and it is a FRACTION rather than a distance so a thin wisp ramps as quickly as a tower.
+		float edge = 0.2 * column;
+		float ramp = 0.0;
+		if (column > 1.0) {
+			ramp = smoothstep(0.0, edge, eye_altitude) * smoothstep(0.0, edge, column - eye_altitude);
+		}
+		float amount = (1.0 - exp(-params.deck.y * column)) * ramp * params.radii.w;
+		L += T * params.deck_radiance.rgb * amount;
+		T *= 1.0 - amount;
 	}
 
 	// The band's two spans, clamped to the march and sorted: `hi0 <= lo1` always holds.
