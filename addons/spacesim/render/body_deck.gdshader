@@ -214,9 +214,13 @@ void fragment() {
 	float covered = smoothstep(threshold - softness, threshold + softness, field);
 	float thickness = clamp((field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
 
-	// **The slant path.** `to_eye` is the direction out of the slab, so its cosine against the normal is
-	// `mu` — 1 at the sub-solar point, 0 at the limb.
-	float mu = clamp(dot(p, to_eye), 0.03, 1.0);
+	// **The slant path, and it must be the UNSIGNED cosine.** `to_eye` is the direction from this point to the
+	// eye, so from outside the slab `dot(p, to_eye)` is the cosine of the view zenith — but from INSIDE the
+	// sphere the surface being drawn is the far side, `to_eye` points back inward, and the dot product is
+	// negative. Clamped at 0.03 that drove every texel to full opacity and the deck became a smooth white slab
+	// with the map's structure invisible inside it — Evert's two screenshots, top and bottom of one cloud.
+	// The slab is crossed at the same angle from either face, so the magnitude is the right cosine.
+	float mu = clamp(abs(dot(p, to_eye)), 0.03, 1.0);
 	// **Opacity is `R(tau)`, the complement of what the base transmits.** The old form was a reflectance ramp —
 	// the column's normalised thickness — which saturated at 1, so this face hid everything while the base let a
 	// fifth of the sky through at the same texel. Evert: *"there is a lot of alpha applied that seems to be
