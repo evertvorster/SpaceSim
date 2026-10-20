@@ -36,6 +36,20 @@ uniform float deck_height = 0.0;
 // The star's direction in the body's own frame, which is the frame `unit_position` is in.
 uniform vec3 deck_sun = vec3(0.0, 1.0, 0.0);
 
+// **How dark a shadow is allowed to get**, as the floor on the light it leaves: `1.0` is no shadow, `0.0` is
+// the physical transmittance with nothing added back.
+//
+// The engine gives one `AO` value, and it drives **both** the ambient and the direct light, so "a shadow does
+// not remove the ambient" cannot be said by writing two numbers — it has to be said as a floor. Evert,
+// 2026-10-20: *"when you are in the shadow of a cloud, there is usually still plenty of ambient light lighting
+// the scene."* He is right, and the physical reason is that a shadow is filled back in by multiple scattering —
+// the cloud's own base is a bright diffuse source over your head — which nothing here models, because the
+// ambient is a constant rather than a sky probe.
+//
+// **The upgrade path is written down rather than implied**: when the lighting plan gives the ambient an actual
+// sky to come from, this floor should go and the ambient should simply be lit by what is above it.
+uniform float deck_shadow_floor : hint_range(0.0, 1.0) = 1.0;
+
 // **The deck's detail ladder, so the shadow is the image of the SAME field the cloud draws.** These are the
 // deck's own numbers, published beside the map: a shadow that sampled only the map would be blotchy where the
 // cloud is whispy, because the whispy detail below the map's texel is this ladder — six octaves of the same
@@ -59,8 +73,7 @@ vec2 deck_shadow_uv(vec3 direction) {
 	return vec2(0.5 + atan(direction.z, direction.x) / TAU, 0.5 - asin(clamp(direction.y, -1.0, 1.0)) / PI);
 }
 
-
-// How much of the star's light reaches a point whose unit direction is `p`.
+// How much of the star's light reaches a point whose unit direction is `p`: `exp(-tau · thickness / mu)`.
 float deck_transmittance(vec3 p, float planet_radius) {
     float mu = dot(p, deck_sun);
     // The star is at or below this point's horizon: there is no direct light to shadow.
@@ -93,4 +106,11 @@ float deck_transmittance(vec3 p, float planet_radius) {
         (field - deck_threshold) / max(1.0 - deck_threshold, 1.0e-4), 0.0, 1.0
     );
     return exp(-deck_tau * thickness / zenith);
+}
+
+// How much of the star's light reaches a point whose unit direction is `p`, **after the floor** — the number
+// the caller writes into `AO`. The transmittance itself is the return of `deck_transmittance()` below, kept
+// separate so the concession and the physics are not the same expression.
+float deck_shadow_factor(vec3 p, float planet_radius) {
+	return mix(deck_shadow_floor, 1.0, deck_transmittance(p, planet_radius));
 }

@@ -188,7 +188,7 @@ void fragment() {
 	// `AO`/`AO_LIGHT_AFFECT` because the engine turns those into a *direct-light* occlusion before the light
 	// loop, which is exactly a cloud's shadow (and needs no BRDF of our own). See `deck_shadow.gdshaderinc`.
 	if (deck_shadow_present()) {
-		AO = deck_transmittance(normalize(unit_position), planet_radius);
+		AO = deck_shadow_factor(normalize(unit_position), planet_radius);
 		AO_LIGHT_AFFECT = 1.0;
 	}
 	SPECULAR = land_specular;

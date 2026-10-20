@@ -85,6 +85,21 @@ const OCEAN_TONE_OCTAVES := 3
 ## A few per cent of the water's colour — enough to read as water moving, not enough to be paint.
 const OCEAN_TONE_VARIATION := 0.12
 
+## **How dark a cloud's shadow is allowed to get** — the floor on the light it leaves, so `1.0` is no shadow and
+## `0.0` is the physical transmittance with nothing given back.
+##
+## **The engine gives one `AO` value and it drives both the ambient and the direct light**, so "a shadow keeps
+## the ambient" cannot be written as two numbers — it is a floor or it is a `light()` override, and the override
+## costs the PBR the surface was tuned with. Evert, 2026-10-20: *"when you are in the shadow of a cloud, there is
+## usually still plenty of ambient light."* The physical reason is multiple scattering: a cloud's base is a
+## bright diffuse source overhead, and nothing here models it — the ambient is a *constant*, not a sky probe.
+##
+## **0.45**: a shadow removes a little over half the light, which reads as shade rather than as night, and the
+## contrast against full sun is still unmistakable. A look number, and one that wants a flight rather than a
+## calculation. When the lighting plan gives the ambient an actual sky, this floor goes and the ambient is
+## simply lit by what is above it.
+const DECK_SHADOW_FLOOR := 0.45
+
 ## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
 ## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
 ## honest and the picture is flat. This is the named concession, and it is a *uniform* rather than a constant
@@ -481,6 +496,9 @@ static func surface_material(
 	material.set_shader_parameter("deck_tau", 0.0)
 	material.set_shader_parameter("deck_height", 0.0)
 	material.set_shader_parameter("deck_threshold", 1.0)
+	# **Floor 1.0 means no shadow**, which is what a material with no deck above it should say — the gate is
+	# `deck_tau > 0`, and this makes the arithmetic agree with it rather than relying on the gate alone.
+	material.set_shader_parameter("deck_shadow_floor", 1.0)
 	return material
 
 
@@ -535,6 +553,9 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("deck_tau", 0.0)
 	material.set_shader_parameter("deck_height", 0.0)
 	material.set_shader_parameter("deck_threshold", 1.0)
+	# **Floor 1.0 means no shadow**, which is what a material with no deck above it should say — the gate is
+	# `deck_tau > 0`, and this makes the arithmetic agree with it rather than relying on the gate alone.
+	material.set_shader_parameter("deck_shadow_floor", 1.0)
 	return material
 
 
@@ -727,6 +748,7 @@ static func apply_deck_shadow(
 	surface.set_shader_parameter("deck_detail_seed", detail_seed)
 	surface.set_shader_parameter("deck_detail_feature", detail_feature)
 	surface.set_shader_parameter("deck_detail_strength", DECK_DETAIL_STRENGTH)
+	surface.set_shader_parameter("deck_shadow_floor", DECK_SHADOW_FLOOR)
 
 
 ## **Where the star is, in the body's frame** — the direction the shadow is offset along, per frame, because it

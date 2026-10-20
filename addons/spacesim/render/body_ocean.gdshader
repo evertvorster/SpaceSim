@@ -142,7 +142,7 @@ void fragment() {
 	// **The deck's shadow, on the sea as on the land** — the same transmittance, the same uniform, one law in
 	// `deck_shadow.gdshaderinc`. A shadowed shore beside an unshadowed sea would be worse than no shadow.
 	if (deck_shadow_present()) {
-		AO = deck_transmittance(normalize(unit_position), planet_radius);
+		AO = deck_shadow_factor(normalize(unit_position), planet_radius);
 		AO_LIGHT_AFFECT = 1.0;
 	}
 	SPECULAR = specular_value;

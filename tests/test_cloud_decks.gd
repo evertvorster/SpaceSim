@@ -232,6 +232,12 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 			1.0)
 		h.check_near(float(material.get_shader_parameter("deck_threshold")), 0.843,
 			"and the same percentile the cloud is drawn with", 1.0e-9)
+		# **A shadow does not remove the ambient**, and with one `AO` value driving both the ambient and the
+		# direct light the only way to say that is a floor: below `DECK_SHADOW_FLOOR` the light stops falling.
+		h.check_near(float(material.get_shader_parameter("deck_shadow_floor")),
+			SpacesimBodyRenderer.DECK_SHADOW_FLOOR,
+			"lit from a floor of %.2f, so shade is not night" % SpacesimBodyRenderer.DECK_SHADOW_FLOOR,
+			1.0e-9)
 
 	# **And a REFINEMENT reaches it.** The deck's map is republished on every rung, and the shadow's copy has to
 	# move with it or the shadow stays at the width of the first bake while the cloud sharpens — which is
@@ -261,6 +267,8 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	if luna != null and luna.mesh_material != null:
 		h.check_near(float((luna.mesh_material as ShaderMaterial).get_shader_parameter("deck_tau")), 0.0,
 			"while an airless body has no shadow at all", 1.0e-9)
+		h.check_near(float((luna.mesh_material as ShaderMaterial).get_shader_parameter("deck_shadow_floor")),
+			1.0, "and a floor of 1.0, which is no shadow by arithmetic as well as by gate", 1.0e-9)
 
 
 ## **The ramp gain is what keeps the light budget honest**, and its ceiling is real: with the gain set from
