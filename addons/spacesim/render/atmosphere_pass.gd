@@ -55,6 +55,11 @@ const BLOCK := 8
 var _built := false
 var _status := "not built"
 var _frames := 0
+## **How many per-frame uniform sets are alive**, which must return to zero: the set is rebuilt each frame
+## because the colour texture's RID can change with the render target, and a set that is created and not
+## freed is a RID gone from the frame device's allocator. Reported at teardown rather than watched, so the
+## cost is one integer and the check costs nothing per frame.
+var _sets_live := 0
 
 var _shader: RID
 var _pipeline: RID
@@ -78,12 +83,24 @@ func _init() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE and _built:
-		var rd := RenderingServer.get_rendering_device()
-		if rd != null:
-			for rid in [_pipeline, _shader, _params]:
-				if (rid as RID).is_valid():
-					rd.free_rid(rid)
+	if what != NOTIFICATION_PREDELETE or not _built:
+		return
+	# **A per-frame allocation that is not per-frame freed is the bug this pass had**, and it is worth
+	# shouting about rather than leaving as a slow death: one set a frame exhausts the frame device's RID
+	# allocator in about fifteen minutes of flight, and the errors appear in *other* passes — the exposure
+	# pass first, then the 2D renderer, which is where Evert saw it (2026-10-20). Fixing it took a minute;
+	# finding it took two flights, because the traceback named victims.
+	if _sets_live != 0:
+		printerr(
+			"ERROR: SpacesimAtmospherePass: %d uniform set(s) never freed — a per-frame set must be freed "
+			% _sets_live
+			+ "per frame, or the RID allocator fills and an unrelated pass fails"
+		)
+	var rd := RenderingServer.get_rendering_device()
+	if rd != null:
+		for rid in [_pipeline, _shader, _params]:
+			if (rid as RID).is_valid():
+				rd.free_rid(rid)
 
 
 ## What happened, for a probe or a test to read. Nothing here is authoritative about the picture; it is the
@@ -179,6 +196,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	if not set.is_valid():
 		_status = "the uniform set could not be built"
 		return
+	_sets_live += 1
 	rd.buffer_update(_params, 0, PARAM_FLOATS * 4, _values.to_byte_array())
 	var list := rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(list, _pipeline)
@@ -187,6 +205,13 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		list, ceili(size.x / float(BLOCK)), ceili(size.y / float(BLOCK)), 1
 	)
 	rd.compute_list_end()
+	# **Freed here, and this is not tidiness.** The set is per frame — the colour texture's RID can change
+	# with the render target — and `free_rid` is safe while the compute list is still in flight: the device
+	# pushes everything so it is disposed of when this frame index is processed next
+	# (`rendering_device.cpp`). The exposure pass and `SpacesimCloudGpu` rely on exactly the same guarantee;
+	# this pass was the one place that created a set and never freed it.
+	rd.free_rid(set)
+	_sets_live -= 1
 	_frames += 1
 
 

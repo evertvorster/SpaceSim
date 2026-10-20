@@ -284,6 +284,11 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	var apply_set := _uniform_set(rd, _shader_apply, [color, _state], [false, true])
 	if not sample_set.is_valid() or not finalize_set.is_valid() or not apply_set.is_valid():
 		_status = "a uniform set could not be built"
+		# **Whatever was built still has to go back.** The early return is the failure path, which is exactly
+		# where a leak is easiest to leave: an allocator that is already short is the one place it gets worse.
+		for set in [sample_set, finalize_set, apply_set]:
+			if (set as RID).is_valid():
+				rd.free_rid(set)
 		return
 
 	var list := rd.compute_list_begin()
