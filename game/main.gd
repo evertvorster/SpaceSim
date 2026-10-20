@@ -502,7 +502,7 @@ func _update_atmosphere_volume(observer: Vector3) -> void:
 		return
 	_atmosphere_pass.prepare(
 		_camera, air["centre"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
-		air["sun_direction"], air["air"], 1.0
+		air["sun_direction"], air["air"], 1.0, air.get("deck", {})
 	)
 
 

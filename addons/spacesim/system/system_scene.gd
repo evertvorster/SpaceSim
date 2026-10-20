@@ -677,8 +677,46 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 			"atmosphere_radius": body.radius + body.sky_top,
 			"sun_direction": sun,
 			"air": body.air,
+			"deck": near_deck(body),
 		}
 	return best
+
+
+## **The deck the near regime can draw, as `SpacesimAtmospherePass` needs it** — or `{}` when there is
+## nothing to draw, which is the honest answer for a body with no deck, a layer with no thickness, or a map
+## that has not landed.
+##
+## **The material is the source, not a second copy of it.** Threshold, gain and colour are what the shell is
+## drawing with this frame, fitted to the map it is sampling, so reading them back is what stops the slab and
+## the shell from disagreeing about the same cloud. The extinction comes from the same law the test asserts
+## (`SpacesimCloudBand.extinction`) over the air's own derived scale height.
+##
+## **The top layer only, and that is this rung's named limit.** The near regime is live inside or just under
+## the top deck, where a lower deck is seen through the gaps of the one above — so the stack arrives with a
+## sampler array and a per-deck loop, not before.
+func near_deck(body: SpacesimSceneBody) -> Dictionary:
+	if body == null or body.decks.is_empty() or body.air.is_empty():
+		return {}
+	var deck: SpacesimSceneBody.Deck = body.decks[0]
+	if deck.material == null or deck.node == null or deck.thickness <= 0.0:
+		return {}
+	var cover = deck.material.get_shader_parameter("cover")
+	if cover == null or deck.published_width <= 0:
+		return {}
+	var palette: Color = deck.material.get_shader_parameter("cloud_color")
+	var gain := float(deck.material.get_shader_parameter("ramp_gain"))
+	return {
+		"base_radius": body.radius + deck.height,
+		"top_radius": body.radius + deck.height + deck.thickness,
+		"extinction": SpacesimCloudBand.extinction(
+			deck.optical_depth, float(body.air.get("rayleigh_scale_height", 0.0))
+		),
+		"threshold": float(deck.material.get_shader_parameter("threshold")),
+		"column_height": deck.thickness,
+		"radiance": Vector3(palette.r, palette.g, palette.b) * gain,
+		"texture": cover,
+		"basis": deck.node.global_transform.basis,
+	}
 
 
 func _derive_air(body: SpacesimSceneBody) -> void:
@@ -1248,6 +1286,7 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		sun = (star_body.position - body.position).normalized()
 	for material in [body.mesh_material, body.ocean_material]:
 		SpacesimBodyRenderer.face_surface_star(material, sun)
+	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
 		var top_radius := body.radius + deck.height + deck.thickness
 		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0))
@@ -1260,6 +1299,11 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		if width == deck.published_width:
 			continue
 		deck.published_width = width
+		# **The shell hands over only once there is a map to hand over TO.** The pass draws the deck as a slab
+		# from `near_deck()`, which answers nothing until a texture exists — so a bake still in flight, or a body
+		# the field has nothing for, leaves the shell drawing the whole deck as it does today. A refinement lands
+		# over the coarse thing rather than instead of it.
+		deck.material.set_shader_parameter("near_weight", 0.0 if width <= 0 else 1.0)
 		if texture == null or width <= 0:
 			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
 			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world
@@ -1270,7 +1314,7 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			)
 			# **A uniform veil casts a uniform shadow**: a one-texel white map with `threshold = 0` is a single
 			# thickness everywhere, which is what a deck the model calls FEATURELESS actually is.
-			if deck.index == 0:
+			if deck == shadowing:
 				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, 0)
 			continue
 		# **Which mean the gain is fitted to is the layer's own path**: a tau deck's alpha is the exponential,
@@ -1284,13 +1328,35 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		SpacesimBodyRenderer.apply_cloud_map(
 			deck.material, texture, width, threshold, gain.value, 1.0
 		)
-		if deck.index == 0:
+		if deck == shadowing:
 			_publish_deck_shadow(body, deck, texture, threshold, width)
 
 
-## **The deck above the ground is the one that shadows it.** Only the highest layer publishes a shadow, and it
-## goes to the land and the sea together — a shadow that reached one and not the other would put a line down
-## every coastline, the same failure the sea level already taught.
+## **The deck nearest the ground is the one that shadows it** — the LOWEST layer, not the highest.
+##
+## Evert, 2026-10-20: *"only the lowest deck should be casting shadows… the deck closest to the planet will
+## have the sharpest defined shadows."* A star is not a point: it subtends an angle, so a shadow's edge is a
+## penumbra that widens with the distance between the casting layer and the ground. The lever arm is
+## `height · tan(zenith)`, so a deck a few kilometres up smears every edge by a few kilometres while the deck
+## just overhead barely smears it at all. On Earth, with one deck, this changes nothing; it is the multi-deck
+## case it is written for.
+##
+## **Chosen by radius rather than by position in the stack**, because the rule is "closest to the planet" and
+## saying that directly cannot drift from how the stack happens to be ordered.
+func _shadowing_deck(body: SpacesimSceneBody) -> SpacesimSceneBody.Deck:
+	var lowest: SpacesimSceneBody.Deck = null
+	var lowest_top := INF
+	for deck in body.decks:
+		var top := deck.height + deck.thickness
+		if top < lowest_top:
+			lowest_top = top
+			lowest = deck
+	return lowest
+
+
+## **One shadow, from the deck nearest the ground**, and it goes to the land and the sea together — a shadow
+## that reached one and not the other would put a line down every coastline, the same failure the sea level
+## already taught.
 ##
 ## The lever arm is the deck's **top** above the surface: a shadow's offset is `height · tan(zenith)`, and
 ## using the base would put every shadow a slab's thickness too close to its cloud.

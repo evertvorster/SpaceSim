@@ -64,15 +64,33 @@ var _sets_live := 0
 var _shader: RID
 var _pipeline: RID
 var _params: RID
+## **The sampler and the fallback texel.** A combined image sampler needs both, and the set is rebuilt every
+## frame because the deck's map is replaced when it refines — so a texture that is not there yet has to be a
+## real one, not a null RID. This is the same class of trap as the per-frame uniform set: an invalid id in a
+## set fails the whole dispatch, and the failure looks like "the pass drew nothing".
+var _sampler: RID
+var _white: ImageTexture
+## The deck's map for this frame, or null when the near regime is not live — the callback turns it into a
+## uniform id and falls back to `_white` so the set is always complete.
+var _deck_texture: Texture2D
 
 ## The per-frame numbers, in the order the shader's `Params` block declares them. Written as one buffer
 ## update rather than as push constants, because a push-constant block is only 128 bytes.
 ##
 ##    0..3   eye_offset          4..7   sun_direction       8..11  rayleigh
 ##   12..15  absorption          16..19 mie                20..23  frame (size, tan)
-##   24..27  radii (planet, top) — zw free for the cloud volume
+##   24..27  radii (planet, atmosphere top, deck top, deck weight)
+##   28..31  deck  (base radius, extinction 1/m, threshold, full column height)
+##   32..35  deck radiance (xyz)
+##   36..47  view -> deck model space, as three vec4 columns
+##
+## **The deck is ONE layer, the top one, and that is a named limit rather than an oversight.** The near
+## regime is only live inside or just under the top deck, where a lower deck is seen through the gaps of the
+## one above it — so the stack belongs in the rung after this one, with a sampler array and a per-deck loop.
+## Until then a body with two decks (Jupiter, Saturn) draws its near regime as its top deck alone, and the
+## shell still draws both from above.
 var _values := PackedFloat32Array()
-const PARAM_FLOATS := 28
+const PARAM_FLOATS := 48
 
 
 func _init() -> void:
@@ -98,7 +116,7 @@ func _notification(what: int) -> void:
 		)
 	var rd := RenderingServer.get_rendering_device()
 	if rd != null:
-		for rid in [_pipeline, _shader, _params]:
+		for rid in [_pipeline, _shader, _params, _sampler]:
 			if (rid as RID).is_valid():
 				rd.free_rid(rid)
 
@@ -119,7 +137,7 @@ func status() -> String:
 ## shader takes its exit on the first instruction.
 func prepare(
 	camera: Camera3D, body_centre_world: Vector3, planet_radius: float, atmosphere_radius: float,
-	sun_direction_world: Vector3, air: Dictionary, blend: float
+	sun_direction_world: Vector3, air: Dictionary, blend: float, deck: Dictionary = {}
 ) -> void:
 	if camera == null:
 		blend = 0.0
@@ -160,6 +178,45 @@ func prepare(
 	# No air means no march: the shader exits on the blend test before anything else is read.
 	_values[24] = planet_radius
 	_values[25] = atmosphere_radius
+	# **The deck, as one slab on the same ray.** The weight is the handover and it is the exact complement of
+	# the one the shell applies — 1 below the base, 0 at the top, `smoothstep` across the slab's own
+	# thickness — so between them the deck is drawn once and never twice. Both sides derive the fade from the
+	# deck's own two radii, so there is no constant to keep in step.
+	#
+	# **A deck with no map is no deck here.** The publish only hands over once a texture exists, and a bake
+	# that is still in flight leaves the shell drawing on its own — a refinement lands *over* the coarse
+	# thing and never instead of it.
+	if not deck.is_empty():
+		var base_radius: float = deck.get("base_radius", 0.0)
+		var top_radius: float = deck.get("top_radius", 0.0)
+		var texture: Texture2D = deck.get("texture", null)
+		if texture != null and top_radius > base_radius:
+			var eye_radius := (view.origin - body_centre_world).length()
+			_values[26] = top_radius
+			_values[27] = 1.0 - smoothstep(base_radius, top_radius, eye_radius)
+			_values[28] = base_radius
+			_values[29] = float(deck.get("extinction", 0.0))
+			_values[30] = float(deck.get("threshold", 0.0))
+			_values[31] = float(deck.get("column_height", 0.0))
+			var radiance: Vector3 = deck.get("radiance", Vector3.ZERO)
+			_values[32] = radiance.x
+			_values[33] = radiance.y
+			_values[34] = radiance.z
+			# **View space to the deck's own model space**, done here because a `Basis` is double and a mat3 in
+			# the shader is not. The map is body-fixed — it is the same one the mesh samples — so a march that
+			# ignored the body's rotation would draw a different cloud from the one the shell draws.
+			var body_basis: Basis = deck.get("basis", Basis.IDENTITY)
+			var to_model := body_basis.inverse() * view.basis
+			for column in 3:
+				var axis := to_model[column]
+				_values[36 + column * 4] = axis.x
+				_values[37 + column * 4] = axis.y
+				_values[38 + column * 4] = axis.z
+			# Kept for the uniform set, which is built in the callback where the frame's RIDs are known.
+			_deck_texture = texture
+	else:
+		_deck_texture = null
+
 
 func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	var rd := RenderingServer.get_rendering_device()
@@ -190,8 +247,10 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	_status = "ready"
 
 	if _frames == 0:
-		print("ATMO: size=%s radii=(%.0f, %.0f) blend=%.1f"
-			% [size, _values[24], _values[25], _values[23]])
+		# The numbers the handover depends on, printed once — a pass that quietly hands nothing over looks
+		# exactly like a shader that is right, and this is the cheapest way not to be fooled.
+		print("ATMO: size=%s radii=(%.0f, %.0f, %.0f) blend=%.1f deck_weight=%.2f deck_ext=%.5f"
+			% [size, _values[24], _values[25], _values[26], _values[23], _values[27], _values[29]])
 	var set := _uniform_set(rd, [color, _params])
 	if not set.is_valid():
 		_status = "the uniform set could not be built"
@@ -227,6 +286,23 @@ func _uniform_set(rd: RenderingDevice, resources: Array) -> RID:
 	params_uniform.binding = 1
 	params_uniform.add_id(resources[1])
 	uniforms.append(params_uniform)
+	# **A combined image sampler takes the SAMPLER first and the texture second**, and both ids must be valid
+	# or the whole set fails — which presents as a pass that drew nothing rather than as a binding error.
+	# The deck's map may be absent on any given frame (no bake yet, or a body with no deck), so the fallback is
+	# a real one-texel texture rather than a null RID; the shader never reads it, because a missing deck has
+	# `radii.w = 0` and exits before the fetch.
+	#
+	# **And a `Texture2D`'s RID is NOT a `RenderingDevice` texture RID.** Feeding `get_rid()` straight in fails
+	# the set with *"Texture (binding: 2, index 0) is not a valid texture"* — the server's RID and the device's
+	# live in different spaces, and `RenderingServer.texture_get_rd_texture` is the bridge between them.
+	var cover_uniform := RDUniform.new()
+	cover_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	cover_uniform.binding = 2
+	cover_uniform.add_id(_sampler)
+	cover_uniform.add_id(RenderingServer.texture_get_rd_texture(
+		(_deck_texture if _deck_texture != null else _white).get_rid()
+	))
+	uniforms.append(cover_uniform)
 	return rd.uniform_set_create(uniforms, _shader, 0)
 
 
@@ -237,6 +313,17 @@ func _build(rd: RenderingDevice) -> void:
 		return
 	_pipeline = rd.compute_pipeline_create(_shader)
 	_params = rd.storage_buffer_create(PARAM_FLOATS * 4)
+	# Linear filtering and repeat on `u`: the map's seam is `u = 1.0` exactly, and a clamped sampler picks the
+	# wrong edge there — the same reason `body_deck.gdshader` declares `repeat_enable`.
+	var state := RDSamplerState.new()
+	state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	_sampler = rd.sampler_create(state)
+	var white := Image.create(1, 1, false, Image.FORMAT_L8)
+	white.fill(Color.WHITE)
+	_white = ImageTexture.create_from_image(white)
 	_built = true
 	_status = "ready"
 
@@ -282,12 +369,31 @@ layout(std430, set = 0, binding = 1) buffer Params {
 	vec4 absorption;      // xyz 1/m
 	vec4 mie;             // x coefficient, y scale height, z anisotropy, w sun intensity
 	vec4 frame;           // xy render size, z tan(fov/2), w blend 0..1
-	vec4 radii;           // x planet, y atmosphere top, zw free for the cloud volume
+	vec4 radii;           // x planet, y atmosphere top, z deck top, w deck weight 0..1
+	vec4 deck;            // x base radius, y extinction 1/m, z threshold, w full column height
+	vec4 deck_radiance;   // rgb, flat for this rung
+	mat3 to_model;        // view space -> the deck's own model space, column-major
 } params;
+// **The deck's baked map, sampled the way the mesh samples it.** Binding 2 is always present; a frame with
+// no deck carries `radii.w = 0` and never reads it.
+layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
+// **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
+// headlessly (`tests/test_cloud_band.gd`); the shader carries the numbers, which is the arrangement Cloud
+// Volumes §4.3a states rather than a second source of truth. Six samples per e-fold, and the stop at 1/100
+// gives `ceil(log(100) * 6) = 28` steps whatever the chord — which is what makes the limb affordable and is
+// the difference between a cloud and an opaque lid.
+const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
+const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
+const float TAU_F = 6.283185307179586;
+// **The exact inverse of `SpacesimCloudField.bake`** — and of `body_deck.gdshader`'s own `cloud_map_uv`, so
+// the slab samples the same texel the mesh does. Bands land mirrored or a hemisphere out if this drifts.
+vec2 cloud_map_uv(vec3 p) {
+	return vec2(0.5 + atan(p.z, p.x) / TAU_F, 0.5 - asin(clamp(p.y, -1.0, 1.0)) / PI_F);
+}
 // A miss is signalled with x > y, and `x` is POSITIVE — so a hit must be proved, never inferred from a
 // sign. Same sentinel and same lesson as the shell's shader.
 vec2 ray_sphere(vec3 origin, vec3 direction, float radius) {
@@ -393,7 +499,59 @@ void main() {
 	vec3 transmittance = exp(-(params.mie.x * depth_mie
 		+ (params.rayleigh.xyz + params.absorption.xyz) * depth_rayleigh));
 
-	vec3 color = here.rgb * transmittance + scattered * params.mie.w * params.frame.w;
+	// **THE DECK, AS ONE SLAB ON THIS SAME RAY.** This is here rather than in a shell because from inside or
+	// below a deck there is no surface to draw: the eye is in the medium, and what it sees is the cross-section
+	// between it and whatever it is looking at. One map tap per sample, the steps from the optical depth, and
+	// the composition Cloud Volumes §4.7 names:
+	//
+	//     out = (behind * T_deck + L_deck) * T_air + L_air
+	//
+	// **The light is flat for this rung** — `deck_radiance` is what the shell draws, and the sun taps, the powder
+	// term and the phase lobe come next. What this rung is for is the geometry: the bounds, the map in the
+	// right place, and parallax that only a slab with a varying top can have.
+	float cloud_T = 1.0;
+	vec3 cloud_light = vec3(0.0);
+	if (params.radii.w > 0.0) {
+		vec2 band = ray_sphere(eye, ray, params.radii.z);
+		if (band.x <= band.y) {
+			float b0 = max(max(band.x, 0.0), start);
+			float b1 = min(band.y, end);
+			// **A ray that reaches the ground leaves the band at the BASE**, so its chord is one arc — half the
+			// grazing one. `SpacesimCloudBand.chord` is this law, and its test pins the halving.
+			vec2 lower = ray_sphere(eye, ray, params.deck.x);
+			if (lower.x <= lower.y && lower.x > 0.0) {
+				b1 = min(b1, lower.x);
+			}
+			if (b1 > b0) {
+				float chord = b1 - b0;
+				int steps = clamp(
+					int(ceil(chord * params.deck.y * SAMPLES_PER_OPTICAL_DEPTH)), 1, DECK_STEP_LIMIT
+				);
+				float step_length = chord / float(steps);
+				for (int i = 0; i < DECK_STEP_LIMIT; i++) {
+					if (i >= steps) break;
+					vec3 p = eye + ray * (b0 + step_length * (float(i) + 0.5));
+					float field = texture(cover, cloud_map_uv(normalize(params.to_model * normalize(p)))).r;
+					// **Luminance is height** (§4.2): this column's cloud reaches `top` above the base, so a sample
+					// above it is in clear air and the lateral edge is a taper rather than a cut.
+					float top = params.deck.w * max(0.0,
+						(field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4));
+					float altitude = length(p) - params.deck.x;
+					float density = top > 0.0 ? clamp(1.0 - altitude / top, 0.0, 1.0) : 0.0;
+					float opacity = 1.0 - exp(-density * params.deck.y * step_length);
+					cloud_light += params.deck_radiance.rgb * opacity * cloud_T;
+					cloud_T *= 1.0 - opacity;
+				}
+			}
+		}
+	}
+	// **The handover to the shell**, and it has to be a blend rather than a switch: the shell fades out across
+	// exactly the same band, computed from the same two radii, so between them the deck is drawn once. Blending
+	// the *result* rather than the light keeps a half-weight deck from dimming what is behind it — the alpha and
+	// the radiance are one fact.
+	vec3 behind = mix(here.rgb, here.rgb * cloud_T + cloud_light, params.radii.w);
+
+	vec3 color = behind * transmittance + scattered * params.mie.w * params.frame.w;
 	// **Not clamped to 1.0**: this writes linear HDR and the tonemap downstream decides what is white.
 	imageStore(color_image, pixel, vec4(color, here.a));
 }

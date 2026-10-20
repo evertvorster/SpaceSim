@@ -204,6 +204,28 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	h.check(deck.shadow_tau > 0.0,
 		"Earth's deck has an optical depth to cast with (%.3f), derived from its opacity" % deck.shadow_tau)
 	var land := earth.mesh_material as ShaderMaterial
+	# **The LOWEST deck casts, not the highest** (Evert, 2026-10-20) — a star subtends an angle, so a shadow's
+	# penumbra widens with the distance from the casting layer to the ground, and the deck nearest the planet
+	# gives the sharpest edges. Earth has one deck, so the rule is checked on a body that has two.
+	#
+	# `_shadowing_deck` is private, like every rule this scene derives for itself; it is the rule that is under
+	# test, so it is what the test calls rather than a copy of it.
+	var two_decked: SpacesimSceneBody = null
+	for body in scene.bodies:
+		if body.decks.size() > 1:
+			two_decked = body
+			break
+	h.check(two_decked != null, "Sol has a body with more than one deck to test the shadow rule on")
+	if two_decked != null:
+		var lowest: SpacesimSceneBody.Deck = two_decked.decks[0]
+		for candidate in two_decked.decks:
+			if candidate.height + candidate.thickness < lowest.height + lowest.thickness:
+				lowest = candidate
+		h.check(scene._shadowing_deck(two_decked) == lowest,
+			"and %s's shadow comes from the deck nearest the ground, not the top of its stack"
+				% two_decked.id)
+		h.check(lowest != two_decked.decks[0],
+			"which is not the first layer in the stack, so the check can tell the two apart")
 	# **Already published, by the frame walk this suite drove a moment ago** — which is the stronger claim:
 	# the shadow is wired into `update_lod`, not merely available to be set.
 	h.check_near(float(land.get_shader_parameter("deck_tau")), deck.shadow_tau,

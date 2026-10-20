@@ -84,6 +84,12 @@ uniform float optical_depth = 0.0;
 // `base_ratio` is `R_base / R_top`, which is all the geometry the shader needs: both radii are on the same
 // node, so the top is 1.0 in model space.
 uniform float base_ratio : hint_range(0.0, 1.0) = 1.0;
+// **How the shell hands over to the near regime.** 0 = draw the deck everywhere, which is what happens until
+// the pass has a map to march; 1 = fade the shell out across the slab's own thickness, because the pass is
+// drawing that slab from the same field. The fade is `smoothstep` from the base to the top on the eye's
+// radius, and the pass applies the exact complement across the same two radii — so the deck is drawn once and
+// never twice, and the boundary cannot drift because neither side owns a constant.
+uniform float near_weight : hint_range(0.0, 1.0) = 0.0;
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
 uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
@@ -183,6 +189,10 @@ void fragment() {
 	}
 
 	vec3 radiance = cloud_color * ramp_gain;
+	// **And the handover.** The pass marches this deck as a slab once it has the map, and the shell must not
+	// draw the same cloud on top of it. `near_weight` is 0 until there is a map (`near_deck()` answers nothing
+	// without one), so nothing is lost while a bake is still in flight.
+	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
 	if (from_below) {
 		// **Multiple scattering, not single.** The first version of this multiplied the radiance by
 		// `exp(-tau / mu_sun)`, which is what a *beam* loses crossing the slab — and it made the underside
