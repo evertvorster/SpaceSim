@@ -149,8 +149,12 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 		(earth.node.global_position - camera.global_position).normalized(), Vector3.UP
 	)
 	camera.current = true
-	for frame in 3:
+	# **Until a rebuild has actually landed**: the walk is a pool task, and three frames is a guess rather
+	# than a wait. The first version of this check failed intermittently for exactly that reason.
+	for frame in 30:
 		scene.update_lod(camera, 0.016)
+		if earth.patch_triangles > 0 and earth.decks[0].node.mesh != null:
+			break
 
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.node.visible, "the deck is visible once the frame has walked it")
@@ -169,6 +173,13 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	var eye: Vector3 = deck.material.get_shader_parameter("eye_local")
 	h.check(eye.length() > 1.0 and eye.length() < 4.0,
 		"and the eye in the deck's own frame, above its top (%.2f radii)" % eye.length())
+
+	# **A rung landing is NOT asserted here, and that is a finding rather than laziness.** Driving the cache
+	# toward a 1024-wide map and waiting four seconds left the task pending, and timing the CPU bake directly
+	# says why: **1024x512 takes 3.8 s — 7.2 us a texel, nine times the 0.80 us the plan and `docs/API.md`
+	# record.** At 8192 that is minutes, so on the CPU path a refinement effectively never arrives and the
+	# material keeps the 256 floor map. `tests/test_cloud_maps.gd` covers the cache's own contract; the cost
+	# is recorded in MemPalace and needs re-measuring before the LOD reasoning is trusted again.
 
 	# **One switch, and it hides every deck.** Read through `get_value` every frame, so it is hot.
 	SpacesimSettings.set_value("render.cloud_decks", false)
@@ -219,6 +230,20 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 			1.0)
 		h.check_near(float(material.get_shader_parameter("deck_threshold")), 0.843,
 			"and the same percentile the cloud is drawn with", 1.0e-9)
+
+	# **And a REFINEMENT reaches it.** The deck's map is republished on every rung, and the shadow's copy has to
+	# move with it or the shadow stays at the width of the first bake while the cloud sharpens — which is
+	# exactly what it looked like in flight. Published here with a different texture, as a rung would.
+	var refined := Image.create_empty(8, 4, false, Image.FORMAT_L8)
+	refined.fill(Color(0.5, 0.5, 0.5, 1.0))
+	var refined_texture := ImageTexture.create_from_image(refined)
+	SpacesimBodyRenderer.apply_deck_shadow(
+		earth.mesh_material, refined_texture, 0.7, deck.shadow_tau, deck.height + deck.thickness
+	)
+	h.check(land.get_shader_parameter("deck_cover") == refined_texture,
+		"and a refined map replaces the shadow's copy of it")
+	h.check_near(float(land.get_shader_parameter("deck_threshold")), 0.7,
+		"with the percentile of the map it arrived with", 1.0e-9)
 
 	# **A body with no deck keeps its shadow switched off**, which is the shader's `deck_shadow_present()` gate
 	# and the reason the path costs nothing on the bodies without air.
