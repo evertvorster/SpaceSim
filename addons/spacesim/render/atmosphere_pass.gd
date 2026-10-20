@@ -385,6 +385,10 @@ const int J_STEPS = 8;
 // second source of truth. Six samples per e-fold, and the stop at 1/100 gives `ceil(log(100) * 6) = 28` steps
 // whatever the chord — what makes the limb affordable, and the difference between a cloud and an opaque lid.
 const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
+// **How quickly the fog arrives and leaves**, as a share of the column's own depth — the tuning knob for
+// "did that feel like diving into a cloud". A fraction rather than a distance, so a wisp ramps as quickly as
+// a tower. Smaller is sharper; too small and the ramp itself becomes the pop it exists to hide.
+const float FOG_EDGE_SHARE = 0.2;
 const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
 const float TAU_F = 6.283185307179586;
@@ -593,7 +597,7 @@ void main() {
 		// out of the fog. We already know the exact amount of opacity of the cloud layer where the player is we
 		// should ramp up to that, and down from it while we fly through the cloud layer."* The edge is a fifth
 		// of the column, and it is a FRACTION rather than a distance so a thin wisp ramps as quickly as a tower.
-		float edge = 0.2 * column;
+		float edge = FOG_EDGE_SHARE * column;
 		float ramp = 0.0;
 		if (column > 1.0) {
 			ramp = smoothstep(0.0, edge, eye_altitude) * smoothstep(0.0, edge, column - eye_altitude);
