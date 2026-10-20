@@ -40,6 +40,7 @@ func run(h, root: Node) -> void:
 	_test_the_two_scales(h, scene, materials, luminosity)
 	_test_the_favouring_profile(h)
 	_test_the_layer_stack(h, scene, materials, luminosity)
+	_test_the_deck_thickness(h, scene, materials, luminosity)
 	_test_a_cloud_stack_composites(h, scene, materials)
 	_test_a_product_needs_its_reactants(h)
 
@@ -381,3 +382,78 @@ func _test_the_layer_stack(h, scene: SpacesimSystemScene, materials: SpacesimMat
 	h.check(is_finite(jupiter_morphology.ratio) and is_finite(jupiter_morphology.band_scale)
 		and is_finite(jupiter_morphology.eddy_scale) and is_finite(jupiter_morphology.cells),
 		"and every number the model produces is finite")
+
+
+## **A deck's top, and the one derivation that answers "how thick is a cloud?"**
+##
+## The thickness is the condensate scale height — where the saturation mixing ratio has fallen by e —
+## capped by the tropopause. What the suite can honestly check is what it checked for the base: that the
+## number lands where the real decks are, and that the two bodies where it *cannot* are named rather than
+## tuned. See `SpacesimAtmosphereModel.Condensation.thickness`.
+func _test_the_deck_thickness(
+	h, scene: SpacesimSystemScene, materials: SpacesimMaterialTable, luminosity: float
+) -> void:
+	var earth_deck := _level_of(scene, "planet:earth", "water_vapour", materials, luminosity)
+	h.check(earth_deck != null and earth_deck.regime == SpacesimAtmosphereModel.Condensation.Regime.LEVEL,
+		"Earth's water has a level to put a deck on")
+	if earth_deck == null:
+		return
+	h.check(earth_deck.thickness > 1000.0 and earth_deck.thickness < 2000.0,
+		"and it is 1-2 km deep (%.0f m), against cumulus bases at 1-2 km and tops at 2-3" % earth_deck.thickness)
+
+	# **The two bodies where it is honestly wrong, asserted as order with the reason in the message** —
+	# Venus's deck is photochemical H2SO4 while this model condenses CO2 (the same cause as its base being
+	# right for the wrong molecule), and Jupiter's is organised convection against a condensation scale.
+	var venus_deck := _level_of(scene, "planet:venus", "carbon_dioxide", materials, luminosity)
+	if venus_deck != null:
+		h.check(venus_deck.thickness > 0.0 and venus_deck.thickness < 5000.0,
+			"Venus's deck comes out %.0f m against a real 20 km one - a different molecule, and its base sits on the tropopause so the cap binds" % venus_deck.thickness)
+	var jupiter_deck := _level_of(scene, "planet:jupiter", "ammonia", materials, luminosity)
+	if jupiter_deck != null:
+		h.check(jupiter_deck.thickness > 0.0 and jupiter_deck.thickness < 10000.0,
+			"and Jupiter's ammonia scale is a few km (%.0f m) against a convective deck" % jupiter_deck.thickness)
+
+	# **Every layer the model calls a LEVEL states a thickness**, which is the invariant D1 reads: a deck node
+	# is `radius + height + thickness`, so a zero here would collapse the slab onto its own base.
+	var earth := scene.body_by_id("planet:earth")
+	var levelled := true
+	var count := 0
+	for level in SpacesimCloudModel.layers(
+		earth.content.atmosphere, materials,
+		SpacesimAtmosphereModel.surface_gravity(earth.content),
+		SpacesimAtmosphereModel.equilibrium_temperature(earth.content, materials, luminosity,
+			earth.position.distance_to(scene.star().position))
+	):
+		count += 1
+		if level.thickness <= 0.0:
+			levelled = false
+	h.check(count > 0 and levelled, "and every LEVEL layer states one, not just the top (%d)" % count)
+
+	# **The phase is a named ceiling, not a lookup** - the table states one latent heat per species and its
+	# ice entries cannot be reached by name (`water_vapour`'s sibling is `water_ice`, so a suffix rule would
+	# be a guess). What is checkable is that the ice entry exists and is the larger number, which is what
+	# makes the ceiling's 25 % claim true rather than assumed.
+	var vapour := materials.by_name("water_vapour")
+	var ice := materials.by_name("water_ice")
+	h.check(ice != null and ice.latent_heat > vapour.latent_heat,
+		"and the ice entry exists and takes more heat to sublime than the liquid takes to evaporate")
+
+
+## One species' level on a body, or null when the model places none.
+func _level_of(
+	scene: SpacesimSystemScene, body_id: String, species_name: String,
+	materials: SpacesimMaterialTable, luminosity: float
+) -> SpacesimAtmosphereModel.Condensation:
+	var body := scene.body_by_id(body_id)
+	if body == null or body.content == null or body.content.atmosphere == null:
+		return null
+	var levels := SpacesimCloudModel.layers(
+		body.content.atmosphere, materials,
+		SpacesimAtmosphereModel.surface_gravity(body.content),
+		SpacesimAtmosphereModel.equilibrium_temperature(body.content, materials, luminosity,
+			body.position.distance_to(scene.star().position))
+	)
+	for level in levels:
+		if level.species == species_name:
+			return level
+	return null

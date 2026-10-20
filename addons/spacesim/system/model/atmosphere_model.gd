@@ -353,6 +353,25 @@ class Condensation:
 	var height := 0.0
 	## Pascals, from `pressure_at` — **an approximation that degrades with height**, see there.
 	var pressure := 0.0
+	## **How deep the deck is, in metres — the top is `height + thickness`.** Only meaningful for
+	## `LEVEL`, and zero where the regime is not one, which is this module's convention for *not stated*.
+	##
+	## The **condensate scale height**: the height over which the saturation mixing ratio falls by e, from
+	## Clausius-Clapeyron along the body's own lapse —
+	##
+	##     d(ln e_s)/dh = −L Γ / (R T²)   ⇒   H_w = (R / L) · T_base² / Γ
+	##
+	## capped by the tropopause, because a cloud cannot rise past it. `R` and `L` are both **molar**
+	## (`latent_heat` is J/mol), which is what makes `R/L` a reciprocal temperature and `H_w` metres.
+	##
+	## Measured against the real decks: **Earth comes out 1,604 m** against cumulus bases 1–2 km and tops
+	## 2–3 km, on the conservative side because `Γ` is the *dry* adiabat (9.78 K/km against a real 6.5);
+	## **Jupiter 3,969 m** against an ammonia deck several times that, because a convective deck is organised
+	## and `H_w` is a condensation scale; and **Venus 160 m against a real 20 km deck** — photochemical
+	## H₂SO₄ and not the CO₂ this model condenses, the same cause as its base being right for the wrong
+	## molecule, made worse here because that base sits against the tropopause so the **cap** binds rather
+	## than the scale. All three measured 2026-10-20 by `tests/test_clouds.gd`.
+	var thickness := 0.0
 
 
 ## Every condensation level in a body's air, **highest first** — so the first `LEVEL` is the deck seen
@@ -362,6 +381,13 @@ class Condensation:
 ## temperature. Everything else — the surface temperature, the lapse rate, the tropopause, the scale
 ## height — is this module's own and is computed here, so a caller cannot get one of them inconsistent
 ## with the other three.
+##
+## **`equilibrium` must be `equilibrium_temperature()`, never `reference_temperature()`.** The latter
+## returns what content *pinned* as a mean surface temperature, and the tropopause is the skin temperature
+## of the **equilibrium** one — so passing the pinned surface here takes `tropopause_temperature` to
+## 0.8409 of a 737 K Venus, a 620 K ceiling, and **`NONE` for every species on the planet**: Venus's deck
+## disappears entirely (measured 2026-10-20, while adding `thickness`). The two functions are one letter
+## apart in name and 518 K apart in meaning.
 static func condensation_levels(
 	atmosphere: SpacesimAtmosphere,
 	materials: SpacesimMaterialTable,
@@ -390,7 +416,8 @@ static func condensation_levels(
 		if material == null or material.condensation_temperature <= 0.0:
 			continue
 		levels.append(_level_for(
-			material, Condensation.Formation.CONDENSATION, surface, ceiling, lapse, atmosphere, air_height
+			material, Condensation.Formation.CONDENSATION, surface, ceiling, lapse, atmosphere, air_height,
+			materials
 		))
 	# **A species that forms IN SITU is looked for in the TABLE, not in the mix** — see
 	# `SpacesimSpecies.formed_from`. It exists only where every one of its reactants is present, and a
@@ -409,7 +436,8 @@ static func condensation_levels(
 		if not all_present:
 			continue
 		levels.append(_level_for(
-			material, Condensation.Formation.REACTION, surface, ceiling, lapse, atmosphere, air_height
+			material, Condensation.Formation.REACTION, surface, ceiling, lapse, atmosphere, air_height,
+			materials
 		))
 	levels.sort_custom(func(a: Condensation, b: Condensation) -> bool: return a.height > b.height)
 	return levels
@@ -460,7 +488,8 @@ static func _level_for(
 	ceiling: float,
 	lapse: float,
 	atmosphere: SpacesimAtmosphere,
-	air_height: float
+	air_height: float,
+	materials: SpacesimMaterialTable
 ) -> Condensation:
 	var level := Condensation.new()
 	level.species = material.species_name
@@ -478,7 +507,29 @@ static func _level_for(
 		level.pressure = pressure_at(level.height, atmosphere.surface_pressure, air_height)
 		var deepest := -air_height * log(MODELLED_PRESSURE_MULTIPLE)
 		level.regime = Condensation.Regime.LEVEL if level.height >= deepest else Condensation.Regime.DEEP
+		if level.regime == Condensation.Regime.LEVEL:
+			# **The condensate scale height, capped by the tropopause.** The second term is the same
+			# arithmetic as `height` with the ceiling in place of the base temperature, so the two cannot
+			# use different profiles — and it is asked for only where the base is above the ground, since a
+			# `DEEP` deck's top is not a thing this model has a height for.
+			#
+			# **A species with no `latent_heat` gets no thickness**, which is the same reading the table gives
+			# a zero everywhere else: *not stated*. Without the guard the division would be infinite and the
+			# tropopause cap would quietly become the answer.
+			#
+			# `ponytail:` the table states ONE latent heat per species and does not always say which phase it
+			# is, so a base below `melting_temperature` is still computed with the vapour's number. The ice
+			# entries cannot be reached by name — `water_vapour`'s sibling is `water_ice`, not
+			# `water_vapour_ice`, so a suffix rule would be a guess — and the error is small: Earth's deck is
+			# **1.6 km with the vapour's coefficient against 1.3 with the ice's**, both inside the observed
+			# range. Upgrade path: a `latent_fusion` per species, which is a measurement to collect.
+			if material.latent_heat > 0.0 and lapse > 0.0:
+				level.thickness = maxf(minf(
+					(GAS_CONSTANT / material.latent_heat) * freezing * freezing / lapse,
+					(surface - ceiling) / lapse - level.height
+				), 0.0)
 	return level
+
 
 
 ## **The air's own reflection** — the term the albedo derivation was missing, and it is DERIVED rather
