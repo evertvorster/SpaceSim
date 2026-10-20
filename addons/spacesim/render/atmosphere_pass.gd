@@ -570,7 +570,47 @@ void main() {
 	// right place, and parallax that only a slab with a varying top can have.
 	float cloud_T = 1.0;
 	vec3 cloud_light = vec3(0.0);
-	if (params.radii.w > 0.0) {
+	// What is behind the deck: the frame as drawn, and every stage below mixes *away* from it.
+	vec3 behind = here.rgb;
+	// **THE PLAYER'S OWN HAZE, and it is the whole of the inside-the-deck picture.** Evert, 2026-10-20:
+	//
+	//   *"sample the cloud thickness where the player is at when entering the cloud layer from the top. Turn
+	//    that into a haze/fog or something like that. So if you are in a thick cloud, you can't see far. Then,
+	//    as you go down towards the bottom of the cloud layer, lessen that effect, as if there is less fog
+	//    between you and the bottom of the cloud layer. Once emerging from the cloud layer, this effect should
+	//    be gone. To counter travel in the cloud layer, continuously sample the cloud thickness where the
+	//    player is and apply that scale."*
+	//
+	// So it is a FOG and not a marched slab: what limits visibility inside a cloud is the medium you are in, not
+	// the shape of the blob around you. The optical depth is **the cloud still below the eye**, which is why
+	// descending clears it without a special case — `tau = sigma * min(altitude, this column's depth)`, so it
+	// falls to zero at the base and the ground emerges on its own.
+	//
+	// **It is also what makes crossing the top continuous.** At the top of a full column `altitude` and the
+	// column's depth are the same number, so the haze arrives at exactly the depth the marched slab above it
+	// would have integrated. That is the flash's real cure: the two regimes are the same integral, one marched
+	// and one closed form.
+	float eye_altitude = length(eye) - params.deck.x;
+	bool inside_band = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;
+	if (inside_band) {
+		// **Sampled at the eye, every frame**, in the deck's own model space so it is the same texel the mesh
+		// reads: flying through a broken deck hazes and clears with the map instead of fogging uniformly.
+		float eye_field = texture(cover, cloud_map_uv(normalize(params.to_model * eye))).r;
+		float eye_share = clamp(
+			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
+		);
+		float column = params.deck.w * eye_share;
+		float tau = params.deck.y * min(eye_altitude, column);
+		vec3 haze = params.deck_radiance.rgb;
+		// A thin column is a wisp you see through and a thick one closes the world down, because `column` is in
+		// the exponent — the map's brightness deciding how far you can see, which is what was asked for.
+		//
+		// **Blended against `behind` rather than composited over the frame**, so it is one stage of the same
+		// sentence as the air and the marched slab: what the haze covers, the slab must not also cover.
+		behind = mix(behind, haze, (1.0 - exp(-tau)) * params.radii.w);
+	}
+	// **And the marched slab is for looking INTO a deck from outside it**, which is when the shape matters.
+	if (params.radii.w > 0.0 && !inside_band) {
 		float lo0, hi0, lo1, hi1;
 		deck_span(eye, ray, params.radii.z, params.deck.x, lo0, hi0, lo1, hi1);
 		float floor_t = max(start, 0.0);
@@ -595,8 +635,8 @@ void main() {
 	// **The handover to the shell**, and it has to be a blend rather than a switch: the shell fades out across
 	// exactly the same band, computed from the same two radii, so between them the deck is drawn once. Blending
 	// the *result* rather than the light keeps a half-weight deck from dimming what is behind it — the alpha and
-	// the radiance are one fact.
-	vec3 behind = mix(here.rgb, here.rgb * cloud_T + cloud_light, params.radii.w);
+	// the radiance are one fact. A frame with no deck (`radii.w = 0`) leaves `behind` as it was drawn.
+	behind = mix(behind, behind * cloud_T + cloud_light, params.radii.w * (inside_band ? 0.0 : 1.0));
 
 	vec3 color = behind * transmittance + scattered * params.mie.w * params.frame.w;
 	// **Not clamped to 1.0**: this writes linear HDR and the tonemap downstream decides what is white.

@@ -190,10 +190,16 @@ void fragment() {
 	// which integrates the cross-section instead of switching pictures.
 
 	vec3 radiance = cloud_color * ramp_gain;
-	// **And the handover.** The pass marches this deck as a slab once it has the map, and the shell must not
-	// draw the same cloud on top of it. `near_weight` is 0 until there is a map (`near_deck()` answers nothing
-	// without one), so nothing is lost while a bake is still in flight.
-	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
+	// **And the handover.** Once the eye is inside the deck the PASS owns the picture — as a haze sampled at the
+	// player, not as a surface — so the shell lets go over the top fifth of the slab rather than across all of
+	// it. A finite band rather than a switch, because the two pictures differ: the shell is a lit surface seen
+	// from above, the pass is a fog seen from within. `near_weight` is 0 until a map has landed, so nothing is
+	// lost while a bake is in flight.
+	alpha *= mix(
+		1.0,
+		smoothstep(1.0 - 0.2 * (1.0 - base_ratio), 1.0, eye_radius),
+		near_weight
+	);
 	if (from_below) {
 		// **Multiple scattering, not single.** The first version of this multiplied the radiance by
 		// `exp(-tau / mu_sun)`, which is what a *beam* loses crossing the slab — and it made the underside
