@@ -16,6 +16,7 @@ extends RefCounted
 
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
 const OCEAN_SHADER := preload("res://addons/spacesim/render/body_ocean.gdshader")
+const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
@@ -176,6 +177,12 @@ const UNIT_LUX_PER_SR := 100000.0 / PI
 ## an instrument for "is anything actually being applied" and an instrument that ignores part of what is
 ## drawn can only ever under-report.
 const POINT_TRIANGLES := 2
+
+## **How far the deck's detail ladder may push the field either side of the map's own value.** Measured when
+## this was last built (`tests/probe_deck_detail.gd`, 2026-10-18): coverage 60.5 % → 57.3 %, mean thickness
+## 0.3419 → 0.3396 — small enough that the percentile threshold and the fitted ramp gain stay honest, which
+## is the property that matters, because both are measured off the *map's* distribution.
+const DECK_DETAIL_STRENGTH := 0.2
 
 ## The wireframe view's one material — see [method wireframe_material].
 static var _wireframe: StandardMaterial3D
@@ -593,3 +600,135 @@ static func apply_surface_maps(
 		# landing, and invisible to the suite because a headless run has no surface maps at all. A caller that
 		# passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
 		surface.set_shader_parameter("detail_first_octave", first_detail_octave(base_frequency, width))
+
+
+## **The cloud deck's material** — the far regime's cloud, from the derivation and the layer's own numbers.
+##
+## A deck is the body's own patch mesh at `radius + height + thickness`, so **the node is the geometry and
+## this is everything else**: the field's seed, the slab's two radii in the one ratio the shader needs, the
+## layer's optical depth, and its colour.
+##
+## **The thickness is simulated, not built.** Evert, 2026-10-20: *"We can simulate the thickness by using a
+## similar thing to the land textures. At any real distance from the observer this would be sufficient."* So
+## `base_ratio` is all the geometry there is: `R_base / R_top`, because both radii are on the same node and
+## the top is 1.0 in model space. The shader samples the base's own crossing of the eye ray from underneath,
+## which is genuine parallax of thickness rather than a fudge.
+##
+## `seed_layer` is the content layer's index, which is what `SpacesimCloudField.seed_for()` keys the weather
+## by — so a body's decks are different clouds rather than the same one at two heights.
+static func deck_material(
+	body: SpacesimSceneBody,
+	level: SpacesimAtmosphereModel.Condensation,
+	optical_depth: float,
+	palette: Color,
+	seed_layer: int
+) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = DECK_SHADER
+	# **The slab's proportions, and the reason a negative altitude is fine.** A gas giant's deck base is
+	# *below* its datum, because its datum is a pressure and not a floor, so `radius + height` can be smaller
+	# than `radius` and there is nothing to clamp: the base is inside the planet's own reference sphere, which
+	# no giant draws.
+	var base_radius := body.radius + level.height
+	var top_radius := base_radius + level.thickness
+	material.set_shader_parameter("base_ratio", clampf(base_radius / maxf(top_radius, 1.0), 0.0, 1.0))
+	material.set_shader_parameter("cover", white_texel())
+	material.set_shader_parameter("veil", 1.0)
+	material.set_shader_parameter("optical_depth", optical_depth)
+	# **Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing.** The
+	# authored colour is a palette value; what the deck reflects is `ramp_gain`'s business, one level up.
+	material.set_shader_parameter("cloud_color", palette.srgb_to_linear())
+	material.set_shader_parameter("detail_seed", SpacesimCloudField.seed_for(body.id, seed_layer))
+	material.set_shader_parameter("detail_strength", DECK_DETAIL_STRENGTH)
+	# **Every deck is centred on the same body, so a distance sort cannot separate the stack** — the order has
+	# to be stated. The deepest composites first (lower priority is drawn earlier), leaving the highest deck
+	# over the top of it, which is what a belt *is*: a thin bright deck over a browner one.
+	material.render_priority = -seed_layer
+	return material
+
+
+## **Publish a baked map, and everything measured off it, together.**
+##
+## The threshold is the percentile the layer's coverage implies, `ramp_gain` is fitted to the map's own
+## measured mean, and `veil` is 1 for a mapped deck. **All four arrive in one call for the same reason
+## `apply_surface_maps` does**: a threshold from one bake against a gain from another is a deck whose average
+## reflectance is not the calibrated albedo, and nothing would catch it.
+##
+## `width == 0` is the *no map* case — a body the model calls `FEATURELESS`, whose honest picture is a
+## uniform veil at its coverage rather than an absent deck. That is the recipe's own rule (§3a), and it is
+## why the white texel and `threshold = 0` are the material's starting state.
+static func apply_cloud_map(
+	material: Material, texture: Texture2D, width: int, threshold: float, ramp_gain: float,
+	veil: float
+) -> void:
+	var deck := material as ShaderMaterial
+	if deck == null:
+		return
+	if texture != null and deck.get_shader_parameter("cover") != texture:
+		deck.set_shader_parameter("cover", texture)
+	if width > 0:
+		# **The ladder starts at two texels of the map in hand**, so it can never duplicate what the map shows
+		# and it moves as the map refines. A texel spans `TAU / width` in longitude.
+		deck.set_shader_parameter("detail_feature", TAU * 2.0 / float(width))
+	deck.set_shader_parameter("threshold", threshold)
+	deck.set_shader_parameter("ramp_gain", ramp_gain)
+	deck.set_shader_parameter("veil", veil)
+
+
+## **Where the eye is, and where the star is, in the deck's own frame** — the two numbers that decide whether
+## a fragment is a cloud top, a cloud base, or cloud from the inside.
+##
+## `eye_offset` is the body-to-eye vector **divided by the top radius on the host, in double precision**, and
+## `sun` is the star's direction in the body's frame. Both are per frame and both are small numbers: the model
+## space of a deck node is a unit sphere, so nothing astronomical ever reaches a `float`.
+static func face_deck(material: Material, eye_offset: Vector3, sun: Vector3) -> void:
+	var deck := material as ShaderMaterial
+	if deck == null:
+		return
+	deck.set_shader_parameter("eye_local", eye_offset)
+	deck.set_shader_parameter("sun_model", sun)
+
+
+## **The reflectance a deck is drawn at**, so that its *average* is the calibrated albedo while its thick tops
+## are as near white as the budget allows.
+##
+##     gain = albedo / (palette_luminance · mean)
+##
+## because what reaches the eye from a texel is `ALBEDO · ALPHA`, whose mean is `ramp_gain · mean(thickness)`.
+## **The clamp at 1.0 is a real ceiling and not paranoia**: a low-contrast field asks for a gain above 1, which
+## would be a cloud reflecting more than white. It cannot, so the gain stops and the achieved average falls
+## short — and that shortfall is worth reporting rather than hiding, so `Gain` carries it.
+class Gain:
+	extends RefCounted
+
+	var value := 1.0
+	## How much of the calibrated albedo this deck actually reaches, 0..1. **1.0 means the budget was met**;
+	## below it, the field wanted more contrast than a single reflectance can give it.
+	var achieved := 1.0
+
+
+static func cloud_gain(albedo: float, palette: Color, mean: float) -> Gain:
+	var gain := Gain.new()
+	var luminance := palette.get_luminance()
+	if albedo <= 0.0 or luminance <= 0.0 or mean <= 0.0:
+		gain.value = 0.0
+		gain.achieved = 0.0
+		return gain
+	var wanted := albedo / (luminance * mean)
+	gain.value = clampf(wanted, 0.0, 1.0)
+	gain.achieved = gain.value / wanted
+	return gain
+
+
+## **A one-texel white map**, for a deck the model places but the field has nothing to bake for: a
+## `FEATURELESS` body's uniform shroud, with `threshold = 0` so the whole disc is cloud.
+##
+## Its own texture rather than [method flat_height]'s, because that one caches a single image whatever value
+## it is asked for — fine where everything wants the same neutral, wrong here.
+static var _white: ImageTexture
+static func white_texel() -> ImageTexture:
+	if _white == null:
+		var image := Image.create_empty(1, 1, false, Image.FORMAT_L8)
+		image.set_pixel(0, 0, Color(1.0, 1.0, 1.0, 1.0))
+		_white = ImageTexture.create_from_image(image)
+	return _white

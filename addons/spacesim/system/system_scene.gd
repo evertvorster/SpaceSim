@@ -48,6 +48,10 @@ var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
 ## The baked surface maps, one cache for the whole system.
 var _surface_maps := SpacesimSurfaceMaps.new()
+## **The baked cloud maps, one cache for the whole system** — keyed `(body, layer)`, so a stack is entries
+## rather than a second cache. Unlike the surface's, this one stays open: it has no local `RenderingDevice` of
+## its own beyond the one `SpacesimCloudGpu` opens for a bake, and a deck refines on approach like the ground.
+var _cloud_maps := SpacesimCloudMaps.new()
 ## **Draw the bodies' tessellation instead of the bodies.** Set by the game's wireframe toggle; read by
 ## `update_lod`, which swaps the line meshes and an unshaded white material in and out. Off, and nothing
 ## changes — it is a debug view, not a mode the renderer has to reason about.
@@ -136,8 +140,6 @@ func build(parent: Node) -> SpacesimSystemScene:
 	# `RenderingDevice` alive for the length of a session is both the teardown segfault and the risk
 	# `SpacesimSurfaceMaps.prepare()` exists to remove.
 	_surface_maps.close()
-
-	frame_tree.frame_changed.connect(_on_frame_changed)
 	# **Every task added must be awaited before the engine goes away**, or the exit segfaults with no
 	# output at all — the pool has to free what the task allocated. A rebuild is milliseconds, so the join
 	# is one poll long.
@@ -529,6 +531,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
+	_build_decks(body)
 
 	if not body.landable:
 		return
@@ -716,6 +719,101 @@ func _derive_air(body: SpacesimSceneBody) -> void:
 		),
 		"temperature": temperature,
 	}
+
+
+## **The cloud stack: one deck per layer the model places a level for.**
+##
+## **A loop, not a field.** Earth happens to author one deck and Jupiter two, and the code does not know the
+## difference — a stack is what the next step asks for anyway and a loop costs a `for`. Evert, 2026-10-20.
+##
+## **A layer is paired to its level by SPECIES**, which is the only thing tying the two together: the level's
+## altitude is derived from the air and the species' own condensation temperature, and the layer states what
+## it is made of. A layer that names no species — the flat shorthand every body but Jupiter and Saturn
+## authors — takes the highest unclaimed level, which is the deck seen from outside.
+##
+## A body with no air, no authored deck, or no condensable that forms a `LEVEL` gets no deck at all, which is
+## three different reasons for the same empty answer and none of them a zero-height shell.
+func _build_decks(body: SpacesimSceneBody) -> void:
+	if body.content == null or body.content.atmosphere == null or body.content.clouds == null:
+		return
+	var clouds := body.content.clouds
+	if clouds.layer_count() <= 0:
+		return
+	var light := _light_at(body)
+	var materials := _materials()
+	var gravity := SpacesimAtmosphereModel.surface_gravity(body.content)
+	# **`equilibrium_temperature`, never `reference_temperature`** — see `condensation_levels`. The latter
+	# returns what content *pinned* as a mean surface temperature, and the tropopause is the equilibrium's
+	# skin temperature: passed the pinned one, Venus's ceiling rises to 620 K and its deck disappears.
+	var equilibrium := SpacesimAtmosphereModel.equilibrium_temperature(
+		body.content, materials, light.x, light.y
+	)
+	var morphology := SpacesimCloudModel.morphology(body.content, materials, light.x, light.y)
+	var unclaimed := SpacesimCloudModel.layers(
+		body.content.atmosphere, materials, gravity, equilibrium, body.content
+	)
+	for index in clouds.layer_count():
+		var level := _claim_level(unclaimed, clouds.species_at(index))
+		if level == null:
+			continue
+		var deck := SpacesimSceneBody.Deck.new()
+		deck.index = index
+		deck.level = level
+		deck.height = level.height
+		deck.thickness = level.thickness
+		deck.coverage = clouds.coverage_at(index)
+		deck.albedo = clouds.albedo_at(index)
+		deck.palette = _cloud_palette(clouds, index, materials)
+		deck.optical_depth = clouds.optical_depth_at(index)
+		deck.morphology = morphology
+		deck.material = SpacesimBodyRenderer.deck_material(
+			body, level, clouds.optical_depth_at(index), deck.palette, index
+		)
+		# **The node is the body's own unit sphere scaled to the slab's TOP**, and its mesh arrives with the
+		# first patch rebuild — nothing draws for a frame or two rather than stalling the frame that asked.
+		var top_radius := body.radius + deck.height + deck.thickness
+		deck.node = _add_body_mesh(
+			body.node, top_radius, deck.material, "%sDeck%d" % [body.name, index], 0
+		)
+		deck.node.mesh = null
+		body.decks.append(deck)
+
+
+## **The level a content layer is made of**, taken out of the unclaimed pool so two layers cannot land on
+## the same altitude — which on a body with one level would otherwise draw the same deck twice.
+func _claim_level(
+	unclaimed: Array, species: String
+) -> SpacesimAtmosphereModel.Condensation:
+	if unclaimed.is_empty():
+		return null
+	var chosen := -1
+	if species.is_empty():
+		chosen = 0
+	else:
+		for index in unclaimed.size():
+			if (unclaimed[index] as SpacesimAtmosphereModel.Condensation).species == species:
+				chosen = index
+				break
+	if chosen < 0:
+		return null
+	var level: SpacesimAtmosphereModel.Condensation = unclaimed[chosen]
+	unclaimed.remove_at(chosen)
+	return level
+
+
+## **What colour a deck is** — stated beats derived, the rule the whole table runs on: `Color(0, 0, 0, 0)`
+## means "not stated", and then the species' own scattering colour is used, so water is white because water
+## is white. A giant's tint is a chromophore that no species carries yet, which is why content states it.
+func _cloud_palette(
+	clouds: SpacesimClouds, index: int, materials: SpacesimMaterialTable
+) -> Color:
+	var stated := clouds.color_at(index)
+	if stated.a > 0.0:
+		return stated
+	var material := materials.by_name(clouds.species_at(index))
+	if material != null and material.color.a > 0.0:
+		return material.color
+	return Color.WHITE
 
 
 ## The star's luminosity and this body's distance from it — the pair every per-body derivation needs and
@@ -963,6 +1061,10 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 	# that appears a frame or two after it was asked for, never a stall in the frame that asked.
 	# **Collected before the bodies are walked**, so a bake that landed this frame is drawn this frame.
 	_surface_maps.poll()
+	# **A deck's map lands the same way the ground's does**, and it is polled before the walk so a bake that
+	# arrived this frame is drawn this frame. The cloud cache has no bake pass of its own — a floor bake is
+	# synchronous and a refinement is a pool task (or a main-thread dispatch), so there is nothing to attach.
+	_cloud_maps.poll()
 	_poll_patch_builds()
 	for body in bodies:
 		if body.node == null:
@@ -975,6 +1077,9 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 			body.mesh.visible = not is_point
 		if body.ocean != null:
 			body.ocean.visible = not is_point
+		# **A wireframe view is about triangles**, and a cloud deck would cover the ones under test.
+		for deck in body.decks:
+			deck.node.visible = not is_point and not wireframe
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
 		# not drawn by anything yet, and a deck is not a thing this tree has.
 		if body.point != null:
@@ -988,6 +1093,7 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 		_refine_surface_tiles(
 			body, distance, pixel, (observer - body.node.global_position).normalized(), surface_cap
 		)
+		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1097,12 +1203,75 @@ func surface_maps() -> SpacesimSurfaceMaps:
 ## on the way out.
 func close() -> void:
 	_surface_maps.close()
+	# **The deck's cache goes the same way, and for its own reason**: a refinement is a pool task (or a local
+	# device's dispatch), and the pool will not let a task outlive the engine. The bail goes up first so a 27 s
+	# bake stops at its next row rather than trading a crash for a hung exit.
+	_cloud_maps.close()
 
 
 ## **Hand the surface maps a render-thread bake pass** — from `main.gd`, which owns the camera's compositor.
 ## Without one, every body keeps the map baked at scene build.
 func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 	_surface_maps.attach_bake(bake_pass)
+
+
+## **A deck, per frame, per layer**: the eye and the star in the deck's own frame, and the map it should be
+## sampling.
+##
+## **Publishing happens when a map lands, not every frame.** The threshold, the ramp gain and the detail
+## ladder's first octave are all measured off the map in hand, so they must move together and only when it
+## moves — the same rule the ground's materials follow. What changes every frame is the eye's position, which
+## is two uniform writes and no measurement at all.
+##
+## **The eye is handed over in the deck's model space**, divided by the top radius here, in double precision:
+## a deck node's model space is a unit sphere, so nothing astronomical ever reaches a `float`.
+func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) -> void:
+	if body.decks.is_empty():
+		return
+	# **Read through `get_value` so the switch stays hot.** One switch for this mechanism, and it reads no
+	# other one — `show_decks = render.cloud_decks and not volume` made "turn the decks on" a lie.
+	if not bool(SpacesimSettings.get_value("render.cloud_decks")):
+		for deck in body.decks:
+			deck.node.visible = false
+		return
+	var to_eye := observer - body.node.global_position
+	var star_body := star()
+	var sun := Vector3.UP
+	if star_body != null:
+		# The deck's model space is the body's own, which is unrotated, so the direction needs no transform.
+		sun = (star_body.position - body.position).normalized()
+	for deck in body.decks:
+		var top_radius := body.radius + deck.height + deck.thickness
+		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0), sun)
+		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
+		var texture := _cloud_maps.map(
+			body.id, deck.index, body.radius, deck.coverage, distance, deck.morphology,
+			deck.optical_depth
+		)
+		var width := _cloud_maps.width_of(body.id, deck.index)
+		if width == deck.published_width:
+			continue
+		deck.published_width = width
+		if texture == null or width <= 0:
+			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
+			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world
+			# reads as a shroud rather than as an absent deck.
+			var veil := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, 1.0)
+			SpacesimBodyRenderer.apply_cloud_map(
+				deck.material, SpacesimBodyRenderer.white_texel(), 0, 0.0, veil.value, deck.coverage
+			)
+			continue
+		# **Which mean the gain is fitted to is the layer's own path**: a tau deck's alpha is the exponential,
+		# so its mean opacity is the number; a ramp deck's is the mean thickness.
+		var mean := (
+			_cloud_maps.opacity_mean_of(body.id, deck.index) if deck.optical_depth > 0.0
+			else _cloud_maps.ramp_mean_of(body.id, deck.index)
+		)
+		var gain := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, mean)
+		SpacesimBodyRenderer.apply_cloud_map(
+			deck.material, texture, width, _cloud_maps.threshold_of(body.id, deck.index), gain.value,
+			1.0
+		)
 
 
 ## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
@@ -1198,6 +1367,10 @@ func _poll_patch_builds() -> void:
 		# **The ocean draws the same triangles**, so a rebuild cannot leave the sea behind on older geometry.
 		if body.ocean != null:
 			body.ocean.mesh = body.mesh.mesh
+		# **And every deck does too** — a stack is the same triangles at different scales, so a rebuild that
+		# reached the ground and the sea but not the clouds would leave the weather on last frame's sphere.
+		for deck in body.decks:
+			deck.node.mesh = body.mesh.mesh
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.

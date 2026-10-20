@@ -92,6 +92,10 @@ const REGISTRY := {
 	# material that applies air of its own beside it applies the same air twice — see `Atmospheres` §9a. This is
 	# the pass's gate and its blend at once: zero leaves the frame exactly as it was drawn.
 	"render.atmosphere_volume": {"default": true, "scope": Scope.PLAYER},
+	# --- the cloud decks. **One switch for one mechanism**: it reads no other switch, which is the rule a
+	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
+	# nothing.
+	"render.cloud_decks": {"default": true, "scope": Scope.PLAYER},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
 	},

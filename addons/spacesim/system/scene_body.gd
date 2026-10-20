@@ -32,6 +32,42 @@ var mesh_material: Material
 var ocean: MeshInstance3D
 ## The ocean's material, kept so the map and the sea level can be published to it with the land's.
 var ocean_material: ShaderMaterial
+## **The cloud stack**: one deck per layer the model places a level for, highest first, each a node on the
+## body's own patch mesh at its own derived radius. Empty for a body with no air, no authored deck, or no
+## condensable that forms a level — which is most of them.
+var decks: Array[Deck] = []
+
+
+## One deck, built: the node, its material, and the derived altitudes they were placed at.
+##
+## **Kept together because they are one thing** — a node without its level has nowhere sensible to sit, and a
+## material without the measurement its map produced carries another layer's threshold. `index` is the
+## content layer it came from, which is what the map cache and the field's seed are keyed by.
+class Deck:
+	extends RefCounted
+
+	var node: MeshInstance3D
+	var material: ShaderMaterial
+	var level: SpacesimAtmosphereModel.Condensation
+	var index := 0
+	## Metres above the surface, and the slab's thickness — the node is scaled to `radius + height + thickness`
+	## and `base_ratio` is what places the base inside it.
+	var height := 0.0
+	var thickness := 0.0
+	## What content says this layer covers and reflects, and the hue it is drawn in — resolved once at build,
+	## because the map's threshold and ramp gain are fitted to them on every publish.
+	var coverage := 0.0
+	var albedo := 0.0
+	var palette := Color.WHITE
+	## The layer's optical depth at full thickness, or 0 for the reflectance-ramp path. It decides which of
+	## the map's two measured means the ramp gain is fitted to.
+	var optical_depth := 0.0
+	## The body's cloud organisation, which is what the field is generated from. One derivation for the whole
+	## stack: the bands do not change with altitude.
+	var morphology: SpacesimCloudModel.Morphology
+	## The width of the map the material is currently sampling, so a publish happens when one lands rather
+	## than every frame. `-1` is *nothing published yet*, which is not the same as width 0 (*no map*).
+	var published_width := -1
 ## The **point of light** this body becomes once it is too small to be a disc: a camera-facing quad,
 ## sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as
 ## geometry. Set by `SpacesimSystemScene.update_lod`.
