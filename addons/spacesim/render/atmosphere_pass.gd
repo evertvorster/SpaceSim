@@ -380,13 +380,6 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
-// **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
-// headlessly (`tests/test_cloud_band.gd`); the shader carries the numbers, which is the arrangement Cloud
-// Volumes §4.3a states rather than a second source of truth. Six samples per e-fold, and the stop at 1/100
-// gives `ceil(log(100) * 6) = 28` steps whatever the chord — which is what makes the limb affordable and is
-// the difference between a cloud and an opaque lid.
-const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
-const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
 const float TAU_F = 6.283185307179586;
 // **The exact inverse of `SpacesimCloudField.bake`** — and of `body_deck.gdshader`'s own `cloud_map_uv`, so
@@ -404,65 +397,6 @@ vec2 ray_sphere(vec3 origin, vec3 direction, float radius) {
 		return vec2(1e5, -1e5);
 	}
 	return vec2((-b - sqrt(d)) * 0.5, (-b + sqrt(d)) * 0.5);
-}
-
-// **The band's spans along this ray.** The deck is the region `base <= r <= top`, so a line can cross it
-// TWICE — and the second one is real, just usually behind the planet where `end` cuts it. The previous form
-// took the outer sphere's span and clamped it at the base only when the base's near root was ahead, which is
-// false for an eye *below* the base: then the clamp silently did nothing and the march ran the whole column
-// down to the ground. From underneath a deck that is a grey haze all the way to the surface, and that is what
-// it looked like in flight (2026-10-20).
-//
-// The squared closest approach decides it, which is the same geometry `SpacesimCloudBand.chord` states: a ray
-// that dips below the base crosses the band once on each side of its closest point.
-void deck_span(vec3 eye, vec3 ray, float top_r, float base_r,
-	out float lo0, out float hi0, out float lo1, out float hi1) {
-	lo0 = 0.0; hi0 = 0.0; lo1 = 0.0; hi1 = 0.0;
-	float tc = -dot(eye, ray);
-	float d2 = max(dot(eye, eye) - tc * tc, 0.0);
-	float outer_half = top_r * top_r - d2;
-	if (outer_half <= 0.0) {
-		return;
-	}
-	outer_half = sqrt(outer_half);
-	float base_half = base_r * base_r - d2;
-	if (base_half <= 0.0) {
-		lo0 = tc - outer_half;
-		hi0 = tc + outer_half;
-		return;
-	}
-	base_half = sqrt(base_half);
-	lo0 = tc - outer_half; hi0 = tc - base_half;
-	lo1 = tc + base_half;  hi1 = tc + outer_half;
-}
-
-// One span of the band, marched. `total` is the whole band's chord so the budget is shared between the two
-// spans rather than granted twice.
-void march_deck(float lo, float hi, float count, vec3 eye, vec3 ray, inout float T, inout vec3 L) {
-	int steps = max(int(round(count)), 1);
-	float step_length = (hi - lo) / float(steps);
-	for (int i = 0; i < DECK_STEP_LIMIT; i++) {
-		if (i >= steps) break;
-		vec3 p = eye + ray * (lo + step_length * (float(i) + 0.5));
-		float field = texture(cover, cloud_map_uv(normalize(params.to_model * normalize(p)))).r;
-		// **Luminance is height** (§4.2): this column's cloud reaches `top` above the base, so a sample above
-		// it is in clear air and the lateral edge is a taper rather than a cut.
-		float top = params.deck.w * clamp(
-			(field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
-		);
-		// **Uniform through the slab and soft at the top**, rather than a wedge thickening downward. A wedge
-		// put the whole column's opacity in its bottom metre, which is why nothing was visible looking up from
-		// under a deck: the cloud was all at the base and the top of the column was empty air.
-		//
-		// `1 - smoothstep(a, b, x)` and NOT `smoothstep(b, a, x)`: GLSL leaves the result undefined when
-		// `edge0 >= edge1`, so the descending form is not a shorthand for the complement.
-		float density = top > 0.0
-			? 1.0 - smoothstep(0.72, 1.0, (length(p) - params.deck.x) / top)
-			: 0.0;
-		float alpha = 1.0 - exp(-density * params.deck.y * step_length);
-		L += params.deck_radiance.rgb * alpha * T;
-		T *= 1.0 - alpha;
-	}
 }
 
 void main() {
@@ -568,9 +502,7 @@ void main() {
 	// **The light is flat for this rung** — `deck_radiance` is what the shell draws, and the sun taps, the powder
 	// term and the phase lobe come next. What this rung is for is the geometry: the bounds, the map in the
 	// right place, and parallax that only a slab with a varying top can have.
-	float cloud_T = 1.0;
-	vec3 cloud_light = vec3(0.0);
-	// What is behind the deck: the frame as drawn, and every stage below mixes *away* from it.
+	// What is behind the deck: the frame as drawn, and the haze below mixes *away* from it.
 	vec3 behind = here.rgb;
 	// **THE PLAYER'S OWN HAZE, and it is the whole of the inside-the-deck picture.** Evert, 2026-10-20:
 	//
@@ -591,8 +523,7 @@ void main() {
 	// would have integrated. That is the flash's real cure: the two regimes are the same integral, one marched
 	// and one closed form.
 	float eye_altitude = length(eye) - params.deck.x;
-	bool inside_band = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;
-	if (inside_band) {
+	bool inside_band = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;	if (inside_band) {
 		// **Sampled at the eye, every frame**, in the deck's own model space so it is the same texel the mesh
 		// reads: flying through a broken deck hazes and clears with the map instead of fogging uniformly.
 		float eye_field = texture(cover, cloud_map_uv(normalize(params.to_model * eye))).r;
@@ -606,37 +537,9 @@ void main() {
 		// the exponent — the map's brightness deciding how far you can see, which is what was asked for.
 		//
 		// **Blended against `behind` rather than composited over the frame**, so it is one stage of the same
-		// sentence as the air and the marched slab: what the haze covers, the slab must not also cover.
+		// sentence as the air: what the haze covers, the air still dims.
 		behind = mix(behind, haze, (1.0 - exp(-tau)) * params.radii.w);
 	}
-	// **And the marched slab is for looking INTO a deck from outside it**, which is when the shape matters.
-	if (params.radii.w > 0.0 && !inside_band) {
-		float lo0, hi0, lo1, hi1;
-		deck_span(eye, ray, params.radii.z, params.deck.x, lo0, hi0, lo1, hi1);
-		float floor_t = max(start, 0.0);
-		lo0 = max(lo0, floor_t); hi0 = min(hi0, end);
-		lo1 = max(lo1, floor_t); hi1 = min(hi1, end);
-		float len0 = max(hi0 - lo0, 0.0);
-		float len1 = max(hi1 - lo1, 0.0);
-		float total = len0 + len1;
-		if (total > 0.0) {
-			// The budget is the band's own: a sample may not advance more than a sixth of an e-fold.
-			int budget = clamp(
-				int(ceil(total * params.deck.y * SAMPLES_PER_OPTICAL_DEPTH)), 1, DECK_STEP_LIMIT
-			);
-			if (len0 > 0.0) {
-				march_deck(lo0, hi0, float(budget) * len0 / total, eye, ray, cloud_T, cloud_light);
-			}
-			if (len1 > 0.0) {
-				march_deck(lo1, hi1, float(budget) * len1 / total, eye, ray, cloud_T, cloud_light);
-			}
-		}
-	}
-	// **The handover to the shell**, and it has to be a blend rather than a switch: the shell fades out across
-	// exactly the same band, computed from the same two radii, so between them the deck is drawn once. Blending
-	// the *result* rather than the light keeps a half-weight deck from dimming what is behind it — the alpha and
-	// the radiance are one fact. A frame with no deck (`radii.w = 0`) leaves `behind` as it was drawn.
-	behind = mix(behind, behind * cloud_T + cloud_light, params.radii.w * (inside_band ? 0.0 : 1.0));
 
 	vec3 color = behind * transmittance + scattered * params.mie.w * params.frame.w;
 	// **Not clamped to 1.0**: this writes linear HDR and the tonemap downstream decides what is white.

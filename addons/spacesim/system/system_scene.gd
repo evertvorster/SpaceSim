@@ -1310,11 +1310,6 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		if width == deck.published_width:
 			continue
 		deck.published_width = width
-		# **The shell hands over only once there is a map to hand over TO.** The pass draws the deck as a slab
-		# from `near_deck()`, which answers nothing until a texture exists — so a bake still in flight, or a body
-		# the field has nothing for, leaves the shell drawing the whole deck as it does today. A refinement lands
-		# over the coarse thing rather than instead of it.
-		deck.material.set_shader_parameter("near_weight", 0.0 if width <= 0 else 1.0)
 		if texture == null or width <= 0:
 			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
 			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world
