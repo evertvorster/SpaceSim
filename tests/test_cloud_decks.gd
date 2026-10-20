@@ -212,10 +212,12 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	# Publish what a landed map would publish, and check both surfaces took it.
 	var cover := SpacesimBodyRenderer.white_texel()
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
+		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness,
+		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 2048.0
 	)
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.ocean_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
+		earth.ocean_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness,
+		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 2048.0
 	)
 	var sea := earth.ocean_material as ShaderMaterial
 	for pair in [[land, "land"], [sea, "sea"]]:
@@ -238,12 +240,20 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	refined.fill(Color(0.5, 0.5, 0.5, 1.0))
 	var refined_texture := ImageTexture.create_from_image(refined)
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, refined_texture, 0.7, deck.shadow_tau, deck.height + deck.thickness
+		earth.mesh_material, refined_texture, 0.7, deck.shadow_tau, deck.height + deck.thickness,
+		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 4096.0
 	)
 	h.check(land.get_shader_parameter("deck_cover") == refined_texture,
 		"and a refined map replaces the shadow's copy of it")
 	h.check_near(float(land.get_shader_parameter("deck_threshold")), 0.7,
 		"with the percentile of the map it arrived with", 1.0e-9)
+	# **And the ladder moves with it**, because the ladder is what makes the visible texture: a shadow that
+	# sampled only the map would be blotchy where the cloud is whispy — which is what flight showed.
+	h.check_near(float(land.get_shader_parameter("deck_detail_feature")), TAU * 2.0 / 4096.0,
+		"and the ladder's first feature follows the map's width, as the deck's own does", 1.0e-12)
+	h.check(int(land.get_shader_parameter("deck_detail_seed"))
+		== int(deck.material.get_shader_parameter("detail_seed")),
+		"with the deck's own field seed, so the shadow is the same cloud")
 
 	# **A body with no deck keeps its shadow switched off**, which is the shader's `deck_shadow_present()` gate
 	# and the reason the path costs nothing on the bodies without air.

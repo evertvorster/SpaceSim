@@ -710,7 +710,8 @@ static func face_deck(material: Material, eye_offset: Vector3) -> void:
 ##
 ## A body with no deck never calls this, and `deck_tau` stays 0 — the shader's `deck_shadow_present()` gate.
 static func apply_deck_shadow(
-	material: Material, texture: Texture2D, threshold: float, tau: float, height: float
+	material: Material, texture: Texture2D, threshold: float, tau: float, height: float,
+	detail_seed: int, detail_feature: float
 ) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null or tau <= 0.0 or height <= 0.0:
@@ -720,6 +721,12 @@ static func apply_deck_shadow(
 	surface.set_shader_parameter("deck_threshold", threshold)
 	surface.set_shader_parameter("deck_tau", tau)
 	surface.set_shader_parameter("deck_height", height)
+	# **The deck's own ladder, so the shadow is the image of the field the cloud draws** — not of the map
+	# alone, which is what made it blotchy where the cloud was whispy. The seed and the first feature must be
+	# the deck's exactly, or the shadow would be a different cloud from the one casting it.
+	surface.set_shader_parameter("deck_detail_seed", detail_seed)
+	surface.set_shader_parameter("deck_detail_feature", detail_feature)
+	surface.set_shader_parameter("deck_detail_strength", DECK_DETAIL_STRENGTH)
 
 
 ## **Where the star is, in the body's frame** — the direction the shadow is offset along, per frame, because it

@@ -112,11 +112,7 @@ uniform int detail_seed = 0;
 uniform float detail_feature = 0.0;
 uniform float detail_strength : hint_range(0.0, 0.5) = 0.0;
 
-#include "res://addons/spacesim/system/model/noise.gdshaderinc"
-
-// Rungs in the ladder below the map. Six reaches from two texels of an 8k map (9.8 km on Earth) down to about
-// 300 m, which is past anything the map can hold and past where the near regime takes over.
-const int DETAIL_RUNGS = 6;
+#include "res://addons/spacesim/render/cloud_detail.gdshaderinc"
 
 // Model space, the offset from the body's centre — which for a unit sphere IS its direction. Captured in
 // `vertex()` because **`VERTEX` inside `fragment()` is in VIEW space**.
@@ -125,24 +121,6 @@ varying vec3 local_position;
 
 vec2 cloud_map_uv(vec3 p) {
 	return vec2(0.5 + atan(p.z, p.x) / TAU, 0.5 - asin(clamp(p.y, -1.0, 1.0)) / PI);
-}
-
-
-// One octave per rung, each faded out where a pixel spans more than a quarter of its feature.
-float cloud_detail(vec3 p, float footprint, int seed, float feature, float strength) {
-	float total = 0.0;
-	float weight = 0.0;
-	float amplitude = 1.0;
-	float size = feature;
-	for (int rung = 0; rung < DETAIL_RUNGS; rung++) {
-		float audible = 1.0 - smoothstep(0.25, 0.5, footprint / size);
-		total += fnl_os2s3(seed + rung * 1013, p / size) * amplitude * audible;
-		weight += amplitude;
-		amplitude *= 0.5;
-		size *= 0.5;
-	}
-	// Normalised by the weight it RAN, so the ladder's statistics do not change with the rung count.
-	return weight > 0.0 ? total / weight * strength : 0.0;
 }
 
 

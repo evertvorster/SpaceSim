@@ -1271,7 +1271,7 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			# **A uniform veil casts a uniform shadow**: a one-texel white map with `threshold = 0` is a single
 			# thickness everywhere, which is what a deck the model calls FEATURELESS actually is.
 			if deck.index == 0:
-				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0)
+				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, 0)
 			continue
 		# **Which mean the gain is fitted to is the layer's own path**: a tau deck's alpha is the exponential,
 		# so its mean opacity is the number; a ramp deck's is the mean thickness.
@@ -1285,7 +1285,7 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			deck.material, texture, width, threshold, gain.value, 1.0
 		)
 		if deck.index == 0:
-			_publish_deck_shadow(body, deck, texture, threshold)
+			_publish_deck_shadow(body, deck, texture, threshold, width)
 
 
 ## **The deck above the ground is the one that shadows it.** Only the highest layer publishes a shadow, and it
@@ -1295,11 +1295,17 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 ## The lever arm is the deck's **top** above the surface: a shadow's offset is `height · tan(zenith)`, and
 ## using the base would put every shadow a slab's thickness too close to its cloud.
 func _publish_deck_shadow(
-	body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck, texture: Texture2D, threshold: float
+	body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck, texture: Texture2D, threshold: float,
+	width: int
 ) -> void:
+	# **The deck's own ladder numbers, passed rather than read back off its material** — `detail_feature` is
+	# two texels of the map in hand, so a refinement moves it, and the shadow has to move with it or it would
+	# be a different cloud from the one casting it.
+	var feature := TAU * 2.0 / float(width) if width > 0 else 0.0
 	for material in [body.mesh_material, body.ocean_material]:
 		SpacesimBodyRenderer.apply_deck_shadow(
-			material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness
+			material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness,
+			SpacesimCloudField.seed_for(body.id, deck.index), feature
 		)
 
 

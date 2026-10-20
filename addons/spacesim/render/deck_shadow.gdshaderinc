@@ -36,6 +36,17 @@ uniform float deck_height = 0.0;
 // The star's direction in the body's own frame, which is the frame `unit_position` is in.
 uniform vec3 deck_sun = vec3(0.0, 1.0, 0.0);
 
+// **The deck's detail ladder, so the shadow is the image of the SAME field the cloud draws.** These are the
+// deck's own numbers, published beside the map: a shadow that sampled only the map would be blotchy where the
+// cloud is whispy, because the whispy detail below the map's texel is this ladder — six octaves of the same
+// generator, evaluated per pixel. Evert, 2026-10-20: *"the detail ladder makes the texture — why can't we use
+// the texture, which is the output of the detail ladder?"*
+uniform int deck_detail_seed = 0;
+uniform float deck_detail_feature = 0.0;
+uniform float deck_detail_strength : hint_range(0.0, 0.5) = 0.0;
+
+#include "res://addons/spacesim/render/cloud_detail.gdshaderinc"
+
 
 bool deck_shadow_present() {
 	return deck_tau > 0.0 && deck_height > 0.0;
@@ -66,6 +77,18 @@ float deck_transmittance(vec3 p, float planet_radius) {
         shadow_direction = normalize(p + (across / across_length) * arc);
     }
     float field = texture(deck_cover, deck_shadow_uv(shadow_direction)).r;
+    // **And the structure the map is too coarse to hold**, from the same ladder the cloud draws with. The
+    // footprint is this pixel's angle **at the deck** — `fwidth` is measured at the eye, and the ladder's
+    // feature sizes are arcs on the sphere, so the distance to the shell in radii is the conversion.
+    if (deck_detail_strength > 0.0 && deck_detail_feature > 0.0) {
+        float at_deck = length(fwidth(p)) * (deck_height / max(planet_radius, 1.0));
+        field = clamp(
+            field + cloud_detail(
+                shadow_direction, at_deck, deck_detail_seed, deck_detail_feature, deck_detail_strength
+            ),
+            0.0, 1.0
+        );
+    }
     float thickness = clamp(
         (field - deck_threshold) / max(1.0 - deck_threshold, 1.0e-4), 0.0, 1.0
     );
