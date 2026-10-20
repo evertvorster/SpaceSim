@@ -149,6 +149,12 @@ func _morphology(banding: int, ratio: float) -> SpacesimCloudModel.Morphology:
 ## every "the path is dead" bug this project has had.
 func _test_the_cache_bakes_on_the_gpu(h) -> void:
 	var maps := SpacesimCloudMaps.new()
+	# **The GPU is opt-in, and this is the only place that opts in.** In flight every bake takes the CPU path,
+	# because a local `RenderingDevice` driven from the frame loop exhausts the frame device's RID pools — see
+	# `SpacesimCloudMaps.gpu_allowed`. This suite exists so the GPU path cannot rot while it is unused.
+	h.check(not maps.gpu_available(), "a cache refuses the GPU until it is asked for")
+	maps.gpu_allowed = true
+	h.check(maps.gpu_available(), "and takes it when asked, which is the whole point of the gate")
 	maps.map("planet:earth", 0, 6.371e6, 0.6, 20000.0e3,
 		_morphology(SpacesimCloudModel.Banding.SHREDDED, 0.104))
 	h.check(maps.bakes() >= 1, "the cache baked a floor (%d bakes)" % maps.bakes())

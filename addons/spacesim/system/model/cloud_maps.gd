@@ -86,6 +86,22 @@ var _gpu: SpacesimCloudGpu = null
 ## evidence is a count from the run that baked.
 var _gpu_bakes := 0
 
+## **Whether a bake may open a local `RenderingDevice` — FALSE by default, and it is the frame loop that
+## makes it so.**
+##
+## A local device's calls are render-thread-only, and **it shares the driver with the frame's own**, so a
+## bake driven from `_process` exhausts the engine's RID pools in a few minutes of flight: the damage shows
+## up in an unrelated pass, as `_allocate_rid` — *"Element limit reached"* — and a frame that stops shading.
+## That is why the surface maps were moved off `_process` onto a render-thread bake pass.
+##
+## **The deck made the same trap reachable again**, because this cache is now driven from `update_lod` on
+## approach, so its refinements ran from the frame loop for the first time. Evert, 2026-10-20, closing on
+## Venus's clouds: *"the atmosphere suddenly disappeared"*, with the allocator errors that name it. So the
+## GPU is **opt-in**, and only a test or an offline tool asks for it; in flight every bake — the synchronous
+## floor and every refinement — goes to the CPU path, which is `0.80 us` a pixel (0.4 s at 1024², 1.7 s at
+## 2048²) on a pool thread, arriving late rather than damaging the frame.
+var gpu_allowed := false
+
 
 ## **The map width worth having at a distance**, from the law the probe measured — and the distance is to
 ## the *surface*, not to the body's centre.
@@ -396,6 +412,8 @@ func _bake(
 ## page of errors in the log to explain it. So a GPU bake is done **where the device was opened, on the
 ## main thread**, and a refinement with a GPU present is not a pool task at all.
 func gpu_available() -> bool:
+	if not gpu_allowed:
+		return false
 	if _gpu == null:
 		_gpu = SpacesimCloudGpu.new()
 	return _gpu.open()
