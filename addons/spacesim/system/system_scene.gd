@@ -691,6 +691,21 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 ## the shell from disagreeing about the same cloud. The extinction comes from the same law the test asserts
 ## (`SpacesimCloudBand.extinction`) over the air's own derived scale height.
 ##
+## **The extinction the near regime and the base's light both use.** A tau layer states its optical depth and gets
+## `SpacesimCloudBand.extinction` — the law the test asserts. A RAMP layer states none (every body but the giants),
+## so its equivalent depth comes from the mean thickness the ramp gain was already fitted to,
+## `-ln(1 - mean)` over the mean column — the same equivalence the shadow uses, and the only number that makes a
+## vertical column draw what the shell draws there. **One home for it**, because two copies drift apart on exactly
+## the bodies nobody looks at.
+func _deck_extinction(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
+	if deck.optical_depth > 0.0:
+		return SpacesimCloudBand.extinction(
+			deck.optical_depth, float(body.air.get("rayleigh_scale_height", 0.0))
+		)
+	var mean := clampf(_cloud_maps.ramp_mean_of(body.id, deck.index), 0.02, 0.98)
+	return -log(1.0 - mean) / maxf(mean * deck.thickness, 1.0)
+
+
 ## **The top layer only, and that is this rung's named limit.** The near regime is live inside or just under
 ## the top deck, where a lower deck is seen through the gaps of the one above — so the stack arrives with a
 ## sampler array and a per-deck loop, not before.
@@ -705,19 +720,7 @@ func near_deck(body: SpacesimSceneBody) -> Dictionary:
 		return {}
 	var palette: Color = deck.material.get_shader_parameter("cloud_color")
 	var gain := float(deck.material.get_shader_parameter("ramp_gain"))
-	# **The extinction the slab marches with.** A tau layer states its optical depth and gets
-	# `SpacesimCloudBand.extinction` — the same law the test asserts. A RAMP layer states none (every body but
-	# the giants), so its equivalent depth comes from the mean thickness the ramp gain was already fitted to:
-	# `tau = -ln(1 - mean_thickness)` over the mean column, which is the same equivalence the shadow uses and
-	# the only number that makes a vertical column draw what the shell draws there.
-	var extinction := 0.0
-	if deck.optical_depth > 0.0:
-		extinction = SpacesimCloudBand.extinction(
-			deck.optical_depth, float(body.air.get("rayleigh_scale_height", 0.0))
-		)
-	else:
-		var mean := clampf(_cloud_maps.ramp_mean_of(body.id, deck.index), 0.02, 0.98)
-		extinction = -log(1.0 - mean) / maxf(mean * deck.thickness, 1.0)
+	var extinction := _deck_extinction(body, deck)
 	return {
 		"base_radius": body.radius + deck.height,
 		"top_radius": body.radius + deck.height + deck.thickness,
@@ -1300,7 +1303,12 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
 		var top_radius := body.radius + deck.height + deck.thickness
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0))
+		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0), sun)
+		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
+		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
+		SpacesimBodyRenderer.apply_deck_light(
+			deck.material, body.air, _deck_extinction(body, deck) * deck.thickness
+		)
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
 		var texture := _cloud_maps.map(
 			body.id, deck.index, body.radius, deck.coverage, distance, deck.morphology,

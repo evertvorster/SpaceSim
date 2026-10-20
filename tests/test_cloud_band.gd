@@ -43,6 +43,8 @@ func run(h, root: Node) -> void:
 	_test_the_chord(h, scene)
 	_test_the_spans(h)
 	_test_the_samples(h)
+	_test_the_two_faces(h)
+	_test_the_skylight(h, scene)
 	_test_the_bound(h)
 	_test_the_march(h, scene, materials, luminosity)
 	_test_every_deck_in_sol(h, scene, materials, luminosity)
@@ -222,6 +224,84 @@ func _test_the_samples(h) -> void:
 	# is three samples at six per e-fold.
 	h.check(SpacesimCloudBand.samples(1000.0, 0.5e-3) == 3,
 		"a chord of one optical depth less a bit comes to three samples")
+
+
+## **A cloud's two faces are complements** (`Cloud Decks Plan` §D6). If this fails, one texture cannot serve
+## both faces and the underside needs a second source it does not have.
+func _test_the_two_faces(h) -> void:
+	var faces := SpacesimCloudBand.two_flux(0.0)
+	h.check_near(faces.x, 0.0, "a slab of no depth reflects nothing", 1.0e-9)
+	h.check_near(faces.y, 1.0, "and transmits everything, so its base is the sky", 1.0e-9)
+
+	var sums_hold := true
+	var base_falls := true
+	var top_rises := true
+	var previous_t := 2.0
+	var previous_r := -1.0
+	for i in 40:
+		var tau := 0.05 * float(i + 1)
+		var pair := SpacesimCloudBand.two_flux(tau)
+		if absf(pair.x + pair.y - 1.0) > 1.0e-9:
+			sums_hold = false
+		if pair.y > previous_t:
+			base_falls = false
+		if pair.x < previous_r:
+			top_rises = false
+		previous_t = pair.y
+		previous_r = pair.x
+	h.check(sums_hold, "reflectance and transmittance sum to 1 at every depth")
+	h.check(base_falls, "the base darkens monotonically as the slab thickens")
+	h.check(top_rises, "while the top brightens — the two faces move in opposite directions")
+
+	# The failure this law exists to replace: the beam. It must be strictly darker than the diffuse base.
+	h.check(SpacesimCloudBand.two_flux(3.0).y > exp(-3.0),
+		"and the diffuse base is brighter than a beam of the same depth would leave")
+
+
+## **The light arriving from above**, which is derived rather than authored: the colour has to come out of the
+## Rayleigh ratio, and the lobe has to point at the star.
+func _test_the_skylight(h, scene: SpacesimSystemScene) -> void:
+	h.check_near(SpacesimCloudBand.henyey_greenstein(0.0, 0.0), 1.0 / (4.0 * PI),
+		"an isotropic lobe is 1/4pi", 1.0e-12)
+	var forward := SpacesimCloudBand.henyey_greenstein(1.0, 0.8)
+	var backward := SpacesimCloudBand.henyey_greenstein(-1.0, 0.8)
+	h.check(forward > backward * 10.0,
+		"and a forward lobe at g=0.8 is far brighter looking THROUGH the slab at the star (%.3f against %.3f)"
+			% [forward, backward])
+
+	var earth := scene.body_by_id("planet:earth")
+	var air: Dictionary = earth.air if earth != null else {}
+	h.check(not air.is_empty(), "Earth's air carries the sky's own coefficients")
+	if air.is_empty():
+		return
+	var rayleigh: Vector3 = air["rayleigh"]
+	var rayleigh_tau := rayleigh * float(air["rayleigh_scale_height"])
+	var mie_tau := float(air["mie"]) * float(air["mie_scale_height"])
+	var intensity := float(air["sun_intensity"])
+	var anisotropy := float(air["mie_anisotropy"])
+	h.check(rayleigh_tau.z > rayleigh_tau.x * 3.0,
+		"whose Rayleigh depth is blue-dominant by the 1/lambda^4 ratio (%.4f against %.4f)"
+			% [rayleigh_tau.z, rayleigh_tau.x])
+
+	# The colour is not chosen: away from the star the sky is blue, and the Mie term washes it toward white.
+	var sky_only := SpacesimCloudBand.sky_radiance(-0.5, rayleigh_tau, 0.0, intensity, anisotropy)
+	var with_mie := SpacesimCloudBand.sky_radiance(-0.5, rayleigh_tau, mie_tau, intensity, anisotropy)
+	h.check(sky_only.z > sky_only.x * 2.0, "so the skylight is blue with no aerosol in it")
+	h.check(with_mie.z / maxf(with_mie.x, 1.0e-9) < sky_only.z / maxf(sky_only.x, 1.0e-9),
+		"and adding the aerosol term washes it toward white, which is what a cloud base transmits")
+	var sunward := SpacesimCloudBand.sky_radiance(1.0, rayleigh_tau, mie_tau, intensity, anisotropy)
+	var away := SpacesimCloudBand.sky_radiance(-1.0, rayleigh_tau, mie_tau, intensity, anisotropy)
+	h.check(_luminance(sunward) > _luminance(away) * 2.0,
+		"with far more of it toward the star than away from it")
+
+	# And the base a full column transmits is darker than the sky it transmits — the whole point of §D6.
+	var faces := SpacesimCloudBand.two_flux(rayleigh_tau.z * 0.0 + 1.5)
+	h.check(faces.y < 0.5, "a thick base transmits less than half the light arriving above it")
+
+
+## Luminance of a linear radiance. `Color.get_luminance` is a Color method, not a Vector3 one.
+func _luminance(radiance: Vector3) -> float:
+	return 0.2126 * radiance.x + 0.7152 * radiance.y + 0.0722 * radiance.z
 
 
 ## The ceiling that makes the limb affordable: whatever the chord, the march stops.

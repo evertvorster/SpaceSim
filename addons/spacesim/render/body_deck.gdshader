@@ -94,6 +94,32 @@ uniform float base_ratio : hint_range(0.0, 1.0) = 1.0;
 // `near_weight` is 0 until a map has landed, and 0 means "draw everywhere", so a refinement lands over the
 // coarse thing rather than instead of it.
 uniform float near_weight : hint_range(0.0, 1.0) = 0.0;
+
+// ===== THE BASE'S LIGHT =============================================================
+//
+// **What "lit from behind" is, mathematically** — `Cloud Decks Plan` §D6, and the law itself is
+// `SpacesimCloudBand.two_flux`, `henyey_greenstein` and `sky_radiance`, tested headlessly. The shader carries
+// the arithmetic, as it does for the band laws.
+//
+// A cloud scatters conservatively, so its two faces are **complements**: `R(tau) + T(tau) = 1`. The top's
+// reflectance saturates while the base's transmittance falls to nothing, at the same tau — which is why one
+// texture serves both faces, and why the thick centres darken by exactly the amount the tops whiten.
+//
+// The light a base transmits is the sky above it, and that is **derived**, not authored: the same Rayleigh and
+// Mie coefficients the sky shader takes, in the closed form of its own single-scatter loop. `beta * H` is a
+// vec3 because beta is, so the colour is the Rayleigh ratio and there is no blue constant to guess.
+uniform vec3 sky_rayleigh_tau = vec3(0.0);
+uniform float sky_mie_tau = 0.0;
+uniform float sky_intensity = 0.0;
+uniform float sky_anisotropy = 0.758;
+// **The optical depth of a full column** — `extinction * the layer's derived thickness`, so this shader does
+// not have to know the extinction law, only multiply by the thickness it already samples.
+uniform float tau_full = 0.0;
+// The cloud's own multiply-scattered light: what a base shows once `T -> 0`. A stated interim, scaled as a
+// Lambertian surface of the cloud's own reflectance would be — see §D6's "what is approximated".
+uniform vec3 scattered_grey = vec3(0.0);
+// The star, in the deck's model space — the same convention `eye_local` uses.
+uniform vec3 sun_local = vec3(0.0, 1.0, 0.0);
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
 uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
@@ -136,6 +162,15 @@ vec2 cloud_map_uv(vec3 p) {
 
 void vertex() {
 	local_position = VERTEX;
+}
+
+
+// The Henyey-Greenstein lobe, normalised over the sphere: `g = 0` is isotropic, `g > 0` carries on forward.
+float henyey_greenstein_deck(float cos_theta, float anisotropy) {
+	float g = clamp(anisotropy, -0.95, 0.95);
+	float g2 = g * g;
+	float forward = max(1.0 + g2 - 2.0 * g * clamp(cos_theta, -1.0, 1.0), 1.0e-4);
+	return (1.0 - g2) / (4.0 * PI * pow(forward, 1.5));
 }
 
 
@@ -198,25 +233,35 @@ void fragment() {
 	// between two drawings of the same field rather than a handover to nothing.
 	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
 	if (from_below) {
-		// **Multiple scattering, not single.** The first version of this multiplied the radiance by
-		// `exp(-tau / mu_sun)`, which is what a *beam* loses crossing the slab — and it made the underside
-		// collapse towards the horizon and go black near it. A real cloud's base is a **diffuse source**: light
-		// enters the top, scatters many times, and leaves the base in every direction, which is why the base of
-		// a cumulus is bright grey at any viewing angle. So the underside gets a stated share of the top's
-		// reflectance and the *angle* is not in it.
+		// **THE BASE'S OWN LIGHT.** The old form was `radiance *= 0.35` — one constant, identical for a wisp and a
+		// tower, which is why the underside read as lit from below: nothing in it depended on thickness and nothing
+		// depended on where the star is. Evert, flying it: *"far too bright, as if lit from below."*
 		//
-		// **Day and night are still the light loop's**, which multiplies by the surface's own cosine to the
-		// star — so a night-side base stays dark without this number having to know about it.
-		//
-		// 0.35 is a look number, named here rather than buried: a water cloud's base runs about a third to a
-		// half of its top's brightness, and an *under*-side that reads as thinner than the top is the physical
-		// direction to err in. `tests/shader_check.sh` is what says it compiles; only a flight says whether it
-		// reads.
-		const float UNDERSIDE_SHARE = 0.35;
-		radiance *= UNDERSIDE_SHARE;
+		// Now: the slab's two faces are complements, the light transmitted is the sky above this column in closed
+		// form, and a Henyey-Greenstein lobe puts the bright side where physics puts it — looking THROUGH the slab
+		// at the star.
+		float tau = tau_full * thickness;
+		float transmit = 1.0 / (1.0 + max(tau, 0.0));
+		// The sky above this column, from the coefficients the sky shader takes. `cos_sky` is against the column's
+		// own outward normal, so a high star lights the sky overhead more than a low one.
+		float cos_sky = clamp(dot(p, sun_local), -1.0, 1.0);
+		float rayleigh_phase = 3.0 / (16.0 * PI) * (1.0 + cos_sky * cos_sky);
+		vec3 sky = (sky_rayleigh_tau * rayleigh_phase
+			+ vec3(sky_mie_tau * henyey_greenstein_deck(cos_sky, sky_anisotropy))) * sky_intensity;
+		// Forward scattering: `-dot(sun, to_eye)` is 1 when the eye is on the far side of the slab from the star.
+		float view_phase = henyey_greenstein_deck(clamp(-dot(sun_local, to_eye), -1.0, 1.0), sky_anisotropy);
+		radiance = transmit * sky * view_phase + (1.0 - transmit) * scattered_grey;
+		// **No engine light loop on this face.** The base's radiance is computed here, so it goes out as emission
+		// and the albedo is left at zero — otherwise the star's own lambert would be applied to it a second time.
+		ALBEDO = vec3(0.0);
+		EMISSION = radiance;
 	}
 
-	ALBEDO = radiance;
+	// The top is a lit surface, so it goes through the engine's light loop as albedo; the base computed its own
+	// radiance above and went out as emission, so it must not also be lit.
+	if (!from_below) {
+		ALBEDO = radiance;
+	}
 	ALPHA = alpha;
 	ROUGHNESS = 0.9;
 	if (from_below) {

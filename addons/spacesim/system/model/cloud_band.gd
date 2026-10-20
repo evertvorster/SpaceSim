@@ -131,6 +131,56 @@ static func chord(outer: float, base: float, impact: float) -> float:
 	return through_outer - sqrt(maxf(base * base - closest * closest, 0.0))
 
 
+## **The two faces of a slab, as a complement.** A cloud scatters conservatively in visible light — droplets
+## barely absorb — so energy in equals energy out and `R(tau) + T(tau) = 1`: the top's reflectance rises and
+## saturates while the base's transmittance falls to nothing, **at the same tau**. That is what lets one texture
+## serve both faces, and it is the law behind `Cloud Decks Plan` §D6.
+##
+## Returns `(reflectance, transmittance)`. The diffusion limit, `tau/(1+tau)` and `1/(1+tau)`, is monotone,
+## exact in the complement, and one divide — the Kubelka-Munk forms cost two `sinh`s and buy little for a picture.
+##
+## **`1 - exp(-tau)` is NOT this**, and the difference has already cost a flight: that is the attenuation of a
+## BEAM, which collapses to black at grazing angles, while a cloud's base is a **diffuse source** because light
+## enters the top, scatters many times and leaves the base in every direction.
+static func two_flux(tau: float) -> Vector2:
+	var optical_depth := maxf(tau, 0.0)
+	return Vector2(optical_depth / (1.0 + optical_depth), 1.0 / (1.0 + optical_depth))
+
+
+## **The Henyey-Greenstein phase function**, normalised so that its integral over the sphere is 1 — `g = 0` is
+## isotropic (`1/4pi`) and `g > 0` is forward-peaked, which for a cloud means the light carries on in the
+## direction it was going: **the base glows when you look through the slab at the star, and is grey otherwise.**
+##
+## That one term is the whole difference between "the underside is uniformly lit from below" — which is what a
+## constant share draws — and a real cloud base. `g` is clamped short of 1 because `1 - g²` in the numerator and
+## `(1+g²-2g·cos)` to the 1.5 go to zero together at the forward pole.
+static func henyey_greenstein(cos_theta: float, anisotropy: float) -> float:
+	var g := clampf(anisotropy, -0.95, 0.95)
+	var g2 := g * g
+	var forward := maxf(1.0 + g2 - 2.0 * g * clampf(cos_theta, -1.0, 1.0), 1.0e-4)
+	return (1.0 - g2) / (4.0 * PI * pow(forward, 1.5))
+
+
+## **The radiance arriving from the sky above a column** — the light a cloud base transmits, and the number that
+## makes `UNDERSIDE_SHARE` unnecessary.
+##
+## It is the **closed form of the single-scatter loop the sky shader runs**, over a slab of exponential density
+## with the star overhead: `int p(theta)·beta·exp(-h/H) dh = p(theta)·beta·H`. So `rayleigh_tau` is
+## `beta_rayleigh * H_rayleigh` — **a vec3, because `beta` is, and its per-channel ratio IS the sky's colour**
+## (Rayleigh goes as 1/lambda^4, so there is no blue constant to guess). `mie_tau` is a scalar, which is why the
+## aureole near the star is white while the sky away from it is blue.
+##
+## `cos_theta` is between the star and the direction being looked at. `intensity` is the star's illuminance in the
+## frame's own currency and not in lux — the same `sun_intensity` the sky march multiplies its in-scatter by.
+static func sky_radiance(
+	cos_theta: float, rayleigh_tau: Vector3, mie_tau: float, intensity: float, anisotropy: float
+) -> Vector3:
+	var cosine := clampf(cos_theta, -1.0, 1.0)
+	var rayleigh_phase := 3.0 / (16.0 * PI) * (1.0 + cosine * cosine)
+	return (rayleigh_tau * rayleigh_phase
+		+ Vector3.ONE * (mie_tau * henyey_greenstein(cosine, anisotropy))) * intensity
+
+
 ## **The spans of the band along a ray**, as distances from the eye — `[lo0, hi0, lo1, hi1]` in metres, an
 ## empty pair given as `lo == hi`.
 ##
