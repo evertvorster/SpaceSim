@@ -380,6 +380,12 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
+// **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
+// headlessly; the shader carries the numbers, which is the arrangement Cloud Volumes §4.3a states rather than a
+// second source of truth. Six samples per e-fold, and the stop at 1/100 gives `ceil(log(100) * 6) = 28` steps
+// whatever the chord — what makes the limb affordable, and the difference between a cloud and an opaque lid.
+const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
+const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
 const float TAU_F = 6.283185307179586;
 // **The exact inverse of `SpacesimCloudField.bake`** — and of `body_deck.gdshader`'s own `cloud_map_uv`, so
@@ -397,6 +403,106 @@ vec2 ray_sphere(vec3 origin, vec3 direction, float radius) {
 		return vec2(1e5, -1e5);
 	}
 	return vec2((-b - sqrt(d)) * 0.5, (-b + sqrt(d)) * 0.5);
+}
+
+// **The band's spans along this ray**, as distances from the eye — the region `base <= r <= top`, which a line
+// crosses TWICE when it dips below the base. `SpacesimCloudBand.spans()` is this law and `tests/test_cloud_band.gd`
+// pins it on the five cases that were flown; this is its transcription.
+void deck_span(vec3 eye, vec3 ray, float top_r, float base_r,
+	out float lo0, out float hi0, out float lo1, out float hi1) {
+	lo0 = 0.0; hi0 = 0.0; lo1 = 0.0; hi1 = 0.0;
+	float tc = -dot(eye, ray);
+	float d2 = max(dot(eye, eye) - tc * tc, 0.0);
+	float outer_half = top_r * top_r - d2;
+	if (outer_half <= 0.0) {
+		return;
+	}
+	outer_half = sqrt(outer_half);
+	float base_half = base_r * base_r - d2;
+	if (base_half <= 0.0) {
+		lo0 = tc - outer_half;
+		hi0 = tc + outer_half;
+		return;
+	}
+	base_half = sqrt(base_half);
+	lo0 = tc - outer_half; hi0 = tc - base_half;
+	lo1 = tc + base_half;  hi1 = tc + outer_half;
+}
+
+// **ONE SEGMENT OF AIR**, front to back. Every segment carries its own transmittance and in-scatter, which is
+// the whole reason the deck can sit between two of them: the air below a deck and the air above it are the same
+// integral with a boundary, and the boundary is a deck radius, not a depth buffer.
+//
+// `depth_*` is cumulative along the view ray and is what the sun attenuation is built from; `seg_*` is this
+// segment's own path and is what its transmittance comes from.
+void march_air(float t0, float t1, float phase_r, float phase_m, int steps,
+		vec3 eye, vec3 ray, vec3 sun, inout float depth_r, inout float depth_m,
+		inout vec3 T, inout vec3 L) {
+	float span = t1 - t0;
+	float seg_r = 0.0;
+	float seg_m = 0.0;
+	vec3 sum_r = vec3(0.0);
+	vec3 sum_m = vec3(0.0);
+	for (int i = 0; i < I_STEPS; i++) {
+		if (i >= steps) break;
+		// Quadratically spaced toward the eye, where the air is.
+		float f0 = float(i) / float(steps);
+		float f1 = float(i + 1) / float(steps);
+		float a0 = t0 + span * f0 * f0;
+		float a1 = t0 + span * f1 * f1;
+		float step_size = a1 - a0;
+		vec3 position = eye + ray * (a0 + step_size * 0.5);
+		float height = length(position) - params.radii.x;
+		float step_rayleigh = exp(-height / params.rayleigh.w) * step_size;
+		float step_mie = exp(-height / params.mie.y) * step_size;
+		depth_r += step_rayleigh;
+		depth_m += step_mie;
+		seg_r += step_rayleigh;
+		seg_m += step_mie;
+		float sun_step = ray_sphere(position, sun, params.radii.y).y / float(J_STEPS);
+		float sun_depth_rayleigh = 0.0;
+		float sun_depth_mie = 0.0;
+		float s = 0.0;
+		for (int j = 0; j < J_STEPS; j++) {
+			float sun_height = length(position + sun * (s + sun_step * 0.5)) - params.radii.x;
+			sun_depth_rayleigh += exp(-sun_height / params.rayleigh.w) * sun_step;
+			sun_depth_mie += exp(-sun_height / params.mie.y) * sun_step;
+			s += sun_step;
+		}
+		vec3 attenuation = exp(-(params.mie.x * (depth_m + sun_depth_mie)
+			+ (params.rayleigh.xyz + params.absorption.xyz)
+				* (depth_r + sun_depth_rayleigh)));
+		sum_r += step_rayleigh * attenuation;
+		sum_m += step_mie * attenuation;
+	}
+	L += T * (phase_r * params.rayleigh.xyz * sum_r + phase_m * params.mie.x * sum_m) * params.mie.w;
+	T *= exp(-(params.mie.x * seg_m + (params.rayleigh.xyz + params.absorption.xyz) * seg_r));
+}
+
+// **ONE SEGMENT OF DECK**, the same way: its own transmittance and in-scatter, so the air after it is
+// attenuated by it and nothing has to be reordered later.
+void march_deck(float lo, float hi, vec3 eye, vec3 ray, inout vec3 T, inout vec3 L) {
+	int steps = max(int(round(ceil((hi - lo) * params.deck.y * SAMPLES_PER_OPTICAL_DEPTH))), 1);
+	steps = min(steps, DECK_STEP_LIMIT);
+	float step_length = (hi - lo) / float(steps);
+	for (int i = 0; i < DECK_STEP_LIMIT; i++) {
+		if (i >= steps) break;
+		vec3 p = eye + ray * (lo + step_length * (float(i) + 0.5));
+		float field = texture(cover, cloud_map_uv(normalize(params.to_model * normalize(p)))).r;
+		// **Luminance is height**: this column's cloud reaches `top` above the base, so a sample above it is in
+		// clear air and the lateral edge is a taper rather than a cut.
+		float top = params.deck.w * clamp(
+			(field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
+		);
+		// Uniform through the slab and soft at the top. `1 - smoothstep(a, b, x)` and not the descending form:
+		// GLSL leaves `smoothstep` undefined when `edge0 >= edge1`.
+		float density = top > 0.0
+			? 1.0 - smoothstep(0.72, 1.0, (length(p) - params.deck.x) / top)
+			: 0.0;
+		float alpha = 1.0 - exp(-density * params.deck.y * step_length);
+		L += T * params.deck_radiance.rgb * alpha;
+		T *= 1.0 - alpha;
+	}
 }
 
 void main() {
@@ -450,61 +556,16 @@ void main() {
 	float phase_mie = 3.0 / (8.0 * PI_F) * ((1.0 - gg) * (mumu + 1.0))
 		/ (pow(1.0 + gg - 2.0 * mu * params.mie.z, 1.5) * (2.0 + gg));
 
-	vec3 total_rayleigh = vec3(0.0);
-	vec3 total_mie = vec3(0.0);
-	float depth_rayleigh = 0.0;
-	float depth_mie = 0.0;
+	// **THE ORDERED WALK.** Front to back: the haze at the eye, then whichever of air and deck this ray meets,
+	// in radius order. The deck is not a surface over which the air is painted — it is a SEGMENT, with the air
+	// below it in front and the air above it behind, which is the one thing this pass could never do while the
+	// deck was a shell composited before the pass ran. Below a deck looking up, that is the whole difference.
+	float depth_r = 0.0;
+	float depth_m = 0.0;
+	vec3 T = vec3(1.0);
+	vec3 L = vec3(0.0);
 
-	for (int i = 0; i < I_STEPS; i++) {
-		float f0 = float(i) / float(I_STEPS);
-		float f1 = float(i + 1) / float(I_STEPS);
-		float t0 = start + span_length * f0 * f0;
-		float t1 = start + span_length * f1 * f1;
-		float step_size = t1 - t0;
-		vec3 position = eye + ray * (t0 + step_size * 0.5);
-		float height = length(position) - params.radii.x;
-		float step_rayleigh = exp(-height / params.rayleigh.w) * step_size;
-		float step_mie = exp(-height / params.mie.y) * step_size;
-		depth_rayleigh += step_rayleigh;
-		depth_mie += step_mie;
-
-		float sun_step = ray_sphere(position, sun, params.radii.y).y / float(J_STEPS);
-		float sun_depth_rayleigh = 0.0;
-		float sun_depth_mie = 0.0;
-		float s = 0.0;
-		for (int j = 0; j < J_STEPS; j++) {
-			float sun_height = length(position + sun * (s + sun_step * 0.5)) - params.radii.x;
-			sun_depth_rayleigh += exp(-sun_height / params.rayleigh.w) * sun_step;
-			sun_depth_mie += exp(-sun_height / params.mie.y) * sun_step;
-			s += sun_step;
-		}
-		vec3 attenuation = exp(-(params.mie.x * (depth_mie + sun_depth_mie)
-			+ (params.rayleigh.xyz + params.absorption.xyz)
-				* (depth_rayleigh + sun_depth_rayleigh)));
-		total_rayleigh += step_rayleigh * attenuation;
-		total_mie += step_mie * attenuation;
-	}
-
-	vec3 scattered = phase_rayleigh * params.rayleigh.xyz * total_rayleigh
-		+ phase_mie * params.mie.x * total_mie;
-	// **The whole column's transmittance**, so what is behind the air is dimmed by exactly the air in
-	// front of it — the ground, the stars, and anything already drawn at that pixel.
-	vec3 transmittance = exp(-(params.mie.x * depth_mie
-		+ (params.rayleigh.xyz + params.absorption.xyz) * depth_rayleigh));
-
-	// **THE DECK, AS ONE SLAB ON THIS SAME RAY.** This is here rather than in a shell because from inside or
-	// below a deck there is no surface to draw: the eye is in the medium, and what it sees is the cross-section
-	// between it and whatever it is looking at. One map tap per sample, the steps from the optical depth, and
-	// the composition Cloud Volumes §4.7 names:
-	//
-	//     out = (behind * T_deck + L_deck) * T_air + L_air
-	//
-	// **The light is flat for this rung** — `deck_radiance` is what the shell draws, and the sun taps, the powder
-	// term and the phase lobe come next. What this rung is for is the geometry: the bounds, the map in the
-	// right place, and parallax that only a slab with a varying top can have.
-	// What is behind the deck: the frame as drawn, and the haze below mixes *away* from it.
-	vec3 behind = here.rgb;
-	// **THE PLAYER'S OWN HAZE, and it is the whole of the inside-the-deck picture.** Evert, 2026-10-20:
+	// **THE PLAYER'S OWN HAZE**, the first thing in the order because it is at the eye. Evert, 2026-10-20:
 	//
 	//   *"sample the cloud thickness where the player is at when entering the cloud layer from the top. Turn
 	//    that into a haze/fog or something like that. So if you are in a thick cloud, you can't see far. Then,
@@ -513,35 +574,76 @@ void main() {
 	//    be gone. To counter travel in the cloud layer, continuously sample the cloud thickness where the
 	//    player is and apply that scale."*
 	//
-	// So it is a FOG and not a marched slab: what limits visibility inside a cloud is the medium you are in, not
-	// the shape of the blob around you. The optical depth is **the cloud still below the eye**, which is why
-	// descending clears it without a special case — `tau = sigma * min(altitude, this column's depth)`, so it
-	// falls to zero at the base and the ground emerges on its own.
-	//
-	// **It is also what makes crossing the top continuous.** At the top of a full column `altitude` and the
-	// column's depth are the same number, so the haze arrives at exactly the depth the marched slab above it
-	// would have integrated. That is the flash's real cure: the two regimes are the same integral, one marched
-	// and one closed form.
+	// `tau` is the cloud still BELOW the eye, so descending clears it with no special case — it falls to zero at
+	// the base and the ground emerges on its own. A thick column closes the world down and a wisp does not,
+	// because the column is in the exponent.
 	float eye_altitude = length(eye) - params.deck.x;
-	bool inside_band = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;	if (inside_band) {
-		// **Sampled at the eye, every frame**, in the deck's own model space so it is the same texel the mesh
-		// reads: flying through a broken deck hazes and clears with the map instead of fogging uniformly.
+	bool in_medium = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;
+	if (in_medium) {
 		float eye_field = texture(cover, cloud_map_uv(normalize(params.to_model * eye))).r;
 		float eye_share = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
-		float column = params.deck.w * eye_share;
-		float tau = params.deck.y * min(eye_altitude, column);
-		vec3 haze = params.deck_radiance.rgb;
-		// A thin column is a wisp you see through and a thick one closes the world down, because `column` is in
-		// the exponent — the map's brightness deciding how far you can see, which is what was asked for.
-		//
-		// **Blended against `behind` rather than composited over the frame**, so it is one stage of the same
-		// sentence as the air: what the haze covers, the air still dims.
-		behind = mix(behind, haze, (1.0 - exp(-tau)) * params.radii.w);
+		float tau = params.deck.y * min(eye_altitude, params.deck.w * eye_share);
+		L += T * params.deck_radiance.rgb * (1.0 - exp(-tau)) * params.radii.w;
+		T *= 1.0 - (1.0 - exp(-tau)) * params.radii.w;
 	}
 
-	vec3 color = behind * transmittance + scattered * params.mie.w * params.frame.w;
+	// The band's two spans, clamped to the march and sorted: `hi0 <= lo1` always holds.
+	float b_lo[2];
+	float b_hi[2];
+	int b_count = 0;
+	if (params.radii.w > 0.0) {
+		float lo0, hi0, lo1, hi1;
+		deck_span(eye, ray, params.radii.z, params.deck.x, lo0, hi0, lo1, hi1);
+		if (hi0 > max(lo0, start)) {
+			b_lo[b_count] = max(lo0, start);
+			b_hi[b_count] = min(hi0, end);
+			if (b_hi[b_count] > b_lo[b_count]) {
+				b_count += 1;
+			}
+		}
+		if (hi1 > max(lo1, start) && b_count < 2) {
+			b_lo[b_count] = max(lo1, start);
+			b_hi[b_count] = min(hi1, end);
+			if (b_hi[b_count] > b_lo[b_count]) {
+				b_count += 1;
+			}
+		}
+	}
+
+	// The air's share of the step budget, so a deck in the way does not multiply the cost of the sky.
+	float band_length = 0.0;
+	for (int k = 0; k < 2; k++) {
+		if (k < b_count) {
+			band_length += b_hi[k] - b_lo[k];
+		}
+	}
+	float air_length = max((end - start) - band_length, 1.0);
+	float cursor = start;
+	for (int k = 0; k < 2; k++) {
+		if (k >= b_count) break;
+		if (b_lo[k] > cursor) {
+			int steps = max(int(round(float(I_STEPS) * (b_lo[k] - cursor) / air_length)), 2);
+			march_air(cursor, b_lo[k], phase_rayleigh, phase_mie, min(steps, I_STEPS),
+				eye, ray, sun, depth_r, depth_m, T, L);
+		}
+		// Inside the medium the haze above already carries it; from outside, the shape is what matters.
+		if (!in_medium) {
+			march_deck(b_lo[k], b_hi[k], eye, ray, T, L);
+		}
+		cursor = b_hi[k];
+	}
+	if (cursor < end) {
+		int steps = max(int(round(float(I_STEPS) * (end - cursor) / air_length)), 2);
+		march_air(cursor, end, phase_rayleigh, phase_mie, min(steps, I_STEPS),
+			eye, ray, sun, depth_r, depth_m, T, L);
+	}
+
+	// **One composite, in order.** The air is no longer a single factor applied to a finished frame; it is a
+	// sequence of segments whose boundaries are the deck's own radii, so what is behind the deck is dimmed by
+	// the air behind it and not by the air in front.
+	vec3 color = mix(here.rgb, T * here.rgb + L, params.frame.w);
 	// **Not clamped to 1.0**: this writes linear HDR and the tonemap downstream decides what is white.
 	imageStore(color_image, pixel, vec4(color, here.a));
 }

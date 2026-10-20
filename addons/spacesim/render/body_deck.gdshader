@@ -84,6 +84,13 @@ uniform float optical_depth = 0.0;
 // `base_ratio` is `R_base / R_top`, which is all the geometry the shader needs: both radii are on the same
 // node, so the top is 1.0 in model space.
 uniform float base_ratio : hint_range(0.0, 1.0) = 1.0;
+// **How the shell hands the deck over to the near regime.** The pass draws the deck as a SEGMENT once the eye
+// is close enough that its cross-section matters — the air below it in front, the air above it behind — and the
+// shell would be a second drawing of the same cloud. So the shell fades out across the slab's own thickness:
+// 1 above the top, 0 at the base, computed from the deck's own two radii so neither side owns a constant.
+// **0 means the shell draws everywhere**, which is what a body with no landed map gets: a refinement lands over
+// the coarse thing, never instead of it.
+uniform float near_weight : hint_range(0.0, 1.0) = 0.0;
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
 uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
@@ -183,14 +190,9 @@ void fragment() {
 	// alpha jumped from `covered * thickness` to `covered` on the way in. The inside case is now the pass's,
 	// which integrates the cross-section instead of switching pictures.
 
-	// **The shell draws at every altitude, and it is not faded out by anything.** Evert, 2026-10-20: *"Don't
-	// switch off the shell drawing. Consider the situation where you fly through the shell and there is no
-	// cloud at your location. By definition, the clouds will be far away, and the simple texture and the
-	// ground should stay visible. This is why we are sampling the current position in the texture, as that
-	// tells you how much fog there is."* So the deck's picture is always this one, and the pass contributes a
-	// **haze sampled at the player** on top of it — zero where the map says clear, which is precisely the case
-	// where the shell has to keep showing what is overhead and on the horizon.
 	vec3 radiance = cloud_color * ramp_gain;
+	// **The handover to the near regime**, which is a segment in the pass rather than a second picture here.
+	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
 	if (from_below) {
 		// **Multiple scattering, not single.** The first version of this multiplied the radiance by
 		// `exp(-tau / mu_sun)`, which is what a *beam* loses crossing the slab — and it made the underside
