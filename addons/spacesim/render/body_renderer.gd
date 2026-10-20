@@ -675,18 +675,20 @@ static func apply_cloud_map(
 	deck.set_shader_parameter("veil", veil)
 
 
-## **Where the eye is, and where the star is, in the deck's own frame** — the two numbers that decide whether
-## a fragment is a cloud top, a cloud base, or cloud from the inside.
+## **Where the eye is in the deck's own frame** — the one number that decides whether a fragment is a cloud top,
+## a cloud base, or cloud seen from the inside.
 ##
-## `eye_offset` is the body-to-eye vector **divided by the top radius on the host, in double precision**, and
-## `sun` is the star's direction in the body's frame. Both are per frame and both are small numbers: the model
-## space of a deck node is a unit sphere, so nothing astronomical ever reaches a `float`.
-static func face_deck(material: Material, eye_offset: Vector3, sun: Vector3) -> void:
+## `eye_offset` is the body-to-eye vector **divided by the top radius on the host, in double precision**: the
+## model space of a deck node is a unit sphere, so nothing astronomical ever reaches a `float`.
+##
+## **The star is not passed**, and that is deliberate: the deck is lit by the engine's own light, and the
+## underside's brightness is a diffuse share of the top's rather than a beam transmittance — see the shader's
+## `UNDERSIDE_SHARE`. A direction uniform that nothing reads is worse than none.
+static func face_deck(material: Material, eye_offset: Vector3) -> void:
 	var deck := material as ShaderMaterial
 	if deck == null:
 		return
 	deck.set_shader_parameter("eye_local", eye_offset)
-	deck.set_shader_parameter("sun_model", sun)
 
 
 ## **The reflectance a deck is drawn at**, so that its *average* is the calibrated albedo while its thick tops

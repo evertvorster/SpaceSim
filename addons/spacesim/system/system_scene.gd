@@ -1235,14 +1235,9 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			deck.node.visible = false
 		return
 	var to_eye := observer - body.node.global_position
-	var star_body := star()
-	var sun := Vector3.UP
-	if star_body != null:
-		# The deck's model space is the body's own, which is unrotated, so the direction needs no transform.
-		sun = (star_body.position - body.position).normalized()
 	for deck in body.decks:
 		var top_radius := body.radius + deck.height + deck.thickness
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0), sun)
+		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0))
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
 		var texture := _cloud_maps.map(
 			body.id, deck.index, body.radius, deck.coverage, distance, deck.morphology,

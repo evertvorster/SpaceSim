@@ -74,8 +74,6 @@ uniform float base_ratio : hint_range(0.0, 1.0) = 1.0;
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
 uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
-// The star's direction in the body's own frame, which is the same frame as `local_position`.
-uniform vec3 sun_model = vec3(0.0, 1.0, 0.0);
 
 // ===== THE DETAIL BELOW THE MAP =====================================================
 //
@@ -195,11 +193,22 @@ void fragment() {
 
 	vec3 radiance = cloud_color * ramp_gain;
 	if (from_below) {
-		// **What lights an underside is the light that got through the cloud**, not the star's full beam —
-		// and the fragment faces away from the star, so without this the light loop would take it to black.
-		// An ordinary water deck is optically thick, hence the floor on the depth when a layer states none.
-		float sun_mu = clamp(dot(p, sun_model), 0.0, 1.0);
-		radiance *= exp(-max(optical_depth, 1.0) / max(sun_mu, 0.15));
+		// **Multiple scattering, not single.** The first version of this multiplied the radiance by
+		// `exp(-tau / mu_sun)`, which is what a *beam* loses crossing the slab — and it made the underside
+		// collapse towards the horizon and go black near it. A real cloud's base is a **diffuse source**: light
+		// enters the top, scatters many times, and leaves the base in every direction, which is why the base of
+		// a cumulus is bright grey at any viewing angle. So the underside gets a stated share of the top's
+		// reflectance and the *angle* is not in it.
+		//
+		// **Day and night are still the light loop's**, which multiplies by the surface's own cosine to the
+		// star — so a night-side base stays dark without this number having to know about it.
+		//
+		// 0.35 is a look number, named here rather than buried: a water cloud's base runs about a third to a
+		// half of its top's brightness, and an *under*-side that reads as thinner than the top is the physical
+		// direction to err in. `tests/shader_check.sh` is what says it compiles; only a flight says whether it
+		// reads.
+		const float UNDERSIDE_SHARE = 0.35;
+		radiance *= UNDERSIDE_SHARE;
 	}
 
 	ALBEDO = radiance;
