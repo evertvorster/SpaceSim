@@ -602,7 +602,9 @@ void main() {
 		if (column > 1.0) {
 			ramp = smoothstep(0.0, edge, eye_altitude) * smoothstep(0.0, edge, column - eye_altitude);
 		}
-		float amount = (1.0 - exp(-params.deck.y * column)) * ramp * params.radii.w;
+		// **Not scaled by the handover weight**: the fog is full strength wherever the eye is inside the column,
+		// because what it covers is the shell going edge-on, and that happens throughout the medium.
+		float amount = (1.0 - exp(-params.deck.y * column)) * ramp;
 		L += T * params.deck_radiance.rgb * amount;
 		T *= 1.0 - amount;
 	}

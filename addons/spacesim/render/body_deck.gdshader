@@ -84,12 +84,15 @@ uniform float optical_depth = 0.0;
 // `base_ratio` is `R_base / R_top`, which is all the geometry the shader needs: both radii are on the same
 // node, so the top is 1.0 in model space.
 uniform float base_ratio : hint_range(0.0, 1.0) = 1.0;
-// **How the shell hands the deck over to the near regime.** The pass draws the deck as a SEGMENT once the eye
-// is close enough that its cross-section matters — the air below it in front, the air above it behind — and the
-// shell would be a second drawing of the same cloud. So the shell fades out across the slab's own thickness:
-// 1 above the top, 0 at the base, computed from the deck's own two radii so neither side owns a constant.
-// **0 means the shell draws everywhere**, which is what a body with no landed map gets: a refinement lands over
-// the coarse thing, never instead of it.
+// **How the shell hands the deck over, and it is ONLY below the base.** The shell draws the deck from above it
+// and from inside it — inside is where its structure lives, and the pass's fog is what hides the moment the
+// shell goes edge-on. Below the base is the one place the pass must own the deck, because that is the case the
+// whole segmented atmosphere exists for: looking up from underneath, the deck has to be a medium with the air
+// above it *behind* it, and a surface drawn before the pass cannot be ordered that way.
+//
+// So the handover is a narrow band just UNDER the base — 1 at and above it, 0 a little below. `near_weight` is
+// 0 until a map has landed, and 0 means "draw everywhere", so a refinement lands over the coarse thing rather
+// than instead of it.
 uniform float near_weight : hint_range(0.0, 1.0) = 0.0;
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
@@ -191,8 +194,9 @@ void fragment() {
 	// which integrates the cross-section instead of switching pictures.
 
 	vec3 radiance = cloud_color * ramp_gain;
-	// **The handover to the near regime**, which is a segment in the pass rather than a second picture here.
-	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
+	// **The handover, below the base only.** Above it and inside it the shell is the deck's picture; underneath it
+	// the pass's ordered segment is, and this is what stops the same cloud being drawn twice.
+	alpha *= mix(1.0, smoothstep(base_ratio - 0.2 * (1.0 - base_ratio), base_ratio, eye_radius), near_weight);
 	if (from_below) {
 		// **Multiple scattering, not single.** The first version of this multiplied the radiance by
 		// `exp(-tau / mu_sun)`, which is what a *beam* loses crossing the slab — and it made the underside
