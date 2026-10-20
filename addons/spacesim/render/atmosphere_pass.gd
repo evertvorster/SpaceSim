@@ -389,6 +389,9 @@ const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
 // "did that feel like diving into a cloud". A fraction rather than a distance, so a wisp ramps as quickly as
 // a tower. Smaller is sharper; too small and the ramp itself becomes the pop it exists to hide.
 const float FOG_EDGE_SHARE = 0.2;
+// The fog's density as a share of the layer's own extinction. It is a WASH over the deck the march draws, not
+// the deck itself, so it wants to be thin enough that the marched structure reads through it.
+const float FOG_DENSITY_SHARE = 0.25;
 const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
 const float TAU_F = 6.283185307179586;
@@ -589,9 +592,9 @@ void main() {
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
 		float column = params.deck.w * eye_share;
-		// **The opacity of the layer where the player is** — the number this ramps up TO, and it is already
-		// known: the column's own depth through the layer's extinction. A thick column is near-opaque and a
-		// wisp is nearly clear, so the map's brightness decides how far you can see.
+		// The column's own depth here, which is what decides how far you can see: a thick column hazes hard and a
+		// wisp barely at all, because the map's brightness is in the exponent.
+		//
 		// **A ramp at each boundary and full inside**, rather than a linear build from the base. Evert, 2026-10-20:
 		// *"Running up through thick clouds, I expected a quick ramp to thick fog, and a ramp down when I punch
 		// out of the fog. We already know the exact amount of opacity of the cloud layer where the player is we
@@ -602,11 +605,24 @@ void main() {
 		if (column > 1.0) {
 			ramp = smoothstep(0.0, edge, eye_altitude) * smoothstep(0.0, edge, column - eye_altitude);
 		}
-		// **Not scaled by the handover weight**: the fog is full strength wherever the eye is inside the column,
-		// because what it covers is the shell going edge-on, and that happens throughout the medium.
-		float amount = (1.0 - exp(-params.deck.y * column)) * ramp;
-		L += T * params.deck_radiance.rgb * amount;
-		T *= 1.0 - amount;
+		// **A FOG, not a wash.** The first version mixed the whole frame toward the cloud colour by a constant,
+		// so it covered the cloud two metres away exactly as much as the horizon — which is why the layer
+		// vanished inside it. Evert, 2026-10-20: *"The cloud layer still disappears between 1.5km and 3km
+		// altitude."* A medium attenuates with DISTANCE: what is near stays legible, what is far is lost, and
+		// that difference is the entire sensation of being in fog.
+		//
+		// The density is the layer's own extinction scaled by the ramp — you are inside that cloud, so its
+		// extinction is the honest number — and the distance is this ray's whole length, clamped at the planet
+		// and at the atmosphere. So looking down you see the ground close under you; looking out you lose the
+		// horizon; and nothing is hidden that is not actually far away.
+		// **A wash over the marched deck, not a replacement for it.** The march is what draws the cloud now, so
+		// the fog's job is only the seam you asked it for: covering the moment the shell goes edge-on. A share of
+		// the layer's own extinction, because the full value would bury the marched structure under itself.
+		float sigma_fog = params.deck.y * ramp * FOG_DENSITY_SHARE;
+		float reach = max(end - start, 0.0);
+		float fog_T = exp(-sigma_fog * reach);
+		L += T * params.deck_radiance.rgb * (1.0 - fog_T);
+		T *= fog_T;
 	}
 
 	// The band's two spans, clamped to the march and sorted: `hi0 <= lo1` always holds.
@@ -648,10 +664,13 @@ void main() {
 			march_air(cursor, b_lo[k], phase_rayleigh, phase_mie, min(steps, I_STEPS),
 				eye, ray, sun, depth_r, depth_m, T, L);
 		}
-		// Inside the medium the haze above already carries it; from outside, the shape is what matters.
-		if (!in_medium) {
-			march_deck(b_lo[k], b_hi[k], eye, ray, T, L);
-		}
+		// **ALWAYS**, including from inside the band. Evert, 2026-10-20: the deck vanished between 1.5 km and 3 km
+		// — the band's own altitude range — while he was in clear air looking at a distant cloud. The cause was
+		// this guard: inside the band the pass drew only the fog, and the shell was faded out, so nothing drew
+		// the deck. The shell cannot carry that case anyway: it is the body's own patch mesh, so it only covers
+		// what the ground's LOD covers, and a cloud near the horizon falls outside it. The mesh is a picture for
+		// when you are outside; inside, the cross-section along the ray is the honest one, and it needs no mesh.
+		march_deck(b_lo[k], b_hi[k], eye, ray, T, L);
 		cursor = b_hi[k];
 	}
 	if (cursor < end) {
