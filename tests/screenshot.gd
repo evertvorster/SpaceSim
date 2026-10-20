@@ -154,20 +154,22 @@ func _report_decks() -> void:
 		if material == null:
 			continue
 		var cover := material.get_shader_parameter("cover") as Texture2D
-		# **Every number the shader is actually given**, and the eye's position in the deck's own frame is the
-		# one that decides whether the frame is a top, a base or the inside: a shot is worthless as evidence
-		# if it cannot say which side of the shell it was taken from.
-		var eye := material.get_shader_parameter("eye_local") as Vector3
+		# **And the window, because it is a second texture and a picture cannot tell you which one drew.**
+		# `detail_size` zero is the far regime, and a non-zero one names the rectangle the patch occupies in
+		# the map's `(u, v)` — which is the only way to see from outside that it is not covering everything.
+		var detail := material.get_shader_parameter("detail") as Texture2D
+		var detail_size: Vector2 = material.get_shader_parameter("detail_size")
+		var window := "-"
+		if detail_size.x > 0.0 and detail != null:
+			window = "%dx%d at (%s)" % [detail.get_width(), detail.get_height(), str(detail_size)]
 		decks += 1
-		print("SHOT deck %-18s map %sx%s  threshold=%.3f  veil=%.3f  gain=%.3f  base_ratio=%.6f  eye=%.6f" % [
+		print("SHOT deck %-18s base %sx%s  window %s  threshold=%.3f  veil=%.3f" % [
 			mesh.name,
 			"-" if cover == null else str(cover.get_width()),
 			"-" if cover == null else str(cover.get_height()),
+			window,
 			float(material.get_shader_parameter("threshold")),
 			float(material.get_shader_parameter("veil")),
-			float(material.get_shader_parameter("ramp_gain")),
-			float(material.get_shader_parameter("base_ratio")),
-			-1.0 if eye == null else eye.length(),
 		])
 	print("SHOT: %d deck(s) in the tree" % decks)
 
