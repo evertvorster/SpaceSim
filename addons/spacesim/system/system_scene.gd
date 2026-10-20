@@ -691,19 +691,24 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 ## the shell from disagreeing about the same cloud. The extinction comes from the same law the test asserts
 ## (`SpacesimCloudBand.extinction`) over the air's own derived scale height.
 ##
-## **The extinction the near regime and the base's light both use.** A tau layer states its optical depth and gets
-## `SpacesimCloudBand.extinction` — the law the test asserts. A RAMP layer states none (every body but the giants),
-## so its equivalent depth comes from the mean thickness the ramp gain was already fitted to,
-## `-ln(1 - mean)` over the mean column — the same equivalence the shadow uses, and the only number that makes a
-## vertical column draw what the shell draws there. **One home for it**, because two copies drift apart on exactly
-## the bodies nobody looks at.
-func _deck_extinction(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
+## **A layer's vertical optical depth at full thickness**, which is the one number opacity, the base's
+## transmittance and the near regime's march all come from.
+##
+## A tau layer states it. A RAMP layer (every body but the giants) states none, and its equivalent is
+## `-ln(1 - mean)`, the same equivalence the shadow uses — so at the mean column its transmittance is the mean
+## thickness the ramp was calibrated on. **One home for it**, because two copies drift apart on exactly the
+## bodies nobody looks at.
+func _deck_tau_full(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
 	if deck.optical_depth > 0.0:
-		return SpacesimCloudBand.extinction(
-			deck.optical_depth, float(body.air.get("rayleigh_scale_height", 0.0))
-		)
+		return deck.optical_depth
 	var mean := clampf(_cloud_maps.ramp_mean_of(body.id, deck.index), 0.02, 0.98)
-	return -log(1.0 - mean) / maxf(mean * deck.thickness, 1.0)
+	return -log(1.0 - mean)
+
+
+## The per-metre coefficient a march needs, from the layer's own column — `tau_full / thickness`, so the near
+## regime integrates exactly the depth the shell draws with.
+func _deck_extinction(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
+	return _deck_tau_full(body, deck) / maxf(deck.thickness, 1.0)
 
 
 ## **The top layer only, and that is this rung's named limit.** The near regime is live inside or just under
@@ -823,9 +828,7 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		if deck.shadow_tau <= 0.0:
 			deck.shadow_tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
 		deck.morphology = morphology
-		deck.material = SpacesimBodyRenderer.deck_material(
-			body, level, clouds.optical_depth_at(index), deck.palette, index
-		)
+		deck.material = SpacesimBodyRenderer.deck_material(body, level, deck.palette, index)
 		# **The node is the body's own unit sphere scaled to the slab's TOP**, and its mesh arrives with the
 		# first patch rebuild — nothing draws for a frame or two rather than stalling the frame that asked.
 		var top_radius := body.radius + deck.height + deck.thickness
@@ -1307,7 +1310,7 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
 		SpacesimBodyRenderer.apply_deck_light(
-			deck.material, body.air, _deck_extinction(body, deck) * deck.thickness
+			deck.material, body.air, _deck_tau_full(body, deck)
 		)
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
 		var texture := _cloud_maps.map(
@@ -1335,12 +1338,10 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			if deck == shadowing:
 				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, 0)
 			continue
-		# **Which mean the gain is fitted to is the layer's own path**: a tau deck's alpha is the exponential,
-		# so its mean opacity is the number; a ramp deck's is the mean thickness.
-		var mean := (
-			_cloud_maps.opacity_mean_of(body.id, deck.index) if deck.optical_depth > 0.0
-			else _cloud_maps.ramp_mean_of(body.id, deck.index)
-		)
+		# **One mean for every layer**: the gain is fitted to the mean of what the deck actually draws, `R(tau)`.
+		# There used to be two paths — a tau layer fitted to its mean opacity and a ramp layer to its mean
+		# thickness — and two laws for one quantity is how the top ended up opaque while the base transmitted.
+		var mean := _cloud_maps.opacity_mean_of(body.id, deck.index)
 		var gain := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, mean)
 		var threshold := _cloud_maps.threshold_of(body.id, deck.index)
 		SpacesimBodyRenderer.apply_cloud_map(

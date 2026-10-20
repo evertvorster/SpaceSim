@@ -206,13 +206,22 @@ static func mean_exceedance(image: Image, threshold: float) -> float:
 	return total / float(count)
 
 
-## **How much light the layer actually blocks, averaged over the area it covers**, for a layer that states an
-## optical depth: the mean of `1 - exp(-tau * thickness)`.
+## The depth a ramp layer's mean thickness implies, or the depth the layer stated.
+static func _column_depth(ramp_mean: float, stated: float) -> float:
+	if stated > 0.0:
+		return stated
+	return -log(maxf(1.0 - clampf(ramp_mean, 0.0, 0.999), 1.0e-3))
+
+
+## **How much light the layer actually blocks, averaged over the area it covers**: the mean of `R(tau)`, the
+## complement of the transmittance the march integrates.
 ##
-## This is the same job `mean_exceedance` does for the ramp path, and it exists because the drawn reflectance
-## of a tau layer is `ALBEDO * ALPHA` with `ALPHA` exponential — so fitting the ramp to the mean *thickness*
-## would over-brighten it. Fitted to this instead, the layer's average drawn reflectance is its albedo, which
-## is what `bond_albedo` assumes and what the tests hold.
+## **One law for both faces and both layer kinds.** The reflectance ramp this replaced saturated at 1 — it was
+## the column's normalised thickness — so a tau-1.5 deck hid everything from above while transmitting a fifth of
+## the sky underneath it. Evert, flying: *"looking down at the clouds, there is a lot of alpha applied that seems
+## to be missing from the bottom up."* Fitted to `R(tau)` instead, the layer's average drawn reflectance is still
+## its albedo (which is what `bond_albedo` assumes and what the tests hold), and the two faces cannot disagree
+## about how much light gets through.
 ##
 ## **Measured at the local vertical**, `mu = 1`. The limb is deliberately brighter than this, because that is
 ## what a slab does; the budget is fitted at normal incidence.
@@ -230,7 +239,7 @@ static func mean_opacity(image: Image, threshold: float, depth: float) -> float:
 	var count := 0
 	for byte in data:
 		if byte >= level:
-			total += 1.0 - exp(-depth * (float(byte) - float(level)) / span)
+			total += SpacesimCloudBand.two_flux(depth * (float(byte) - float(level)) / span).x
 			count += 1
 	return 0.0 if count == 0 else total / float(count)
 
@@ -387,7 +396,10 @@ func _bake_floor(
 	entry.texel = (TAU * radius) / float(FLOOR_WIDTH)
 	entry.threshold = threshold_for(image, coverage)
 	entry.ramp_mean = mean_exceedance(image, entry.threshold)
-	entry.opacity_mean = mean_opacity(image, entry.threshold, depth)
+	# **The optical depth is derived here, from this image**, when the layer states none: `-ln(1 - ramp_mean)` is
+	# the depth whose transmittance is the mean thickness, which is the equivalence the shadow already uses. So the
+	# mean the gain is fitted to is `mean(R(tau))` for every layer, ramp or tau, and one map cannot carry two laws.
+	entry.opacity_mean = mean_opacity(image, entry.threshold, _column_depth(entry.ramp_mean, depth))
 	entry.texture = ImageTexture.create_from_image(image)
 
 
@@ -471,7 +483,9 @@ func _measure(entry: Entry, coverage: float, depth: float) -> void:
 		return
 	entry.threshold = threshold_for(entry.image, coverage)
 	entry.ramp_mean = mean_exceedance(entry.image, entry.threshold)
-	entry.opacity_mean = mean_opacity(entry.image, entry.threshold, depth)
+	entry.opacity_mean = mean_opacity(
+		entry.image, entry.threshold, _column_depth(entry.ramp_mean, depth)
+	)
 
 
 func _bake_refinement(

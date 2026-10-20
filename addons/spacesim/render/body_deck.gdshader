@@ -67,7 +67,10 @@ uniform float ramp_gain : hint_range(0.0, 1.0) = 1.0;
 // as a slab: `ALPHA = 1 − exp(−tau · thickness / mu)` with `mu` the view cosine, so the same cloud is
 // *thicker at the limb* because the line of sight through it is longer. That is the difference between a
 // deck that is transparent because a number said so and one that is transparent because it is thin.
-uniform float optical_depth = 0.0;
+// **The vertical optical depth of a full column**, from the host — `SpacesimSystemScene._deck_tau_full`. The
+// shader multiplies it by the thickness it samples, so opacity and the base's transmittance are the same law
+// from the same texel.
+uniform float tau_full = 0.0;
 
 // ===== THE SLAB, AND ITS TWO SIDES ==================================================
 //
@@ -112,9 +115,6 @@ uniform vec3 sky_rayleigh_tau = vec3(0.0);
 uniform float sky_mie_tau = 0.0;
 uniform float sky_intensity = 0.0;
 uniform float sky_anisotropy = 0.758;
-// **The optical depth of a full column** — `extinction * the layer's derived thickness`, so this shader does
-// not have to know the extinction law, only multiply by the thickness it already samples.
-uniform float tau_full = 0.0;
 // The cloud's own multiply-scattered light: what a base shows once `T -> 0`. A stated interim, scaled as a
 // Lambertian surface of the cloud's own reflectance would be — see §D6's "what is approximated".
 uniform vec3 scattered_grey = vec3(0.0);
@@ -217,10 +217,13 @@ void fragment() {
 	// **The slant path.** `to_eye` is the direction out of the slab, so its cosine against the normal is
 	// `mu` — 1 at the sub-solar point, 0 at the limb.
 	float mu = clamp(dot(p, to_eye), 0.03, 1.0);
-	float alpha = covered * veil * thickness;
-	if (optical_depth > 0.0) {
-		alpha = covered * veil * (1.0 - exp(-optical_depth * thickness / mu));
-	}
+	// **Opacity is `R(tau)`, the complement of what the base transmits.** The old form was a reflectance ramp —
+	// the column's normalised thickness — which saturated at 1, so this face hid everything while the base let a
+	// fifth of the sky through at the same texel. Evert: *"there is a lot of alpha applied that seems to be
+	// missing from the bottom up."* One law, one texel, both faces: `alpha + transmit = 1`.
+	float column_tau = tau_full * thickness / mu;
+	float transmit = 1.0 / (1.0 + max(column_tau, 0.0));
+	float alpha = covered * veil * (1.0 - transmit);
 	// **The inside-the-slab branch is GONE, and deleting it is what removes the flash at the deck's top.** It
 	// used to set `alpha = covered` for an eye between the base and the top — a step by construction, where
 	// what should change continuously is the cross-section of cloud along the ray. Evert saw it as "at 3k
@@ -240,8 +243,8 @@ void fragment() {
 		// Now: the slab's two faces are complements, the light transmitted is the sky above this column in closed
 		// form, and a Henyey-Greenstein lobe puts the bright side where physics puts it — looking THROUGH the slab
 		// at the star.
-		float tau = tau_full * thickness;
-		float transmit = 1.0 / (1.0 + max(tau, 0.0));
+		// `transmit` and `column_tau` are the ones the opacity above computed from the same texel, so the two
+		// faces cannot disagree: what the top hides is what the base lets through.
 		// The sky above this column, from the coefficients the sky shader takes. `cos_sky` is against the column's
 		// own outward normal, so a high star lights the sky overhead more than a low one.
 		float cos_sky = clamp(dot(p, sun_local), -1.0, 1.0);

@@ -649,7 +649,6 @@ static func apply_surface_maps(
 static func deck_material(
 	body: SpacesimSceneBody,
 	level: SpacesimAtmosphereModel.Condensation,
-	optical_depth: float,
 	palette: Color,
 	seed_layer: int
 ) -> ShaderMaterial:
@@ -664,7 +663,6 @@ static func deck_material(
 	material.set_shader_parameter("base_ratio", clampf(base_radius / maxf(top_radius, 1.0), 0.0, 1.0))
 	material.set_shader_parameter("cover", white_texel())
 	material.set_shader_parameter("veil", 1.0)
-	material.set_shader_parameter("optical_depth", optical_depth)
 	# **Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing.** The
 	# authored colour is a palette value; what the deck reflects is `ramp_gain`'s business, one level up.
 	material.set_shader_parameter("cloud_color", palette.srgb_to_linear())
