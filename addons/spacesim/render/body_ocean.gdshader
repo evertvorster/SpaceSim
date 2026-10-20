@@ -3,6 +3,8 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+// **The deck above, as a shadow** — the same law the land uses, so a shadowed shore meets a shadowed sea.
+#include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
 // **The ocean: a level, absorbing surface, and nothing else.**
 //
@@ -137,6 +139,12 @@ void fragment() {
 	float fill = smoothstep(shallow_metres, max(deep_metres, shallow_metres * 1.01), depth);
 	ALBEDO = mix(shallow_color, deep_color, fill);
 	ROUGHNESS = roughness_value;
+	// **The deck's shadow, on the sea as on the land** — the same transmittance, the same uniform, one law in
+	// `deck_shadow.gdshaderinc`. A shadowed shore beside an unshadowed sea would be worse than no shadow.
+	if (deck_shadow_present()) {
+		AO = deck_transmittance(normalize(unit_position), planet_radius);
+		AO_LIGHT_AFFECT = 1.0;
+	}
 	SPECULAR = specular_value;
 
 	// **One sampling law for everything here**: a feature is drawn while a pixel holds at least four samples of

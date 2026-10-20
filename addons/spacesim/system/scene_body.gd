@@ -62,6 +62,10 @@ class Deck:
 	## The layer's optical depth at full thickness, or 0 for the reflectance-ramp path. It decides which of
 	## the map's two measured means the ramp gain is fitted to.
 	var optical_depth := 0.0
+	## **The depth the SHADOW uses**, which is not always the one the deck draws with: a layer on the ramp path
+	## states no `optical_depth`, and its honest equivalent is `−ln(1 − opacity)` — what "how opaque it is where
+	## it covers" already means, since `α = 1 − e^{−τ}`. Zero for a layer that is neither.
+	var shadow_tau := 0.0
 	## The body's cloud organisation, which is what the field is generated from. One derivation for the whole
 	## stack: the bands do not change with altitude.
 	var morphology: SpacesimCloudModel.Morphology

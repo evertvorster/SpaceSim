@@ -31,6 +31,7 @@ func run(h, root: Node) -> void:
 	_test_who_gets_no_deck(h, scene)
 	_test_a_deck_below_its_datum(h, scene)
 	_test_the_deck_goes_live(h, scene, root)
+	_test_the_deck_casts_a_shadow(h, scene)
 	_test_the_ramp_gain(h)
 
 	scene.container.free()
@@ -177,6 +178,54 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	scene.update_lod(camera, 0.016)
 	h.check(deck.node.visible, "and brings it back")
 	camera.queue_free()
+
+
+## **The deck's shadow reaches the ground, and the sea with it.** What can be asserted is the *contract*
+## between the deck and the surface it darkens: the same map, the same percentile, a depth, and the lever arm
+## the offset is measured along. What cannot be asserted here is how the shadow looks — one tap of a field in
+## the star's direction is arithmetic GLSL does, not GDScript.
+func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	if earth == null or earth.decks.is_empty() or earth.mesh_material == null:
+		h.check(false, "Earth has a deck and a land material to shadow")
+		return
+	var deck: SpacesimSceneBody.Deck = earth.decks[0]
+	h.check(deck.shadow_tau > 0.0,
+		"Earth's deck has an optical depth to cast with (%.3f), derived from its opacity" % deck.shadow_tau)
+	var land := earth.mesh_material as ShaderMaterial
+	# **Already published, by the frame walk this suite drove a moment ago** — which is the stronger claim:
+	# the shadow is wired into `update_lod`, not merely available to be set.
+	h.check_near(float(land.get_shader_parameter("deck_tau")), deck.shadow_tau,
+		"and the frame walk has already given the land that depth", 1.0e-9)
+
+	# Publish what a landed map would publish, and check both surfaces took it.
+	var cover := SpacesimBodyRenderer.white_texel()
+	SpacesimBodyRenderer.apply_deck_shadow(
+		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
+	)
+	SpacesimBodyRenderer.apply_deck_shadow(
+		earth.ocean_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
+	)
+	var sea := earth.ocean_material as ShaderMaterial
+	for pair in [[land, "land"], [sea, "sea"]]:
+		var material: ShaderMaterial = pair[0]
+		if material == null:
+			continue
+		h.check_near(float(material.get_shader_parameter("deck_tau")), deck.shadow_tau,
+			"the %s is shadowed by the deck's own depth" % pair[1], 1.0e-9)
+		h.check_near(float(material.get_shader_parameter("deck_height")),
+			deck.height + deck.thickness,
+			"with the lever arm at the deck's TOP, %.0f m above the surface" % (deck.height + deck.thickness),
+			1.0)
+		h.check_near(float(material.get_shader_parameter("deck_threshold")), 0.843,
+			"and the same percentile the cloud is drawn with", 1.0e-9)
+
+	# **A body with no deck keeps its shadow switched off**, which is the shader's `deck_shadow_present()` gate
+	# and the reason the path costs nothing on the bodies without air.
+	var luna := scene.body_by_id("moon:luna")
+	if luna != null and luna.mesh_material != null:
+		h.check_near(float((luna.mesh_material as ShaderMaterial).get_shader_parameter("deck_tau")), 0.0,
+			"while an airless body has no shadow at all", 1.0e-9)
 
 
 ## **The ramp gain is what keeps the light budget honest**, and its ceiling is real: with the gain set from

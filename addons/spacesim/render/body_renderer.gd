@@ -476,6 +476,11 @@ static func surface_material(
 	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
+	# **No deck above to begin with**: `deck_tau = 0` makes the shadow path a uniform branch, which is the
+	# honest state of every body without a cloud layer. `apply_deck_shadow()` is the one writer.
+	material.set_shader_parameter("deck_tau", 0.0)
+	material.set_shader_parameter("deck_height", 0.0)
+	material.set_shader_parameter("deck_threshold", 1.0)
 	return material
 
 
@@ -526,6 +531,10 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("tone_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("tone_octaves", OCEAN_TONE_OCTAVES)
 	material.set_shader_parameter("tone_variation", OCEAN_TONE_VARIATION)
+	# **The sea is shadowed by the same deck as the land**, from the same uniforms — see `deck_shadow.gdshaderinc`.
+	material.set_shader_parameter("deck_tau", 0.0)
+	material.set_shader_parameter("deck_height", 0.0)
+	material.set_shader_parameter("deck_threshold", 1.0)
 	return material
 
 
@@ -689,6 +698,37 @@ static func face_deck(material: Material, eye_offset: Vector3) -> void:
 	if deck == null:
 		return
 	deck.set_shader_parameter("eye_local", eye_offset)
+
+
+## **Publish the deck's shadow on a surface** — the map, the percentile that makes it a thickness, the depth,
+## and the lever arm the offset is measured along.
+##
+## **The map is the deck's own**, read from the star's side instead of the eye's, so a shadow cannot disagree
+## with the cloud that casts it. `height` is the deck's TOP above this surface: a shadow's offset is
+## `height · tan(zenith)`, and using the base instead would put every shadow a slab's thickness too close to
+## its cloud.
+##
+## A body with no deck never calls this, and `deck_tau` stays 0 — the shader's `deck_shadow_present()` gate.
+static func apply_deck_shadow(
+	material: Material, texture: Texture2D, threshold: float, tau: float, height: float
+) -> void:
+	var surface := material as ShaderMaterial
+	if surface == null or tau <= 0.0 or height <= 0.0:
+		return
+	if texture != null and surface.get_shader_parameter("deck_cover") != texture:
+		surface.set_shader_parameter("deck_cover", texture)
+	surface.set_shader_parameter("deck_threshold", threshold)
+	surface.set_shader_parameter("deck_tau", tau)
+	surface.set_shader_parameter("deck_height", height)
+
+
+## **Where the star is, in the body's frame** — the direction the shadow is offset along, per frame, because it
+## is the star's motion that moves a shadow and not the ground's.
+static func face_surface_star(material: Material, sun_model: Vector3) -> void:
+	var surface := material as ShaderMaterial
+	if surface == null:
+		return
+	surface.set_shader_parameter("deck_sun", sun_model)
 
 
 ## **The reflectance a deck is drawn at**, so that its *average* is the calibrated albedo while its thick tops

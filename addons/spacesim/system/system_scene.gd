@@ -765,6 +765,11 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		deck.albedo = clouds.albedo_at(index)
 		deck.palette = _cloud_palette(clouds, index, materials)
 		deck.optical_depth = clouds.optical_depth_at(index)
+		# **What the SHADOW is cast with.** A layer on the ramp path states no optical depth, and its honest
+		# equivalent is `−ln(1 − opacity)` — "how opaque it is where it covers" already means `α = 1 − e^{−τ}`.
+		deck.shadow_tau = deck.optical_depth
+		if deck.shadow_tau <= 0.0:
+			deck.shadow_tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
 		deck.morphology = morphology
 		deck.material = SpacesimBodyRenderer.deck_material(
 			body, level, clouds.optical_depth_at(index), deck.palette, index
@@ -1235,6 +1240,14 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			deck.node.visible = false
 		return
 	var to_eye := observer - body.node.global_position
+	# **Where the star is, in the body's own frame** — the direction a shadow is offset along, and the reason a
+	# shadow moves as the star moves rather than as the ground does.
+	var sun := Vector3.UP
+	var star_body := star()
+	if star_body != null:
+		sun = (star_body.position - body.position).normalized()
+	for material in [body.mesh_material, body.ocean_material]:
+		SpacesimBodyRenderer.face_surface_star(material, sun)
 	for deck in body.decks:
 		var top_radius := body.radius + deck.height + deck.thickness
 		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0))
@@ -1255,6 +1268,10 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			SpacesimBodyRenderer.apply_cloud_map(
 				deck.material, SpacesimBodyRenderer.white_texel(), 0, 0.0, veil.value, deck.coverage
 			)
+			# **A uniform veil casts a uniform shadow**: a one-texel white map with `threshold = 0` is a single
+			# thickness everywhere, which is what a deck the model calls FEATURELESS actually is.
+			if deck.index == 0:
+				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0)
 			continue
 		# **Which mean the gain is fitted to is the layer's own path**: a tau deck's alpha is the exponential,
 		# so its mean opacity is the number; a ramp deck's is the mean thickness.
@@ -1263,9 +1280,26 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			else _cloud_maps.ramp_mean_of(body.id, deck.index)
 		)
 		var gain := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, mean)
+		var threshold := _cloud_maps.threshold_of(body.id, deck.index)
 		SpacesimBodyRenderer.apply_cloud_map(
-			deck.material, texture, width, _cloud_maps.threshold_of(body.id, deck.index), gain.value,
-			1.0
+			deck.material, texture, width, threshold, gain.value, 1.0
+		)
+		if deck.index == 0:
+			_publish_deck_shadow(body, deck, texture, threshold)
+
+
+## **The deck above the ground is the one that shadows it.** Only the highest layer publishes a shadow, and it
+## goes to the land and the sea together — a shadow that reached one and not the other would put a line down
+## every coastline, the same failure the sea level already taught.
+##
+## The lever arm is the deck's **top** above the surface: a shadow's offset is `height · tan(zenith)`, and
+## using the base would put every shadow a slab's thickness too close to its cloud.
+func _publish_deck_shadow(
+	body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck, texture: Texture2D, threshold: float
+) -> void:
+	for material in [body.mesh_material, body.ocean_material]:
+		SpacesimBodyRenderer.apply_deck_shadow(
+			material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness
 		)
 
 

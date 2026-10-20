@@ -7,6 +7,8 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // geology. The include is the whole mechanism: one field, two compilers.
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+// **The deck above, as a shadow.** One law, shared with the sea, so the two cannot disagree.
+#include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
 // **The surface layer: a height field, a colour ramp, and a sea.**
 //
@@ -182,6 +184,13 @@ void fragment() {
 	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
 	ROUGHNESS = land_roughness;
+	// **The cloud deck's shadow on the ground**, as the star's transmittance through it — and written into
+	// `AO`/`AO_LIGHT_AFFECT` because the engine turns those into a *direct-light* occlusion before the light
+	// loop, which is exactly a cloud's shadow (and needs no BRDF of our own). See `deck_shadow.gdshaderinc`.
+	if (deck_shadow_present()) {
+		AO = deck_transmittance(normalize(unit_position), planet_radius);
+		AO_LIGHT_AFFECT = 1.0;
+	}
 	SPECULAR = land_specular;
 
 	// **The relief, from four taps of the same map.** `eps` is one texel of *that* map, because a fixed
