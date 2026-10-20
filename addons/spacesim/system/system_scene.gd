@@ -1244,10 +1244,24 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			deck.optical_depth
 		)
 		var width := _cloud_maps.width_of(body.id, deck.index)
-		if width == deck.published_width:
+		# **When the map has nothing to say, say so with the layer's coverage instead of with a gap.**
+		#
+		# The shell's visible arc from the eye is `sqrt(2 * R * slot)` — the horizon distance — and a map
+		# whose texel is comparable to it cannot resolve *anything*: every pixel samples the same texel, and
+		# if that one texel happens to fall below the threshold the deck does not merely look coarse, it
+		# **does not exist**. That is what a deck seen from a few hundred metres below looks like, and it is
+		# why the whole-body map cannot be the near field.
+		#
+		# So below the altitude where the map can serve, the deck is drawn at the layer's own coverage — the
+		# same veil a `FEATURELESS` body gets, and the same rule: an absent deck is never the honest answer to
+		# "the map is too coarse here". The structure that this gives up is the near regime's job.
+		var slot := absf(to_eye.length() - top_radius)
+		var texel := TAU * top_radius / float(maxi(width, 1))
+		var under_resolved := slot < 2.0 * texel and slot < sqrt(2.0 * top_radius * texel)
+		if width == deck.published_width and not (under_resolved and deck.material.get_shader_parameter("veil") != deck.coverage):
 			continue
 		deck.published_width = width
-		if texture == null or width <= 0:
+		if texture == null or width <= 0 or under_resolved:
 			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
 			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world
 			# reads as a shroud rather than as an absent deck.

@@ -159,14 +159,21 @@ void fragment() {
 	}
 
 	float field = texture(cover, cloud_map_uv(sample_direction)).r;
-	// **And the structure the map is too coarse to hold.** `fwidth` of the model-space direction is the angle
-	// one pixel spans, so the fade is in the units the feature sizes are in: no distance, no scale factor, and
-	// nothing to keep in sync with the camera.
+	// **And the structure the map is too coarse to hold below the map's own texel.**
+	//
+	// **The footprint has to be in the same frame as the feature sizes, and that was a real bug.** `fwidth`
+	// gives the angle a pixel spans **at the eye**; every `size` in the ladder is an arc **on the unit sphere**,
+	// i.e. measured at the planet's centre. The two agree only when the eye is about a radius away — which is
+	// why the ladder worked from orbit and was dead from 700 m, where they differ by R/distance ≈ 9,000 and
+	// every rung faded out. Converting the footprint into sphere-arc units is one factor: the eye's distance to
+	// the shell, in radii. **From underneath, that made the difference between "one map texel and no detail"
+	// and a sky with structure in it.**
+	float eye_to_shell = max(abs(1.0 - eye_radius), 1.0e-7);
+	float sphere_footprint = length(fwidth(local_position)) * eye_to_shell;
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
 		field = clamp(
 			field + cloud_detail(
-				sample_direction, length(fwidth(local_position)),
-				detail_seed, detail_feature, detail_strength
+				sample_direction, sphere_footprint, detail_seed, detail_feature, detail_strength
 			),
 			0.0, 1.0
 		);
