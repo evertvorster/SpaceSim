@@ -131,6 +131,41 @@ static func chord(outer: float, base: float, impact: float) -> float:
 	return through_outer - sqrt(maxf(base * base - closest * closest, 0.0))
 
 
+## **The spans of the band along a ray**, as distances from the eye — `[lo0, hi0, lo1, hi1]` in metres, an
+## empty pair given as `lo == hi`.
+##
+## One span normally, **two when the ray dips below the base** (the band either side of its closest approach),
+## and none when the ray misses the outer sphere altogether. `along` is the cosine between the eye's own
+## position vector and the ray: `-1` looks straight at the centre and `+1` straight away from it, and
+## `impact = eye_radius · sqrt(1 - along²)` follows from it.
+##
+## **This exists because its absence cost a flight.** The first version of the shader took the outer sphere's
+## span and clamped it at the base only when the base's *near root was ahead* — which is false for an eye below
+## the base, where the clamp then silently did nothing and the march ran the whole column down to the ground.
+## Evert, 2026-10-20: *"below the ground textures are invisible, just a grey haze. Then, it's a grey haze all
+## the way down to the surface."* The law is here so that its consequence can be asserted without a GPU;
+## `SpacesimAtmospherePass`'s `deck_span()` is its transcription into GLSL.
+static func spans(eye_radius: float, along: float, top_radius: float, base_radius: float) -> PackedFloat32Array:
+	var empty := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+	if top_radius <= base_radius or eye_radius <= 0.0:
+		return empty
+	var impact_squared := eye_radius * eye_radius * maxf(1.0 - along * along, 0.0)
+	var outer_half := top_radius * top_radius - impact_squared
+	if outer_half <= 0.0:
+		return empty
+	outer_half = sqrt(outer_half)
+	# The ray's closest point, as a distance from the eye: positive when it is ahead, which is what decides
+	# whether a span lands in front of the observer at all.
+	var closest := -eye_radius * along
+	var base_half := base_radius * base_radius - impact_squared
+	if base_half <= 0.0:
+		return PackedFloat32Array([closest - outer_half, closest + outer_half, 0.0, 0.0])
+	base_half = sqrt(base_half)
+	return PackedFloat32Array([
+		closest - outer_half, closest - base_half, closest + base_half, closest + outer_half,
+	])
+
+
 ## **The samples a chord deserves** — `ceil(chord · extinction · SAMPLES_PER_OPTICAL_DEPTH)`.
 ##
 ## Floored at one: every ray that is in a band costs a sample, because that sample is what carries the

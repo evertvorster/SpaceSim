@@ -182,11 +182,12 @@ void fragment() {
 	if (optical_depth > 0.0) {
 		alpha = covered * veil * (1.0 - exp(-optical_depth * thickness / mu));
 	}
-	// **Inside the slab there is no way round it**: the deck is between the eye and everything, so cover is
-	// the whole story. This is what stops punching through a deck from being a sudden bright flash.
-	if (eye_radius < 1.0 && eye_radius >= base_ratio) {
-		alpha = covered;
-	}
+	// **The inside-the-slab branch is GONE, and deleting it is what removes the flash at the deck's top.** It
+	// used to set `alpha = covered` for an eye between the base and the top — a step by construction, where
+	// what should change continuously is the cross-section of cloud along the ray. Evert saw it as "at 3k
+	// altitude there is a flash again" (2026-10-20), 3,040 m being this deck's top exactly: the shell's own
+	// alpha jumped from `covered * thickness` to `covered` on the way in. The inside case is now the pass's,
+	// which integrates the cross-section instead of switching pictures.
 
 	vec3 radiance = cloud_color * ramp_gain;
 	// **And the handover.** The pass marches this deck as a slab once it has the map, and the shell must not

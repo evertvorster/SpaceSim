@@ -705,12 +705,23 @@ func near_deck(body: SpacesimSceneBody) -> Dictionary:
 		return {}
 	var palette: Color = deck.material.get_shader_parameter("cloud_color")
 	var gain := float(deck.material.get_shader_parameter("ramp_gain"))
+	# **The extinction the slab marches with.** A tau layer states its optical depth and gets
+	# `SpacesimCloudBand.extinction` — the same law the test asserts. A RAMP layer states none (every body but
+	# the giants), so its equivalent depth comes from the mean thickness the ramp gain was already fitted to:
+	# `tau = -ln(1 - mean_thickness)` over the mean column, which is the same equivalence the shadow uses and
+	# the only number that makes a vertical column draw what the shell draws there.
+	var extinction := 0.0
+	if deck.optical_depth > 0.0:
+		extinction = SpacesimCloudBand.extinction(
+			deck.optical_depth, float(body.air.get("rayleigh_scale_height", 0.0))
+		)
+	else:
+		var mean := clampf(_cloud_maps.ramp_mean_of(body.id, deck.index), 0.02, 0.98)
+		extinction = -log(1.0 - mean) / maxf(mean * deck.thickness, 1.0)
 	return {
 		"base_radius": body.radius + deck.height,
 		"top_radius": body.radius + deck.height + deck.thickness,
-		"extinction": SpacesimCloudBand.extinction(
-			deck.optical_depth, float(body.air.get("rayleigh_scale_height", 0.0))
-		),
+		"extinction": extinction,
 		"threshold": float(deck.material.get_shader_parameter("threshold")),
 		"column_height": deck.thickness,
 		"radiance": Vector3(palette.r, palette.g, palette.b) * gain,

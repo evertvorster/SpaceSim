@@ -41,6 +41,7 @@ func run(h, root: Node) -> void:
 	_test_column_top(h)
 	_test_extinction(h)
 	_test_the_chord(h, scene)
+	_test_the_spans(h)
 	_test_the_samples(h)
 	_test_the_bound(h)
 	_test_the_march(h, scene, materials, luminosity)
@@ -148,6 +149,48 @@ func _test_the_chord(h, scene: SpacesimSystemScene) -> void:
 
 	h.check_near(SpacesimCloudBand.chord(base, base, 0.0), 0.0,
 		"a band of zero thickness has no chord at all", 1.0e-9)
+
+
+## **The spans a ray actually meets, which is where the geometry bug lived.** The four cases that were flown
+## on 2026-10-20, asserted: a grey haze ran all the way to the ground because a ray from *below* the base was
+## given the whole column.
+func _test_the_spans(h) -> void:
+	var planet := 6371000.0
+	var base := planet + 1436.0
+	var top := base + 1604.0
+
+	# Below the base, looking down: nothing. This is the case that put haze on the ground.
+	var down := SpacesimCloudBand.spans(planet + 500.0, -1.0, top, base)
+	h.check_near(_ahead(down, planet + 500.0), 0.0,
+		"an eye below the base looking down meets no cloud at all", 1.0e-6)
+
+	# Below the base, looking up: the whole slab, from the base overhead to its top.
+	var up := SpacesimCloudBand.spans(planet + 500.0, 1.0, top, base)
+	h.check_near(_ahead(up, 1.0e12), 1604.0,
+		"and looking up it meets the whole slab (%.0f m)" % _ahead(up, 1.0e12), 1.0e-3)
+
+	# Inside the slab, looking down: only the part below the eye — which is why the ground reads through.
+	h.check_near(_ahead(SpacesimCloudBand.spans(planet + 2000.0, -1.0, top, base), planet + 2000.0), 564.0,
+		"inside the slab looking down, only the column below the eye", 1.0e-3)
+	h.check_near(_ahead(SpacesimCloudBand.spans(planet + 2000.0, 1.0, top, base), 1.0e12), 1040.0,
+		"and looking up, only the column above it", 1.0e-3)
+
+	# Above the top: the whole slab, and the far side of it is beyond the planet.
+	h.check_near(_ahead(SpacesimCloudBand.spans(planet + 10000.0, -1.0, top, base), planet + 10000.0), 1604.0,
+		"from above, the whole slab and no more", 1.0e-3)
+
+	# `along = 0` is a ray perpendicular to the position vector, so its closest approach IS the eye's radius —
+	# twice the band's, and the ray passes over it entirely.
+	h.check_near(_ahead(SpacesimCloudBand.spans(top * 2.0, 0.0, top, base), 1.0e12), 0.0,
+		"and a ray that passes over the band meets nothing", 1.0e-6)
+
+
+## How much of the band is in front of the eye, given where the march is allowed to end.
+func _ahead(spans: PackedFloat32Array, end: float) -> float:
+	return (
+		maxf(minf(spans[1], end) - maxf(spans[0], 0.0), 0.0)
+		+ maxf(minf(spans[3], end) - maxf(spans[2], 0.0), 0.0)
+	)
 
 
 ## The count is a consequence, not a choice: a sample may not advance more than a sixth of an e-fold.

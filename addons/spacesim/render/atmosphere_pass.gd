@@ -406,6 +406,65 @@ vec2 ray_sphere(vec3 origin, vec3 direction, float radius) {
 	return vec2((-b - sqrt(d)) * 0.5, (-b + sqrt(d)) * 0.5);
 }
 
+// **The band's spans along this ray.** The deck is the region `base <= r <= top`, so a line can cross it
+// TWICE — and the second one is real, just usually behind the planet where `end` cuts it. The previous form
+// took the outer sphere's span and clamped it at the base only when the base's near root was ahead, which is
+// false for an eye *below* the base: then the clamp silently did nothing and the march ran the whole column
+// down to the ground. From underneath a deck that is a grey haze all the way to the surface, and that is what
+// it looked like in flight (2026-10-20).
+//
+// The squared closest approach decides it, which is the same geometry `SpacesimCloudBand.chord` states: a ray
+// that dips below the base crosses the band once on each side of its closest point.
+void deck_span(vec3 eye, vec3 ray, float top_r, float base_r,
+	out float lo0, out float hi0, out float lo1, out float hi1) {
+	lo0 = 0.0; hi0 = 0.0; lo1 = 0.0; hi1 = 0.0;
+	float tc = -dot(eye, ray);
+	float d2 = max(dot(eye, eye) - tc * tc, 0.0);
+	float outer_half = top_r * top_r - d2;
+	if (outer_half <= 0.0) {
+		return;
+	}
+	outer_half = sqrt(outer_half);
+	float base_half = base_r * base_r - d2;
+	if (base_half <= 0.0) {
+		lo0 = tc - outer_half;
+		hi0 = tc + outer_half;
+		return;
+	}
+	base_half = sqrt(base_half);
+	lo0 = tc - outer_half; hi0 = tc - base_half;
+	lo1 = tc + base_half;  hi1 = tc + outer_half;
+}
+
+// One span of the band, marched. `total` is the whole band's chord so the budget is shared between the two
+// spans rather than granted twice.
+void march_deck(float lo, float hi, float count, vec3 eye, vec3 ray, inout float T, inout vec3 L) {
+	int steps = max(int(round(count)), 1);
+	float step_length = (hi - lo) / float(steps);
+	for (int i = 0; i < DECK_STEP_LIMIT; i++) {
+		if (i >= steps) break;
+		vec3 p = eye + ray * (lo + step_length * (float(i) + 0.5));
+		float field = texture(cover, cloud_map_uv(normalize(params.to_model * normalize(p)))).r;
+		// **Luminance is height** (§4.2): this column's cloud reaches `top` above the base, so a sample above
+		// it is in clear air and the lateral edge is a taper rather than a cut.
+		float top = params.deck.w * clamp(
+			(field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
+		);
+		// **Uniform through the slab and soft at the top**, rather than a wedge thickening downward. A wedge
+		// put the whole column's opacity in its bottom metre, which is why nothing was visible looking up from
+		// under a deck: the cloud was all at the base and the top of the column was empty air.
+		//
+		// `1 - smoothstep(a, b, x)` and NOT `smoothstep(b, a, x)`: GLSL leaves the result undefined when
+		// `edge0 >= edge1`, so the descending form is not a shorthand for the complement.
+		float density = top > 0.0
+			? 1.0 - smoothstep(0.72, 1.0, (length(p) - params.deck.x) / top)
+			: 0.0;
+		float alpha = 1.0 - exp(-density * params.deck.y * step_length);
+		L += params.deck_radiance.rgb * alpha * T;
+		T *= 1.0 - alpha;
+	}
+}
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (pixel.x >= int(params.frame.x) || pixel.y >= int(params.frame.y)) {
@@ -512,36 +571,24 @@ void main() {
 	float cloud_T = 1.0;
 	vec3 cloud_light = vec3(0.0);
 	if (params.radii.w > 0.0) {
-		vec2 band = ray_sphere(eye, ray, params.radii.z);
-		if (band.x <= band.y) {
-			float b0 = max(max(band.x, 0.0), start);
-			float b1 = min(band.y, end);
-			// **A ray that reaches the ground leaves the band at the BASE**, so its chord is one arc — half the
-			// grazing one. `SpacesimCloudBand.chord` is this law, and its test pins the halving.
-			vec2 lower = ray_sphere(eye, ray, params.deck.x);
-			if (lower.x <= lower.y && lower.x > 0.0) {
-				b1 = min(b1, lower.x);
+		float lo0, hi0, lo1, hi1;
+		deck_span(eye, ray, params.radii.z, params.deck.x, lo0, hi0, lo1, hi1);
+		float floor_t = max(start, 0.0);
+		lo0 = max(lo0, floor_t); hi0 = min(hi0, end);
+		lo1 = max(lo1, floor_t); hi1 = min(hi1, end);
+		float len0 = max(hi0 - lo0, 0.0);
+		float len1 = max(hi1 - lo1, 0.0);
+		float total = len0 + len1;
+		if (total > 0.0) {
+			// The budget is the band's own: a sample may not advance more than a sixth of an e-fold.
+			int budget = clamp(
+				int(ceil(total * params.deck.y * SAMPLES_PER_OPTICAL_DEPTH)), 1, DECK_STEP_LIMIT
+			);
+			if (len0 > 0.0) {
+				march_deck(lo0, hi0, float(budget) * len0 / total, eye, ray, cloud_T, cloud_light);
 			}
-			if (b1 > b0) {
-				float chord = b1 - b0;
-				int steps = clamp(
-					int(ceil(chord * params.deck.y * SAMPLES_PER_OPTICAL_DEPTH)), 1, DECK_STEP_LIMIT
-				);
-				float step_length = chord / float(steps);
-				for (int i = 0; i < DECK_STEP_LIMIT; i++) {
-					if (i >= steps) break;
-					vec3 p = eye + ray * (b0 + step_length * (float(i) + 0.5));
-					float field = texture(cover, cloud_map_uv(normalize(params.to_model * normalize(p)))).r;
-					// **Luminance is height** (§4.2): this column's cloud reaches `top` above the base, so a sample
-					// above it is in clear air and the lateral edge is a taper rather than a cut.
-					float top = params.deck.w * max(0.0,
-						(field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4));
-					float altitude = length(p) - params.deck.x;
-					float density = top > 0.0 ? clamp(1.0 - altitude / top, 0.0, 1.0) : 0.0;
-					float opacity = 1.0 - exp(-density * params.deck.y * step_length);
-					cloud_light += params.deck_radiance.rgb * opacity * cloud_T;
-					cloud_T *= 1.0 - opacity;
-				}
+			if (len1 > 0.0) {
+				march_deck(lo1, hi1, float(budget) * len1 / total, eye, ray, cloud_T, cloud_light);
 			}
 		}
 	}
