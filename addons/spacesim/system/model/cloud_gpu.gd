@@ -154,6 +154,12 @@ void main() {
 const PARAMS_SIZE := 96
 
 var _device: RenderingDevice
+## **How many RIDs this device has created and not freed.** Every bake creates three and frees three, and the
+## shader and pipeline live until `close()` — so a number that is not zero at teardown is a leak, and this is
+## an instrument rather than a guard: the same class of bug (a per-frame allocation that is never freed)
+## exhausted the frame device's allocator twice in this project, and both times it was found by a flight, in a
+## pass that was looking at someone else's error.
+var _rids_live := 0
 var _shader: RID
 var _pipeline: RID
 var _error := ""
@@ -190,11 +196,13 @@ func open() -> bool:
 		device.free()
 		return false
 	_shader = device.shader_create_from_spirv(spirv)
+	_rids_live += 1
 	if not _shader.is_valid():
 		_error = "shader_create_from_spirv() gave an invalid RID"
 		device.free()
 		return false
 	_pipeline = device.compute_pipeline_create(_shader)
+	_rids_live += 1
 	if not _pipeline.is_valid():
 		_error = "compute_pipeline_create() gave an invalid RID"
 		device.free()
@@ -206,8 +214,16 @@ func open() -> bool:
 func close() -> void:
 	if _device != null and _pipeline.is_valid():
 		_device.free_rid(_pipeline)
+		_rids_live -= 1
 	if _device != null and _shader.is_valid():
 		_device.free_rid(_shader)
+		_rids_live -= 1
+	if _rids_live != 0:
+		printerr(
+			"ERROR: SpacesimCloudGpu: %d RID(s) created and never freed — every bake's texture, buffer and "
+			% _rids_live
+			+ "uniform set must come back, or the device's allocator fills"
+		)
 	_pipeline = RID()
 	_shader = RID()
 	# **The device is freed, not merely dropped.** A local `RenderingDevice` left alive to be destroyed at
@@ -223,6 +239,12 @@ func close() -> void:
 
 ## Why `open()` did not work, or an empty string. Reported rather than thrown: a bake that cannot run on
 ## the GPU is a bake that runs on the CPU.
+## How many RIDs the device holds right now. **Zero between bakes**, and the GPU suite asserts it: the
+## instrument is only worth having if something fails when it moves.
+func live_rids() -> int:
+	return _rids_live
+
+
 func error() -> String:
 	return _error
 
@@ -258,6 +280,7 @@ func bake(
 	)
 	var marker := Time.get_ticks_usec()
 	var texture := _device.texture_create(format, RDTextureView.new())
+	_rids_live += 1
 	last_microseconds["create"] = Time.get_ticks_usec() - marker
 	if not texture.is_valid():
 		_error = "texture_create() gave an invalid RID"
@@ -265,6 +288,7 @@ func bake(
 
 	var vortex_bytes := _vortex_bytes(planned.stack)
 	var buffer := _device.storage_buffer_create(vortex_bytes.size(), vortex_bytes)
+	_rids_live += 1
 
 	var image_uniform := RDUniform.new()
 	image_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
@@ -275,10 +299,12 @@ func bake(
 	buffer_uniform.binding = 1
 	buffer_uniform.add_id(buffer)
 	var uniform_set := _device.uniform_set_create([image_uniform, buffer_uniform], _shader, 0)
+	_rids_live += 1
 	if not uniform_set.is_valid():
 		_error = "uniform_set_create() gave an invalid RID"
 		_device.free_rid(texture)
 		_device.free_rid(buffer)
+		_rids_live -= 2
 		return null
 
 	var params := _params(w, h, planned, uv_origin, uv_size)
@@ -302,6 +328,7 @@ func bake(
 	_device.free_rid(uniform_set)
 	_device.free_rid(texture)
 	_device.free_rid(buffer)
+	_rids_live -= 3
 
 	if data.size() != w * h:
 		_error = "read back %d bytes for a %dx%d map" % [data.size(), w, h]

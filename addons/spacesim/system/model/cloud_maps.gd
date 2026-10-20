@@ -94,13 +94,21 @@ var _gpu_bakes := 0
 ## up in an unrelated pass, as `_allocate_rid` — *"Element limit reached"* — and a frame that stops shading.
 ## That is why the surface maps were moved off `_process` onto a render-thread bake pass.
 ##
-## **The deck made the same trap reachable again**, because this cache is now driven from `update_lod` on
+## **The deck made that trap reachable again**, because this cache is now driven from `update_lod` on
 ## approach, so its refinements ran from the frame loop for the first time. Evert, 2026-10-20, closing on
-## Venus's clouds: *"the atmosphere suddenly disappeared"*, with the allocator errors that name it. So the
-## GPU is **opt-in**, and only a test or an offline tool asks for it; in flight every bake — the synchronous
-## floor and every refinement — goes to the CPU path, which is `0.80 us` a pixel (0.4 s at 1024², 1.7 s at
-## 2048²) on a pool thread, arriving late rather than damaging the frame.
-var gpu_allowed := false
+## Venus's clouds: *"the atmosphere suddenly disappeared"*, with the allocator errors that name it.
+##
+## **But the GPU bake was not that leak, and it is the whole point of having one** (Evert, 2026-10-20: *"that's
+## why we bake on the GPU, not the CPU"*). The allocator was exhausted by `SpacesimAtmospherePass`'s per-frame
+## uniform set, which is fixed and now instrumented; this device frees every RID it creates, on every bake and
+## at `close()`, and `SpacesimCloudGpu` counts them so a leak cannot be silent. The speed is not a detail:
+## **47 ms for 8192x4096 against 26.8 s** on the CPU path, which is the difference between a refinement that
+## arrives while it is still wanted and one that lands below the altitude it was baked for.
+##
+## So the GPU is on by default and the CPU path is what a headless run falls back to, by construction —
+## `create_local_rendering_device()` returns null there. A caller that wants the CPU path explicitly (a test
+## comparing the two, say) can set this false.
+var gpu_allowed := true
 
 
 ## **The map width worth having at a distance**, from the law the probe measured — and the distance is to
@@ -326,6 +334,11 @@ func bakes() -> int:
 ## than a failure — `tests/gpu_check.sh` is where a non-zero value is asserted.
 func gpu_bakes() -> int:
 	return _gpu_bakes
+
+
+## How many RIDs the bake device is holding, for the GPU suite's leak check. Zero unless a device is open.
+func gpu_live_rids() -> int:
+	return 0 if _gpu == null else _gpu.live_rids()
 
 
 ## Drop everything. **Waits for anything in flight**, because a task holds its entry and a released id is

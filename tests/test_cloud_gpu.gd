@@ -149,12 +149,15 @@ func _morphology(banding: int, ratio: float) -> SpacesimCloudModel.Morphology:
 ## every "the path is dead" bug this project has had.
 func _test_the_cache_bakes_on_the_gpu(h) -> void:
 	var maps := SpacesimCloudMaps.new()
-	# **The GPU is opt-in, and this is the only place that opts in.** In flight every bake takes the CPU path,
-	# because a local `RenderingDevice` driven from the frame loop exhausts the frame device's RID pools — see
-	# `SpacesimCloudMaps.gpu_allowed`. This suite exists so the GPU path cannot rot while it is unused.
-	h.check(not maps.gpu_available(), "a cache refuses the GPU until it is asked for")
+	# **The GPU is what a cache bakes on by default**, because 47 ms against 26.8 s at 8192x4096 is the
+	# difference between a refinement that arrives while it is wanted and one that lands below the altitude it
+	# was baked for. Headless runs fall back to the CPU by construction — `create_local_rendering_device()` is
+	# null there — and this suite is what keeps the GPU path from rotting while a headless run never takes it.
+	h.check(maps.gpu_allowed and maps.gpu_available(),
+		"a cache bakes on the GPU by default, and this is the run that proves the path works")
+	maps.gpu_allowed = false
+	h.check(not maps.gpu_available(), "and keeps to the CPU when told to, which is how the two are compared")
 	maps.gpu_allowed = true
-	h.check(maps.gpu_available(), "and takes it when asked, which is the whole point of the gate")
 	maps.map("planet:earth", 0, 6.371e6, 0.6, 20000.0e3,
 		_morphology(SpacesimCloudModel.Banding.SHREDDED, 0.104))
 	h.check(maps.bakes() >= 1, "the cache baked a floor (%d bakes)" % maps.bakes())
@@ -165,3 +168,12 @@ func _test_the_cache_bakes_on_the_gpu(h) -> void:
 	h.check(threshold > 0.0 and threshold < 1.0,
 		"with a threshold the statistics could measure from it (%.3f)" % threshold)
 	maps.close()
+	# **And nothing leaked**, which is what the counter is for: the allocator exhaustion that cost two flights
+	# in this project was allocations that were never given back, and it was found in a pass that was reading
+	# someone else's error rather than in the one that was leaking.
+	h.check(_gpu_live_rids(maps) == 0, "and every RID the bake created came back (%d live)" % _gpu_live_rids(maps))
+
+
+# The cache's device is private, so the check reads the count through the cache's own GPU handle.
+func _gpu_live_rids(maps: SpacesimCloudMaps) -> int:
+	return maps.gpu_live_rids()
