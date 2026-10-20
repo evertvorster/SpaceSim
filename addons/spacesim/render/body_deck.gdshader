@@ -1,4 +1,17 @@
 shader_type spatial;
+// **`cull_disabled` is not a detail, it is the whole of "a deck seen from underneath".** A spherical shell
+// shows FRONT faces from outside and BACK faces from inside, so Godot's default `cull_back` draws the deck
+// from above and **deletes it from below** — the mesh is there, the map is there, and there is nothing to
+// rasterise. That is exactly the fault Evert reported twice and photographed: drawn at 4.7 km from above,
+// absent at 696 m from below. The line was designed, written down in this file's own reasoning, and then
+// left out of the file — so every version of this shader until 2026-10-20 had it missing.
+//
+// `blend_mix` because a deck occludes rather than adds (the air adds; a cloud is something you look *at*),
+// `depth_draw_always` because it writes depth where it has cloud and `discard`s where it has none — which is
+// what lets the air pass end its march at the first thing drawn — and `specular_disabled` because a cloud's
+// highlight is not a specular lobe.
+render_mode blend_mix, cull_disabled, depth_draw_always, specular_disabled;
+
 // **The far regime's cloud: a baked coverage map on a shell, with its thickness as shading.**
 //
 // A deck is the body's own patch mesh, scaled — not a second mesh and not a second walk — so its triangles
