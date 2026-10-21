@@ -179,13 +179,14 @@ const REGISTRY := {
 	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.roll_left": {"default": "A", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.roll_right": {"default": "D", "scope": Scope.PLAYER, "validator": "key_binding"},
+	# **The brackets roll, and they used to step the mesh error budget** — which is a value flown once and
+	# now left at its best setting (`lod.error_budget` stays in the registry, hot, and the HUD keeps showing
+	# the triangle count). A trim nobody adjusts does not need two keys; flying sideways does.
+	"bindings.roll_left": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.ship_toggle": {"default": "O", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.detail_down": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.detail_up": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding"},
 }
 

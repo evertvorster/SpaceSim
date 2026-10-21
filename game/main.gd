@@ -27,10 +27,9 @@ const SYSTEM_PATH := "res://systems/sol.tres"
 
 const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
-## **Per second, over the whole signed range**: half the stick a second, so 0 to full is two seconds and
-## astern is reached just as quickly. The old 0.7 was sized for a 0..1 range and would take half a minute
-## to cross a 20-wide one.
-const THROTTLE_RATE := 10.0
+## **Ten seconds from zero to full**, which over the +-10 range is one unit a second — slow enough to stop
+## inside a deck and to watch a surface go past, and astern is reached in the same time.
+const THROTTLE_RATE := 1.0
 
 ## The mesh error budget, in pixels of silhouette error, as stops to step through rather than a
 ## continuous number: it is a perceptual trim, so the useful question is "is this better or worse"
@@ -40,7 +39,6 @@ const THROTTLE_RATE := 10.0
 ##
 ## The index is read from the setting every time rather than cached, because a setting cached in a
 ## variable is the one thing that turns it cold.
-const ERROR_BUDGET_STEPS := [32.0, 16.0, 8.0, 4.0, 2.0, 1.0, 0.5]
 
 var _system: SpacesimSystemScene
 var _session: SpacesimSession
@@ -197,10 +195,6 @@ func _handle_key(event: InputEventKey) -> void:
 		SpacesimSettings.set_value("ship.visible", not ship_is_visible(), true)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_down"))):
-		_set_error_budget(_error_budget_index() + 1)
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_up"))):
-		_set_error_budget(_error_budget_index() - 1)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.throttle_stop"))):
 		_throttle_stop = true
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.wireframe_toggle"))):
@@ -327,25 +321,6 @@ func _on_exit_requested() -> void:
 func _held(binding_key: String) -> bool:
 	var code := Bindings.keycode_of(String(SpacesimSettings.get_value(binding_key)))
 	return code != KEY_NONE and Input.is_physical_key_pressed(code)
-
-
-## Which step of `ERROR_BUDGET_STEPS` the setting is nearest — so the keys pick up wherever the
-## settings screen or the config file left it, rather than from a remembered index.
-func _error_budget_index() -> int:
-	var budget := float(SpacesimSettings.get_value("lod.error_budget"))
-	var best := 0
-	for i in ERROR_BUDGET_STEPS.size():
-		if absf(ERROR_BUDGET_STEPS[i] - budget) < absf(ERROR_BUDGET_STEPS[best] - budget):
-			best = i
-	return best
-
-
-## Step the mesh error budget. **Written through the settings store**, so the settings screen sees the
-## change and it survives the session: it is a value being chosen by eye, which is what the store is
-## for, and a debug-only copy of it is how a trim becomes two numbers that disagree.
-func _set_error_budget(index: int) -> void:
-	var clamped := clampi(index, 0, ERROR_BUDGET_STEPS.size() - 1)
-	SpacesimSettings.set_value("lod.error_budget", ERROR_BUDGET_STEPS[clamped], true)
 
 
 ## Selection is the input half of targeting, and the smallest stand-in for the navigation we
@@ -749,15 +724,13 @@ func _update_hud() -> void:
 					]
 				),
 				(
-					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s ship on/off    %s %s mesh error"
+					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s ship on/off"
 					% [
 						_binding("bindings.player_screen"),
 						_binding("bindings.settings_screen"),
 						_binding("bindings.cycle_target"),
 						_binding("bindings.bodies_toggle"),
 						_binding("bindings.ship_toggle"),
-						_binding("bindings.detail_down"),
-						_binding("bindings.detail_up"),
 					]
 				),
 			]
