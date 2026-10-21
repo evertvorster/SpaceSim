@@ -390,10 +390,17 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
-// **This branch's second switch**: 1 draws the fog, 0 removes it. The test is "the split with no texture", and a
-// flat field makes the fog uniform in altitude only — so if the haziness survives the flat field, this is the next
-// thing to switch off to tell a fog-shaped haze from a segmented-air one. One build each way.
-const float FOG_SCALE = 1.0;
+// **This branch's second switch: 0, because with no texture there is no fog.**
+//
+// Evert, 2026-10-21: *"With no texture, that should be 0 fog."* Right, and it corrects the build: the fog's
+// density is *dictated by the texture at the camera*, so "no texture" means no density and therefore no fog. A
+// uniform white texel is not the absence of a reading — it is the reading "cloudier than any real texel", which
+// is why the flat-field build came back with full fog and could not isolate anything.
+//
+// So this build is the split with no texture AND no fog: a slab of constant density, drawn by the shell and
+// marched by the pass, and nothing else. If the haziness that swaps across the split is still there, it is the
+// segmentation; if it is gone, it was the fog — i.e. the texture arriving through density.
+const float FOG_SCALE = 0.0;
 
 // **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
 // headlessly; the shader carries the numbers, which is the arrangement Cloud Volumes §4.3a states rather than a
