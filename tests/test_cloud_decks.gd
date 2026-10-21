@@ -51,8 +51,11 @@ func _test_a_single_deck(h, scene: SpacesimSystemScene) -> void:
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.level.species == "water_vapour",
 		"and it is its water vapour, at %.0f m" % deck.height)
-	h.check_near(deck.node.scale.x, earth.radius + deck.height + deck.thickness,
-		"the node is scaled to the slab's TOP: radius + height + thickness", 1.0)
+	# **The BASE, since 2026-10-21** — a condensation level is a level, so the one sphere a deck can honestly be
+	# is the one every column starts at. The tops vary by column and the map's luminance-as-height is what holds
+	# that variation; no single sphere can.
+	h.check_near(deck.node.scale.x, earth.radius + deck.height,
+		"the node is scaled to the slab's BASE: radius + height", 1.0)
 	h.check(deck.node.get_parent() == earth.node,
 		"and it is a child of the body, so it inherits the body's place in the frame tree")
 	h.check(deck.material != null and deck.material.shader != null,
@@ -60,11 +63,13 @@ func _test_a_single_deck(h, scene: SpacesimSystemScene) -> void:
 	# **The deck is ONE sphere at its top radius**, and that is all the geometry the shader knows: it samples the
 	# map on that sphere at every altitude (2026-10-21), so the base is a shading fact rather than a surface and
 	# there is no base/top ratio to publish.
-	var top := earth.radius + deck.height + deck.thickness
-	h.check_near(deck.node.scale.x, top,
-		"and the node is that sphere, scaled to the slab's top", 1.0)
+	# **The BASE, since 2026-10-21.** It used to be the slab's top, and the comment here used to say the base was
+	# "a shading fact rather than a surface" — which the 2026-10-21 flight reversed: a condensation level IS a
+	# level, so the base is the one surface every column shares.
+	h.check_near(deck.node.scale.x, earth.radius + deck.height,
+		"and the node is that sphere, scaled to the slab's base", 1.0)
 	h.check(deck.material.get_shader_parameter("base_ratio") == null,
-		"with no base/top ratio, because no surface exists at the base")
+		"with no base/top ratio, because one sphere is both")
 	h.check(deck.thickness > 0.0, "with the derived thickness behind it (%.0f m)" % deck.thickness)
 
 
@@ -321,8 +326,8 @@ func _test_the_cameras_own_column(h, scene: SpacesimSystemScene) -> void:
 	var data := scene.near_deck(earth, sub_camera)
 	h.check(not data.is_empty(), "the deck publishes the fog's lookup")
 	var eye_model: Vector3 = data["eye_model"]
-	h.check_near(eye_model.length(), (earth.radius + 2000.0) / top,
-		"and it is the camera's radius in top radii", 1.0e-6)
+	h.check_near(eye_model.length(), (earth.radius + 2000.0) / (earth.radius + deck.height),
+		"and it is the camera's radius in the sphere's own radii", 1.0e-6)
 	h.check(eye_model.normalized().dot(Vector3.UP) > 0.9999,
 		"pointing at the camera's own column: straight up over the sub-camera point")
 

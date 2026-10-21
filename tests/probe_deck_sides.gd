@@ -106,14 +106,18 @@ func _report_decks() -> void:
 		var cover := material.get_shader_parameter("cover") as Texture2D
 		var raw_eye: Variant = material.get_shader_parameter("eye_local")
 		var eye: Variant = raw_eye if raw_eye is Vector3 else null
+		# **Every number read through a `Variant`, because a parameter that was never set returns null**
+		# — `float(null)` is an error that aborts the whole report, and a report that dies is worse than none.
+		var threshold: Variant = material.get_shader_parameter("threshold")
+		var veil: Variant = material.get_shader_parameter("veil")
+		var gain: Variant = material.get_shader_parameter("ramp_gain")
+		var tau: Variant = material.get_shader_parameter("tau_full")
 		decks += 1
-		print("SIDES deck %-16s visible=%s mesh=%s map=%s threshold=%.3f veil=%.3f gain=%.3f eye=%.6f"
+		print("SIDES deck %-16s visible=%s mesh=%s map=%s threshold=%s veil=%s gain=%s tau_full=%s eye=%s"
 			% [mesh.name, mesh.visible, mesh.mesh != null,
 				"-" if cover == null else str(cover.get_width()),
-				float(material.get_shader_parameter("threshold")),
-				float(material.get_shader_parameter("veil")),
-				float(material.get_shader_parameter("ramp_gain")),
-				-1.0 if eye == null else eye.length()])
+				threshold, veil, gain, tau,
+				"-" if eye == null else "%.6f" % eye.length()])
 	print("SIDES: %d deck(s)" % decks)
 
 

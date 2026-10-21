@@ -148,12 +148,15 @@ void vertex() {
 
 void fragment() {
 	vec3 p = normalize(local_position);
-	// **Inside the deck's sphere** — the only boundary this surface has, since the node is scaled to its TOP.
+	// **Inside the deck's sphere** — the only boundary this surface has, since the node is scaled to its BASE.
 	float eye_radius = length(eye_local);
 	vec3 to_eye = normalize(eye_local - p);
 
-	// **ONE SAMPLE, ON THE TOP SPHERE, ALWAYS.** Evert, 2026-10-21: *"strip the blending code, and map the
-	// texture to the top of the deck, always."*
+	// **ONE SAMPLE, ON ONE SPHERE, ALWAYS** — and since 2026-10-21 that sphere is at the deck's BASE. Evert:
+	// *"rather than put the split and render on the top part of the cloud shell, we put it at the bottom."* A
+	// condensation level IS a level, so the base is geometrically true for every column at once, while the tops
+	// vary and are not. From altitude the 1.6 km move is invisible in a 6,374 km radius; from underneath it is the
+	// difference between the cloud's real underside and a sheet at the height of the tallest column in the map.
 	//
 	// So there is no base-sphere projection and no crossfade: the mesh is a sphere at the deck's TOP radius and
 	// the map is painted on it, which is all this ever was. Above the deck you see the outside of that sphere;
@@ -213,13 +216,15 @@ void fragment() {
 	ALBEDO = radiance;
 	ALPHA = alpha;
 	ROUGHNESS = 0.9;
-	// **The normal flips at the TOP, which is the only boundary there is.** Evert, 2026-10-21: *"that flip needs
-	// to occur as we cross the upper bound, as I now see no clouds from below at any altitude."*
+	// **The normal flips at the sphere's surface, wherever that sphere is** — the top when it was the top, the
+	// base now. Evert, 2026-10-21: *"that flip needs to occur as we cross the upper bound, as I now see no clouds
+	// from below at any altitude."* The rule is "inside the sphere means back faces", which is what the test
+	// below says and what makes it independent of which radius the sphere is at.
 	//
 	// It used to flip at the BASE, which is a radius with no surface on it — so it stepped the lighting at 1,436 m
 	// and was still wrong everywhere else. Inside the sphere every fragment is a BACK face whose normal points
 	// away from the viewer, and without the flip the underside is lit as though it faced away and goes black.
-	// Crossing the top is exactly when that starts, so that is where the flip belongs.
+	// Crossing the sphere is exactly when that starts, so that is where the flip belongs.
 	if (eye_radius < 1.0) {
 		NORMAL = -NORMAL;
 	}

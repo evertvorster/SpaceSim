@@ -838,11 +838,15 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 			deck.shadow_tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
 		deck.morphology = morphology
 		deck.material = SpacesimBodyRenderer.deck_material(body, level, deck.palette, index)
-		# **The node is the body's own unit sphere scaled to the slab's TOP**, and its mesh arrives with the
-		# first patch rebuild — nothing draws for a frame or two rather than stalling the frame that asked.
-		var top_radius := body.radius + deck.height + deck.thickness
+		# **The node is the body's own unit sphere scaled to the slab's BASE** (2026-10-21) — *a condensation
+		# level is a level*, so every column starts at the same altitude and the base is the one surface a single
+		# sphere can honestly be. The tops vary by column, which is what the map's luminance-as-height encodes and
+		# what no one sphere can hold. From altitude the radius difference is 1.6 km in 6,374 — invisible — and
+		# from underneath it is the difference between the cloud's real underside and a mirrored sheet at the top
+		# of the tallest column.
+		var base_radius := body.radius + deck.height
 		deck.node = _add_body_mesh(
-			body.node, top_radius, deck.material, "%sDeck%d" % [body.name, index], 0
+			body.node, base_radius, deck.material, "%sDeck%d" % [body.name, index], 0
 		)
 		deck.node.mesh = null
 		body.decks.append(deck)
@@ -1314,8 +1318,9 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		SpacesimBodyRenderer.face_surface_star(material, sun)
 	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
-		var top_radius := body.radius + deck.height + deck.thickness
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0))
+		# Divided by the sphere's own radius, because the node's model space is a unit sphere.
+		var sphere_radius := body.radius + deck.height
+		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(sphere_radius, 1.0))
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.

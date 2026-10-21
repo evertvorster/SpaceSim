@@ -508,7 +508,7 @@ void march_deck(float lo, float hi, vec3 eye, vec3 ray, inout vec3 T, inout vec3
 		// row, so a point sample aliases into bands on the texel grid. This is a compute shader, so there are no
 		// derivatives to pick a level with: the footprint comes from the step itself — one step's length in texels
 		// of a map whose width covers TAU at this radius.
-		float texel_arc = TAU_F * params.radii.z / max(params.eye_model.w, 1.0);
+		float texel_arc = TAU_F * params.deck.x / max(params.eye_model.w, 1.0);
 		float lod = clamp(log2(max(step_length / texel_arc, 1.0)), 0.0, 12.0);
 		float field = textureLod(cover, cloud_map_uv(normalize(params.to_model * normalize(p))), lod).r;
 		// **Luminance is height**: this column's cloud reaches `top` above the base, so a sample above it is in
@@ -617,7 +617,13 @@ void main() {
 		float column = params.deck.w * density;
 		float share = 0.0;
 		if (column > 1.0) {
-			share = density * clamp(eye_altitude / column, 0.0, 1.0);
+			// **Thickest at the BASE, thinning as you climb.** Evert, 2026-10-21: *"reverse the fog so that its
+			// thickest at the bottom in a thick cloud, and thins out as you climb."* Which is the honest reading:
+			// at a cloud's base the whole column is above you, so the sky is lost; near the top there is almost
+			// nothing above you, so it clears. **Full strength the instant you enter** — his call, and no ramp
+			// band: at altitude 0 the bracket is exactly 1, so crossing the base arrives at the patch's own
+			// density in one step, which is what entering a cloud is.
+			share = density * (1.0 - clamp(eye_altitude / column, 0.0, 1.0));
 		}
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
