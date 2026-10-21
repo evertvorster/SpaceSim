@@ -600,12 +600,25 @@ void main() {
 	// column at the base does not fog it at all; a wisp is a fifth of that everywhere. Nothing to tune, nothing
 	// that can disagree with the deck, because both numbers are already the ones the deck is drawn from.
 	float eye_altitude = length(eye) - params.deck.x;
-	if (params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w) {
+	if (params.radii.w > 0.0 && eye_altitude > 0.0) {
 		float eye_field = texture(cover, cloud_map_uv(normalize(params.eye_model.xyz))).r;
 		float density = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
-		float share = density * clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0) * FOG_SCALE;
+		// **THIS column's top, not the tallest one in the map.** Evert, 2026-10-21: *"There still seems to be a
+		// fog pass, and its assuming the thickest cloud thickness."* It was: the ramp divided by the layer's
+		// THICKNESS, which is the envelope — so a thin patch kept fogging all the way to the envelope's ceiling and
+		// never reached its own strength. The law for a column's own top already exists (`march_deck`'s
+		// luminance-as-height): `column = full_column * density`, so both the gate and the ramp use it.
+		//
+		// The two densities cancel inside the column — `density * alt / (full * density) = alt / full` — which is
+		// the shape wanted: one slope through the layer, truncated at each patch's own top, where the share equals
+		// exactly the texture's reading at the camera. Above that top there is no cloud above the eye, so no fog.
+		float column = params.deck.w * density;
+		float share = 0.0;
+		if (column > 1.0) {
+			share = density * clamp(eye_altitude / column, 0.0, 1.0) * FOG_SCALE;
+		}
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
 		T *= 1.0 - share;
