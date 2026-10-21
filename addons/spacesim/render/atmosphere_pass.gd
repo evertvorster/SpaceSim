@@ -73,6 +73,10 @@ var _white: ImageTexture
 ## The deck's map for this frame, or null when the near regime is not live — the callback turns it into a
 ## uniform id and falls back to `_white` so the set is always complete.
 var _deck_texture: Texture2D
+## **How opaque the map's relative reading means** — the fog's only free number, hot from `fog.gain`. Everything
+## else in the fog is a consequence: the amount is the cloud map's reading at the camera, and the ramp is full at
+## the deck's base and zero at its top because those are where the geometry puts them.
+var fog_gain := 2.0
 
 ## The per-frame numbers, in the order the shader's `Params` block declares them. Written as one buffer
 ## update rather than as push constants, because a push-constant block is only 128 bytes.
@@ -203,6 +207,8 @@ func prepare(
 			_values[32] = radiance.x
 			_values[33] = radiance.y
 			_values[34] = radiance.z
+			# The fog's gain, beside the colour it scales — a radiance has no fourth channel.
+			_values[35] = fog_gain
 			# **View space to the deck's own model space**, done here because a `Basis` is double and a mat3 in
 			# the shader is not. The map is body-fixed — it is the same one the mesh samples — so a march that
 			# ignored the body's rotation would draw a different cloud from the one the shell draws.
@@ -380,7 +386,7 @@ layout(std430, set = 0, binding = 1) buffer Params {
 	vec4 frame;           // xy render size, z tan(fov/2), w blend 0..1
 	vec4 radii;           // x planet, y atmosphere top, z deck top, w deck weight 0..1
 	vec4 deck;            // x base radius, y extinction 1/m, z threshold, w full column height
-	vec4 deck_radiance;   // rgb, flat for this rung
+	vec4 deck_radiance;   // rgb the fog's colour (the deck's drawn brightness); w the fog's gain
 	mat3 to_model;        // view space -> the deck's own model space, column-major
 	vec4 eye_model;       // xyz the camera in the deck's model space; w the map's width in texels
 } params;
@@ -390,11 +396,6 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
-// **How much opacity the map's density reading means.** 1.0 would make the fog exactly as opaque as the texel's
-// relative brightness, which reads thin inside a cloud that the eye calls solid; 2.0 saturates at a reading of
-// half. Above ~3 a wisp starts fogging like a tower, so this wants to stay near 2.
-const float FOG_GAIN = 2.0;
-
 // **Does this pass draw the deck as a segment?** It does not — the shell draws it from both sides — so there is
 // nothing for the air to be ordered around, and splitting it at the deck's radii only loses the air inside that
 // span. One flag, because the split and the march are one mechanism.
@@ -654,10 +655,11 @@ void main() {
 		// cloud at the bottom... this is just a little fine tuning."*
 		//
 		// So the map's reading is scaled into the opacity it should mean, and clamped at 1: at 2.0 a patch reading
-		// half or more whites the view out, a quarter reads as a veil, a wisp stays thin. **The knob is this line**
-		// — nothing else in the fog has a free number, and the ramp's two ends are fixed by geometry (full at the
-		// base, zero at the shell's top).
-		float strength = clamp(density * FOG_GAIN, 0.0, 1.0);
+		// half or more whites the view out, a quarter reads as a veil, a wisp stays thin. **It travels in
+		// `deck_radiance.w`** — unused by a radiance that is rgb — so the strength sits beside the colour it
+		// scales, and it is HOT (`fog.gain`), because this is the one number in the fog that is a judgement rather
+		// than a consequence: the ramp's two ends are fixed by geometry and the map gives the relative amount.
+		float strength = clamp(density * params.deck_radiance.w, 0.0, 1.0);
 		float share = strength * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;

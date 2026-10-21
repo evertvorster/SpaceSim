@@ -362,6 +362,7 @@ func _apply_settings() -> void:
 	_exposure_pass.adaptation_rate = float(
 		SpacesimSettings.get_value("exposure.adaptation_rate")
 	)
+	_atmosphere_pass.fog_gain = float(SpacesimSettings.get_value("fog.gain"))
 	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
 	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
 	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))
@@ -370,7 +371,7 @@ func _apply_settings() -> void:
 
 func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
-		"camera.fov", "camera.ship_distance", "ship.visible", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops":
+		"camera.fov", "camera.ship_distance", "ship.visible", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops", "exposure.adaptation_rate", "fog.gain":
 			_apply_settings()
 
 

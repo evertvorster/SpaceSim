@@ -140,6 +140,16 @@ const REGISTRY := {
 	# quickly it closes on a change however large: at 2.0 the remaining gap halves every 0.35 s. Evert,
 	# 2026-10-21: close quickly when the difference is large, then fine-tune.
 	"exposure.adaptation_rate": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.1, "max": 20.0},
+	# --- the fog inside a cloud deck, and the ONLY free number in it.
+	#
+	# The amount is the cloud map's reading at the camera, and that reading is *relative*: 0 at the coverage
+	# threshold, 1 only at the brightest texel the map can hold — so a patch anyone would call thick reads
+	# 0.5-0.7, and "full strength, dictated by the texture" arrived as a 50-70% veil. This scales that reading
+	# into the opacity it should mean, clamped at 1. The ramp needs no number: full at the base, zero at the
+	# shell's top, both fixed by geometry. Read every frame by `main.gd` and handed to
+	# `SpacesimAtmospherePass.fog_gain`. Evert, 2026-10-21: *"maybe this should be a tunable so that I can
+	# iterate and find something that looks like I expect."*
+	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a
