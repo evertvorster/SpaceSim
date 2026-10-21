@@ -217,6 +217,8 @@ func prepare(
 			_values[48] = eye_model.x
 			_values[49] = eye_model.y
 			_values[50] = eye_model.z
+			# The map's width, which is what turns a step's length in metres into a level of its pyramid.
+			_values[51] = float(deck.get("width", 0))
 			# Kept for the uniform set, which is built in the callback where the frame's RIDs are known.
 			_deck_texture = texture
 	else:
@@ -323,6 +325,8 @@ func _build(rd: RenderingDevice) -> void:
 	var state := RDSamplerState.new()
 	state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	# Linear between levels too: the deck march asks for a level by number, and nearest-mip stepping shows.
+	state.mip_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
 	state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	_sampler = rd.sampler_create(state)
@@ -378,7 +382,7 @@ layout(std430, set = 0, binding = 1) buffer Params {
 	vec4 deck;            // x base radius, y extinction 1/m, z threshold, w full column height
 	vec4 deck_radiance;   // rgb, flat for this rung
 	mat3 to_model;        // view space -> the deck's own model space, column-major
-	vec4 eye_model;       // the camera in the deck's model space, unit sphere — the fog's own lookup
+	vec4 eye_model;       // xyz the camera in the deck's model space; w the map's width in texels
 } params;
 // **The deck's baked map, sampled the way the mesh samples it.** Binding 2 is always present; a frame with
 // no deck carries `radii.w = 0` and never reads it.
@@ -495,7 +499,13 @@ void march_deck(float lo, float hi, vec3 eye, vec3 ray, inout vec3 T, inout vec3
 	for (int i = 0; i < DECK_STEP_LIMIT; i++) {
 		if (i >= steps) break;
 		vec3 p = eye + ray * (lo + step_length * (float(i) + 0.5));
-		float field = texture(cover, cloud_map_uv(normalize(params.to_model * normalize(p)))).r;
+		// **A filtered pyramid, not level 0.** A ray running along the layer sweeps more than one texel per screen
+		// row, so a point sample aliases into bands on the texel grid. This is a compute shader, so there are no
+		// derivatives to pick a level with: the footprint comes from the step itself — one step's length in texels
+		// of a map whose width covers TAU at this radius.
+		float texel_arc = TAU_F * params.radii.z / max(params.eye_model.w, 1.0);
+		float lod = clamp(log2(max(step_length / texel_arc, 1.0)), 0.0, 12.0);
+		float field = textureLod(cover, cloud_map_uv(normalize(params.to_model * normalize(p))), lod).r;
 		// **Luminance is height**: this column's cloud reaches `top` above the base, so a sample above it is in
 		// clear air and the lateral edge is a taper rather than a cut.
 		float top = params.deck.w * clamp(

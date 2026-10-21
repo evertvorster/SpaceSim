@@ -294,6 +294,20 @@ func poll() -> int:
 	return finished
 
 
+## **Mips, because this map is minified from orbit and looked ALONG from inside the layer.** The surface map
+## generates them for the same reason and says so; without a pyramid, both renderers point-sample level 0 and the
+## grazing rays alias into bands aligned with the texel grid. Measured on Venus just below the deck: 17 discrete
+## row-to-row jumps over 0.0025 luminance in the horizon region, against a max of 0.0009 in the frame just above.
+##
+## **On a copy**, deliberately: `threshold_for`, `mean_exceedance` and `mean_opacity` all read `image.get_data()`,
+## which returns the whole chain when mips exist, so a mipmapped `entry.image` would change every one of the
+## calibrated numbers. The copy is transient — the texture takes its own — so nothing outlives this call.
+static func _map_texture(image: Image) -> ImageTexture:
+	var mipmapped := image.duplicate()
+	mipmapped.generate_mipmaps()
+	return ImageTexture.create_from_image(mipmapped)
+
+
 ## Hand a finished `Image` to the material: the width it implies and the texture the shader is given.
 ## **The one place that happens**, so a bake that completes on the main thread (every GPU bake) and one that
 ## completes in the pool cannot leave the entry in different states.
@@ -301,7 +315,7 @@ func _publish(entry: Entry) -> void:
 	if entry.image == null:
 		return
 	entry.width = entry.image.get_width()
-	entry.texture = ImageTexture.create_from_image(entry.image)
+	entry.texture = _map_texture(entry.image)
 
 
 func pending() -> int:
@@ -400,7 +414,7 @@ func _bake_floor(
 	# the depth whose transmittance is the mean thickness, which is the equivalence the shadow already uses. So the
 	# mean the gain is fitted to is `mean(R(tau))` for every layer, ramp or tau, and one map cannot carry two laws.
 	entry.opacity_mean = mean_opacity(image, entry.threshold, _column_depth(entry.ramp_mean, depth))
-	entry.texture = ImageTexture.create_from_image(image)
+	entry.texture = _map_texture(image)
 
 
 ## **The one place a map is generated**, so the GPU path is a substitution and not a second code path.

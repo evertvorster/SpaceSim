@@ -742,6 +742,8 @@ func near_deck(body: SpacesimSceneBody, observer: Vector3) -> Dictionary:
 		# shader only normalises it.
 		"eye_model": (deck.node.global_transform.basis.inverse()
 			* (observer - deck.node.global_position)),
+		# What the march needs to choose a mip: texels around the equator.
+		"width": deck.published_width,
 	}
 
 

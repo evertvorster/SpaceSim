@@ -35,6 +35,7 @@ func run(h, root: Node) -> void:
 	_test_the_base_gets_its_light(h, scene)
 	_test_the_cameras_own_column(h, scene)
 	_test_the_fog_ramp(h, scene, root)
+	_test_the_map_carries_a_pyramid(h)
 	_test_the_ramp_gain(h)
 
 	scene.container.free()
@@ -412,6 +413,22 @@ func _test_the_fog_ramp(h, scene: SpacesimSystemScene, root: Node) -> void:
 			rising = false
 	h.check(rising, "rising monotonically between them, so it cannot fade upward from the bottom")
 	h.check_near(ramps[2], 0.5, "half way up is half the fog", 0.05)
+
+
+## **The map is published with a pyramid, and the measured image is left alone.**
+##
+## The two halves of one decision: the shaders need mips (a grazing ray sweeps more than a texel per screen row,
+## and level 0 aliases into bands), while `threshold_for`, `mean_exceedance` and `mean_opacity` read
+## `image.get_data()` — which returns the WHOLE chain — so a mipmapped `entry.image` would move every calibrated
+## number. Hence the copy, and hence a check on each side of it.
+func _test_the_map_carries_a_pyramid(h) -> void:
+	var image := Image.create(64, 32, false, Image.FORMAT_R8)
+	image.fill(Color(0.5, 0.5, 0.5))
+	var texture := SpacesimCloudMaps._map_texture(image)
+	h.check(texture != null, "a map becomes a texture")
+	var back := texture.get_image()
+	h.check(back != null and back.has_mipmaps(), "and the texture carries a mip pyramid")
+	h.check(not image.has_mipmaps(), "while the measured image keeps none, so its histograms stay level 0")
 
 
 func _test_the_ramp_gain(h) -> void:

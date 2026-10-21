@@ -23,7 +23,7 @@
 // sky, so its underside of the light budget is smaller. If it reads wrong, `AO_LIGHT_AFFECT` is the knob that
 // separates the two, and a `light()` override is the last resort.
 
-uniform sampler2D deck_cover : filter_linear, repeat_enable, hint_default_black;
+uniform sampler2D deck_cover : filter_linear_mipmap, repeat_enable, hint_default_black;
 // The percentile the deck's own coverage implies — the same number the deck draws with, so the shadow is
 // where the cloud is and not where the field merely has a value.
 uniform float deck_threshold : hint_range(0.0, 1.0) = 1.0;

@@ -34,7 +34,7 @@ render_mode blend_mix, cull_disabled, depth_draw_always, specular_disabled;
 //
 // `repeat_enable` on `u` is deliberate: at `u = 1.0` exactly, which the seam produces, a clamped sampler
 // would pick the wrong edge.
-uniform sampler2D cover : filter_linear, repeat_enable;
+uniform sampler2D cover : filter_linear_mipmap, repeat_enable;
 
 // Where the layer's coverage puts the threshold, as a percentile of the map — from
 // `SpacesimCloudMaps.threshold_for()`, so the drawn coverage is the one that was asked for.
