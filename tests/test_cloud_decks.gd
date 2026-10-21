@@ -32,7 +32,6 @@ func run(h, root: Node) -> void:
 	_test_a_deck_below_its_datum(h, scene)
 	_test_the_deck_goes_live(h, scene, root)
 	_test_the_deck_casts_a_shadow(h, scene)
-	_test_the_base_gets_its_light(h, scene)
 	_test_the_cameras_own_column(h, scene)
 	_test_the_fog_ramp(h, scene, root)
 	_test_the_map_carries_a_pyramid(h)
@@ -299,46 +298,6 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 			1.0, "and a floor of 1.0, which is no shadow by arithmetic as well as by gate", 1.0e-9)
 
 
-## **The ramp gain is what keeps the light budget honest**, and its ceiling is real: with the gain set from
-## the map's own mean, the deck's average drawn reflectance is the calibrated albedo exactly — and where the
-## field wants more contrast than a single reflectance can give, the gain stops at white and reports the
-## shortfall instead of hiding it.
-## **The base's light is published, and its colour is the Rayleigh ratio** — `Cloud Decks Plan` §D6. The law
-## itself (`two_flux`, `henyey_greenstein`, `sky_radiance`) is asserted in `test_cloud_band.gd`; this checks that
-## the numbers reach the material, because a uniform that is never set fails as a black underside rather than as
-## an error.
-func _test_the_base_gets_its_light(h, scene: SpacesimSystemScene) -> void:
-	var earth := scene.body_by_id("planet:earth")
-	if earth == null or earth.decks.is_empty():
-		h.check(false, "Earth has a deck to light")
-		return
-	var deck: SpacesimSceneBody.Deck = earth.decks[0]
-	var material := deck.material as ShaderMaterial
-	if material == null:
-		h.check(false, "with a material to publish to")
-		return
-	var tau_full := float(material.get_shader_parameter("tau_full"))
-	h.check(tau_full > 0.0,
-		"the frame walk publishes the column's own optical depth (%.3f)" % tau_full)
-	h.check_near(tau_full, scene._deck_extinction(earth, deck) * deck.thickness,
-		"which is the extinction the near regime marches with, times the derived thickness", 1.0e-6)
-
-	var rayleigh: Vector3 = material.get_shader_parameter("sky_rayleigh_tau")
-	h.check(rayleigh.z > rayleigh.x * 2.0,
-		"the skylight it transmits is blue-dominant, because beta is a vec3 (%.4f against %.4f)"
-			% [rayleigh.z, rayleigh.x])
-	h.check(float(material.get_shader_parameter("sky_intensity")) > 0.0,
-		"and it carries the star's illuminance in the frame's own currency")
-	var grey: Vector3 = material.get_shader_parameter("scattered_grey")
-	h.check(grey.x > 0.0 and is_finite(grey.x) and is_finite(grey.y) and is_finite(grey.z),
-		"with a finite interior light for the thick centres to fall back to")
-	var sun: Vector3 = material.get_shader_parameter("sun_local")
-	h.check_near(sun.length(), 1.0, "and the star's direction in the deck's frame, normalised", 1.0e-6)
-
-
-## **The fog samples the column the camera is in**, so the camera's position in the deck's own model space has
-## to be right. It used to be derived inside the shader from a float32 matrix, and it sampled somewhere else —
-## "random fog in clear air, and none where there was cloud". Computed on the host now, and asserted here.
 func _test_the_cameras_own_column(h, scene: SpacesimSystemScene) -> void:
 	var earth := scene.body_by_id("planet:earth")
 	if earth == null or earth.decks.is_empty() or earth.node == null:

@@ -654,7 +654,6 @@ void main() {
 		// **NO DECK IS MARCHED ON THIS BRANCH.** The shell draws it from both sides, so the pass contributes the
 		// air and the fog only — one cloud, one mechanism, and any difference between the top view and the bottom
 		// view is then a property of the texture or the geometry rather than of two different renderers.
-		// `march_deck` stays in the file, unused, so the branch can be compared against the previous one.
 		cursor = b_hi[k];
 	}
 	if (cursor < end) {

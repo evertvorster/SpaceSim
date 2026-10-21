@@ -1315,12 +1315,9 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
 		var top_radius := body.radius + deck.height + deck.thickness
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0), sun)
+		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(top_radius, 1.0))
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
-		SpacesimBodyRenderer.apply_deck_light(
-			deck.material, body.air, _deck_tau_full(body, deck)
-		)
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
 		var texture := _cloud_maps.map(
 			body.id, deck.index, body.radius, deck.coverage, distance, deck.morphology,

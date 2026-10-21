@@ -712,7 +712,7 @@ static func apply_cloud_map(
 ## **The star is not passed**, and that is deliberate: the deck is lit by the engine's own light, and the
 ## underside's brightness is a diffuse share of the top's rather than a beam transmittance — see the shader's
 ## `UNDERSIDE_SHARE`. A direction uniform that nothing reads is worse than none.
-static func face_deck(material: Material, eye_offset: Vector3, sun_local: Vector3) -> void:
+static func face_deck(material: Material, eye_offset: Vector3) -> void:
 	var deck := material as ShaderMaterial
 	if deck == null:
 		return
@@ -720,7 +720,6 @@ static func face_deck(material: Material, eye_offset: Vector3, sun_local: Vector
 	# **The star, in the deck's own frame** — the base's light needs it, and it is the same convention `eye_local`
 	# uses: both are world-space vectors handed over already normalised, because the deck node is a uniform scale
 	# and no rotation.
-	deck.set_shader_parameter("sun_local", sun_local)
 
 
 ## **The light a cloud base transmits, from the air's own numbers** — `Cloud Decks Plan` §D6.
@@ -736,46 +735,6 @@ static func face_deck(material: Material, eye_offset: Vector3, sun_local: Vector
 ## reflectance the top is drawn at. That is the diffusion limit and it uses no new constant — a thick base is as
 ## bright as the cloud's albedo would make it, which is what "the multiply-scattered light" means without a
 ## multiple-scattering model this project does not have.
-static func apply_deck_light(material: Material, air: Dictionary, tau_full: float) -> void:
-	var deck := material as ShaderMaterial
-	if deck == null or air.is_empty():
-		return
-	var intensity := float(air.get("sun_intensity", 0.0))
-	var rayleigh: Vector3 = air.get("rayleigh", Vector3.ZERO)
-	deck.set_shader_parameter(
-		"sky_rayleigh_tau", rayleigh * float(air.get("rayleigh_scale_height", 0.0))
-	)
-	deck.set_shader_parameter(
-		"sky_mie_tau", float(air.get("mie", 0.0)) * float(air.get("mie_scale_height", 0.0))
-	)
-	deck.set_shader_parameter("sky_intensity", intensity)
-	deck.set_shader_parameter("sky_anisotropy", float(air.get("mie_anisotropy", 0.758)))
-	deck.set_shader_parameter("tau_full", tau_full)
-	# **`get_shader_parameter` returns `null` for a parameter that has never been set**, and this runs before the
-	# first map has been published. `float(null)` is a runtime error that aborts the function silently, which is
-	# exactly how a per-frame publish dies without saying so.
-	var palette := Color.WHITE
-	var published_palette = deck.get_shader_parameter("cloud_color")
-	if published_palette is Color:
-		palette = published_palette
-	var gain := 1.0
-	var published_gain = deck.get_shader_parameter("ramp_gain")
-	if published_gain is float:
-		gain = published_gain
-	deck.set_shader_parameter(
-		"scattered_grey", Vector3(palette.r, palette.g, palette.b) * gain * intensity / PI
-	)
-
-
-## **Publish the deck's shadow on a surface** — the map, the percentile that makes it a thickness, the depth,
-## and the lever arm the offset is measured along.
-##
-## **The map is the deck's own**, read from the star's side instead of the eye's, so a shadow cannot disagree
-## with the cloud that casts it. `height` is the deck's TOP above this surface: a shadow's offset is
-## `height · tan(zenith)`, and using the base instead would put every shadow a slab's thickness too close to
-## its cloud.
-##
-## A body with no deck never calls this, and `deck_tau` stays 0 — the shader's `deck_shadow_present()` gate.
 static func apply_deck_shadow(
 	material: Material, texture: Texture2D, threshold: float, tau: float, height: float,
 	detail_seed: int, detail_feature: float

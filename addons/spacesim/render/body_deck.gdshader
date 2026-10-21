@@ -95,18 +95,12 @@ uniform float tau_full = 0.0;
 // reflectance saturates while the base's transmittance falls to nothing, at the same tau — which is why one
 // texture serves both faces, and why the thick centres darken by exactly the amount the tops whiten.
 //
-// The light a base transmits is the sky above it, and that is **derived**, not authored: the same Rayleigh and
-// Mie coefficients the sky shader takes, in the closed form of its own single-scatter loop. `beta * H` is a
-// vec3 because beta is, so the colour is the Rayleigh ratio and there is no blue constant to guess.
-uniform vec3 sky_rayleigh_tau = vec3(0.0);
-uniform float sky_mie_tau = 0.0;
-uniform float sky_intensity = 0.0;
-uniform float sky_anisotropy = 0.758;
-// The cloud's own multiply-scattered light: what a base shows once `T -> 0`. A stated interim, scaled as a
-// Lambertian surface of the cloud's own reflectance would be — see §D6's "what is approximated".
-uniform vec3 scattered_grey = vec3(0.0);
-// The star, in the deck's model space — the same convention `eye_local` uses.
-uniform vec3 sun_local = vec3(0.0, 1.0, 0.0);
+// **No light of its own, deliberately, and the plumbing for one is gone (2026-10-21).** This shader drew a base's
+// radiance for a while — the sky's Rayleigh/Mie single-scatter in closed form, a sunward lobe, the cloud's own
+// multiply-scattered grey — and every version of it needed an input the model does not carry. The last of it was
+// written every frame and read by nothing once the base became the pass's cross-section, so it is deleted rather
+// than left as an unread uniform. The arithmetic survives in `SpacesimCloudBand` (`two_flux`,
+// `henyey_greenstein`, `sky_radiance`), tested, as the route back if droplet size and absorption ever exist.
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
 uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
