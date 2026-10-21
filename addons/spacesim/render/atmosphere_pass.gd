@@ -602,66 +602,26 @@ void main() {
 	//   the texture at the CAMERA    how cloudy this patch is, 0..1
 	//   altitude above the BASE      over the layer's own thickness, so full at the top and nothing at the bottom
 	//
-	// Multiply them and that share is the fog. A dense column at the top fogs the view out completely; the same
-	// column at the base does not fog it at all; a wisp is a fifth of that everywhere. Nothing to tune, nothing
-	// that can disagree with the deck, because both numbers are already the ones the deck is drawn from.
+	// Multiply them and that share is the fog, thickest at the base and thinning to nothing at the top.
 	float eye_altitude = length(eye) - params.deck.x;
 	if (params.radii.w > 0.0 && eye_altitude > 0.0) {
 		float eye_field = texture(cover, cloud_map_uv(normalize(params.eye_model.xyz))).r;
-		float density = clamp(
-			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
-		);
-		// **THIS column's top, not the tallest one in the map.** Evert, 2026-10-21: *"There still seems to be a
-		// fog pass, and its assuming the thickest cloud thickness."* It was: the ramp divided by the layer's
-		// THICKNESS, which is the envelope — so a thin patch kept fogging all the way to the envelope's ceiling and
-		// never reached its own strength. The law for a column's own top already exists (`march_deck`'s
-		// luminance-as-height): `column = full_column * density`, so both the gate and the ramp use it.
+		// **The strength is the TEXTURE, not a remapped share of it.** Evert, 2026-10-21: *"for the strength we
+		// should just sample the texture before albedo or color or any attenuation is applied."* It was
+		// `(field - threshold) / (1 - threshold)` — a reading that is 0 at the coverage threshold and only 1 at the
+		// brightest texel the map can hold, so a patch the eye calls solid arrived as 0.5-0.7 before the gain. The
+		// field enters directly now; coverage decides only WHETHER there is cloud, using the same smoothstep span
+		// the deck's own alpha uses, so clear air stays clear.
 		//
-		// The two densities cancel inside the column — `density * alt / (full * density) = alt / full` — which is
-		// the shape wanted: one slope through the layer, truncated at each patch's own top, where the share equals
-		// exactly the texture's reading at the camera. Above that top there is no cloud above the eye, so no fog.
-		// **Thickest at the BASE, thinning as you climb** — and the ramp must be a PRODUCT, not a ratio of this
-		// column. Evert, 2026-10-21: *"reverse the fog so that its thickest at the bottom in a thick cloud, and
-		// thins out as you climb."*
-		//
-		// The first attempt divided by `column = full * density`, and the two densities cancel:
-		//
-		//     density * (1 - alt / (full * density))  =  density - alt/full
-		//
-		// which is a SUBTRACTION: at 1.7 km the altitude term removes 264/1604 = 0.165 from every patch whatever
-		// its depth, so a typical density of 0.2 came out at 0.035 and the fog read as absent. Measure: flying at
-		// 1.7 km inside Earth's band, *"there is no fog"*.
-		//
-		// So the envelope carries the ramp — one slope per full column, scaled by how cloudy this patch is — and
-		// **this column's own top GATES it** rather than dividing it, which is what keeps fog out of the air above
-		// a wisp. Full strength at the base (altitude 0 gives the bracket exactly 1), arriving in one step on
-		// entry, which is what entering a cloud is.
-		// **No gate at the column's own top: the RAMP reaches zero, so there is nothing to cut.**
-		// Evert, 2026-10-21: *"when I near the top of the column, at about 3 km, there is still too much fog the
-		// one instant, and then the next instant there is no fog. I expected the fog to fade to nothing by the time
-		// I get to the top of the shell so that there would be no discontinuity."*
-		//
-		// The gate was `eye_altitude < column`, and `column = full * density`, so for a patch at density 0.9 it cut
-		// at altitude 2,883 m — where this ramp still read 0.1. The fog therefore dropped from 0.09 to 0 in one
-		// frame, a metre below the shell's top. **A linear ramp cannot be proportional to the density AND reach
-		// zero at the local column's top** — `density * (1 - alt/column)` is `density - alt/full`, the subtraction
-		// that killed the fog entirely at 1.7 km. So the envelope's top is where it lands, and the patch's own
-		// depth is carried by `density` alone: a wisp has a tenth of the fog everywhere and it fades out with
-		// everything else, instead of stopping dead halfway up.
-		// **The one tuning number in the fog**, and the reason it exists: `density` is a *relative* reading — 0 at
-		// the coverage threshold, 1 only at the brightest texel the map can hold — so a patch anyone would call
-		// thick reads around 0.5-0.7 and "full strength, dictated by the texture" arrived as a 50-70% veil when
-		// flying into a dense one. Evert, 2026-10-21: *"the fog effect is not strong enough when I fly into a thick
-		// cloud at the bottom... this is just a little fine tuning."*
-		//
-		// So the map's reading is scaled into the opacity it should mean, and clamped at 1: at 2.0 a patch reading
-		// half or more whites the view out, a quarter reads as a veil, a wisp stays thin. **It travels in
-		// `deck_radiance.w`** — unused by a radiance that is rgb — so the strength sits beside the colour it
-		// scales, and it is HOT (`fog.gain`), because this is the one number in the fog that is a judgement rather
-		// than a consequence: the ramp's two ends are fixed by geometry and the map gives the relative amount.
-		float strength = clamp(density * params.deck_radiance.w, 0.0, 1.0);
+		// Nothing of the deck's albedo, palette or `ramp_gain` is anywhere in this number — those belong to the
+		// deck's DRAWN brightness, which is a different quantity, and they were already not in it. What was
+		// attenuating the fog was the remap.
+		float covered = smoothstep(params.deck.z, 1.0, eye_field);
+		float strength = clamp(eye_field * params.deck_radiance.w, 0.0, 1.0) * covered;
+		// **Thickest at the BASE, thinning as you climb**, full strength the instant you enter. The ramp's two ends
+		// are geometry: 1 at the deck's base, 0 at its top, so nothing has to be gated and there is no step at
+		// either end.
 		float share = strength * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
-		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
 		T *= 1.0 - share;
 	}
