@@ -50,6 +50,27 @@ func _ready() -> void:
 				_regime_name(condensation.regime)
 			])
 
+	# **And the deck's own radii**, because those are the numbers the split is made of: the pass receives
+	# `base_radius` and `top_radius`, puts its air/deck segment boundaries exactly there, gates the fog strictly
+	# between them, and the deck shader flips its normal where the eye crosses the TOP. So an altitude question
+	# about the split is a question about this table and nothing else.
+	print()
+	print("%-14s %4s %10s %9s %9s %14s %14s" % [
+		"body", "deck", "base km", "thick m", "top km", "base radius m", "top radius m"
+	])
+	for content in sol.bodies:
+		var body := scene.body_by_id(content.id)
+		if body == null or body.decks.is_empty():
+			continue
+		for deck in body.decks:
+			var base_altitude: float = deck.height
+			var top_altitude: float = deck.height + deck.thickness
+			print("%-14s %4d %10.3f %9.1f %9.3f %14.1f %14.1f" % [
+				content.id.replace("planet:", "").replace("moon:", "m."),
+				deck.index, base_altitude / 1000.0, deck.thickness, top_altitude / 1000.0,
+				body.radius + base_altitude, body.radius + top_altitude
+			])
+
 	scene.container.free()
 	get_tree().quit(0)
 
