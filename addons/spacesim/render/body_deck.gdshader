@@ -154,6 +154,8 @@ void vertex() {
 
 void fragment() {
 	vec3 p = normalize(local_position);
+	// **Inside the deck's sphere** — the only boundary this surface has, since the node is scaled to its TOP.
+	float eye_radius = length(eye_local);
 	vec3 to_eye = normalize(eye_local - p);
 
 	// **ONE SAMPLE, ON THE TOP SPHERE, ALWAYS.** Evert, 2026-10-21: *"strip the blending code, and map the
@@ -217,14 +219,16 @@ void fragment() {
 	ALBEDO = radiance;
 	ALPHA = alpha;
 	ROUGHNESS = 0.9;
-	// **NO SPECIAL CASE FOR THE BASE, and none for the inside either.** Evert, 2026-10-21: *"We are mapping the
-	// texture to the upper bound of the cloud deck, right? In all cases, right? ... Why is there a change in what
-	// I see at the lower bound?"*
+	// **The normal flips at the TOP, which is the only boundary there is.** Evert, 2026-10-21: *"that flip needs
+	// to occur as we cross the upper bound, as I now see no clouds from below at any altitude."*
 	//
-	// There was: `from_below` flipped the normal at the base radius — a hard lighting step at exactly 1,436 m, on
-	// a surface that does not exist there. The normal is now whatever the geometry gives at every altitude, so the
-	// base means nothing to this shader at all. It knows one sphere and one texture, and the only thing crossing
-	// the TOP changes is which face of that sphere you are looking at.
+	// It used to flip at the BASE, which is a radius with no surface on it — so it stepped the lighting at 1,436 m
+	// and was still wrong everywhere else. Inside the sphere every fragment is a BACK face whose normal points
+	// away from the viewer, and without the flip the underside is lit as though it faced away and goes black.
+	// Crossing the top is exactly when that starts, so that is where the flip belongs.
+	if (eye_radius < 1.0) {
+		NORMAL = -NORMAL;
+	}
 	// **Depth is written where there IS cloud, and nowhere else.** The air pass clips its march at the first
 	// thing drawn, so a gap that wrote depth would lose the air that is properly above the ground; this
 	// discard is what keeps the gaps honest. It also stops the sphere blending its own far side through its
