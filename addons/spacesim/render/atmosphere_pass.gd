@@ -614,16 +614,26 @@ void main() {
 		// The two densities cancel inside the column — `density * alt / (full * density) = alt / full` — which is
 		// the shape wanted: one slope through the layer, truncated at each patch's own top, where the share equals
 		// exactly the texture's reading at the camera. Above that top there is no cloud above the eye, so no fog.
+		// **Thickest at the BASE, thinning as you climb** — and the ramp must be a PRODUCT, not a ratio of this
+		// column. Evert, 2026-10-21: *"reverse the fog so that its thickest at the bottom in a thick cloud, and
+		// thins out as you climb."*
+		//
+		// The first attempt divided by `column = full * density`, and the two densities cancel:
+		//
+		//     density * (1 - alt / (full * density))  =  density - alt/full
+		//
+		// which is a SUBTRACTION: at 1.7 km the altitude term removes 264/1604 = 0.165 from every patch whatever
+		// its depth, so a typical density of 0.2 came out at 0.035 and the fog read as absent. Measure: flying at
+		// 1.7 km inside Earth's band, *"there is no fog"*.
+		//
+		// So the envelope carries the ramp — one slope per full column, scaled by how cloudy this patch is — and
+		// **this column's own top GATES it** rather than dividing it, which is what keeps fog out of the air above
+		// a wisp. Full strength at the base (altitude 0 gives the bracket exactly 1), arriving in one step on
+		// entry, which is what entering a cloud is.
 		float column = params.deck.w * density;
 		float share = 0.0;
-		if (column > 1.0) {
-			// **Thickest at the BASE, thinning as you climb.** Evert, 2026-10-21: *"reverse the fog so that its
-			// thickest at the bottom in a thick cloud, and thins out as you climb."* Which is the honest reading:
-			// at a cloud's base the whole column is above you, so the sky is lost; near the top there is almost
-			// nothing above you, so it clears. **Full strength the instant you enter** — his call, and no ramp
-			// band: at altitude 0 the bracket is exactly 1, so crossing the base arrives at the patch's own
-			// density in one step, which is what entering a cloud is.
-			share = density * (1.0 - clamp(eye_altitude / column, 0.0, 1.0));
+		if (column > 1.0 && eye_altitude < column) {
+			share = density * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
 		}
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
