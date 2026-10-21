@@ -11,8 +11,8 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 **Early, but real.** Sol and the player are the game now, not a demo: coordinate
 frames, the travel unit, a data-driven system, navigation markers, settings, a player who can be
 saved, loaded and browsed, a body whose surface **subdivides as you approach it**, and **the stars**:
-the real sky above Sol, from the HYG catalogue, with an exposure that can be tuned to the observer
-rather than metered from the frame.
+the real sky above Sol, from the HYG catalogue, with an exposure metered from the **rendered frame** on the
+GPU and adapting in **stops** — exponential, so it closes a large gap quickly and fine-tunes a small one.
 
 **The surface is derived, not authored.** What a body's surface *is* comes from the phase of its
 composition — a Voronoi plate partition with each plate standing or sagging, a region term slower than a plate
@@ -26,13 +26,27 @@ one threshold.
 exposure pass, marching one ray per pixel with sixteen samples along it and eight toward the sun, light scattered
 by the species mix the body is made of. It draws the air over a planet's *disk* from space, the limb, and the sky
 from underneath, because it owns every pixel rather than a shell that can only be where the geometry is. Measured
-in flight the same day the surface landed: **339 fps / 2.9 ms**, from 423 m inside it.
+in flight the same day the surface landed: **339 fps / 2.9 ms**, from 423 m inside it. The same pass draws the
+cloud deck's fog and marches the air as **one segment** — nothing in it occludes the air, and a segment structure
+that skips the span it does not fill loses the medium in that span.
 
-**The clouds are not drawn.** The map, its percentile threshold and a reflectance ramp fitted to the measured mean
-all exist and are tested, and the direction is a **baked deck for the far regime** composited inside the air pass
-— which stands behind the switch argument in a vault doc rather than in the code. The near regime (parallax, a
-silver lining, an underside) is deliberately unbuilt. There is no terrain displacement, no physics and no
-simulation.
+**The clouds are drawn.** A layer's condensate thickness is derived — the dew point's height and how far the column
+above it rises — and it is baked into a **coverage map** whose brightness stands in for height. The map is painted
+on **one sphere per layer**, scaled to that layer's *base* radius, because a condensation level is a level: every
+column starts at the same altitude while the tops vary, and that variation is what the map holds. The same map
+draws the deck from above, from below and from inside, and casts the ground shadow as a ray test against the
+field rather than a shadow map.
+
+**Inside and below a deck** the air pass adds a fog, because a surface has no cross-section to draw: its strength
+is the map at the camera and its ramp runs from full at the deck's base to nothing at its top. One number, `fog.gain`,
+is hot for tuning. **The far regime draws every layer a body has; the near regime reads one deck**, so Jupiter and
+Saturn lose their lower layer once you are inside or just under the upper one — multiple decks is the next rung and
+needs a per-deck parameter block, a sampler array and an eye-ordered walk (the vault's `Cloud Decks Plan` §D9).
+
+**The air and the clouds share one composite, in one place.** The pass owns every pixel: air in front of the deck,
+the deck, and air behind it — which is the thing a shell composited before the pass can never get right.
+
+There is no terrain displacement, no physics and no simulation.
 
 **The star data is third-party and is licensed separately from the code.** `addons/spacesim/sky/`
 holds HYG v4.4 (Hipparcos + Yale Bright Star + Gliese) under **CC BY-SA 4.0**, which is compatible
@@ -61,7 +75,8 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
     model/         the derivation: what a body's numbers are, from what it is made of
   lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
   render/          what is drawn: the surface, the ocean, the patch quadtree, the level law, the
-                   render-thread map bake, and the air as one volumetric march over the frame
+                   render-thread map bake, the clouds on a sphere per deck, and the air as one
+                   volumetric march over the frame (which also carries the near regime's fog)
   player/          the player's own state (attributes and assets) and the screen for it
   navigation/      the overlay: a ring at each object, a short line, and its label, placed
                    so labels never overlap and a moon yields to its planet only where the two
@@ -93,11 +108,13 @@ godot-double-mono --path .
 ```
 
 It starts in `game/main.tscn`, flying **Sol** from `systems/sol.tres` — the real solar system, with
-the planets placed where JPL says they were at J2000. **W/S** throttle, **mouse** pitch and yaw,
-**A/D** roll, **T** to cycle
-the selected target, **Esc** releases the mouse (click to take it back). **P** hides the bodies and
-**`[` `]`** change their tessellation, which is how the frame-cost questions get answered rather
-than guessed at. **Tab** opens the personal data screen and **Alt+C** the settings screen; both
+the planets placed where JPL says they were at J2000. **`+` `-`** throttle, ten seconds from a stop
+to full and the same speed astern, **Backspace** stops, **mouse** yaws and pitches, **`[` `]`** roll,
+and **`1`–`6`** fix the view forward, back, left, right, up and down — six fixed directions, so one
+cloud can be looked at from every side while the mouse still steers. **T** cycles the selected target,
+**Esc** releases the mouse (click to take it back), **P** hides the bodies, **O** the ship and **L**
+draws wireframe. **Tab** the personal data screen, **Alt+C** the settings screen. Every one of these
+is a binding in the settings file — see `bindings.*` in [`docs/API.md`](docs/API.md). Both screens
 pause the game. On the personal data screen **Save** and **New Story** act on the world, and the
 histories and their saves are browsed and acted on there — playing, renaming or deleting a history,
 loading or deleting a save. **Only names are editable**: the player's own, each thing they hold, and
