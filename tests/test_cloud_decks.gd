@@ -34,6 +34,7 @@ func run(h, root: Node) -> void:
 	_test_the_deck_casts_a_shadow(h, scene)
 	_test_the_base_gets_its_light(h, scene)
 	_test_the_cameras_own_column(h, scene)
+	_test_the_fog_ramp(h, scene, root)
 	_test_the_ramp_gain(h)
 
 	scene.container.free()
@@ -361,6 +362,56 @@ func _test_the_cameras_own_column(h, scene: SpacesimSystemScene) -> void:
 	var moved := scene.near_deck(earth, centre + Vector3(0.3, 0.9, 0.2).normalized() * (earth.radius + 2000.0))
 	h.check(moved["eye_model"].normalized().dot(eye_model.normalized()) < 0.99,
 		"and it moves with the camera rather than staying put")
+
+
+## **The fog's ramp, through `prepare()` itself**: full at the deck's TOP, nothing at its BASE, and identical
+## whichever way the camera is travelling. Evert, 2026-10-21: *"entering the deck from below a thick cloud
+## instantly adds the fog at the bottom of the deck, and fades it to the top. From above it works correctly.
+## Direction of travel should not matter."*
+##
+## Nothing in the fog reads a velocity or a previous frame, so travel direction cannot enter it — which means the
+## ramp itself is what to check, and this checks the numbers the shader will be handed rather than the code.
+func _test_the_fog_ramp(h, scene: SpacesimSystemScene, root: Node) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	if earth == null or earth.decks.is_empty():
+		h.check(false, "Earth has a deck to ramp the fog over")
+		return
+	var deck: SpacesimSceneBody.Deck = earth.decks[0]
+	var base := earth.radius + deck.height
+	var top := base + deck.thickness
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	var effect := SpacesimAtmospherePass.new()
+
+	var ramps: Array = []
+	for fraction: float in [0.0, 0.25, 0.5, 0.75, 1.0]:
+		var altitude: float = base + (top - base) * fraction
+		# The base itself is the boundary; sample just inside it so the gate is satisfied.
+		var observer: Vector3 = earth.node.global_position + Vector3.UP * (altitude + 0.5)
+		camera.global_position = observer
+		var air := scene.air_for_eye(observer)
+		if air.is_empty():
+			h.check(false, "the air is found at %.0f m" % altitude)
+			break
+		effect.prepare(camera, air["centre"], float(air["planet_radius"]),
+			float(air["atmosphere_radius"]), air["sun_direction"], air["air"], 1.0,
+			air.get("deck", {}))
+		var eye := Vector3(effect._values[0], effect._values[1], effect._values[2])
+		var deck_base: float = effect._values[28]
+		var column: float = effect._values[31]
+		ramps.append(clampf((eye.length() - deck_base) / maxf(column, 1.0), 0.0, 1.0))
+	camera.queue_free()
+
+	if ramps.size() < 5:
+		return
+	h.check(ramps[0] < 0.02, "at the BASE the fog's ramp is nothing (%.3f)" % ramps[0])
+	h.check(ramps[4] > 0.98, "and at the TOP it is full (%.3f)" % ramps[4])
+	var rising := true
+	for i in range(1, ramps.size()):
+		if ramps[i] < ramps[i - 1] - 1.0e-6:
+			rising = false
+	h.check(rising, "rising monotonically between them, so it cannot fade upward from the bottom")
+	h.check_near(ramps[2], 0.5, "half way up is half the fog", 0.05)
 
 
 func _test_the_ramp_gain(h) -> void:
