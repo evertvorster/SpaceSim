@@ -83,6 +83,7 @@ var _deck_texture: Texture2D
 ##   28..31  deck  (base radius, extinction 1/m, threshold, full column height)
 ##   32..35  deck radiance (xyz)
 ##   36..47  view -> deck model space, as three vec4 columns
+##   48..51  the camera in the deck's model space — what the fog samples by
 ##
 ## **The deck is ONE layer, the top one, and that is a named limit rather than an oversight.** The near
 ## regime is only live inside or just under the top deck, where a lower deck is seen through the gaps of the
@@ -90,7 +91,7 @@ var _deck_texture: Texture2D
 ## Until then a body with two decks (Jupiter, Saturn) draws its near regime as its top deck alone, and the
 ## shell still draws both from above.
 var _values := PackedFloat32Array()
-const PARAM_FLOATS := 48
+const PARAM_FLOATS := 52
 
 
 func _init() -> void:
@@ -212,6 +213,10 @@ func prepare(
 				_values[36 + column * 4] = axis.x
 				_values[37 + column * 4] = axis.y
 				_values[38 + column * 4] = axis.z
+			var eye_model: Vector3 = deck.get("eye_model", Vector3.ZERO)
+			_values[48] = eye_model.x
+			_values[49] = eye_model.y
+			_values[50] = eye_model.z
 			# Kept for the uniform set, which is built in the callback where the frame's RIDs are known.
 			_deck_texture = texture
 	else:
@@ -373,6 +378,7 @@ layout(std430, set = 0, binding = 1) buffer Params {
 	vec4 deck;            // x base radius, y extinction 1/m, z threshold, w full column height
 	vec4 deck_radiance;   // rgb, flat for this rung
 	mat3 to_model;        // view space -> the deck's own model space, column-major
+	vec4 eye_model;       // the camera in the deck's model space, unit sphere — the fog's own lookup
 } params;
 // **The deck's baked map, sampled the way the mesh samples it.** Binding 2 is always present; a frame with
 // no deck carries `radii.w = 0` and never reads it.
@@ -584,7 +590,10 @@ void main() {
 	float eye_altitude = length(eye) - params.deck.x;
 	bool in_medium = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;
 	if (in_medium) {
-		float eye_field = texture(cover, cloud_map_uv(normalize(params.to_model * eye))).r;
+		// **The camera's own column**, from the host's own arithmetic — not a mat3 rebuilt here. The lookup has
+		// to be the column the camera is in, and deriving it from a float32 matrix is how it came to sample
+		// somewhere else entirely.
+		float eye_field = texture(cover, cloud_map_uv(normalize(params.eye_model.xyz))).r;
 		float density = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);

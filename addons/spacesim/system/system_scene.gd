@@ -677,7 +677,7 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 			"atmosphere_radius": body.radius + body.sky_top,
 			"sun_direction": sun,
 			"air": body.air,
-			"deck": near_deck(body),
+			"deck": near_deck(body, observer),
 		}
 	return best
 
@@ -714,7 +714,7 @@ func _deck_extinction(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> 
 ## **The top layer only, and that is this rung's named limit.** The near regime is live inside or just under
 ## the top deck, where a lower deck is seen through the gaps of the one above — so the stack arrives with a
 ## sampler array and a per-deck loop, not before.
-func near_deck(body: SpacesimSceneBody) -> Dictionary:
+func near_deck(body: SpacesimSceneBody, observer: Vector3) -> Dictionary:
 	if body == null or body.decks.is_empty() or body.air.is_empty():
 		return {}
 	var deck: SpacesimSceneBody.Deck = body.decks[0]
@@ -735,6 +735,13 @@ func near_deck(body: SpacesimSceneBody) -> Dictionary:
 		"radiance": Vector3(palette.r, palette.g, palette.b) * gain,
 		"texture": cover,
 		"basis": deck.node.global_transform.basis,
+		# **Where the camera is, in the deck's OWN model space, computed here in double.** The fog samples the map
+		# by the column above the camera, and that lookup used to be derived inside the shader from a float32
+		# matrix — which is how it came to sample somewhere other than where the camera was: random fog in clear
+		# air, and none where there was cloud. Computed here, the maths is double, it is one line to test, and the
+		# shader only normalises it.
+		"eye_model": (deck.node.global_transform.basis.inverse()
+			* (observer - deck.node.global_position)),
 	}
 
 

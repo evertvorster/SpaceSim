@@ -33,6 +33,7 @@ func run(h, root: Node) -> void:
 	_test_the_deck_goes_live(h, scene, root)
 	_test_the_deck_casts_a_shadow(h, scene)
 	_test_the_base_gets_its_light(h, scene)
+	_test_the_cameras_own_column(h, scene)
 	_test_the_ramp_gain(h)
 
 	scene.container.free()
@@ -331,6 +332,35 @@ func _test_the_base_gets_its_light(h, scene: SpacesimSystemScene) -> void:
 		"with a finite interior light for the thick centres to fall back to")
 	var sun: Vector3 = material.get_shader_parameter("sun_local")
 	h.check_near(sun.length(), 1.0, "and the star's direction in the deck's frame, normalised", 1.0e-6)
+
+
+## **The fog samples the column the camera is in**, so the camera's position in the deck's own model space has
+## to be right. It used to be derived inside the shader from a float32 matrix, and it sampled somewhere else —
+## "random fog in clear air, and none where there was cloud". Computed on the host now, and asserted here.
+func _test_the_cameras_own_column(h, scene: SpacesimSystemScene) -> void:
+	var earth := scene.body_by_id("planet:earth")
+	if earth == null or earth.decks.is_empty() or earth.node == null:
+		h.check(false, "Earth has a deck to sample")
+		return
+	var deck: SpacesimSceneBody.Deck = earth.decks[0]
+	var top := earth.radius + deck.height + deck.thickness
+	var centre := earth.node.global_position
+
+	# Straight over the sub-camera point at three altitudes: the model-space position must have length
+	# eye_radius / top_radius, and its direction must be the camera's own.
+	var sub_camera := centre + Vector3.UP * (earth.radius + 2000.0)
+	var data := scene.near_deck(earth, sub_camera)
+	h.check(not data.is_empty(), "the deck publishes the fog's lookup")
+	var eye_model: Vector3 = data["eye_model"]
+	h.check_near(eye_model.length(), (earth.radius + 2000.0) / top,
+		"and it is the camera's radius in top radii", 1.0e-6)
+	h.check(eye_model.normalized().dot(Vector3.UP) > 0.9999,
+		"pointing at the camera's own column: straight up over the sub-camera point")
+
+	# Off to one side, the direction must follow — a lookup that ignored the camera would not move.
+	var moved := scene.near_deck(earth, centre + Vector3(0.3, 0.9, 0.2).normalized() * (earth.radius + 2000.0))
+	h.check(moved["eye_model"].normalized().dot(eye_model.normalized()) < 0.99,
+		"and it moves with the camera rather than staying put")
 
 
 func _test_the_ramp_gain(h) -> void:
