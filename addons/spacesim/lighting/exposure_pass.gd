@@ -55,6 +55,9 @@ var frame_delta := 1.0 / 60.0
 ## may go. It matters most on a frame of nothing but stars: with no mean luminance to answer, the
 ## metre asks for the ceiling.
 var max_multiplier := SpacesimExposure.MAX_MULTIPLIER
+## **Halvings per second**, from `exposure.adaptation_rate`. A property rather than a constant read in the
+## dispatch, so the setting is hot — `main._apply_settings` is its one writer.
+var adaptation_rate := SpacesimExposure.ADAPTATION_RATE
 
 ## Built in the first callback rather than in `_init`: a headless run has no `RenderingDevice`, and a
 ## construction that assumed one would fail there for no reason.
@@ -178,9 +181,16 @@ void main() {
 		? clamp(params.target / mean, params.min_multiplier, params.max_multiplier)
 		: params.max_multiplier;
 	float previous = state.value.x;
+	// **The adaptation is in STOPS, and exponential.** A multiplier gap is a ratio, so easing it linearly makes
+	// a big change crawl and a tiny one instant — the opposite of what is wanted. In log2 space the remaining
+	// gap is multiplied by `1 - exp(-rate*delta)` every frame, which halves it every `ln2/rate` seconds however
+	// large it is: quick to close, fine to settle, and frame-rate independent by construction.
+	//
 	// `previous <= 0` is the first frame: snap rather than easing up from nothing.
-	float t = clamp(params.rate * params.delta, 0.0, 1.0);
-	state.value.x = previous <= 0.0 ? target : mix(previous, target, t);
+	float t = clamp(1.0 - exp(-params.rate * params.delta), 0.0, 1.0);
+	float current_ev = log2(max(previous, 1.0e-6));
+	float target_ev = log2(max(target, 1.0e-6));
+	state.value.x = previous <= 0.0 ? target : exp2(mix(current_ev, target_ev, t));
 	// **`y` is the mean the target was computed from**, and `z` the target itself: the multiplier alone
 	// cannot say whether a jump came from the scene changing or from the "no light at all" branch asking
 	// for the ceiling. Instrument only — nothing reads them on the GPU.
@@ -309,7 +319,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	rd.compute_list_set_push_constant(list, PackedFloat32Array([
 		float(SAMPLE_COUNT), SpacesimExposureMeter.TARGET_AVERAGE,
 		SpacesimExposure.MIN_MULTIPLIER, max_multiplier,
-		SpacesimExposure.ADAPTATION_RATE, frame_delta, 0.0, 0.0,
+		adaptation_rate, frame_delta, 0.0, 0.0,
 	]).to_byte_array(), 32)
 	rd.compute_list_dispatch(list, 1, 1, 1)
 	rd.compute_list_add_barrier(list)

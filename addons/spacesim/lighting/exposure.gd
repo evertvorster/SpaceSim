@@ -49,9 +49,19 @@ const LIGHT_ADAPTED_LUMINANCE := 100000.0
 const MIN_MULTIPLIER := REFERENCE_LUX / (LIGHT_ADAPTED_LUMINANCE * PI)
 const MAX_MULTIPLIER := MIN_MULTIPLIER * 4294967296.0 ## 2^32: the range is 32 stops
 
-## How fast exposure follows a change. Slow on purpose: what you notice about a night side is that it
-## stays dark, and a hard cut when flying between planets looks like a bug.
-const ADAPTATION_RATE := 0.6
+## How fast exposure follows a change, in **halvings per second** — the default for
+## `exposure.adaptation_rate`, which is what actually drives it.
+##
+## **The approach is exponential in STOPS, not linear in the multiplier.** A multiplier gap is a ratio and the
+## eye perceives ratios, so a linear ease means a two-stop change crawls while a 0.02-stop one is instant —
+## backwards from what is wanted. In log2 space the remaining gap is multiplied by `1 - exp(-rate·delta)` each
+## frame, so it **halves every `ln2/rate` seconds whatever its size**: it closes quickly when it is far and
+## fine-tunes when it is near, which is the behaviour, and it is frame-rate independent by construction.
+##
+## Evert, 2026-10-21: *"if there is a large difference between the current EV and the demanded EV it should
+## close in on it quickly, and then fine tune. Something like stepping in halves or thirds, and then just chase
+## the correct EV."* A halving rate is exactly that, with one number to adjust.
+const ADAPTATION_RATE := 2.0
 
 ## A clear blue sky's own **luminance**, in lux per steradian (the same number as cd/m²). Schlyter's
 ## "full daylight, not direct sun" is 10,000-25,000 lux *on a horizontal surface*, and a uniform sky of

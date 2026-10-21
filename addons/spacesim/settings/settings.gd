@@ -136,6 +136,10 @@ const REGISTRY := {
 	# range a dark-adapted eye has and 0 allows no boost at all. Read every frame by `main.gd` and
 	# handed to `SpacesimExposurePass`; the arithmetic is `SpacesimExposure.max_multiplier_for_stops`.
 	"exposure.range_stops": {"default": 32.0, "scope": Scope.PLAYER, "min": 0.0, "max": 40.0},
+	# **Halvings per second.** The exposure's approach is exponential in stops, so this one number sets how
+	# quickly it closes on a change however large: at 2.0 the remaining gap halves every 0.35 s. Evert,
+	# 2026-10-21: close quickly when the difference is large, then fine-tune.
+	"exposure.adaptation_rate": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.1, "max": 20.0},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a

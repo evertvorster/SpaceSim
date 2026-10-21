@@ -359,6 +359,9 @@ func _apply_settings() -> void:
 	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
 		float(SpacesimSettings.get_value("exposure.range_stops"))
 	)
+	_exposure_pass.adaptation_rate = float(
+		SpacesimSettings.get_value("exposure.adaptation_rate")
+	)
 	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
 	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
 	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))

@@ -12,8 +12,43 @@ const SOLAR_CONSTANT := 1361.0 ## W/m² at 1 au, measured
 const SUN_EFFECTIVE_TEMPERATURE := 5772.0 ## K, measured
 
 
+## **The exposure's approach is exponential in STOPS**, so the same rate closes a large change quickly and
+## settles a small one finely. Evert, 2026-10-21: *"if there is a large difference between the current EV and
+## the demanded EV it should close in on it quickly, and then fine tune."*
+##
+## The shader does `exp2(mix(log2(current), log2(target), 1 - exp(-rate*delta)))`; this is that arithmetic, so
+## the claim "halves every ln2/rate seconds" is a test rather than a comment. The GPU side is the same formula
+## with the same numbers, and the setting is what feeds `rate`.
+func _test_adaptation_halves(h) -> void:
+	var rate: float = SpacesimExposure.ADAPTATION_RATE
+	var half_life := log(2.0) / rate
+	h.check(half_life > 0.05 and half_life < 2.0,
+		"the default rate halves the gap every %.2f s" % half_life)
+
+	# A twenty-stop jump, stepped at 60 Hz: the gap must halve on schedule, and never overshoot.
+	var target_ev := 20.0
+	var current_ev := 0.0
+	var steps := int(round(10.0 * 60.0))
+	var halved_on_time := true
+	for i in steps:
+		var delta := 1.0 / 60.0
+		var t := clampf(1.0 - exp(-rate * delta), 0.0, 1.0)
+		current_ev = lerpf(current_ev, target_ev, t)
+		var elapsed := float(i + 1) * delta
+		# Half a second past the half-life, the gap must be under half what it was at the half-life.
+		if absf(elapsed - half_life) < delta * 0.5:
+			var gap_at_half_life := absf(target_ev - current_ev)
+			if gap_at_half_life > 20.0 * 0.55:
+				halved_on_time = false
+	h.check(halved_on_time, "and a large gap is down to about half of itself one half-life later")
+	h.check(absf(target_ev - current_ev) < 0.01,
+		"while ten seconds of it settles within a hundredth of a stop (%.4f)" % absf(target_ev - current_ev))
+	h.check(current_ev <= target_ev + 1.0e-9, "and it never overshoots")
+
+
 func run(h, root: Node) -> void:
 	print("  light")
+	_test_adaptation_halves(h)
 
 	# Without this project setting Godot ignores light_intensity_lux entirely, and every number below
 	# would be correct and invisible.
