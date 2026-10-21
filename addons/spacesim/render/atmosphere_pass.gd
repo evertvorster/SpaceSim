@@ -386,6 +386,10 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
+// Steps the fog takes through the slab's thickness. Six is enough for a linear profile over a ray whose
+// endpoints are already known — the integral is smooth, so the error is a small fraction of one step.
+const int FOG_STEPS = 6;
+
 // **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
 // headlessly; the shader carries the numbers, which is the arrangement Cloud Volumes §4.3a states rather than a
 // second source of truth. Six samples per e-fold, and the stop at 1/100 gives `ceil(log(100) * 6) = 28` steps
@@ -572,39 +576,45 @@ void main() {
 	vec3 T = vec3(1.0);
 	vec3 L = vec3(0.0);
 
-	// **THE FOG AT THE CAMERA, read straight off the cloud texture.** Evert, 2026-10-21: *"What is visible is
-	// some residual density from the deck. Its never actually quite zero, and it flipping from the bottom to the
-	// top, even in relatively clear air is what is causing that inconsistency. I want the camera to pick up that
-	// 'density' at the camera position, and turn it into fog... This fog should be the full strength, which is
-	// dictated by the cloud texture at the point of the camera, at the top of the cloud layer and fade out
-	// linearly towards the bottom of the cloud layer."*
+	// **THE FOG IS A MEDIUM IN THE SLAB, SAMPLED ALONG THE RAY — not a constant over the whole sky.**
+	// Evert, 2026-10-21: *"Just below the bottom... [structured cloud, blue sky]. Just above the bottom... [a
+	// uniform grey wash]. Its not doing the smooth ramp between the bottom and the top of the layer that I asked
+	// for."*
 	//
-	// So the fog's DENSITY is the medium's own extinction scaled by the map where the CAMERA is — no fudge factor,
-	// because "full strength, dictated by the texture" is exactly `extinction * density` — and its share is one
-	// linear ramp: full at the deck's TOP, nothing at its BASE. The residual density that never quite reaches
-	// zero therefore reads as a faint haze that follows you, instead of as the deck flickering as it flips from
-	// one face to the other.
+	// Two things were wrong with the first form, and both are visible in those two frames:
 	//
-	// It attenuates with DISTANCE (`exp(-sigma * the ray's length)`), which is what makes it fog rather than a
-	// wash: what is near stays legible, what is far is lost, and that difference is the whole sensation.
+	// 1. **It applied ONE density, the camera's, to the WHOLE ray.** With `reach` taken to the atmosphere exit
+	//    that is ~100 km of fog at any altitude inside the band — so crossing the base wiped the sky flat
+	//    instead of hazing the cloud you are in.
+	// 2. **The density did not vary along the ray**, so the linear ramp was a single number for the frame
+	//    rather than a profile through the layer.
+	//
+	// So the ramp is now where it belongs: a function of altitude, integrated along the part of the ray that is
+	// inside the slab. The medium's strength is the layer's own extinction scaled by the map where the CAMERA
+	// is — one fetch, and it is the camera's column that says how dense this patch is.
 	float eye_altitude = length(eye) - params.deck.x;
-	bool in_medium = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;
-	if (in_medium) {
-		// **The camera's own column**, from the host's own arithmetic — not a mat3 rebuilt here. The lookup has
-		// to be the column the camera is in, and deriving it from a float32 matrix is how it came to sample
-		// somewhere else entirely.
+	if (params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w) {
 		float eye_field = texture(cover, cloud_map_uv(normalize(params.eye_model.xyz))).r;
 		float density = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
-		// **Full at the top, linear to nothing at the base** — one ramp, no matching at either end, because the
-		// value at the top is whatever the texture says and the value at the base is zero by construction.
-		float ramp = clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0);
-		float sigma_fog = params.deck.y * density * ramp;
-		float reach = max(end - start, 0.0);
-		float fog_T = exp(-sigma_fog * reach);
-		L += T * params.deck_radiance.rgb * (1.0 - fog_T);
-		T *= fog_T;
+		// The ray, cut where it leaves the deck's own sphere — so the fog integrates through the slab and not
+		// through the sky behind it.
+		vec2 slab = ray_sphere(eye, ray, params.radii.z);
+		float fog_end = min(end, slab.x <= slab.y ? slab.y : end);
+		if (fog_end > start) {
+			float step_length = (fog_end - start) / float(FOG_STEPS);
+			float path = 0.0;
+			for (int i = 0; i < FOG_STEPS; i++) {
+				vec3 q = eye + ray * (start + (float(i) + 0.5) * step_length);
+				float altitude = length(q) - params.deck.x;
+				path += clamp(altitude / max(params.deck.w, 1.0), 0.0, 1.0) * step_length;
+			}
+			float tau = params.deck.y * density * path;
+			float fog_T = exp(-tau);
+			L += T * params.deck_radiance.rgb * (1.0 - fog_T);
+			T *= fog_T;
+		}
 	}
 
 	// The band's two spans, clamped to the march and sorted: `hi0 <= lo1` always holds.
