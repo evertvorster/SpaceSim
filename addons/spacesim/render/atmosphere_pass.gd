@@ -630,11 +630,19 @@ void main() {
 		// **this column's own top GATES it** rather than dividing it, which is what keeps fog out of the air above
 		// a wisp. Full strength at the base (altitude 0 gives the bracket exactly 1), arriving in one step on
 		// entry, which is what entering a cloud is.
-		float column = params.deck.w * density;
-		float share = 0.0;
-		if (column > 1.0 && eye_altitude < column) {
-			share = density * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
-		}
+		// **No gate at the column's own top: the RAMP reaches zero, so there is nothing to cut.**
+		// Evert, 2026-10-21: *"when I near the top of the column, at about 3 km, there is still too much fog the
+		// one instant, and then the next instant there is no fog. I expected the fog to fade to nothing by the time
+		// I get to the top of the shell so that there would be no discontinuity."*
+		//
+		// The gate was `eye_altitude < column`, and `column = full * density`, so for a patch at density 0.9 it cut
+		// at altitude 2,883 m — where this ramp still read 0.1. The fog therefore dropped from 0.09 to 0 in one
+		// frame, a metre below the shell's top. **A linear ramp cannot be proportional to the density AND reach
+		// zero at the local column's top** — `density * (1 - alt/column)` is `density - alt/full`, the subtraction
+		// that killed the fog entirely at 1.7 km. So the envelope's top is where it lands, and the patch's own
+		// depth is carried by `density` alone: a wisp has a tenth of the fog everywhere and it fades out with
+		// everything else, instead of stopping dead halfway up.
+		float share = density * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
 		T *= 1.0 - share;
