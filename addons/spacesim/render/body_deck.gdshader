@@ -180,68 +180,37 @@ void fragment() {
 	vec3 to_eye = normalize(eye_local - p);
 	bool from_below = eye_radius < base_ratio;
 
-	// **The base's own crossing of this eye ray.** For an eye under the deck the near intersection with the
-	// base sphere is what the sky shows through, and it is a different direction from the top's by exactly
-	// the slab's thickness. `ray_sphere`'s convention here is Godot's: the eye is the origin and the sphere
-	// is centred on the body, so `c = |eye|^2 - r^2` and a positive discriminant means the ray meets it.
-	vec3 sample_direction = p;
-	if (from_below) {
-		vec3 ray = normalize(p - eye_local);
-		float half_b = dot(eye_local, ray);
-		float discriminant = half_b * half_b - (dot(eye_local, eye_local) - base_ratio * base_ratio);
-		if (discriminant > 0.0) {
-			sample_direction = normalize(eye_local + ray * (-half_b + sqrt(discriminant)));
-		}
-	}
-
-	// **THE TWO SAMPLINGS, BLENDED ACROSS THE SLAB.** The deck is a surface at ONE radius, so a ray meets it on
-	// the near side from above and on the far side from below — and the two intersections are at distances that
-	// differ by orders of magnitude, so the map lands with completely different compression. That is the horizon
-	// step Evert measured: a bright rim and a 0.117 drop in a single row from below, a soft blend from above.
+	// **ONE SAMPLE, ON THE TOP SPHERE, ALWAYS.** Evert, 2026-10-21: *"strip the blending code, and map the
+	// texture to the top of the deck, always."*
 	//
-	// The fix is not to match the shading — a surface genuinely has a discontinuity in its visible side — but to
-	// make the SAMPLING continuous. Both appearances are evaluated and blended across the slab's own thickness,
-	// so above the top you get the near crossing at 100% and below the base the underside at 100%, with the
-	// band between a mix of two pictures that each look right where they are dominant.
+	// So there is no base-sphere projection and no crossfade: the mesh is a sphere at the deck's TOP radius and
+	// the map is painted on it, which is all this ever was. Above the deck you see the outside of that sphere;
+	// below it you see the inside of the same sphere, which is why the pattern is mirrored and stretched toward
+	// the horizon — the parallax a painted surface has, and no attempt is made to hide it.
 	//
-	// The near crossing is extrapolated for an eye inside the sphere, where that root lies behind it. Only its
-	// continuity matters: at the weight where it counts, it is the visible surface.
-	vec3 eye_ray = normalize(p - eye_local);
-	float cross_half_b = dot(eye_local, eye_ray);
-	float cross_disc = cross_half_b * cross_half_b - (dot(eye_local, eye_local) - 1.0);
-	vec3 outside_direction = sample_direction;
-	if (cross_disc > 0.0) {
-		outside_direction = normalize(eye_local + eye_ray * (-cross_half_b - sqrt(cross_disc)));
-	}
-	// **1 above the top, 0 at the base** — the slab is the transition, which is where a cloud is anyway, so
-	// there is no new constant and every deck scales its own band.
-	float outside_weight = smoothstep(base_ratio, 1.0, eye_radius);
-
+	// Two things went with the stripping: the base crossing (which displaced the sample to the slab's OTHER
+	// face, and is how the deck came to be base-mapped from below) and the blend across the slab (which averaged
+	// two decorrelated samplings into a featureless wash — visible as the smooth mid-slab frame). Both are in
+	// the history if the mapping ever needs to be revisited; neither is here.
+	float field = texture(cover, cloud_map_uv(p)).r;
 	// **And the structure the map is too coarse to hold.** `fwidth` of the model-space direction is the angle
 	// one pixel spans, so the fade is in the units the feature sizes are in: no distance, no scale factor, and
 	// nothing to keep in sync with the camera.
-	float footprint = length(fwidth(local_position));
-	float under_field = texture(cover, cloud_map_uv(sample_direction)).r;
-	float outside_field = texture(cover, cloud_map_uv(outside_direction)).r;
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		under_field = clamp(under_field + cloud_detail(
-			sample_direction, footprint, detail_seed, detail_feature, detail_strength), 0.0, 1.0);
-		outside_field = clamp(outside_field + cloud_detail(
-			outside_direction, footprint, detail_seed, detail_feature, detail_strength), 0.0, 1.0);
+		field = clamp(
+			field + cloud_detail(
+				p, length(fwidth(local_position)),
+				detail_seed, detail_feature, detail_strength
+			),
+			0.0, 1.0
+		);
 	}
 
-	// **The percentile as a step, softened**, then the thickness above it, for each — then the blend.
-	// `threshold = 0` makes the whole field cloud, which is what a body the model calls FEATURELESS should be
-	// and what a one-texel white map produces.
-	float under_covered = smoothstep(threshold - softness, threshold + softness, under_field);
-	float outside_covered = smoothstep(threshold - softness, threshold + softness, outside_field);
-	float covered = mix(under_covered, outside_covered, outside_weight);
-	// The thickness is the part above the threshold, normalised — the same law on both.
-	float under_thickness = clamp(
-		(under_field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
-	float outside_thickness = clamp(
-		(outside_field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
-	float thickness = mix(under_thickness, outside_thickness, outside_weight);
+	// **The percentile as a step, softened**, then the thickness above it. `threshold = 0` makes the whole
+	// field cloud, which is what a body the model calls FEATURELESS should be and what a one-texel white map
+	// produces.
+	float covered = smoothstep(threshold - softness, threshold + softness, field);
+	float thickness = clamp((field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
 
 	// **The slant path, and it must be the UNSIGNED cosine.** `to_eye` is the direction from this point to the
 	// eye, so from outside the slab `dot(p, to_eye)` is the cosine of the view zenith — but from INSIDE the
@@ -268,18 +237,11 @@ void fragment() {
 	// **The handover, across the slab.** The pass draws the deck inside and below the band, so this is a blend
 	// between two drawings of the same field rather than a handover to nothing.
 	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
-	if (from_below) {
-		// **NEITHER FACE GETS ITS OWN RADIANCE — this branch exists to be empty.** The question on this branch is
-		// whether the SAME TEXTURE can be shown from above and below, so the two faces draw identically: the same
-		// albedo, the same alpha law, the same engine light. Anything that still differs is geometry or sampling,
-		// which is what we want to see. The darkening-from-below requirement is deliberately out of scope here.
-	}
 
-	// The top is a lit surface, so it goes through the engine's light loop as albedo; the base computed its own
-	// radiance above and went out as emission, so it must not also be lit.
-	if (!from_below) {
-		ALBEDO = radiance;
-	}
+	// **Both faces draw the same way**: the same albedo, the same alpha, the same engine light. On this branch
+	// the only thing that distinguishes them is the normal, and that only because a surface seen from the inside
+	// has its normal pointing away from the viewer.
+	ALBEDO = radiance;
 	ALPHA = alpha;
 	ROUGHNESS = 0.9;
 	if (from_below) {
