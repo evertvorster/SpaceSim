@@ -166,6 +166,15 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	h.check(deck.node.mesh != null and deck.node.mesh == earth.mesh.mesh,
 		"and it draws the body's own triangles, not a mesh of its own")
 	h.check(deck.published_width > 0, "with a map the size law asked for (%d wide)" % deck.published_width)
+	if SpacesimSystemScene.UNIFORM_DECK_FIELD:
+		# **`cloud-split-check` publishes a flat field on purpose** — see the switch's own comment. What a test can
+		# still assert under it is that the switch did exactly what it says, and nothing else.
+		h.check(deck.material.get_shader_parameter("cover") == SpacesimBodyRenderer.white_texel(),
+			"the branch's flat field is one white texel, not the map")
+		h.check(is_equal_approx(float(deck.material.get_shader_parameter("threshold")), 0.0)
+			and is_equal_approx(float(deck.material.get_shader_parameter("detail_strength")), 0.0),
+			"threshold 0 and the detail ladder off, so no structure reaches the deck's field")
+		return
 	h.check(deck.material.get_shader_parameter("cover") != SpacesimBodyRenderer.white_texel(),
 		"sampling that map rather than the white texel")
 	var threshold := float(deck.material.get_shader_parameter("threshold"))

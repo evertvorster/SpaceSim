@@ -1294,6 +1294,11 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 ##
 ## **The eye is handed over in the deck's model space**, divided by the top radius here, in double precision:
 ## a deck node's model space is a unit sphere, so nothing astronomical ever reaches a `float`.
+## **This branch's one switch**: publish a flat deck field instead of the baked map. See the block in
+## `_update_decks` for what it removes and what a flight of it can answer. False restores the real deck exactly.
+const UNIFORM_DECK_FIELD := true
+
+
 func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) -> void:
 	if body.decks.is_empty():
 		return
@@ -1327,6 +1332,31 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		if width == deck.published_width:
 			continue
 		deck.published_width = width
+		# **TEST BRANCH `cloud-split-check`: the split, with no texture anywhere in it.**
+		#
+		# Evert, 2026-10-21: *"One test I want to do is to check the split volume shader without a texture in
+		# between. There is a haziness below that swaps to the top when going through the split that I have been
+		# assuming is due to the texture, but now I am not so sure."*
+		#
+		# Three things have to go quiet, not one, because all three put structure into the deck's field and any of
+		# them could be what the haziness is tracking:
+		#
+		#   1. the baked map      → one white texel, `threshold = 0`, veil 1: field 1 everywhere
+		#   2. the detail ladder  → `strength = 0`, or it re-adds procedural structure the map was carrying
+		#   3. (optional, below)  → `FOG_SCALE` in the pass, when the flat field alone does not settle it
+		#
+		# What is left is one slab of constant density and one honest question: does the split itself put a haze
+		# somewhere, and move it when the eye crosses? The width stays real so `near_deck()` still publishes and the
+		# pass still marches a deck — a nominal width of 0 would remove the segment being tested.
+		if UNIFORM_DECK_FIELD:
+			var flat := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, 1.0)
+			SpacesimBodyRenderer.apply_cloud_map(
+				deck.material, SpacesimBodyRenderer.white_texel(), width, 0.0, flat.value, 1.0
+			)
+			deck.material.set_shader_parameter("detail_strength", 0.0)
+			if deck == shadowing:
+				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, width)
+			continue
 		if texture == null or width <= 0:
 			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
 			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world

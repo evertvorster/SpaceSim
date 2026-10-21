@@ -390,6 +390,11 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
+// **This branch's second switch**: 1 draws the fog, 0 removes it. The test is "the split with no texture", and a
+// flat field makes the fog uniform in altitude only — so if the haziness survives the flat field, this is the next
+// thing to switch off to tell a fog-shaped haze from a segmented-air one. One build each way.
+const float FOG_SCALE = 1.0;
+
 // **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
 // headlessly; the shader carries the numbers, which is the arrangement Cloud Volumes §4.3a states rather than a
 // second source of truth. Six samples per e-fold, and the stop at 1/100 gives `ceil(log(100) * 6) = 28` steps
@@ -600,7 +605,7 @@ void main() {
 		float density = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
-		float share = density * clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0);
+		float share = density * clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0) * FOG_SCALE;
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
 		T *= 1.0 - share;
