@@ -391,7 +391,10 @@ const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
 const float FOG_EDGE_SHARE = 0.2;
 // The fog's density as a share of the layer's own extinction. It is a WASH over the deck the march draws, not
 // the deck itself, so it wants to be thin enough that the marched structure reads through it.
-const float FOG_DENSITY_SHARE = 0.25;
+// **Off, 2026-10-21**, while the deck's crossfade does the job properly. Evert: *"turn off the fog, and try
+// option 1"* — the fog was an attempt to hide a discontinuity that the sampling can remove, and a fog in clear
+// air is not something to ship. Restore by raising this.
+const float FOG_DENSITY_SHARE = 0.0;
 const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
 const float TAU_F = 6.283185307179586;

@@ -194,25 +194,54 @@ void fragment() {
 		}
 	}
 
-	float field = texture(cover, cloud_map_uv(sample_direction)).r;
+	// **THE TWO SAMPLINGS, BLENDED ACROSS THE SLAB.** The deck is a surface at ONE radius, so a ray meets it on
+	// the near side from above and on the far side from below — and the two intersections are at distances that
+	// differ by orders of magnitude, so the map lands with completely different compression. That is the horizon
+	// step Evert measured: a bright rim and a 0.117 drop in a single row from below, a soft blend from above.
+	//
+	// The fix is not to match the shading — a surface genuinely has a discontinuity in its visible side — but to
+	// make the SAMPLING continuous. Both appearances are evaluated and blended across the slab's own thickness,
+	// so above the top you get the near crossing at 100% and below the base the underside at 100%, with the
+	// band between a mix of two pictures that each look right where they are dominant.
+	//
+	// The near crossing is extrapolated for an eye inside the sphere, where that root lies behind it. Only its
+	// continuity matters: at the weight where it counts, it is the visible surface.
+	vec3 eye_ray = normalize(p - eye_local);
+	float cross_half_b = dot(eye_local, eye_ray);
+	float cross_disc = cross_half_b * cross_half_b - (dot(eye_local, eye_local) - 1.0);
+	vec3 outside_direction = sample_direction;
+	if (cross_disc > 0.0) {
+		outside_direction = normalize(eye_local + eye_ray * (-cross_half_b - sqrt(cross_disc)));
+	}
+	// **1 above the top, 0 at the base** — the slab is the transition, which is where a cloud is anyway, so
+	// there is no new constant and every deck scales its own band.
+	float outside_weight = smoothstep(base_ratio, 1.0, eye_radius);
+
 	// **And the structure the map is too coarse to hold.** `fwidth` of the model-space direction is the angle
 	// one pixel spans, so the fade is in the units the feature sizes are in: no distance, no scale factor, and
 	// nothing to keep in sync with the camera.
+	float footprint = length(fwidth(local_position));
+	float under_field = texture(cover, cloud_map_uv(sample_direction)).r;
+	float outside_field = texture(cover, cloud_map_uv(outside_direction)).r;
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		field = clamp(
-			field + cloud_detail(
-				sample_direction, length(fwidth(local_position)),
-				detail_seed, detail_feature, detail_strength
-			),
-			0.0, 1.0
-		);
+		under_field = clamp(under_field + cloud_detail(
+			sample_direction, footprint, detail_seed, detail_feature, detail_strength), 0.0, 1.0);
+		outside_field = clamp(outside_field + cloud_detail(
+			outside_direction, footprint, detail_seed, detail_feature, detail_strength), 0.0, 1.0);
 	}
 
-	// **The percentile as a step, softened**, then the thickness above it. `threshold = 0` makes the whole
-	// field cloud, which is what a body the model calls FEATURELESS should be and what a one-texel white map
-	// produces.
-	float covered = smoothstep(threshold - softness, threshold + softness, field);
-	float thickness = clamp((field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
+	// **The percentile as a step, softened**, then the thickness above it, for each — then the blend.
+	// `threshold = 0` makes the whole field cloud, which is what a body the model calls FEATURELESS should be
+	// and what a one-texel white map produces.
+	float under_covered = smoothstep(threshold - softness, threshold + softness, under_field);
+	float outside_covered = smoothstep(threshold - softness, threshold + softness, outside_field);
+	float covered = mix(under_covered, outside_covered, outside_weight);
+	// The thickness is the part above the threshold, normalised — the same law on both.
+	float under_thickness = clamp(
+		(under_field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
+	float outside_thickness = clamp(
+		(outside_field - threshold) / max(1.0 - threshold, 1.0e-4), 0.0, 1.0);
+	float thickness = mix(under_thickness, outside_thickness, outside_weight);
 
 	// **The slant path, and it must be the UNSIGNED cosine.** `to_eye` is the direction from this point to the
 	// eye, so from outside the slab `dot(p, to_eye)` is the cosine of the view zenith — but from INSIDE the
