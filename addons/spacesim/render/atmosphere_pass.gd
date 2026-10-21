@@ -670,7 +670,10 @@ void main() {
 		// the deck. The shell cannot carry that case anyway: it is the body's own patch mesh, so it only covers
 		// what the ground's LOD covers, and a cloud near the horizon falls outside it. The mesh is a picture for
 		// when you are outside; inside, the cross-section along the ray is the honest one, and it needs no mesh.
-		march_deck(b_lo[k], b_hi[k], eye, ray, T, L);
+		// **NO DECK IS MARCHED ON THIS BRANCH.** The shell draws it from both sides, so the pass contributes the
+		// air and the fog only — one cloud, one mechanism, and any difference between the top view and the bottom
+		// view is then a property of the texture or the geometry rather than of two different renderers.
+		// `march_deck` stays in the file, unused, so the branch can be compared against the previous one.
 		cursor = b_hi[k];
 	}
 	if (cursor < end) {

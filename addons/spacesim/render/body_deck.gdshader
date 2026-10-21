@@ -240,28 +240,10 @@ void fragment() {
 	// between two drawings of the same field rather than a handover to nothing.
 	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
 	if (from_below) {
-		// **THE BASE'S OWN LIGHT.** The old form was `radiance *= 0.35` — one constant, identical for a wisp and a
-		// tower, which is why the underside read as lit from below: nothing in it depended on thickness and nothing
-		// depended on where the star is. Evert, flying it: *"far too bright, as if lit from below."*
-		//
-		// Now: the slab's two faces are complements, the light transmitted is the sky above this column in closed
-		// form, and a Henyey-Greenstein lobe puts the bright side where physics puts it — looking THROUGH the slab
-		// at the star.
-		// `transmit` and `column_tau` are the ones the opacity above computed from the same texel, so the two
-		// faces cannot disagree: what the top hides is what the base lets through.
-		// The sky above this column, from the coefficients the sky shader takes. `cos_sky` is against the column's
-		// own outward normal, so a high star lights the sky overhead more than a low one.
-		float cos_sky = clamp(dot(p, sun_local), -1.0, 1.0);
-		float rayleigh_phase = 3.0 / (16.0 * PI) * (1.0 + cos_sky * cos_sky);
-		vec3 sky = (sky_rayleigh_tau * rayleigh_phase
-			+ vec3(sky_mie_tau * henyey_greenstein_deck(cos_sky, sky_anisotropy))) * sky_intensity;
-		// Forward scattering: `-dot(sun, to_eye)` is 1 when the eye is on the far side of the slab from the star.
-		float view_phase = henyey_greenstein_deck(clamp(-dot(sun_local, to_eye), -1.0, 1.0), sky_anisotropy);
-		radiance = transmit * sky * view_phase + (1.0 - transmit) * scattered_grey;
-		// **No engine light loop on this face.** The base's radiance is computed here, so it goes out as emission
-		// and the albedo is left at zero — otherwise the star's own lambert would be applied to it a second time.
-		ALBEDO = vec3(0.0);
-		EMISSION = radiance;
+		// **NEITHER FACE GETS ITS OWN RADIANCE — this branch exists to be empty.** The question on this branch is
+		// whether the SAME TEXTURE can be shown from above and below, so the two faces draw identically: the same
+		// albedo, the same alpha law, the same engine light. Anything that still differs is geometry or sampling,
+		// which is what we want to see. The darkening-from-below requirement is deliberately out of scope here.
 	}
 
 	// The top is a lit surface, so it goes through the engine's light loop as albedo; the base computed its own
