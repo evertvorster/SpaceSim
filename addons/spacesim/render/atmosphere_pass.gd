@@ -390,6 +390,11 @@ layout(set = 0, binding = 2) uniform sampler2D cover;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
+// **How much opacity the map's density reading means.** 1.0 would make the fog exactly as opaque as the texel's
+// relative brightness, which reads thin inside a cloud that the eye calls solid; 2.0 saturates at a reading of
+// half. Above ~3 a wisp starts fogging like a tower, so this wants to stay near 2.
+const float FOG_GAIN = 2.0;
+
 // **Does this pass draw the deck as a segment?** It does not — the shell draws it from both sides — so there is
 // nothing for the air to be ordered around, and splitting it at the deck's radii only loses the air inside that
 // span. One flag, because the split and the march are one mechanism.
@@ -642,7 +647,18 @@ void main() {
 		// that killed the fog entirely at 1.7 km. So the envelope's top is where it lands, and the patch's own
 		// depth is carried by `density` alone: a wisp has a tenth of the fog everywhere and it fades out with
 		// everything else, instead of stopping dead halfway up.
-		float share = density * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
+		// **The one tuning number in the fog**, and the reason it exists: `density` is a *relative* reading — 0 at
+		// the coverage threshold, 1 only at the brightest texel the map can hold — so a patch anyone would call
+		// thick reads around 0.5-0.7 and "full strength, dictated by the texture" arrived as a 50-70% veil when
+		// flying into a dense one. Evert, 2026-10-21: *"the fog effect is not strong enough when I fly into a thick
+		// cloud at the bottom... this is just a little fine tuning."*
+		//
+		// So the map's reading is scaled into the opacity it should mean, and clamped at 1: at 2.0 a patch reading
+		// half or more whites the view out, a quarter reads as a veil, a wisp stays thin. **The knob is this line**
+		// — nothing else in the fog has a free number, and the ramp's two ends are fixed by geometry (full at the
+		// base, zero at the shell's top).
+		float strength = clamp(density * FOG_GAIN, 0.0, 1.0);
+		float share = strength * (1.0 - clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0));
 		// At the eye, so it goes in front of everything the segments behind it compose.
 		L += T * params.deck_radiance.rgb * share;
 		T *= 1.0 - share;
