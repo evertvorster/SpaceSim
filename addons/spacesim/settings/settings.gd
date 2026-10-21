@@ -164,8 +164,21 @@ const REGISTRY := {
 	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER},
 	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.throttle_up": {"default": "W", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.throttle_down": {"default": "S", "scope": Scope.PLAYER, "validator": "key_binding"},
+	# **The throttle is signed and goes to zero on a key of its own** (2026-10-20), because flying a
+	# cloud backwards at the same speed as forwards is how its two faces get compared. `+` is the
+	# shifted `Equal` key, which is what the physical key in that position is called.
+	"bindings.throttle_up": {"default": "Shift+Equal", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.throttle_down": {"default": "Minus", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.throttle_stop": {"default": "Backspace", "scope": Scope.PLAYER, "validator": "key_binding"},
+	# **The six view directions**, so a scene can be inspected from anywhere without turning the ship. The
+	# camera looks along the chosen direction in the SHIP's frame, so mouse look still steers and the view
+	# stays where it was put.
+	"bindings.view_forward": {"default": "1", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_back": {"default": "2", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_left": {"default": "3", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.roll_left": {"default": "A", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.roll_right": {"default": "D", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},

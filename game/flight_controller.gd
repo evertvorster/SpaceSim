@@ -6,12 +6,19 @@ extends Node3D
 ## dictionary so the same ship can be flown by a test without a keyboard — which is what lets the
 ## headless suite fly the identical ship the game does.
 ##
-##   throttle : 0..1, fraction of the local travel unit
+##   throttle : -TOP_THROTTLE..TOP_THROTTLE, in multiples of the local travel unit. **Signed**, so astern
+##              flies at the same speed as ahead — comparing a cloud's two faces needs it.
 ##   aim      : world-space point to point the ship at (tests use this)
 ##   pitch/yaw/roll : radians to rotate by this step (the interactive path uses these)
 
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Proximity := preload("res://addons/spacesim/travel/proximity.gd")
+
+## **How many local travel units per second full stick is worth.** The engine owns the UNIT
+## (`SpacesimTravelScale`: one neighbourhood per `TRAVERSE_SECONDS`), and this is the episode's multiple of
+## it — which is why it lives here and not there. 10 is an inspection budget: fast enough to cross a cloud
+## deck in one pass, slow enough to stop inside it.
+const TOP_THROTTLE := 10.0
 
 ## The frame tree whose active frame supplies the travel band. Required: a ship without one has
 ## nowhere to fly, so its absence is a programming error rather than a state to handle.
@@ -48,16 +55,17 @@ func travel_band() -> Vector2:
 ## Advance one step. `delta` is seconds; the caller owns the timestep.
 func step(delta: float, input: Dictionary) -> void:
 	_apply_attitude(input)
-	throttle = clampf(float(input.get("throttle", throttle)), 0.0, 1.0)
+	throttle = clampf(float(input.get("throttle", throttle)), -TOP_THROTTLE, TOP_THROTTLE)
 
 	_update_proximity()
 	var band := travel_band()
 	travel_length = TravelScale.local_length(nearest_distance, band.x, band.y)
-	speed = TravelScale.speed_for(throttle, nearest_distance, band.x, band.y)
+	# **One travel unit of speed, times the stick** — signed, so the top speed ahead and astern are the same.
+	speed = TravelScale.speed_for(1.0, nearest_distance, band.x, band.y) * throttle
 
-	# Forward is -Z, as everywhere in Godot.
+	# Forward is -Z, as everywhere in Godot, so a negative throttle moves along +Z.
 	landed = false
-	if speed > 0.0:
+	if speed != 0.0:
 		global_position -= global_transform.basis.z * speed * delta
 
 	_constrain_to_surface()

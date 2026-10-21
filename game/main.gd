@@ -27,7 +27,10 @@ const SYSTEM_PATH := "res://systems/sol.tres"
 
 const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
-const THROTTLE_RATE := 0.7 ## per second
+## **Per second, over the whole signed range**: half the stick a second, so 0 to full is two seconds and
+## astern is reached just as quickly. The old 0.7 was sized for a 0..1 range and would take half a minute
+## to cross a 20-wide one.
+const THROTTLE_RATE := 10.0
 
 ## The mesh error budget, in pixels of silhouette error, as stops to step through rather than a
 ## continuous number: it is a perceptual trim, so the useful question is "is this better or worse"
@@ -43,6 +46,8 @@ var _system: SpacesimSystemScene
 var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
+## Set by the stop key and consumed by the next physics step.
+var _throttle_stop := false
 ## The camera's exposure. Physics-computed — see SpacesimExposure — so it needs updating as the
 ## player moves rather than being left to the engine's frame average.
 var _exposure: SpacesimExposure
@@ -196,8 +201,14 @@ func _handle_key(event: InputEventKey) -> void:
 		_set_error_budget(_error_budget_index() + 1)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.detail_up"))):
 		_set_error_budget(_error_budget_index() - 1)
+	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.throttle_stop"))):
+		_throttle_stop = true
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.wireframe_toggle"))):
 		set_wireframe(not _wireframe)
+	elif _view_for(event) != null:
+		# **The camera looks along a direction in the SHIP's frame**, so mouse look still steers and the
+		# chosen view stays put — which is what makes the same scene comparable from six sides.
+		_camera.basis = _view_for(event)
 	elif event.keycode == KEY_ESCAPE:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
@@ -230,6 +241,26 @@ func set_wireframe(on: bool) -> void:
 	print("wireframe %s: %d deck/air mesh(es) %s" % [
 		"on" if on else "off", hidden, "hidden" if on else "restored"
 	])
+
+
+## The camera-local basis for a view key, or `null` when the event is not one of them.
+##
+## The ship looks along `-Z`, `+Y` is up and `+X` is right, so a rotation about `Y` swings the view
+## horizontally and one about `X` swings it vertically.
+func _view_for(event: InputEventKey) -> Variant:
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_forward"))):
+		return Basis.IDENTITY
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_back"))):
+		return Basis(Vector3.UP, PI)
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_left"))):
+		return Basis(Vector3.UP, PI * 0.5)
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_right"))):
+		return Basis(Vector3.UP, -PI * 0.5)
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_up"))):
+		return Basis(Vector3.RIGHT, PI * 0.5)
+	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_down"))):
+		return Basis(Vector3.RIGHT, -PI * 0.5)
+	return null
 
 
 func _ship_mouse_look(event: InputEventMouseMotion) -> void:
@@ -389,7 +420,9 @@ func _physics_process(delta: float) -> void:
 	if _screen != null:
 		return
 
-	var throttle: float = _ship.throttle
+	# **The stop key is edge-triggered**, so it puts the throttle at zero now rather than winding it down.
+	var throttle: float = 0.0 if _throttle_stop else _ship.throttle
+	_throttle_stop = false
 	if _held("bindings.throttle_up"):
 		throttle += THROTTLE_RATE * delta
 	if _held("bindings.throttle_down"):
@@ -404,7 +437,8 @@ func _physics_process(delta: float) -> void:
 	# Read per frame rather than held, so it is hot without anything having to react to a change.
 	var sensitivity: float = SpacesimSettings.get_value("mouse.sensitivity")
 	var input := {
-		"throttle": clampf(throttle, 0.0, 1.0),
+		# The controller clamps to its own range; one place for the limit.
+		"throttle": throttle,
 		"pitch": -_look.y * sensitivity,
 		"yaw": _look.x * sensitivity,
 		"roll": roll,
@@ -694,12 +728,24 @@ func _update_hud() -> void:
 				),
 				"",
 				(
-					"%s/%s throttle    mouse look    %s/%s roll    Esc release mouse, click to take it back"
+					"%s/%s throttle    %s stop    mouse look    %s/%s roll    Esc release mouse"
 					% [
 						_binding("bindings.throttle_up"),
 						_binding("bindings.throttle_down"),
+						_binding("bindings.throttle_stop"),
 						_binding("bindings.roll_left"),
 						_binding("bindings.roll_right"),
+					]
+				),
+				(
+					"view: %s fwd  %s back  %s left  %s right  %s up  %s down"
+					% [
+						_binding("bindings.view_forward"),
+						_binding("bindings.view_back"),
+						_binding("bindings.view_left"),
+						_binding("bindings.view_right"),
+						_binding("bindings.view_up"),
+						_binding("bindings.view_down"),
 					]
 				),
 				(
