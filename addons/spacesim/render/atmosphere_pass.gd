@@ -385,16 +385,7 @@ const int J_STEPS = 8;
 // second source of truth. Six samples per e-fold, and the stop at 1/100 gives `ceil(log(100) * 6) = 28` steps
 // whatever the chord — what makes the limb affordable, and the difference between a cloud and an opaque lid.
 const float SAMPLES_PER_OPTICAL_DEPTH = 6.0;
-// **How quickly the fog arrives and leaves**, as a share of the column's own depth — the tuning knob for
-// "did that feel like diving into a cloud". A fraction rather than a distance, so a wisp ramps as quickly as
-// a tower. Smaller is sharper; too small and the ramp itself becomes the pop it exists to hide.
-const float FOG_EDGE_SHARE = 0.2;
-// The fog's density as a share of the layer's own extinction. It is a WASH over the deck the march draws, not
-// the deck itself, so it wants to be thin enough that the marched structure reads through it.
-// **Off, 2026-10-21**, while the deck's crossfade does the job properly. Evert: *"turn off the fog, and try
-// option 1"* — the fog was an attempt to hide a discontinuity that the sampling can remove, and a fog in clear
-// air is not something to ship. Restore by raising this.
-const float FOG_DENSITY_SHARE = 0.0;
+
 const int DECK_STEP_LIMIT = 28;
 const float PI_F = 3.141592653589793;
 const float TAU_F = 6.283185307179586;
@@ -575,53 +566,32 @@ void main() {
 	vec3 T = vec3(1.0);
 	vec3 L = vec3(0.0);
 
-	// **THE PLAYER'S OWN HAZE**, the first thing in the order because it is at the eye. Evert, 2026-10-20:
+	// **THE FOG AT THE CAMERA, read straight off the cloud texture.** Evert, 2026-10-21: *"What is visible is
+	// some residual density from the deck. Its never actually quite zero, and it flipping from the bottom to the
+	// top, even in relatively clear air is what is causing that inconsistency. I want the camera to pick up that
+	// 'density' at the camera position, and turn it into fog... This fog should be the full strength, which is
+	// dictated by the cloud texture at the point of the camera, at the top of the cloud layer and fade out
+	// linearly towards the bottom of the cloud layer."*
 	//
-	//   *"sample the cloud thickness where the player is at when entering the cloud layer from the top. Turn
-	//    that into a haze/fog or something like that. So if you are in a thick cloud, you can't see far. Then,
-	//    as you go down towards the bottom of the cloud layer, lessen that effect, as if there is less fog
-	//    between you and the bottom of the cloud layer. Once emerging from the cloud layer, this effect should
-	//    be gone. To counter travel in the cloud layer, continuously sample the cloud thickness where the
-	//    player is and apply that scale."*
+	// So the fog's DENSITY is the medium's own extinction scaled by the map where the CAMERA is — no fudge factor,
+	// because "full strength, dictated by the texture" is exactly `extinction * density` — and its share is one
+	// linear ramp: full at the deck's TOP, nothing at its BASE. The residual density that never quite reaches
+	// zero therefore reads as a faint haze that follows you, instead of as the deck flickering as it flips from
+	// one face to the other.
 	//
-	// `tau` is the cloud still BELOW the eye, so descending clears it with no special case — it falls to zero at
-	// the base and the ground emerges on its own. A thick column closes the world down and a wisp does not,
-	// because the column is in the exponent.
+	// It attenuates with DISTANCE (`exp(-sigma * the ray's length)`), which is what makes it fog rather than a
+	// wash: what is near stays legible, what is far is lost, and that difference is the whole sensation.
 	float eye_altitude = length(eye) - params.deck.x;
 	bool in_medium = params.radii.w > 0.0 && eye_altitude > 0.0 && eye_altitude < params.deck.w;
 	if (in_medium) {
 		float eye_field = texture(cover, cloud_map_uv(normalize(params.to_model * eye))).r;
-		float eye_share = clamp(
+		float density = clamp(
 			(eye_field - params.deck.z) / max(1.0 - params.deck.z, 1.0e-4), 0.0, 1.0
 		);
-		float column = params.deck.w * eye_share;
-		// The column's own depth here, which is what decides how far you can see: a thick column hazes hard and a
-		// wisp barely at all, because the map's brightness is in the exponent.
-		//
-		// **A ramp at each boundary and full inside**, rather than a linear build from the base. Evert, 2026-10-20:
-		// *"Running up through thick clouds, I expected a quick ramp to thick fog, and a ramp down when I punch
-		// out of the fog. We already know the exact amount of opacity of the cloud layer where the player is we
-		// should ramp up to that, and down from it while we fly through the cloud layer."* The edge is a fifth
-		// of the column, and it is a FRACTION rather than a distance so a thin wisp ramps as quickly as a tower.
-		float edge = FOG_EDGE_SHARE * column;
-		float ramp = 0.0;
-		if (column > 1.0) {
-			ramp = smoothstep(0.0, edge, eye_altitude) * smoothstep(0.0, edge, column - eye_altitude);
-		}
-		// **A FOG, not a wash.** The first version mixed the whole frame toward the cloud colour by a constant,
-		// so it covered the cloud two metres away exactly as much as the horizon — which is why the layer
-		// vanished inside it. Evert, 2026-10-20: *"The cloud layer still disappears between 1.5km and 3km
-		// altitude."* A medium attenuates with DISTANCE: what is near stays legible, what is far is lost, and
-		// that difference is the entire sensation of being in fog.
-		//
-		// The density is the layer's own extinction scaled by the ramp — you are inside that cloud, so its
-		// extinction is the honest number — and the distance is this ray's whole length, clamped at the planet
-		// and at the atmosphere. So looking down you see the ground close under you; looking out you lose the
-		// horizon; and nothing is hidden that is not actually far away.
-		// **A wash over the marched deck, not a replacement for it.** The march is what draws the cloud now, so
-		// the fog's job is only the seam you asked it for: covering the moment the shell goes edge-on. A share of
-		// the layer's own extinction, because the full value would bury the marched structure under itself.
-		float sigma_fog = params.deck.y * ramp * FOG_DENSITY_SHARE;
+		// **Full at the top, linear to nothing at the base** — one ramp, no matching at either end, because the
+		// value at the top is whatever the texture says and the value at the base is zero by construction.
+		float ramp = clamp(eye_altitude / max(params.deck.w, 1.0), 0.0, 1.0);
+		float sigma_fog = params.deck.y * density * ramp;
 		float reach = max(end - start, 0.0);
 		float fog_T = exp(-sigma_fog * reach);
 		L += T * params.deck_radiance.rgb * (1.0 - fog_T);
