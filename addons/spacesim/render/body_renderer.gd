@@ -640,7 +640,7 @@ static func apply_surface_maps(
 ##
 ## **The thickness is simulated, not built.** Evert, 2026-10-20: *"We can simulate the thickness by using a
 ## similar thing to the land textures. At any real distance from the observer this would be sufficient."* So
-## `base_ratio` is all the geometry there is: `R_base / R_top`, because both radii are on the same node and
+## The deck's geometry is one sphere at its TOP radius; the base is a shading fact, not a surface.
 ## the top is 1.0 in model space. The shader samples the base's own crossing of the eye ray from underneath,
 ## which is genuine parallax of thickness rather than a fudge.
 ##
@@ -658,9 +658,9 @@ static func deck_material(
 	# *below* its datum, because its datum is a pressure and not a floor, so `radius + height` can be smaller
 	# than `radius` and there is nothing to clamp: the base is inside the planet's own reference sphere, which
 	# no giant draws.
-	var base_radius := body.radius + level.height
-	var top_radius := base_radius + level.thickness
-	material.set_shader_parameter("base_ratio", clampf(base_radius / maxf(top_radius, 1.0), 0.0, 1.0))
+	#
+	# The base's *radius* is no longer published: the deck draws one sphere at its TOP and samples the map there
+	# at every altitude (2026-10-21), so nothing in the shader knows where the base is.
 	material.set_shader_parameter("cover", white_texel())
 	material.set_shader_parameter("veil", 1.0)
 	# **Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing.** The

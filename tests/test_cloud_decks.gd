@@ -55,12 +55,14 @@ func _test_a_single_deck(h, scene: SpacesimSystemScene) -> void:
 		"and it is a child of the body, so it inherits the body's place in the frame tree")
 	h.check(deck.material != null and deck.material.shader != null,
 		"with a shader material, which is what carries the map")
-	# **The slab's two radii are one ratio**, because both are on the same node and the top is 1.0 in model
-	# space — which is all the geometry the shader needs to sample a base.
+	# **The deck is ONE sphere at its top radius**, and that is all the geometry the shader knows: it samples the
+	# map on that sphere at every altitude (2026-10-21), so the base is a shading fact rather than a surface and
+	# there is no base/top ratio to publish.
 	var top := earth.radius + deck.height + deck.thickness
-	h.check_near(float(deck.material.get_shader_parameter("base_ratio")),
-		(earth.radius + deck.height) / top, "and its base sits inside it at the derived condensation level",
-		1.0e-9)
+	h.check_near(deck.node.scale.x, top,
+		"and the node is that sphere, scaled to the slab's top", 1.0)
+	h.check(deck.material.get_shader_parameter("base_ratio") == null,
+		"with no base/top ratio, because no surface exists at the base")
 	h.check(deck.thickness > 0.0, "with the derived thickness behind it (%.0f m)" % deck.thickness)
 
 

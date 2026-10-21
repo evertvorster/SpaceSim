@@ -1321,9 +1321,6 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		if width == deck.published_width:
 			continue
 		deck.published_width = width
-		# **The shell draws the deck at every altitude on this branch** — `near_weight` stays at its default of 0,
-		# which means "draw everywhere". One mechanism, so the two views can be compared as like with like.
-		deck.material.set_shader_parameter("near_weight", 0.0)
 		if texture == null or width <= 0:
 			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
 			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world

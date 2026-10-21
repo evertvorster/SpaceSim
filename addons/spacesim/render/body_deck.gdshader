@@ -84,19 +84,6 @@ uniform float tau_full = 0.0;
 //                          slab;
 //   * eye inside it      — everything is cloud, because it is.
 //
-// `base_ratio` is `R_base / R_top`, which is all the geometry the shader needs: both radii are on the same
-// node, so the top is 1.0 in model space.
-uniform float base_ratio : hint_range(0.0, 1.0) = 1.0;
-// **How the shell hands the deck over: across the slab's own thickness.** 1 above the top, 0 at the base, from
-// the deck's own two radii so neither side owns a constant. **The fade stays, and the deck stays with it** —
-// Evert, 2026-10-20 — because the pass draws the deck through the whole band now, as a cross-section along the
-// ray that needs no mesh at all. That is the division of labour: the shell is the picture from outside, where
-// its map and its detail ladder are what you see, and the pass's segment is the picture from inside and below,
-// where the mesh only ever covers what the ground's LOD does.
-//
-// `near_weight` is 0 until a map has landed, and 0 means "draw everywhere", so a refinement lands over the
-// coarse thing rather than instead of it.
-uniform float near_weight : hint_range(0.0, 1.0) = 0.0;
 
 // ===== THE BASE'S LIGHT =============================================================
 //
@@ -165,20 +152,9 @@ void vertex() {
 }
 
 
-// The Henyey-Greenstein lobe, normalised over the sphere: `g = 0` is isotropic, `g > 0` carries on forward.
-float henyey_greenstein_deck(float cos_theta, float anisotropy) {
-	float g = clamp(anisotropy, -0.95, 0.95);
-	float g2 = g * g;
-	float forward = max(1.0 + g2 - 2.0 * g * clamp(cos_theta, -1.0, 1.0), 1.0e-4);
-	return (1.0 - g2) / (4.0 * PI * pow(forward, 1.5));
-}
-
-
 void fragment() {
 	vec3 p = normalize(local_position);
-	float eye_radius = length(eye_local);
 	vec3 to_eye = normalize(eye_local - p);
-	bool from_below = eye_radius < base_ratio;
 
 	// **ONE SAMPLE, ON THE TOP SPHERE, ALWAYS.** Evert, 2026-10-21: *"strip the blending code, and map the
 	// texture to the top of the deck, always."*
@@ -234,9 +210,6 @@ void fragment() {
 	// which integrates the cross-section instead of switching pictures.
 
 	vec3 radiance = cloud_color * ramp_gain;
-	// **The handover, across the slab.** The pass draws the deck inside and below the band, so this is a blend
-	// between two drawings of the same field rather than a handover to nothing.
-	alpha *= mix(1.0, smoothstep(base_ratio, 1.0, eye_radius), near_weight);
 
 	// **Both faces draw the same way**: the same albedo, the same alpha, the same engine light. On this branch
 	// the only thing that distinguishes them is the normal, and that only because a surface seen from the inside
@@ -244,9 +217,14 @@ void fragment() {
 	ALBEDO = radiance;
 	ALPHA = alpha;
 	ROUGHNESS = 0.9;
-	if (from_below) {
-		NORMAL = -NORMAL;
-	}
+	// **NO SPECIAL CASE FOR THE BASE, and none for the inside either.** Evert, 2026-10-21: *"We are mapping the
+	// texture to the upper bound of the cloud deck, right? In all cases, right? ... Why is there a change in what
+	// I see at the lower bound?"*
+	//
+	// There was: `from_below` flipped the normal at the base radius — a hard lighting step at exactly 1,436 m, on
+	// a surface that does not exist there. The normal is now whatever the geometry gives at every altitude, so the
+	// base means nothing to this shader at all. It knows one sphere and one texture, and the only thing crossing
+	// the TOP changes is which face of that sphere you are looking at.
 	// **Depth is written where there IS cloud, and nowhere else.** The air pass clips its march at the first
 	// thing drawn, so a gap that wrote depth would lose the air that is properly above the ground; this
 	// discard is what keeps the gaps honest. It also stops the sphere blending its own far side through its

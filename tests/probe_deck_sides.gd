@@ -94,7 +94,8 @@ func _frame_name() -> String:
 
 
 ## Every number the deck's shader is actually given. **`eye` is the one that says which side of the shell the
-## frame was taken from**: below 1.0 is inside it, and between `base_ratio` and 1.0 is the slab itself.
+## frame was taken from**: below 1.0 is inside it. The deck draws one sphere at its top radius, so that is the
+## only boundary this report can speak about.
 func _report_decks() -> void:
 	var decks := 0
 	for node in get_root().find_children("*Deck*", "MeshInstance3D", true, false):
@@ -105,13 +106,12 @@ func _report_decks() -> void:
 		var cover := material.get_shader_parameter("cover") as Texture2D
 		var eye := material.get_shader_parameter("eye_local") as Vector3
 		decks += 1
-		print("SIDES deck %-16s visible=%s mesh=%s map=%s threshold=%.3f veil=%.3f gain=%.3f base_ratio=%.6f eye=%.6f"
+		print("SIDES deck %-16s visible=%s mesh=%s map=%s threshold=%.3f veil=%.3f gain=%.3f eye=%.6f"
 			% [mesh.name, mesh.visible, mesh.mesh != null,
 				"-" if cover == null else str(cover.get_width()),
 				float(material.get_shader_parameter("threshold")),
 				float(material.get_shader_parameter("veil")),
 				float(material.get_shader_parameter("ramp_gain")),
-				float(material.get_shader_parameter("base_ratio")),
 				-1.0 if eye == null else eye.length()])
 	print("SIDES: %d deck(s)" % decks)
 
