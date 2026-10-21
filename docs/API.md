@@ -902,8 +902,9 @@ setting — a string with the `key_binding` validator:
 ```
 [bindings]
 settings_screen=Alt+C
-throttle_up=W
-detail_down=BracketLeft
+throttle_up=Shift+Equal
+throttle_stop=Backspace
+roll_left=BracketLeft
 ship_toggle=O
 ```
 
@@ -1327,14 +1328,17 @@ system and ship.
 
 | Key | |
 |---|---|
-| W / S | throttle |
+| `+` / `-` | throttle, signed: astern flies as fast as ahead. Ten seconds from zero to full |
+| Backspace | throttle to zero at once |
 | mouse | pitch and yaw (click to recapture after Esc) |
-| A / D | roll |
+| `[` `]` | roll |
+| `1` `2` `3` `4` `5` `6` | view forward, back, left, right, up, down — camera-local, in the ship's frame, so mouse look still steers and the view stays where it is put |
 | T | cycle the selected target |
 | P | hide/show the bodies |
-| `[` `]` | step the mesh error budget — `lod.error_budget`, which is what sets every body's tessellation. It is the trim for judging a level's silhouette in flight, and it is a *setting*, so the step is written through the store and survives the session |
 | Tab | pause and open the personal data screen |
 | Alt+C | pause and open the settings screen |
+
+**The mesh error budget no longer has keys.** `lod.error_budget` is a *setting* and stays in the registry — it sets every body's tessellation — but the step-through was removed on 2026-10-20: the value is flown once and left at its best, so the brackets are better spent rolling. The HUD still reports the triangle count, which is the reading the trim was for.
 
 Every one of those except Esc is a binding in the settings file and can be changed there. The two
 screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab is also the UI's
