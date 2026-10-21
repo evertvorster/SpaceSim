@@ -402,6 +402,11 @@ const int J_STEPS = 8;
 // segmentation; if it is gone, it was the fog — i.e. the texture arriving through density.
 const float FOG_SCALE = 0.0;
 
+// **Does this pass draw the deck as a segment?** It does not — the shell draws it from both sides, on this branch
+// and on `cloud-volumes` alike — so there is nothing for the air to be ordered around, and splitting it at the
+// deck's radii only loses the air inside that span. One flag, because the split and the march are one mechanism.
+const bool MARCHES_DECK = false;
+
 // **The band laws, as literals.** `SpacesimCloudBand` is the specification and computes their consequences
 // headlessly; the shader carries the numbers, which is the arrangement Cloud Volumes §4.3a states rather than a
 // second source of truth. Six samples per e-fold, and the stop at 1/100 gives `ceil(log(100) * 6) = 28` steps
@@ -631,11 +636,23 @@ void main() {
 		T *= 1.0 - share;
 	}
 
-	// The band's two spans, clamped to the march and sorted: `hi0 <= lo1` always holds.
+	// **The segment split exists ONLY to order the air around a deck the pass draws.** Evert, 2026-10-21, flying
+	// this branch: *"Flying up and down through the 3km split point, I still see the bit of fogginess swapping from
+	// bottom to top, and back again... one of the values we calculate is not properly split at the splitting point,
+	// absorption or scattering... something does not carry over properly."*
+	//
+	// It was the air itself. On this branch `march_deck()` is not called — the shell draws the deck from both
+	// sides — but the walk still cut the air at the deck's two radii and skipped that interval, so **the air
+	// inside the slab was never integrated below the split**, while above it `radii.w` is zero and the air is one
+	// continuous column. Crossing the top therefore added ~1,600 m of air (Earth) to the integral in one step: a
+	// haze that moves as you pass through, which is exactly what was reported.
+	//
+	// The rule: a segment structure and the thing it exists to order must switch together. Nothing in this pass
+	// occludes the air, so the air is one segment and the split is not computed at all.
 	float b_lo[2];
 	float b_hi[2];
 	int b_count = 0;
-	if (params.radii.w > 0.0) {
+	if (MARCHES_DECK && params.radii.w > 0.0) {
 		float lo0, hi0, lo1, hi1;
 		deck_span(eye, ray, params.radii.z, params.deck.x, lo0, hi0, lo1, hi1);
 		if (hi0 > max(lo0, start)) {
