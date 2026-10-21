@@ -166,6 +166,14 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	h.check(deck.node.mesh != null and deck.node.mesh == earth.mesh.mesh,
 		"and it draws the body's own triangles, not a mesh of its own")
 	h.check(deck.published_width > 0, "with a map the size law asked for (%d wide)" % deck.published_width)
+	# **The one number that decides whether the deck is DRAWN.** `alpha = covered * veil * (1 - transmit)` with
+	# `transmit = 1/(1 + tau_full * thickness / mu)`, so `tau_full = 0` is a completely invisible deck — which is
+	# what happened when the function that set it was deleted as light plumbing. An unset uniform fails as a wrong
+	# picture, so the assertion belongs on the published value.
+	var tau_full := float(deck.material.get_shader_parameter("tau_full"))
+	h.check(tau_full > 0.0, "the deck's optical depth is published, or its alpha is zero (%.4f)" % tau_full)
+	h.check(is_equal_approx(tau_full, scene._deck_tau_full(earth, deck)),
+		"and it is the layer's own column depth")
 	h.check(deck.material.get_shader_parameter("cover") != SpacesimBodyRenderer.white_texel(),
 		"sampling that map rather than the white texel")
 	var threshold := float(deck.material.get_shader_parameter("threshold"))

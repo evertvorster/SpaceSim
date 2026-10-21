@@ -685,9 +685,15 @@ static func deck_material(
 ## `width == 0` is the *no map* case — a body the model calls `FEATURELESS`, whose honest picture is a
 ## uniform veil at its coverage rather than an absent deck. That is the recipe's own rule (§3a), and it is
 ## why the white texel and `threshold = 0` are the material's starting state.
+## **`tau_full` is the deck's OPACITY, not its lighting** — the one number that decides whether the deck is drawn
+## at all. `column_tau = tau_full * thickness / mu`, `transmit = 1/(1 + column_tau)` and
+## `alpha = covered * veil * (1 - transmit)`, so an unset `tau_full` is `alpha = 0` and a completely invisible
+## deck. It lives here, in the one place a deck's numbers are published, because the function that used to set it
+## (`apply_deck_light`) was deleted as light plumbing on 2026-10-21 and took the deck with it. **A deletion that
+## claims "nothing reads this" must grep each uniform for readers, not each function.**
 static func apply_cloud_map(
 	material: Material, texture: Texture2D, width: int, threshold: float, ramp_gain: float,
-	veil: float
+	veil: float, tau_full: float
 ) -> void:
 	var deck := material as ShaderMaterial
 	if deck == null:
@@ -701,6 +707,7 @@ static func apply_cloud_map(
 	deck.set_shader_parameter("threshold", threshold)
 	deck.set_shader_parameter("ramp_gain", ramp_gain)
 	deck.set_shader_parameter("veil", veil)
+	deck.set_shader_parameter("tau_full", tau_full)
 
 
 ## **Where the eye is in the deck's own frame** — the one number that decides whether a fragment is a cloud top,

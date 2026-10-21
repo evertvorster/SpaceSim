@@ -1333,7 +1333,8 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			# reads as a shroud rather than as an absent deck.
 			var veil := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, 1.0)
 			SpacesimBodyRenderer.apply_cloud_map(
-				deck.material, SpacesimBodyRenderer.white_texel(), 0, 0.0, veil.value, deck.coverage
+				deck.material, SpacesimBodyRenderer.white_texel(), 0, 0.0, veil.value, deck.coverage,
+				_deck_tau_full(body, deck)
 			)
 			# **A uniform veil casts a uniform shadow**: a one-texel white map with `threshold = 0` is a single
 			# thickness everywhere, which is what a deck the model calls FEATURELESS actually is.
@@ -1347,7 +1348,7 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		var gain := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, mean)
 		var threshold := _cloud_maps.threshold_of(body.id, deck.index)
 		SpacesimBodyRenderer.apply_cloud_map(
-			deck.material, texture, width, threshold, gain.value, 1.0
+			deck.material, texture, width, threshold, gain.value, 1.0, _deck_tau_full(body, deck)
 		)
 		if deck == shadowing:
 			_publish_deck_shadow(body, deck, texture, threshold, width)

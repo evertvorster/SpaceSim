@@ -104,7 +104,8 @@ func _report_decks() -> void:
 		if material == null:
 			continue
 		var cover := material.get_shader_parameter("cover") as Texture2D
-		var eye := material.get_shader_parameter("eye_local") as Vector3
+		var raw_eye: Variant = material.get_shader_parameter("eye_local")
+		var eye: Variant = raw_eye if raw_eye is Vector3 else null
 		decks += 1
 		print("SIDES deck %-16s visible=%s mesh=%s map=%s threshold=%.3f veil=%.3f gain=%.3f eye=%.6f"
 			% [mesh.name, mesh.visible, mesh.mesh != null,
