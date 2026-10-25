@@ -1022,6 +1022,13 @@ func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScen
 			"and keeps only the HUE on the reflectance, at unit brightness")
 		h.check(spec.contains("AO *= air_brightness;"),
 			"with the brightness on the light itself, so the specular loses it too")
+		# **And a highlight behind a cloud owes a BEAM's transmittance, not the diffuse one the composite applies.**
+		h.check(spec.contains("SPECULAR *= deck_specular_share("),
+			"%s dims a specular highlight by the deck's beam transmittance, not its diffuse one" % named)
+	h.check(FileAccess.get_file_as_string(
+		"res://addons/spacesim/render/deck_shadow.gdshaderinc"
+	).contains("return exp(-x) * (1.0 + x);"),
+		"the share is exp(-x)*(1+x): the ratio of a beam's to a diffuse transmittance, and never above 1")
 
 
 ## **A body occludes itself, and the surface has to be told so.**
@@ -1095,6 +1102,16 @@ func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -
 		# terminator in the system under a sun that is not there.
 		h.check((sun as Vector3).dot(to_star.normalized()) > 0.999,
 			"and it is the star's own direction in the body's frame (%s)" % [sun])
+	# **The eye, in body radii.** The upward ray needs a position rather than a direction, because the camera is
+	# a few radii away and the viewing angle varies across a disc — and it is what a specular highlight's own
+	# attenuation is computed from. Unpublished it defaults to straight above, which would put every glint's
+	# cloud over its own zenith.
+	var eye: Variant = body.mesh_material.get_shader_parameter("body_eye_local")
+	h.check(eye is Vector3, "and where the eye is, in the body's own frame")
+	if eye is Vector3:
+		var expected := (camera.global_position - body.node.global_position) / body.radius
+		h.check_near((eye as Vector3).distance_to(expected), 0.0,
+			"which is the camera's offset in body radii (%.3f)" % (eye as Vector3).length(), 1.0e-3)
 	var angle: Variant = body.mesh_material.get_shader_parameter("star_angle")
 	h.check(angle is float and float(angle) > 0.0,
 		"with the star's angular radius, which is what sizes the penumbra (%s)" % [angle])

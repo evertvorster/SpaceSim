@@ -248,6 +248,15 @@ void fragment() {
 		AO *= deck_shadow_factor(up, planet_radius);
 	}
 	SPECULAR = land_specular;
+	// **A specular highlight is a BEAM, and the composite's `1 - alpha` is the deck's DIFFUSE transmittance.**
+	// Right for the ground's own colour; thousands of times too much for the sun's reflection on water behind a
+	// solid deck. `deck_specular_share` is the ratio of the two, at the same `deck_tau · path` the shadow casts
+	// with, so this corrects *which* transmittance applies rather than adding a second law about the cloud.
+	if (deck_shadow_present()) {
+		SPECULAR *= deck_specular_share(
+			up, normalize(body_eye_local - up), planet_radius
+		);
+	}
 
 	// **The relief, from four taps of the same map.** The tap distance is a multiple of one texel of *that*
 	// map, because a fixed epsilon would sample detail the map in hand does not hold and read as noise on

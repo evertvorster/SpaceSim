@@ -37,6 +37,12 @@ uniform float deck_height = 0.0;
 // shader using this one must include FIRST — the shadow is offset along it, and so are the occlusion and the
 // air's extinction. One uniform, one home.
 
+// **The eye, in the body's own frame and in body radii** — the direction *to* the camera, per fragment, which
+// is what the upward ray needs. A *direction* will not do where the star's does: the eye is a few radii away,
+// not a few hundred million, so the viewing angle genuinely varies across a disc. It is the same quantity the
+// deck's own material is handed as `eye_local`.
+uniform vec3 body_eye_local = vec3(0.0, 0.0, 2.0);
+
 // **How dark a shadow is allowed to get**, as the floor on the light it leaves: `1.0` is no shadow, `0.0` is
 // the physical transmittance with nothing added back.
 //
@@ -74,31 +80,44 @@ vec2 deck_shadow_uv(vec3 direction) {
 	return vec2(0.5 + atan(direction.z, direction.x) / TAU, 0.5 - asin(clamp(direction.y, -1.0, 1.0)) / PI);
 }
 
-// How much of the star's light reaches a point whose unit direction is `p`: `exp(-tau · thickness / mu)`.
-float deck_transmittance(vec3 p, float planet_radius) {
-    float mu = dot(p, body_sun);
-    // The star is at or below this point's horizon: there is no direct light to shadow.
+// **The path through the slab along one ray, in column-thicknesses** — `thickness / mu`, with the map read
+// where that ray actually crosses the deck rather than where the point is.
+//
+// **One function for both rays**, because they are the same medium: the star's (which makes a shadow) and the
+// eye's (which is what the surface's light has to cross to be seen). A second copy of this arithmetic is how
+// the two would come to disagree about how thick the cloud is, which is the failure this include exists to
+// prevent in the first place.
+//
+// Returns **-1** when the ray leaves below the local horizontal — nothing crosses the slab — and each caller
+// decides what that means: no light to shadow, or nothing to attenuate on the way out.
+//
+// `with_detail` is false for the eye's ray. The ladder is the *sub-texel* structure and it costs six noise
+// evaluations; a beam's attenuation is decided by the coarse field, and the surface shaders already run a
+// ladder of their own. The shadow keeps it, because there the ladder is what makes the shadow's edge belong to
+// the cloud that casts it.
+float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_detail) {
+    float mu = dot(p, direction);
     if (mu <= 0.0) {
-        return 1.0;
+        return -1.0;
     }
     float zenith = max(mu, 0.05);
-    vec3 across = body_sun - p * mu;
+    vec3 across = direction - p * mu;
     float across_length = length(across);
-    // **Straight up**: the shadow point is the point itself, and there is no offset to divide by.
-    vec3 shadow_direction = p;
+    // **Straight up**: the crossing point is the point itself, and there is no offset to divide by.
+    vec3 crossing = p;
     if (across_length > 1.0e-6) {
         float arc = (deck_height * (across_length / mu)) / max(planet_radius, 1.0);
-        shadow_direction = normalize(p + (across / across_length) * arc);
+        crossing = normalize(p + (across / across_length) * arc);
     }
-    float field = texture(deck_cover, deck_shadow_uv(shadow_direction)).r;
+    float field = texture(deck_cover, deck_shadow_uv(crossing)).r;
     // **And the structure the map is too coarse to hold**, from the same ladder the cloud draws with. The
     // footprint is this pixel's angle **at the deck** — `fwidth` is measured at the eye, and the ladder's
     // feature sizes are arcs on the sphere, so the distance to the shell in radii is the conversion.
-    if (deck_detail_strength > 0.0 && deck_detail_feature > 0.0) {
+    if (with_detail && deck_detail_strength > 0.0 && deck_detail_feature > 0.0) {
         float at_deck = length(fwidth(p)) * (deck_height / max(planet_radius, 1.0));
         field = clamp(
             field + cloud_detail(
-                shadow_direction, at_deck, deck_detail_seed, deck_detail_feature, deck_detail_strength
+                crossing, at_deck, deck_detail_seed, deck_detail_feature, deck_detail_strength
             ),
             0.0, 1.0
         );
@@ -106,7 +125,42 @@ float deck_transmittance(vec3 p, float planet_radius) {
     float thickness = clamp(
         (field - deck_threshold) / max(1.0 - deck_threshold, 1.0e-4), 0.0, 1.0
     );
-    return exp(-deck_tau * thickness / zenith);
+    return thickness / zenith;
+}
+
+
+// How much of the star's light reaches a point whose unit direction is `p`: `exp(-tau · path)`.
+float deck_transmittance(vec3 p, float planet_radius) {
+    float path = deck_column_path(p, body_sun, planet_radius, true);
+    // The star is at or below this point's horizon: there is no direct light to shadow.
+    if (path < 0.0) {
+        return 1.0;
+    }
+    return exp(-deck_tau * path);
+}
+
+
+// **What is left of a BEAM after it crosses the slab, relative to the DIFFUSE transmittance the composite
+// already applies** — the factor a specular highlight owes the cloud above it.
+//
+// **A specular lobe is a beam and a cloud's base is a diffuse source, so they are not attenuated alike.** The
+// deck is drawn `blend_mix`, so the surface behind it passes at `1 - alpha`, and `alpha` is built from
+// `two_flux`'s *diffuse* transmittance `1/(1+x)` — right for the ground's colour, and thousands of times too
+// much for the sun's reflection on water. Evert, flying at sunset, 2026-10-25: *"solid clouds look like hazy
+// wisps when the sunlight is directly behind it, and reflecting off of water."* At `x = 11.5` the diffuse
+// answer is 8 % and a beam's is 0.001 %.
+//
+// `x` is the **same** `deck_tau · path` the shadow casts with — one medium, one map, one view cosine — so this
+// is a correction to *which* transmittance applies, not a second law about the cloud.
+//
+// The result is `exp(-x)·(1 + x)`, which is ≤ 1 for every `x ≥ 0`: the glint can only be dimmed.
+float deck_specular_share(vec3 p, vec3 to_eye, float planet_radius) {
+    float path = deck_column_path(p, to_eye, planet_radius, false);
+    if (path < 0.0) {
+        return 1.0;
+    }
+    float x = max(deck_tau * path, 0.0);
+    return exp(-x) * (1.0 + x);
 }
 
 // How much of the star's light reaches a point whose unit direction is `p`, **after the floor** — the number

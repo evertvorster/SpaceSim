@@ -774,12 +774,18 @@ static func apply_deck_shadow(
 ## makes for `light_angular_distance`, so the penumbra a surface is shaded with and the softness the engine's
 ## own shadow would use cannot disagree. Its width also decides what a pixel can resolve: a penumbra narrower
 ## than one pixel is filtered to the step it averages to (`star_transmission.gdshaderinc`).
-static func face_surface_star(material: Material, sun_model: Vector3, star_angle: float) -> void:
+static func face_surface_star(
+	material: Material, sun_model: Vector3, star_angle: float, eye_local: Vector3
+) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null:
 		return
 	surface.set_shader_parameter("body_sun", sun_model)
 	surface.set_shader_parameter("star_angle", star_angle)
+	# **The eye, in body radii, because the upward ray needs a position and not a direction** — the camera is a
+	# few radii away, so the viewing angle varies across a disc, unlike the star's. It is the third number a
+	# surface's light needs and the one `deck_specular_share` uses.
+	surface.set_shader_parameter("body_eye_local", eye_local)
 
 
 ## **The air's own share of the star's light, at a material's altitude** — published once, at scene build,

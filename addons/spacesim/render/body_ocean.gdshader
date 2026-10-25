@@ -178,6 +178,15 @@ void fragment() {
 		AO *= deck_shadow_factor(up, planet_radius);
 	}
 	SPECULAR = specular_value;
+	// **The sun's path across the water owes the cloud a BEAM's attenuation, not a diffuse one.** This is the
+	// surface Evert photographed: `1 - alpha` dims the sea's colour correctly and leaves the one thing in the
+	// frame that is a beam — the glint — at 8 % where a beam's answer is 0.001 %. See
+	// `deck_shadow.gdshaderinc`.
+	if (deck_shadow_present()) {
+		SPECULAR *= deck_specular_share(
+			up, normalize(body_eye_local - up), planet_radius
+		);
+	}
 
 	// **One sampling law for everything here**: a feature is drawn while a pixel holds at least four samples of
 	// it, gone by two. There is no near/far gate — there was, `wave_fade = 1 - smoothstep(1 m, 25 m, pixel)`, and it
