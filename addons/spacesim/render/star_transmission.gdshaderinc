@@ -84,8 +84,13 @@ const float STAR_MIN_HALF_WIDTH = 1.0e-6;
 // the horizon and wrong by a factor of two a few degrees above it — and the horizon is the whole point.
 // **A closed form and not a march**: eight samples across a chord that at the limb is ~2,000 km, against an
 // 8.5 km scale height, was the previous attempt and it under-integrated the one case that matters.
+// **The denominator is FLOORED, and that is the bug that made Luna glow** (2026-10-25). An airless body has a
+// zero scale height, so the horizon term is zero — and on the night side `mu` clamps to zero as well, so the
+// mass is `1/sqrt(0)` = infinity and the caller's own zero column turns it into `0 * inf` = **NaN**. That NaN
+// rides through `exp` into `ALBEDO` and comes out of the tonemap as a bloomed white halo around a black disc.
+// A zero scale height must give a *finite* mass so the caller's zero can multiply it away.
 float star_air_mass(float mu, float scale_height, float solid_radius) {
-	return inversesqrt(mu * mu + 2.0 * scale_height / (PI * max(solid_radius, 1.0)));
+	return inversesqrt(mu * mu + max(2.0 * scale_height / (PI * max(solid_radius, 1.0)), 1.0e-12));
 }
 
 

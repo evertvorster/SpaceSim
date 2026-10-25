@@ -324,10 +324,15 @@ static func pressure_at(height: float, surface_pressure: float, air_scale_height
 ## 34 at 0 (38). **Prefer the approximation** — Evert, 2026-10-25: *"if there is a fast approximation, that
 ## is to be preferred over an expensive exact simulation."* A factor of 1.1 in the optical depth at the
 ## horizon is a shade of red in a sunset; a loop per fragment on every body with air is a frame.
+## **The denominator is FLOORED, and that is not defensive padding — it is the bug that made Luna glow.**
+## An airless body has a zero scale height, so the horizon term is zero, and at the horizon `mu` clamps to zero
+## too: `1/sqrt(0)` is infinity, the caller multiplies it by a zero column and gets `0 * inf = NaN`, and the
+## NaN goes into `ALBEDO` and out through the tonemap as a bloomed white halo. **A zero scale height must give a
+## finite air mass, so that the caller's own zero can multiply it away.** The floor is on the *term* rather than
+## an early return so that this file and the shader transcribe each other exactly — a shader has no early
+## return that is not a branch.
 static func air_mass(cos_elevation: float, scale_height: float, radius: float) -> float:
-	if scale_height <= 0.0 or radius <= 0.0:
-		return 1.0
-	var horizon_term := 2.0 * scale_height / (PI * radius)
+	var horizon_term := maxf(2.0 * scale_height / (PI * maxf(radius, 1.0)), 1.0e-12)
 	var mu := clampf(cos_elevation, 0.0, 1.0)
 	return 1.0 / sqrt(mu * mu + horizon_term)
 

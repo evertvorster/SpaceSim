@@ -866,6 +866,30 @@ func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScen
 	)
 	h.check(no_air.is_equal_approx(Vector3.ONE),
 		"an airless body's transmittance is exactly 1, which is why the airless case needs no branch")
+	# **And at the horizon, which is the case that broke.** With a zero scale height the horizon term is zero,
+	# so an unlimited `1/sqrt(mu^2 + 0)` is infinity at `mu = 0` — and the caller multiplies it by a zero
+	# column, `0 * inf` is NaN, and the NaN reaches `ALBEDO`. Airless bodies went supernova: Luna's whole night
+	# side bloomed white with its chunks showing through. Tested at 0 and *not only overhead*, because overhead
+	# is the one elevation where the broken form still returned a finite number.
+	for mu in [0.0, 0.5, 1.0]:
+		h.check(not is_nan(SpacesimAtmosphereModel.air_mass(mu, 0.0, earth_radius))
+			and is_finite(SpacesimAtmosphereModel.air_mass(mu, 0.0, earth_radius)),
+			"the air mass of an airless body is finite at mu = %.1f" % mu)
+	var no_air_horizon := SpacesimAtmosphereModel.sun_transmittance(
+		Vector3.ZERO, 0.0, Vector3.ZERO, 0.0, 0.0, 0.0, 0.0, earth_radius
+	)
+	h.check(not is_nan(no_air_horizon.x) and is_finite(no_air_horizon.x),
+		"so an airless body's transmittance at its horizon is a number, not NaN (%.4f)" % no_air_horizon.x)
+	h.check_near(no_air_horizon.x, 1.0, "and it is exactly 1: no air, no extinction", 1.0e-9)
+	# **Luna's own coefficients**, which is the body it actually happened to.
+	var luna := scene.body_by_id("moon:luna")
+	if luna != null:
+		h.check(luna.air.is_empty(), "Luna has no air dictionary at all")
+		var luna_t := SpacesimAtmosphereModel.sun_transmittance(
+			Vector3.ZERO, 0.0, Vector3.ZERO, 0.0, 0.0, 0.0, 0.0, 1737400.0
+		)
+		h.check(luna_t.is_equal_approx(Vector3.ONE) and not is_nan(luna_t.x),
+			"and her night side is drawn in the star's own light, not in a NaN")
 	var overhead_t := SpacesimAtmosphereModel.sun_transmittance(
 		rayleigh, rayleigh_height, absorption, mie, mie_height, 1.0, 0.0, earth_radius
 	)
@@ -913,6 +937,8 @@ func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScen
 	)
 	h.check(code.contains("star_air_mass(") and code.contains("2.0 * scale_height / (PI *"),
 		"the shader's air mass is the round/spherical form, not the secant")
+	h.check(code.contains("max(2.0 * scale_height / (PI * max(solid_radius, 1.0)), 1.0e-12)"),
+		"with its denominator floored, or an airless body's night side is 0 * inf = NaN")
 	h.check(code.contains("star_air_transmittance(") and code.contains("vec3(air_mie) * mie_path"),
 		"and its transmittance is per channel, with Mie through its own column")
 	h.check(FileAccess.get_file_as_string(
