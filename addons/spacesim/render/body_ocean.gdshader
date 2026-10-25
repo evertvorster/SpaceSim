@@ -156,9 +156,16 @@ void fragment() {
 	float depth = (sea_level - height) * field_amplitude;
 	float fill = smoothstep(shallow_metres, max(deep_metres, shallow_metres * 1.01), depth);
 	ALBEDO = mix(shallow_color, deep_color, fill);
-	// The air's share, as on the land: per channel, from the body's own coefficients, and it is what turns a
-	// sunset sea orange rather than white.
-	ALBEDO *= star_air_transmittance(up, body_sun, air_altitude, planet_radius);
+	// **The air's share, split brightness from hue — and on water that split is the whole point.** This is the
+	// body where it shows: a specular lobe is built from the light rather than from `ALBEDO`, so scaling the
+	// albedo alone left the sun's path across the sea blazing at top-of-atmosphere brightness while the water
+	// around it went almost black. The brightness goes into `AO` (the engine applies it to the whole light
+	// contribution, specular included) and only the hue stays on the reflectance, so the diffuse is
+	// mathematically unchanged and the glint finally loses what the air took.
+	vec3 air_through = star_air_transmittance(up, body_sun, air_altitude, planet_radius);
+	float air_brightness = dot(air_through, vec3(0.2126, 0.7152, 0.0722));
+	ALBEDO *= air_through / max(air_brightness, 1.0e-3);
+	AO *= air_brightness;
 	ROUGHNESS = roughness_value;
 	// **Everything that decides how much of the star reaches this point, in one slot** — the star's own
 	// transmission first, then the deck's shadow multiplying it, exactly as the land composes them. `AO` with

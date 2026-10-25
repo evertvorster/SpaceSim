@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://btauauditprobe01"]
+[ext_resource type="Script" path="res://tests/probe_tau_audit.gd" id="1"]
+[node name="ProbeTauAudit" type="Node"]
+script = ExtResource("1")

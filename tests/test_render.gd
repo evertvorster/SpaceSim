@@ -1006,6 +1006,23 @@ func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScen
 	).contains("star_air_transmittance(p, body_sun, air_altitude, planet_radius)"),
 		"and so does a cloud — the limb spots were a cloud drawn in top-of-atmosphere sunlight")
 
+	# **And on the two surfaces with a specular lobe, the transmittance is SPLIT**: its brightness goes into
+	# `AO`, which the engine applies to the whole light contribution, and only its hue stays on `ALBEDO`. Scaling
+	# the albedo alone left the sun's path across the water blazing at top-of-atmosphere brightness while the sea
+	# around it went almost black — a specular lobe is built from the light, not from the reflectance.
+	for path in [
+		"res://addons/spacesim/render/body_surface.gdshader",
+		"res://addons/spacesim/render/body_ocean.gdshader",
+	]:
+		var spec := FileAccess.get_file_as_string(path)
+		var named := String(path).get_file()
+		h.check(spec.contains("float air_brightness = dot(air_through"),
+			"%s measures how much light the air left (its brightness)" % named)
+		h.check(spec.contains("ALBEDO *= air_through / max(air_brightness, 1.0e-3);"),
+			"and keeps only the HUE on the reflectance, at unit brightness")
+		h.check(spec.contains("AO *= air_brightness;"),
+			"with the brightness on the light itself, so the specular loses it too")
+
 
 ## **A body occludes itself, and the surface has to be told so.**
 ##

@@ -205,14 +205,23 @@ void fragment() {
 	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
 	// **The light has crossed the air before it got here**, and that is per channel: blue first, then green,
-	// then red. For a diffuse surface, scaling the reflectance by the transmittance *is* scaling the light it
-	// sees, so this is where the extinction belongs — and it is what makes a ridge near the terminator
-	// orange rather than white instead of having to be dimmed by hand.
+	// then red — which is what makes a ridge near the terminator orange rather than white.
 	//
-	// **The specular lobe is NOT reddened by this**: it is built from the light rather than from `ALBEDO`, and
-	// dimming it by luminance would be a different law. At grazing sun the lobe is weak, which is what makes
-	// the omission tolerable; a `light()` override is the only honest fix and it costs the PBR.
-	ALBEDO *= star_air_transmittance(up, body_sun, air_altitude, planet_radius);
+	// **Split into brightness and hue, because a specular lobe is built from the LIGHT and not from `ALBEDO`.**
+	// Scaling the albedo alone left the sun's glint shining through the air at full strength — Evert, flying,
+	// 2026-10-25, on the sun's path over water at sunset: *"light reflecting off the surface passes unhindered
+	// through the cloud layer"*. So the transmittance's **brightness** goes into `AO`, which the engine applies
+	// to the whole light contribution — diffuse and specular together — and only its **hue** stays on the
+	// reflectance, at unit brightness. The product is unchanged for the diffuse:
+	// `albedo·light·AO × (t/L) × L = albedo·light·t`, exactly the per-channel transmittance.
+	//
+	// **What is left imperfect**: a scalar `AO` cannot redden, so the glint dims but keeps the sun's white. A
+	// `light()` override is the only honest fix and it costs the PBR this surface was tuned with; a dim white
+	// glint at sunset is the better trade than a blinding one.
+	vec3 air_through = star_air_transmittance(up, body_sun, air_altitude, planet_radius);
+	float air_brightness = dot(air_through, vec3(0.2126, 0.7152, 0.0722));
+	ALBEDO *= air_through / max(air_brightness, 1.0e-3);
+	AO *= air_brightness;
 	ROUGHNESS = land_roughness;
 	// **Everything that decides how much of the star reaches this point, in one slot** — and it is `AO`
 	// because the engine turns that into a *direct-light* occlusion before the light loop, which is exactly
