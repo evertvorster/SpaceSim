@@ -210,7 +210,18 @@ static func mean_exceedance(image: Image, threshold: float) -> float:
 
 
 ## The depth a ramp layer's mean thickness implies, or the depth the layer stated.
-static func _column_depth(ramp_mean: float, stated: float) -> float:
+##
+## **The one home for this equivalence.** A tau layer states its depth; a RAMP layer states none, and its
+## equivalent is `-ln(1 - mean)` — the mean thickness the ramp was calibrated on, so at the mean column the
+## layer's transmittance is that number.
+##
+## `SpacesimSystemScene._deck_tau_full()` used to derive its own copy with different clamps (`0.02..0.98`
+## against this one's `0..0.999`), so the tau the deck drew with and the tau its own `opacity_mean` was
+## measured at were two different numbers on exactly the bodies nobody looks at. It calls this now.
+##
+## The `1e-3` floor is what keeps a fully covered ramp finite: at a mean of 1 the column is opaque, and
+## `-ln(0)` is not a number the shader can multiply by.
+static func column_depth(ramp_mean: float, stated := 0.0) -> float:
 	if stated > 0.0:
 		return stated
 	return -log(maxf(1.0 - clampf(ramp_mean, 0.0, 0.999), 1.0e-3))
@@ -416,7 +427,7 @@ func _bake_floor(
 	# **The optical depth is derived here, from this image**, when the layer states none: `-ln(1 - ramp_mean)` is
 	# the depth whose transmittance is the mean thickness, which is the equivalence the shadow already uses. So the
 	# mean the gain is fitted to is `mean(R(tau))` for every layer, ramp or tau, and one map cannot carry two laws.
-	entry.opacity_mean = mean_opacity(image, entry.threshold, _column_depth(entry.ramp_mean, depth))
+	entry.opacity_mean = mean_opacity(image, entry.threshold, column_depth(entry.ramp_mean, depth))
 	entry.texture = _map_texture(image)
 
 
@@ -501,7 +512,7 @@ func _measure(entry: Entry, coverage: float, depth: float) -> void:
 	entry.threshold = threshold_for(entry.image, coverage)
 	entry.ramp_mean = mean_exceedance(entry.image, entry.threshold)
 	entry.opacity_mean = mean_opacity(
-		entry.image, entry.threshold, _column_depth(entry.ramp_mean, depth)
+		entry.image, entry.threshold, column_depth(entry.ramp_mean, depth)
 	)
 
 

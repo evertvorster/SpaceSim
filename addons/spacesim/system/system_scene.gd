@@ -667,15 +667,16 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 ## **A layer's vertical optical depth at full thickness**, which is the one number opacity, the base's
 ## transmittance and the near regime's march all come from.
 ##
-## A tau layer states it. A RAMP layer (every body but the giants) states none, and its equivalent is
-## `-ln(1 - mean)`, the same equivalence the shadow uses — so at the mean column its transmittance is the mean
-## thickness the ramp was calibrated on. **One home for it**, because two copies drift apart on exactly the
-## bodies nobody looks at.
+## A tau layer states it; a RAMP layer's equivalent is `SpacesimCloudMaps.column_depth()`, **which is where
+## that law lives** — this function reads it rather than restating it. It used to carry its own copy with
+## different clamps (`0.02..0.98` against the model's `0..0.999`), so the depth the deck drew with was not the
+## depth its own `opacity_mean` was measured at: they agree at a mean of 0.5 and part company to 3.9 against
+## 4.6 at 0.99. That is the "two copies drift apart on exactly the bodies nobody looks at" failure, in this
+## function, while its own comment claimed one home.
 func _deck_tau_full(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
-	if deck.optical_depth > 0.0:
-		return deck.optical_depth
-	var mean := clampf(_cloud_maps.ramp_mean_of(body.id, deck.index), 0.02, 0.98)
-	return -log(1.0 - mean)
+	return SpacesimCloudMaps.column_depth(
+		_cloud_maps.ramp_mean_of(body.id, deck.index), deck.optical_depth
+	)
 
 
 ## The per-metre coefficient a march needs, from the layer's own column — `tau_full / thickness`, so the near
