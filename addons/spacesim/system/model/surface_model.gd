@@ -3,13 +3,21 @@ extends RefCounted
 ## What a body's surface reflects — the albedo the temperature derivation needs and the colour the
 ## renderer draws.
 ##
-## The surface contribution is an **area-weighted** blend of the materials over the authored coverage
-## fractions. The cloud deck is blended over the top by its own fraction, which is why this cannot be
-## computed from `surface` alone: **clouds dominate a planet's reflection.**
+## **The accounting is NET, and it replaced a gross one on 2026-10-16.** `bond_albedo` composites a
+## `(1 - f) · clear + f · deck` stack from the bottom up, with the clear column a **derived quantity that
+## includes the air's own reflection** — `clear_sky_albedo`, which is why this cannot be computed from
+## `surface` alone. The gross area mix it replaced (`f · cloud + (1 - f) · surface`) gave the ground under a
+## cloud no credit at all; both are valid arithmetic and they are not the same numbers, which is how the
+## model came to have its cloud term 1.9× the published one and its clear term a fifth, cancelling to the
+## right total. See `bond_albedo`'s own doc and [[SpaceSim/Solar Systems and the Physics Model]] §3.5.
 ##
-## A linear area mix is an approximation of a radiative-transfer problem — real clouds absorb and
-## multiple-scatter — but it lands on the measured values when the numbers are real, and the test
-## checks exactly that against the Moon, Earth and Venus.
+## **Clouds dominate a planet's reflection**, which is why the decomposition is worth the trouble: Earth's
+## published split is cloud 0.144 against a clear 0.149 (Stephens et al. 2015, CERES EAFB), and
+## `reflectance_terms()` is the function that has to reproduce both halves rather than the sum.
+##
+## The stack is a linear mix, which is an approximation of a radiative-transfer problem — real clouds absorb
+## and multiple-scatter — but it lands on the measured values when the numbers are real, and the test checks
+## exactly that against the Moon, Earth and Venus.
 
 ## What a body with nothing to derive from is drawn in. Deliberately unlovely, so a placeholder is
 ## never mistaken for a result.
