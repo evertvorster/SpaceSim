@@ -310,8 +310,7 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 			"and being one material, it is one colour from the bottom to the top")
 	# **No liquid, no sea layer** — and the land's cull is switched off rather than made true by luck, or the
 	# lowest ground on an airless body would be discarded.
-		h.check(luna_material.ocean == null if false else luna.ocean == null,
-			"an airless body has no ocean layer at all")
+		h.check(luna.ocean == null, "an airless body has no ocean layer at all")
 		h.check_near(float(luna_material.get_shader_parameter("has_ocean")), 0.0,
 			"and its land layer does not cull anything", 1.0e-6)
 
@@ -437,14 +436,16 @@ func _test_the_sky_is_derived(
 	h.check(scene.air_body(surface_frame) == earth, "and the surface frame is inside Earth's air")
 	h.check(scene.air_body(scene.system_frame) == null, "as the system frame is not")
 
-	# **A named gap, not a silent one.** Every species the authored atmospheres use has a
-	# cross-section except water vapour and hydrogen, and what that costs is written down here.
+	# **A named gap, not a silent one**, and the list below is the statement of it: water vapour and ammonia
+	# are the two species the authored atmospheres use that carry no Rayleigh cross-section in
+	# `materials.tres`, so 0.7 % of Jupiter's air and 0.1 % of Saturn's contributes to neither the sky nor
+	# the air column.
 	#
-	# **The gap grew on 2026-10-16 when the giants were given their real mixes.** Ammonia has no Rayleigh
-	# cross-section in `materials.tres` (nor does the water vapour added alongside it), so 0.7 % of
-	# Jupiter's air and 0.1 % of Saturn's contributes to neither the sky nor the air column. **Named rather
-	# than invented**: a cross-section is a measured quantity, so the honest state is "the giants' rain is
-	# missing", not a guessed number.
+	# **Hydrogen was the third until 2026-10-16**, when it was given a cross-section; the gap then grew in a
+	# different direction as the giants were given their real mixes, which brought ammonia and water vapour
+	# in. **Named rather than invented**: a cross-section is a measured quantity, so the honest state is "the
+	# giants' rain is missing", not a guessed number. Two sentences used to sit in this block, one before
+	# hydrogen landed and one after, contradicting each other with the stale one first.
 	var uncovered: Array[String] = []
 	for body in scene.bodies:
 		if body.content == null or body.content.atmosphere == null:
