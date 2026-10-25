@@ -161,7 +161,7 @@ var _failed := false
 ## texel the detail comes from the ladder, which is a per-pixel evaluation of the field's own formula, and the
 ## ladder is band-limited by what a pixel can resolve — so it is *better* at close range than a texture could be,
 ## and it costs nothing at distance.
-func prepare(body_id: String, radius: float, ocean_fraction: float) -> Entry:
+func prepare(body_id: String, radius: float) -> Entry:
 	var entry: Entry = _entries.get(body_id)
 	if entry != null:
 		return entry
@@ -187,9 +187,11 @@ func prepare(body_id: String, radius: float, ocean_fraction: float) -> Entry:
 	entry.quantiles = quantiles_of(image)
 	entry.base = ImageTexture.create_from_image(image)
 	entry.width = BUILD_WIDTH
-	# The sea level is not stored — it belongs to the caller's ocean fraction — but measuring it here is what
-	# makes the table's meaning checkable, and `tests/probe_surface_maps` prints it.
-	entry.value_at(ocean_fraction)
+	# **The sea level is not stored here and not measured here.** It is a percentile of `entry.quantiles`, and
+	# the caller derives the fraction and asks: `system_scene` reads `entry.value_at(fraction)` one line after
+	# this returns. This function used to make that call and drop the result, with a comment claiming the
+	# measurement made the table checkable — a pure function's return value going nowhere makes nothing
+	# checkable, and an unused parameter is the receipt.
 	return entry
 
 

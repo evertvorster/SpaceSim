@@ -370,7 +370,7 @@ func _place() -> void:
 			str(_ocean.material_override), str(_ocean.get_surface_override_material(0))
 		])
 	print("SURFCOST: ocean fraction %.3f, ocean node %s, mesh %s" % [
-		float(main.get("_system").bodies[0].surface_ocean_fraction) if false else _ocean_fraction,
+		_ocean_fraction,
 		str(_ocean != null), str(_ocean.mesh != null) if _ocean != null else "none"
 	])
 	print("SURFCOST: %.0f km over %s, sea layer %s, exposure pass OFF, exposure pinned to identity" % [

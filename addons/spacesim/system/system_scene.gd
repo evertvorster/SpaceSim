@@ -475,7 +475,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 			body.content, _materials(), light.x, light.y
 		)
 		bands = SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
-		entry = _surface_maps.prepare(body.id, body.radius, body.surface_ocean_fraction)
+		entry = _surface_maps.prepare(body.id, body.radius)
 	var quantiles := SpacesimSurfaceMaps.linear_quantiles()
 	if entry != null and not entry.quantiles.is_empty():
 		quantiles = entry.quantiles
