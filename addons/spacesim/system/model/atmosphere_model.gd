@@ -268,12 +268,21 @@ static func absorption_coefficient(
 ## what the two-stream limit is built on (`k = sqrt(3(1-w)(1-wg))`, which is zero when `w` is one).
 ## **Exactly 1 when the table carries no absorption**, which is where this starts — conservative
 ## scattering is the assumption until a measurement says otherwise.
+##
+## **`aerosols` is the caller stating what its air is made of, and the default is the shader's case.**
+## The sky draws an aerosol haze on every body, from `MIE_COEFFICIENT` — one Earth-authored volume
+## coefficient, because aerosols are a named gap in the material table — so the air the *eye* sees does
+## have Mie extinction and `omega` must count it. An **albedo** is a different question: it is a property
+## of the body's own composition, and handing an Earth haze to a near-vacuum is the failure that put
+## Triton's clear-sky albedo past 1.0 and made every temperature on it NaN. `clear_sky_albedo()` therefore
+## passes `false`, so its `omega` and its optical depth are built from the same gases.
 static func single_scatter_albedo(
-	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable, temperature: float
+	atmosphere: SpacesimAtmosphere, materials: SpacesimMaterialTable, temperature: float,
+	aerosols := true
 ) -> Vector3:
 	var scattering := rayleigh_coefficient(atmosphere, materials, temperature)
 	var absorption := absorption_coefficient(atmosphere, materials, temperature)
-	var mie := Vector3.ONE * MIE_COEFFICIENT
+	var mie := Vector3.ONE * MIE_COEFFICIENT if aerosols else Vector3.ZERO
 	var extinction := scattering + mie + absorption
 	return Vector3(
 		(scattering.x + mie.x) / maxf(extinction.x, 1.0e-30),
@@ -537,32 +546,35 @@ static func _level_for(
 ## equilibrium temperature is computed *from*. A parameter that cannot depend on the temperature cannot
 ## depend on itself through it. `tests/test_surface.gd` asserts the independence rather than trusting it.
 ##
-## **The Mie share is deliberately NOT counted, and that is a finding rather than a simplification.**
-## `MIE_COEFFICIENT` is 21e-6 per metre — a *volume* coefficient authored for Earth's air, used by the sky
-## shader as one number for every body because aerosols are a named gap in the material table. Adding it
-## here gave tiny Triton, whose air is 1.4 Pa of nitrogen, an aerosol optical depth of **0.30** — an
-## Earth-like haze over a near-vacuum — and that pushed its clear-sky albedo past 1.0, at which point
-## `equilibrium_temperature` takes the fourth root of a negative number and every temperature on the body
-## becomes NaN. The suite caught it, which is the only reason it is not in the file.
+## **The Mie share is counted NOWHERE in this function — neither the column nor `omega` — and that is a
+## finding rather than a simplification.** `MIE_COEFFICIENT` is 21e-6 per metre, a *volume* coefficient
+## authored for Earth's air and used by the sky shader as one number for every body, because aerosols are a
+## named gap in the material table. Counting it here gave tiny Triton, whose air is 1.4 Pa of nitrogen, an
+## aerosol optical depth of **0.30** — an Earth-like haze over a near-vacuum — and that pushed its clear-sky
+## albedo past 1.0, at which point `equilibrium_temperature` takes the fourth root of a negative number and
+## every temperature on the body becomes NaN. The suite caught it, which is the only reason it is not in the
+## file.
 ##
-## So a body's air reflects what its **own** gases scatter, scaled by its own pressure and gravity, and
-## counts no aerosol COLUMN. A per-body aerosol column is a collection item; an Earth haze on Neptune is
-## not an approximation of one.
+## So a body's air reflects what its **own** gases scatter, scaled by its own pressure and gravity. That is
+## now true of the product and not only of the column: until 2026-10-25 the depth counted Rayleigh alone
+## while `omega` came from `single_scatter_albedo()`'s aerosol-inclusive form, so the two halves were built
+## from different gases. Measured over Sol's nine bodies, **only Earth has any absorption, so only Earth's
+## omega ever moved** — 0.911 with the aerosol share against 0.783 without, every other body reading exactly
+## 1.0 either way — and Earth's clear-sky air albedo was **0.0554 with the aerosol share against 0.0524
+## without**, for the measured reference `0.149 - 0.081 = 0.068`. The two errors partly cancelled, which is
+## why it survived: on Earth the mixed product landed nearer the published number, and the total the
+## temperature actually uses barely moved — **0.306 before, 0.305 after**.
 ##
-## **The aerosol is nevertheless inside `omega`, and that is a measured inconsistency rather than a
-## decision.** The optical depth here counts Rayleigh only, but the single-scatter albedo it multiplies comes
-## from `single_scatter_albedo()`, whose extinction *does* include `MIE_COEFFICIENT` — correctly, because
-## that function's question is "how much of what the air removes is scattering", and the sky shader's air
-## has aerosols. Measured 2026-10-25 over Sol's nine bodies: **only Earth has any absorption, so only Earth's
-## omega moves** — 0.911 with the aerosol share against 0.783 without, every other body reading exactly 1.0
-## either way. Earth's clear-sky air albedo is **0.0554 with it and 0.0476 without**, against a published
-## 0.059. So on the one body where it matters, the two errors partly cancel and land closer than the
-## consistent version does.
+## **It went anyway, and the reason is the project's guiding principle rather than the number.** A
+## composition-blind constant that happens to cancel on the one body it was authored for is not a derivation;
+## it is a calibration that will not travel. Generated systems randomise composition, so the cancellation
+## Earth enjoys exists nowhere else — and an authored constant applied per body is this project's
+## named-fuse bug, already fired once (Triton's NaN).
 ##
-## That is the "check the parts, not only the sum" trap in a new dress, and the honest state is this
-## paragraph: to make the product self-consistent one of two things has to change — count a per-body aerosol
-## column in the depth (which needs real aerosol data, and a zero for Triton), or take the aerosol out of
-## omega for this caller. The second is one parameter and it moves Earth 20% away from the published number.
+## **Aerosols become CONTENT when exactness is wanted**, a per-body field beside `Species.rayleigh` defaulting
+## to zero — which is both the physically honest shape and the one that cannot break a near-vacuum. Chasing
+## last 0.003 of an air term with a new data model is not worth the mechanism, and the number it buys is
+## 0.001 on the total the temperature actually uses.
 ##
 ## Returned **per channel**, like the coefficient it is built from: a Rayleigh atmosphere reflects blue
 ## several times more than red, which is the same fact that makes the sky blue.
@@ -580,7 +592,7 @@ static func clear_sky_albedo(
 		return Vector3.ZERO
 	# Scattering only, and only the gases the mix actually has.
 	var depth := rayleigh_coefficient(atmosphere, materials, REFERENCE_TEMPERATURE) * air_height
-	var omega := single_scatter_albedo(atmosphere, materials, REFERENCE_TEMPERATURE)
+	var omega := single_scatter_albedo(atmosphere, materials, REFERENCE_TEMPERATURE, false)
 	return 0.5 * omega * Vector3(
 		1.0 - exp(-depth.x), 1.0 - exp(-depth.y), 1.0 - exp(-depth.z)
 	)
