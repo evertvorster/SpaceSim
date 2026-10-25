@@ -118,3 +118,31 @@ static func triangles_at(level: int) -> int:
 ## a player who moved it would be moving a boundary rather than a budget.
 const POINT_TIER_SCREEN_RADIUS := 4.0
 
+## **How wide the air's own limb ring is, in pixels** — the projection of the atmosphere's depth at a
+## distance, and so the width over which its column, and the picture, actually changes:
+##
+##     ring_px = (depth / distance) / pixel_angle
+##
+## **This is the quantity that decides whether an atmosphere is worth drawing, and a disc's size is not.**
+## The air march is a per-pixel integral whose structure is the limb ring: at a distance where the whole body is
+## a few pixels, every one of its pixels is a grazing chord — the transmittance collapses at the rim, the
+## in-scatter peaks there, and what is drawn is a **sub-pixel ring point sampled**, which reads as the planet
+## changing albedo and, under a frame meter pinned at its ceiling, as a white halo. Evert, 2026-10-25: *"we are
+## drawing the atmosphere from way too far away, as it changes the albedo."*
+##
+## It is the same sampling law as the detail ladders — **full while a pixel holds four samples of the feature,
+## gone by two** — which is why the fade is `AIR_RING_FADE` and not a single threshold.
+static func air_ring_pixels(depth: float, distance: float, pixel_angle: float) -> float:
+	if depth <= 0.0 or distance <= 0.0 or pixel_angle <= 0.0:
+		return 0.0
+	return (depth / distance) / pixel_angle
+
+
+## **The pair of thresholds the air fades in between**, in pixels of its own limb ring: nothing below 2, full
+## above 4. For Earth that is 44,000 km and 22,000 km; for Jupiter 96,000 and 48,000 — against the 1.25 Gm and
+## 13.5 Gm the old "is it bigger than a point" test allowed, where the ring is a fraction of a pixel.
+##
+## **The 15-18 Mm sunset is comfortably inside it**: Earth's ring there is ~5 px, which is why that work looked
+## right and Jupiter at 6.95 Gm — 0.3 px — did not.
+const AIR_RING_FADE := Vector2(2.0, 4.0)
+

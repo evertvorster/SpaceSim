@@ -454,12 +454,30 @@ func _print_build() -> void:
 ## The gate is the setting, read through `get_value` so it stays hot, and the pass is told `blend = 0` when the
 ## air should not be drawn — a frame with it off is left exactly as it was drawn.
 ##
-## **The tier test is `update_lod`'s own**, not a second opinion about size. The pass dispatches over the whole
-## frame, so an atmosphere too small to be a disc costs a full-screen compute pass to draw nothing — measured
-## as 340 -> 240 fps in empty space. `SpacesimLod` owns the arithmetic and the threshold, and borrowing both is
-## what keeps "too small to draw" one rule in the project. **A distance gate was tried and is wrong in the
-## other direction**: four atmosphere-radii made the air vanish until the body covered a quarter of the screen,
-## which reads as the LOD being skipped.
+## **The gate is the AIR's own resolution, not the size of its disc** — and it was the disc until 2026-10-25,
+## which is how the air came to be drawn 13.5 Gm from Jupiter (Evert, flying: *"we are drawing the atmosphere
+## from way too far away, as it changes the albedo"*). At that distance the body is nine pixels across, so
+## every pixel of it is a grazing chord: the transmittance falls to zero at the rim and the in-scatter climbs to
+## its maximum there, and the whole picture — a dark disc with a bright ring — is **a sub-pixel structure point
+## sampled**. With the frame meter pinned at its ceiling on an empty scene, that ring blooms into a white halo.
+##
+## **The quantity that decides is the ring's own width**, which is just the air's depth projected:
+##
+##     ring_px = (sky_top / distance) / pixel_angle
+##
+## — the angular span over which the column is long. It is the same sampling law as the detail ladders: full
+## while a pixel holds four samples of the feature, gone by two. That is 44,000 km for Earth and 96,000 km for
+## Jupiter, against 1.25 Gm and 13.5 Gm before, and the sunset at 15-18 Mm — a ring of ~5 px — is comfortably
+## inside it.
+##
+## **A fade and not a step**, because every boundary in this project is a pair of thresholds with a dead band:
+## the air arrives over 2-4 px of ring instead of appearing. Below 2 px the pass is told `blend = 0` and the
+## callback returns before it builds anything, so a distant frame still costs nothing: measured 340 -> 240 fps
+## in empty space when the air was drawn for a body too small to be a disc at all.
+##
+## **A distance gate was tried before and is wrong in the other direction** — four atmosphere-radii made the air
+## vanish until the body covered a quarter of the screen, which reads as the LOD being skipped. This is not
+## that: it is a threshold on what the effect would *look* like, not on how far away the observer is.
 func _update_atmosphere_volume(observer: Vector3) -> void:
 	if _atmosphere_pass == null or _camera == null:
 		return
@@ -472,15 +490,19 @@ func _update_atmosphere_volume(observer: Vector3) -> void:
 		return
 	var distance := observer.distance_to(air["centre"])
 	var pixel := SpacesimLod.pixel_angle(_camera.fov, float(_camera.get_viewport().size.y))
-	var screen := SpacesimLod.screen_radius_pixels(
-		SpacesimLod.angular_radius(float(air["atmosphere_radius"]), distance), pixel
+	# **The air's own limb ring, in pixels** — the depth of the air projected at this distance, which is the
+	# width over which the column, and so the picture, changes. `SpacesimLod` owns both the arithmetic and the
+	# fade bounds, so "too small to draw" stays one rule in the project.
+	var ring := SpacesimLod.air_ring_pixels(
+		float(air["atmosphere_radius"]) - float(air["planet_radius"]), distance, pixel
 	)
-	if screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS:
+	var blend := smoothstep(SpacesimLod.AIR_RING_FADE.x, SpacesimLod.AIR_RING_FADE.y, ring)
+	if blend <= 0.0:
 		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
 		return
 	_atmosphere_pass.prepare(
 		_camera, air["centre"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
-		air["sun_direction"], air["air"], 1.0, air.get("deck", {})
+		air["sun_direction"], air["air"], blend, air.get("deck", {})
 	)
 
 

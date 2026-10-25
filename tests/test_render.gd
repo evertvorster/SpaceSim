@@ -41,6 +41,7 @@ func run(h, root: Node) -> void:
 	_test_the_condensation_levels(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
 	_test_the_greenhouse(h, scene)
+	_test_the_air_is_drawn_only_where_its_ring_resolves(h, scene)
 	_test_the_air_takes_its_share_of_the_starlight(h, scene)
 	_test_hiding_a_body_hides_everything_it_draws(h, scene)
 
@@ -806,6 +807,61 @@ func _test_hiding_a_body_hides_everything_it_draws(h, scene: SpacesimSystemScene
 	h.check(orphaned.is_empty(),
 		"and nothing a body draws sits outside that node, because `P` sets the node alone (%s)"
 			% [orphaned])
+
+
+## **How far away an atmosphere is worth drawing at all** — the air's own limb ring in pixels, not the size of
+## its disc.
+##
+## The gate used to be "is the atmosphere bigger than a point", which let the march run out to **13.5 Gm** for
+## Jupiter. At that distance the body is nine pixels across, so *every* pixel of it is a grazing chord: the
+## transmittance collapses at the rim and the in-scatter peaks there, and the whole picture is a sub-pixel ring
+## point sampled. Evert, flying: *"we are drawing the atmosphere from way too far away, as it changes the
+## albedo"* — and with the frame meter pinned at its ceiling on an empty scene, that ring blooms.
+##
+## The numbers below are the ones that matter: the sunset flown at 15-18 Mm sits comfortably inside the band,
+## and the 6.95 Gm view that showed the halo sits far outside it.
+func _test_the_air_is_drawn_only_where_its_ring_resolves(h, scene: SpacesimSystemScene) -> void:
+	var pixel := SpacesimLod.pixel_angle(70.0, 1080.0)
+	h.check(pixel > 0.0, "the projection's own pixel angle is available (%.6f rad)" % pixel)
+	var earth := scene.body_by_id("planet:earth")
+	var jupiter := scene.body_by_id("planet:jupiter")
+	h.check(earth != null and jupiter != null, "with two bodies that have air")
+	if earth == null or jupiter == null:
+		return
+	var earth_depth: float = earth.sky_top
+	var jupiter_depth: float = jupiter.sky_top
+
+	# The flown sunset: a ring of several pixels, so the air is drawn at full strength.
+	var sunset := SpacesimLod.air_ring_pixels(earth_depth, 1.6e7, pixel)
+	h.check(sunset > SpacesimLod.AIR_RING_FADE.y,
+		"Earth's ring at 16 Mm is %.1f px, inside the band — the sunset stays" % sunset)
+
+	# The reported failure: a fraction of a pixel, so the air is not drawn at all.
+	var far := SpacesimLod.air_ring_pixels(jupiter_depth, 6.95e9, pixel)
+	h.check(far < SpacesimLod.AIR_RING_FADE.x,
+		"Jupiter's ring at 6.95 Gm is %.2f px, below the band — the halo cannot be drawn" % far)
+
+	# And the old gate's reach, for the record: where the atmosphere's *disc* was 4 px.
+	var old_gate := 6.95e9
+	var old_disc := SpacesimLod.screen_radius_pixels(
+		SpacesimLod.angular_radius(jupiter.radius + jupiter_depth, old_gate), pixel
+	)
+	h.check(old_disc > SpacesimLod.POINT_TIER_SCREEN_RADIUS,
+		"the old gate admitted that view, because the disc was %.1f px" % old_disc)
+
+	# The crossover, so the band cannot drift silently: 2 px of ring on Earth is 44,000 km, not 1.25 Gm.
+	var crossover := earth_depth / (SpacesimLod.AIR_RING_FADE.x * pixel)
+	h.check(crossover > 3.0e7 and crossover < 7.0e7,
+		"Earth's air fades in at about %.0f km, not at a million" % (crossover / 1000.0))
+	h.check(SpacesimLod.air_ring_pixels(0.0, 1.0e7, pixel) == 0.0,
+		"an airless body has no ring, so its air is never drawn")
+	h.check(SpacesimLod.air_ring_pixels(earth_depth, 0.0, pixel) == 0.0,
+		"and a degenerate distance is zero rather than a division")
+	# **The call site, because a law nobody calls is decoration.** Read as source: `main.gd` owns the frame, and
+	# the pass is the only thing that consumes this.
+	h.check(FileAccess.get_file_as_string("res://game/main.gd").contains(
+		"SpacesimLod.air_ring_pixels("),
+		"and the frame gate is what uses it, so the march is not gated on a disc's size")
 
 
 ## **The air takes its share of the star's light on the way IN, and that share is the sunset.**
