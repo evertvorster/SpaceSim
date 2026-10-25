@@ -516,6 +516,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
 	_build_decks(body)
+	_publish_air(body)
 
 	if not body.landable:
 		return
@@ -1026,6 +1027,7 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 		_refine_surface_tiles(
 			body, distance, pixel, (observer - body.node.global_position).normalized(), surface_cap
 		)
+		_face_bodies_at_star(body)
 		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
@@ -1148,8 +1150,52 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 	_surface_maps.attach_bake(bake_pass)
 
 
-## **A deck, per frame, per layer**: the eye and the star in the deck's own frame, and the map it should be
-## sampling.
+## **The air's share of the star's light, at each material's own altitude** — once, here, because the
+## coefficients come from the body's composition and the levels from its condensation profile, and neither
+## changes while the game runs.
+##
+## **A deck is published at its own height, and that is the point of the altitude argument**: a tangent clears
+## the ground for a point above it, so a cloud at 1.4 km is still lit after the ground beside it has gone
+## dark, and is dim and orange while it is. Publishing zero to every layer would put a cloud's sunset at the
+## same instant as the ground's and take the geometry out of it.
+func _publish_air(body: SpacesimSceneBody) -> void:
+	for material in [body.mesh_material, body.ocean_material]:
+		SpacesimBodyRenderer.apply_air(material, body.air, 0.0)
+	for deck in body.decks:
+		SpacesimBodyRenderer.apply_air(deck.material, body.air, deck.height)
+
+
+## **Where the star is, and how wide it looks, for every drawn body** — per frame, and NOT inside `_update_decks`.
+##
+## **The move is the fix for a real trap, and the trap is why the name changed.** The publish used to sit after
+## `_update_decks`' `decks.is_empty()` early return, so a body with no deck — Luna, Mercury, Mars — never got it
+## and kept the uniform's default `Vector3.UP`. That was harmless while the only reader was a deck's shadow, and
+## it is a shading error the moment the surface's own star occlusion reads it: every airless body would have had
+## its terminator computed against a northern sun. Nothing would have reported it.
+##
+## `star_angle` is `asin(R_star / d)` off `SpacesimLod.angular_radius`, the same call the light's own
+## `light_angular_distance` makes, so a body's penumbra and its light's softness are one number.
+func _face_bodies_at_star(body: SpacesimSceneBody) -> void:
+	var star_body := star()
+	var sun := Vector3.UP
+	var star_angle := 0.0
+	if star_body != null:
+		var to_star: Vector3 = star_body.position - body.position
+		sun = to_star.normalized()
+		star_angle = SpacesimLod.angular_radius(star_body.radius, to_star.length())
+	var materials := [body.mesh_material, body.ocean_material]
+	# **A deck is lit by the same star**, and its own shader does its own air and occlusion maths, so it needs
+	# the direction and the width as well as the ground does.
+	for deck in body.decks:
+		materials.append(deck.material)
+	for material in materials:
+		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle)
+
+
+## **A deck, per frame, per layer**: the eye in the deck's own frame, and the map it should be sampling.
+##
+## **Not the star** — that is `_face_bodies_at_star`'s, because it is a surface fact and every body needs it,
+## deck or no deck.
 ##
 ## **Publishing happens when a map lands, not every frame.** The threshold, the ramp gain and the detail
 ## ladder's first octave are all measured off the map in hand, so they must move together and only when it
@@ -1168,14 +1214,6 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 			deck.node.visible = false
 		return
 	var to_eye := observer - body.node.global_position
-	# **Where the star is, in the body's own frame** — the direction a shadow is offset along, and the reason a
-	# shadow moves as the star moves rather than as the ground does.
-	var sun := Vector3.UP
-	var star_body := star()
-	if star_body != null:
-		sun = (star_body.position - body.position).normalized()
-	for material in [body.mesh_material, body.ocean_material]:
-		SpacesimBodyRenderer.face_surface_star(material, sun)
 	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
 		# Divided by the sphere's own radius, because the node's model space is a unit sphere.

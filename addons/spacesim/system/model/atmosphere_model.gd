@@ -308,6 +308,81 @@ static func pressure_at(height: float, surface_pressure: float, air_scale_height
 	return surface_pressure * exp(-height / air_scale_height)
 
 
+## **The air mass along a ray at a given elevation** — a spherical exponential atmosphere's path integral,
+## which is the Chapman function. This is the law the shaders' `star_air_transmittance` transcribes.
+##
+## **A closed-form approximation, and that is deliberate.** The exact integral has no elementary form, and a
+## march over it is a loop per fragment — which is what the code this replaces did, at eight *uniform* steps
+## over a chord that at the limb is ~2,000 km, i.e. 250 km a step against an 8.5 km scale height. It
+## under-integrated the one case that matters and it cost a loop to do it.
+##
+##     m(μ) = 1 / sqrt(μ² + 2H/(πR))
+##
+## One constant, derived from the scale height and the radius: it is `1` overhead and `sqrt(πR/2H)` at the
+## horizon — 34 for Earth against Chapman's 38 — and stays within ~20 % of it in between. Checked against the
+## published values for R/H ≈ 750: 2.0 at μ = 0.5 (true 2.0), 9.6 at 0.1 (9.6), 17.3 at 0.05 (~17),
+## 34 at 0 (38). **Prefer the approximation** — Evert, 2026-10-25: *"if there is a fast approximation, that
+## is to be preferred over an expensive exact simulation."* A factor of 1.1 in the optical depth at the
+## horizon is a shade of red in a sunset; a loop per fragment on every body with air is a frame.
+static func air_mass(cos_elevation: float, scale_height: float, radius: float) -> float:
+	if scale_height <= 0.0 or radius <= 0.0:
+		return 1.0
+	var horizon_term := 2.0 * scale_height / (PI * radius)
+	var mu := clampf(cos_elevation, 0.0, 1.0)
+	return 1.0 / sqrt(mu * mu + horizon_term)
+
+
+## **How far below the vertical horizon the star can be and still reach a point at `altitude`**, as the
+## sine of that angle: `sqrt(1 − (R/(R+h))²)`. Zero at the surface, 1.2° at 1.4 km and 1.8° at 3 km on
+## Earth. **This is what lets a cloud stay lit after the ground beside it has gone dark** — sunset seen from
+## a mountaintop, and it is geometry rather than a knob: the tangent clears the ground for a point above it.
+static func horizon_dip(altitude: float, radius: float) -> float:
+	if radius <= 0.0:
+		return 0.0
+	var ratio := radius / (radius + maxf(altitude, 0.0))
+	return sqrt(maxf(1.0 - ratio * ratio, 0.0))
+
+
+## **The optical depth along the star's own ray**, from a point at `altitude` out of the air: the vertical
+## column above the point (`H·exp(−h/H)`) times the air mass through the star's elevation — measured from that
+## point's own horizon, so a star below the vertical horizon but above the dip still gets a path, a very long
+## and very red one.
+##
+## **Rayleigh's scale height is used for it and the caller multiplies absorption by the same column**, which is
+## not right for ozone (it sits in a 25 km layer rather than following the air) and is exactly what
+## `SpacesimAtmospherePass`'s march does. **Agreeing with the pass matters more than being right**: the ground
+## and the sky over it are one integral, and two laws for one optical depth is how they would come to
+## disagree about how thick the air is.
+static func sun_optical_depth(
+	cos_elevation: float, altitude: float, scale_height: float, radius: float
+) -> float:
+	if scale_height <= 0.0:
+		return 0.0
+	var height := maxf(altitude, 0.0)
+	var column := scale_height * exp(-height / scale_height)
+	var mu := cos_elevation + horizon_dip(height, radius)
+	return column * air_mass(mu, scale_height, radius)
+
+
+## **What survives the trip in**, per channel — `exp(−τ)` for the extinction, which is scattering plus
+## absorption for the Rayleigh column and Mie for its own. The same expression the pass applies to its sun
+## path, so a ridge lit near the terminator and the sky above it cannot disagree about the air.
+##
+## **Per channel and not a scalar**, because that discrepancy *is* the sunset: on Earth at the horizon the
+## blue is cut by ~140× and the red by ~7×, so the light that arrives is orange and dim rather than white.
+static func sun_transmittance(
+	rayleigh: Vector3, rayleigh_height: float, absorption: Vector3,
+	mie: float, mie_height: float, cos_elevation: float, altitude: float, radius: float
+) -> Vector3:
+	var tau_r := sun_optical_depth(cos_elevation, altitude, rayleigh_height, radius)
+	var tau_m := sun_optical_depth(cos_elevation, altitude, mie_height, radius)
+	return Vector3(
+		exp(-(rayleigh.x + absorption.x) * tau_r - mie * tau_m),
+		exp(-(rayleigh.y + absorption.y) * tau_r - mie * tau_m),
+		exp(-(rayleigh.z + absorption.z) * tau_r - mie * tau_m)
+	)
+
+
 ## One species' condensation level — **where a cloud deck sits, derived rather than authored.**
 ##
 ## The parameter is the height at which the species reaches its own `condensation_temperature` in the

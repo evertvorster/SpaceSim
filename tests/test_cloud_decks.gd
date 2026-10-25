@@ -146,9 +146,18 @@ func _test_a_deck_below_its_datum(h, scene: SpacesimSystemScene) -> void:
 ## threshold came from its own distribution, that the eye's position reached the material, and that turning
 ## the switch off hides it.
 func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void:
+	# **A test that depends on a player setting must set it.** A run of the *game* writes
+	# `$XDG_CONFIG_HOME/spacesim/settings.cfg` on exit, and the suite reads that file — so toggling
+	# `render.cloud_decks` off in flight and then running the suite turns every check below into an assertion
+	# about nothing (`_update_decks` returns before it publishes, `tau_full` stays unset, and reading it raises
+	# `Nonexistent 'float' constructor`). Restored afterwards, and never saved: a rig may change the world for
+	# one frame, it may not change the player's settings.
+	var was_on: bool = SpacesimSettings.get_value("render.cloud_decks")
+	SpacesimSettings.set_value("render.cloud_decks", true)
 	var earth := scene.body_by_id("planet:earth")
 	if earth == null or earth.decks.is_empty():
 		h.check(false, "Earth has a deck to drive")
+		SpacesimSettings.set_value("render.cloud_decks", was_on)
 		return
 	var camera := Camera3D.new()
 	root.add_child(camera)
@@ -206,6 +215,7 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	SpacesimSettings.set_value("render.cloud_decks", true)
 	scene.update_lod(camera, 0.016)
 	h.check(deck.node.visible, "and brings it back")
+	SpacesimSettings.set_value("render.cloud_decks", was_on)
 	camera.queue_free()
 
 

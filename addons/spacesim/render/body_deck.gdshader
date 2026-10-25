@@ -104,6 +104,11 @@ uniform float tau_full = 0.0;
 // The eye's offset from the body's centre, **in top radii and in model space** — divided on the host, where
 // the numbers are doubles. Its length picks which of the three cases above this fragment is in.
 uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
+// The body's own radius, in metres. **Declared here and not in the star include**, because the land and the
+// sea already declare it and a uniform declared twice in one program is a redefinition error — the same trap
+// the archive's air include recorded. It is what places a cloud's own horizon (`star_transmission`) and the
+// air column above it.
+uniform float planet_radius = 1.0;
 
 // ===== THE DETAIL BELOW THE MAP =====================================================
 //
@@ -129,6 +134,15 @@ uniform int detail_seed = 0;
 uniform float detail_feature = 0.0;
 uniform float detail_strength : hint_range(0.0, 0.5) = 0.0;
 
+// **The star, and what the air leaves of it.** A cloud is a reflector like the ground: the light that wakes it
+// has crossed the air on the way in, and at the limb that path is thousands of kilometres long — so a cloud
+// on the far side of a lit planet is dim and orange, never a bright spot. Evert, 2026-10-25: *"you should
+// never see bright spots for these clouds from the far side of the planet."*
+//
+// **And the star's own occlusion above it**, which is what makes the light die at the horizon of the cloud's
+// own altitude rather than at the ground's — a deck at 1.4 km stays lit 1.2° after the ground beside it has
+// gone dark, and the transmittance is what decides how red it is while it does.
+#include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 #include "res://addons/spacesim/render/cloud_detail.gdshaderinc"
 
 // Model space, the offset from the body's centre — which for a unit sphere IS its direction. Captured in
@@ -167,6 +181,10 @@ void fragment() {
 	// face, and is how the deck came to be base-mapped from below) and the blend across the slab (which averaged
 	// two decorrelated samplings into a featureless wash — visible as the smooth mid-slab frame). Both are in
 	// the history if the mapping ever needs to be revisited; neither is here.
+	// **One measurement of what a pixel spans, used three times**: the detail ladder is band-limited by it,
+	// and the star's own occlusion is filtered by it — a star narrower than a pixel must be drawn as the step
+	// it averages to, not sampled. On the unit sphere it is an angle, which is the unit both want.
+	float deck_footprint = length(fwidth(local_position));
 	float field = texture(cover, cloud_map_uv(p)).r;
 	// **And the structure the map is too coarse to hold.** `fwidth` of the model-space direction is the angle
 	// one pixel spans, so the fade is in the units the feature sizes are in: no distance, no scale factor, and
@@ -208,7 +226,12 @@ void fragment() {
 	// alpha jumped from `covered * thickness` to `covered` on the way in. The inside case is now the pass's,
 	// which integrates the cross-section instead of switching pictures.
 
-	vec3 radiance = cloud_color * ramp_gain;
+	// **The two things that decide how much star reaches this texel**: whether the body is in front of it at
+	// all, and what the air then took. Composed by multiplication — one is a geometric occlusion at the
+	// star's own angular width, the other a per-channel filter — and neither double-counts the other.
+	vec3 radiance = cloud_color * ramp_gain
+		* star_air_transmittance(p, body_sun, air_altitude, planet_radius)
+		* star_transmission(p, body_sun, deck_footprint);
 
 	// **Both faces draw the same way**: the same albedo, the same alpha, the same engine light. On this branch
 	// the only thing that distinguishes them is the normal, and that only because a surface seen from the inside

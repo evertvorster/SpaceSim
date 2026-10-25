@@ -3,6 +3,11 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+// **The star: where it is, how wide it looks, and what the air leaves of it.** First, because it declares
+// `body_sun` and the include below reads it. The sea's own invented light is `sin(1.5e-3)` of full sun —
+// nothing today — but the two layers are lit by ONE law or by two that will eventually disagree, and a
+// sunset's reflection is where that would show.
+#include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 // **The deck above, as a shadow** — the same law the land uses, so a shadowed shore meets a shadowed sea.
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
@@ -151,20 +156,27 @@ void fragment() {
 	float depth = (sea_level - height) * field_amplitude;
 	float fill = smoothstep(shallow_metres, max(deep_metres, shallow_metres * 1.01), depth);
 	ALBEDO = mix(shallow_color, deep_color, fill);
+	// The air's share, as on the land: per channel, from the body's own coefficients, and it is what turns a
+	// sunset sea orange rather than white.
+	ALBEDO *= star_air_transmittance(up, body_sun, air_altitude, planet_radius);
 	ROUGHNESS = roughness_value;
-	// **The deck's shadow, on the sea as on the land** — the same transmittance, the same uniform, one law in
-	// `deck_shadow.gdshaderinc`. A shadowed shore beside an unshadowed sea would be worse than no shadow.
+	// **Everything that decides how much of the star reaches this point, in one slot** — the star's own
+	// transmission first, then the deck's shadow multiplying it, exactly as the land composes them. `AO` with
+	// `AO_LIGHT_AFFECT = 1.0` is the engine's direct-light occlusion before the light loop; see
+	// `star_transmission.gdshaderinc` and `deck_shadow.gdshaderinc`.
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+	AO = star_transmission(up, body_sun, footprint_angle);
+	AO_LIGHT_AFFECT = 1.0;
 	if (deck_shadow_present()) {
-		AO = deck_shadow_factor(normalize(unit_position), planet_radius);
-		AO_LIGHT_AFFECT = 1.0;
+		AO *= deck_shadow_factor(up, planet_radius);
 	}
 	SPECULAR = specular_value;
 
 	// **One sampling law for everything here**: a feature is drawn while a pixel holds at least four samples of
 	// it, gone by two. There is no near/far gate — there was, `wave_fade = 1 - smoothstep(1 m, 25 m, pixel)`, and it
 	// decided when the sea appeared rather than the law doing it: full below 0.8 km and zero above 20.8 km, which
-	// is why a descent saw nothing until 10 km. See `OCEAN_WAVE_OCTAVES`.
-	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+	// is why a descent saw nothing until 10 km. See `OCEAN_WAVE_OCTAVES`. The footprint itself is measured above,
+	// where the star's occlusion is filtered by it.
 
 	// **The swell runs downwind, so the domain is drawn out along one axis** — the same trick the cloud field uses
 	// for zonal stretching, in the tangent plane instead of in latitude. Without it the sea is an isotropic fbm,

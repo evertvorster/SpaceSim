@@ -665,6 +665,10 @@ static func deck_material(
 	# at every altitude (2026-10-21), so nothing in the shader knows where the base is.
 	material.set_shader_parameter("cover", white_texel())
 	material.set_shader_parameter("veil", 1.0)
+	# **The sphere the air and the occlusion are measured against.** A deck never needed it before — the node
+	# is the body's own unit sphere scaled — but its light now comes from `star_transmission.gdshaderinc`,
+	# which needs the body's radius to place the cloud's own horizon and to integrate the air above it.
+	material.set_shader_parameter("planet_radius", body.radius)
 	# **Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing.** The
 	# authored colour is a palette value; what the deck reflects is `ramp_gain`'s business, one level up.
 	material.set_shader_parameter("cloud_color", palette.srgb_to_linear())
@@ -763,13 +767,40 @@ static func apply_deck_shadow(
 	surface.set_shader_parameter("deck_shadow_floor", DECK_SHADOW_FLOOR)
 
 
-## **Where the star is, in the body's frame** — the direction the shadow is offset along, per frame, because it
-## is the star's motion that moves a shadow and not the ground's.
-static func face_surface_star(material: Material, sun_model: Vector3) -> void:
+## **Where the star is, and how wide it looks, in the body's frame** — the two numbers a surface's own light
+## occlusion is made of, published per frame because both follow the body's distance to the star.
+##
+## `star_angle` is `asin(R_star / d)` from `SpacesimLod.angular_radius` — the same call `SpacesimStarLight`
+## makes for `light_angular_distance`, so the penumbra a surface is shaded with and the softness the engine's
+## own shadow would use cannot disagree. Its width also decides what a pixel can resolve: a penumbra narrower
+## than one pixel is filtered to the step it averages to (`star_transmission.gdshaderinc`).
+static func face_surface_star(material: Material, sun_model: Vector3, star_angle: float) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null:
 		return
-	surface.set_shader_parameter("deck_sun", sun_model)
+	surface.set_shader_parameter("body_sun", sun_model)
+	surface.set_shader_parameter("star_angle", star_angle)
+
+
+## **The air's own share of the star's light, at a material's altitude** — published once, at scene build,
+## because it is derived from what the body is made of and where the layer sits, and neither changes while
+## the game runs. Six uniform writes, and unlike the star's direction they never need repeating.
+##
+## **`air` is the same dictionary `SpacesimAtmospherePass` is fed**, so the ground and the sky over it cannot
+## come to disagree about how thick the air is — which is the whole reason the derivation has one home.
+##
+## **The view half is deliberately absent.** The pass owns the transmittance along the eye ray; a material
+## that applied it too would count the same air twice. One integral, one place each.
+static func apply_air(material: Material, air: Dictionary, altitude: float) -> void:
+	var surface := material as ShaderMaterial
+	if surface == null:
+		return
+	surface.set_shader_parameter("air_rayleigh", air.get("rayleigh", Vector3.ZERO))
+	surface.set_shader_parameter("air_rayleigh_height", float(air.get("rayleigh_scale_height", 0.0)))
+	surface.set_shader_parameter("air_absorption", air.get("absorption", Vector3.ZERO))
+	surface.set_shader_parameter("air_mie", float(air.get("mie", 0.0)))
+	surface.set_shader_parameter("air_mie_height", float(air.get("mie_scale_height", 0.0)))
+	surface.set_shader_parameter("air_altitude", altitude)
 
 
 ## **The reflectance a deck is drawn at**, so that its *average* is the calibrated albedo while its thick tops

@@ -7,6 +7,9 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // geology. The include is the whole mechanism: one field, two compilers.
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+// **The star: where it is, how wide it looks, and what the air leaves of it.** First, because it declares
+// `body_sun` and the include below reads it — a shader compiles top to bottom.
+#include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 // **The deck above, as a shadow.** One law, shared with the sea, so the two cannot disagree.
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
@@ -141,8 +144,9 @@ const float SURFACE_PI = 3.141592653589793;
 const float SURFACE_TAU = 6.283185307179586;
 
 // **The map's own tilt ceiling**, and it is NOT `relief_max_tilt` — see the clamp below. 0.35 is about 19°:
-// steeper than real terrain at a 19 km sampling scale, and the most a normal may lean before the shading
-// fiction starts inventing light.
+// steeper than real terrain at a 19 km sampling scale. **It bounds the lean; it never was the guard against
+// the dark side** — the star's own occlusion is (`star_transmission.gdshaderinc`), because only light that
+// reaches a point can be invented by its normal.
 const float MAP_MAX_TILT = 0.35;
 
 // Model space: the unit-sphere position, which **is** the direction. Captured in `vertex()` because
@@ -200,13 +204,39 @@ void fragment() {
 	// The colour, from the ramp the derivation built, indexed by the same height.
 	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
+	// **The light has crossed the air before it got here**, and that is per channel: blue first, then green,
+	// then red. For a diffuse surface, scaling the reflectance by the transmittance *is* scaling the light it
+	// sees, so this is where the extinction belongs — and it is what makes a ridge near the terminator
+	// orange rather than white instead of having to be dimmed by hand.
+	//
+	// **The specular lobe is NOT reddened by this**: it is built from the light rather than from `ALBEDO`, and
+	// dimming it by luminance would be a different law. At grazing sun the lobe is weak, which is what makes
+	// the omission tolerable; a `light()` override is the only honest fix and it costs the PBR.
+	ALBEDO *= star_air_transmittance(up, body_sun, air_altitude, planet_radius);
 	ROUGHNESS = land_roughness;
-	// **The cloud deck's shadow on the ground**, as the star's transmittance through it — and written into
-	// `AO`/`AO_LIGHT_AFFECT` because the engine turns those into a *direct-light* occlusion before the light
-	// loop, which is exactly a cloud's shadow (and needs no BRDF of our own). See `deck_shadow.gdshaderinc`.
+	// **Everything that decides how much of the star reaches this point, in one slot** — and it is `AO`
+	// because the engine turns that into a *direct-light* occlusion before the light loop, which is exactly
+	// what a shadow is and needs no BRDF of our own. See `deck_shadow.gdshaderinc`.
+	//
+	// **The star's own transmission is the load-bearing one.** The body occludes itself, so a point past the
+	// geometric terminator receives no starlight whatever its shading normal says — and the relief below is a
+	// fiction that leans up to a clamped 19°, far enough to face the sun from well into the dark half. That is
+	// the artefact this factor exists to kill: thin lit outlines tracing every coastline on the night side.
+	// It is applied to the LIGHT and not to the normal on purpose — the tilt is the ground.
+	//
+	// **The footprint is measured here because it is needed by both halves.** This factor is filtered by the
+	// pixel (a penumbra narrower than one is drawn as the step it averages to), and the ladder below is
+	// band-limited by it. One measurement, one currency: the angle one pixel spans.
+	// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
+	// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
+	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
+	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+	AO = star_transmission(up, body_sun, footprint_angle);
+	AO_LIGHT_AFFECT = 1.0;
+	// **A cloud's shadow multiplies the star's rather than replacing it** — a deck cannot make the sun rise.
 	if (deck_shadow_present()) {
-		AO = deck_shadow_factor(normalize(unit_position), planet_radius);
-		AO_LIGHT_AFFECT = 1.0;
+		AO *= deck_shadow_factor(up, planet_radius);
 	}
 	SPECULAR = land_specular;
 
@@ -242,21 +272,23 @@ void fragment() {
 	// "coastlines are lit", which is what a flown screenshot showed.
 	//
 	// **Two ceilings, and they are deliberately different numbers.** This one bounds the MAP's slope: 0.35 is
-	// about 19°, already steeper than real terrain at a 19 km sampling scale and the most a normal may lean
-	// before it starts inventing light. `relief_max_tilt` below bounds the ladder's fine bumps instead, which
-	// are a shading fiction at pixel scale and bear a steeper lean. Tuning the uniform does not move this one —
-	// they answer different questions, and naming the literal is what says so.
+	// about 19° and already steeper than real terrain at a 19 km sampling scale. `relief_max_tilt` below bounds
+	// the ladder's fine bumps instead, which are a shading fiction at pixel scale and bear a steeper lean.
+	// Tuning the uniform does not move this one — they answer different questions, and naming the literal is
+	// what says so.
+	//
+	// **A clamp was never the guard against the dark side, and that is the correction.** It bounds how far a
+	// normal may lean and says nothing about which way the star is: 0.35 still faces the sun from 19° past the
+	// terminator, so the coastlines came back after 2026-10-19 and again on 2026-10-25. What stops them is
+	// `star_transmission()` above — the light is zero where the geometry says the star is below the horizon,
+	// whatever the normal claims. The clamps stay for their own reason (a fiction may not outshout the
+	// geometry it decorates), and the honest fix for the fiction itself is displacement — `Surface.md` S5.
 	slope_east = clamp(slope_east, -MAP_MAX_TILT, MAP_MAX_TILT);
 	slope_north = clamp(slope_north, -MAP_MAX_TILT, MAP_MAX_TILT);
 
 	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
-	// pixel spans — the same quantity the mesh's error budget spends — so the fade needs no distance and
-	// nothing to keep in step with the camera.
-	// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
-	// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
-	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
-	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
-	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+	// pixel spans — measured above, where the star's own occlusion is filtered by it — so the fade needs no
+	// distance and nothing to keep in step with the camera.
 float detail = 0.0;
 	if (detail_max_rungs > 0 && detail_first_octave >= 0 && detail_base_frequency > 0.0) {
 		// **The ladder's first feature**, in radians: octave `first_octave` of the field. Everything below is the

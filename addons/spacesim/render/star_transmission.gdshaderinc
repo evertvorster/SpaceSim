@@ -41,7 +41,76 @@
 // sized by a number nobody supplied.
 uniform float star_angle = 0.0;
 
+// **The star's direction in the body's own frame**, which is the frame every direction on these surfaces is
+// measured in — `unit_position` for the land and the sea, `p` for a deck. It lives here rather than in
+// `deck_shadow.gdshaderinc` because it has three consumers now: a shadow is offset along it, the occlusion
+// below needs it, and so does the air's own extinction. **Include this file before `deck_shadow`** in a
+// shader that wants both: the shadow's functions read it and a shader is compiled top to bottom.
+//
+// It used to be `deck_sun`, and the name is what allowed the surface's publish to sit inside the deck's own
+// per-frame call — where an airless body, having no deck, never got it and kept the default `Vector3.UP`.
+uniform vec3 body_sun = vec3(0.0, 1.0, 0.0);
+
+// ===== THE AIR'S SHARE OF THE STAR'S LIGHT =========================================
+//
+// **The light a surface or a cloud is drawn in is the light that REACHES it**, and on the way in the air has
+// taken its share: blue first, then green, then red — which is why a ridge near the terminator is not white,
+// and why a cloud on the far limb of a lit planet is dim and orange instead of a bright spot. Evert,
+// 2026-10-25: *"Clouds lit from the side firstly have less light hitting them from the absorption from the
+// atmosphere, and their own absorption makes them darker, so you should never see bright spots for these
+// clouds from the far side of the planet."*
+//
+// **The numbers are the pass's, from `body.air`** — the same dictionary `SpacesimAtmospherePass` is fed — so
+// the ground and the sky over it cannot disagree about how thick the air is. **The law is
+// `SpacesimAtmosphereModel`'s**, which is where it is tested; what is here is its transcription, and the one
+// thing that must not drift is the shape.
+//
+// **Zero is the degenerate case, not a branch**: an airless body's coefficients are zero, every optical depth
+// is zero, and the transmittance is exactly 1.
+uniform vec3 air_rayleigh = vec3(0.0);
+uniform float air_rayleigh_height = 0.0;
+uniform vec3 air_absorption = vec3(0.0);
+uniform float air_mie = 0.0;
+uniform float air_mie_height = 0.0;
+// Metres above this body's surface — 0 for the ground and the sea, the deck's own base height for a cloud.
+uniform float air_altitude = 0.0;
+
 const float STAR_MIN_HALF_WIDTH = 1.0e-6;
+
+
+// **The air mass of a spherical exponential atmosphere**, approximated in closed form: `1` overhead,
+// `sqrt(pi R / 2H)` at the horizon (34 for Earth, against the Chapman function's 38), monotone between, and
+// within ~20 % of the exact integral everywhere. The plane-parallel `1/cos` it replaces is *unbounded* at
+// the horizon and wrong by a factor of two a few degrees above it — and the horizon is the whole point.
+// **A closed form and not a march**: eight samples across a chord that at the limb is ~2,000 km, against an
+// 8.5 km scale height, was the previous attempt and it under-integrated the one case that matters.
+float star_air_mass(float mu, float scale_height, float solid_radius) {
+	return inversesqrt(mu * mu + 2.0 * scale_height / (PI * max(solid_radius, 1.0)));
+}
+
+
+// **What survives the trip down to this point**, per channel.
+//
+// `dip` is how far below the vertical horizon the star reaches a point at this altitude — the tangent clears
+// the ground for a point above it, which is why a cloud stays lit a degree or so after the ground beneath it
+// has gone dark. Applied as a shift of the elevation, which gets both ends right (0 at the local horizon, 1
+// overhead) and the middle to well inside the model's own tolerance.
+//
+// Above the local horizon the path is the vertical column, `H*exp(-h/H)`, times the air mass through the
+// elevation, and it grows without bound as the star sets — so the light dies continuously into the sunset
+// rather than being cut.
+vec3 star_air_transmittance(vec3 up, vec3 star_direction, float altitude, float solid_radius) {
+	float height = max(altitude, 0.0);
+	float ratio = solid_radius / max(solid_radius + height, 1.0e-3);
+	float dip = sqrt(max(1.0 - ratio * ratio, 0.0));
+	float mu = clamp(dot(up, star_direction) + dip, 0.0, 1.0);
+	// A zero scale height is an airless body: the column is zero, not a division.
+	float rayleigh_path = air_rayleigh_height * exp(-height / max(air_rayleigh_height, 1.0e-3))
+		* star_air_mass(mu, air_rayleigh_height, solid_radius);
+	float mie_path = air_mie_height * exp(-height / max(air_mie_height, 1.0e-3))
+		* star_air_mass(mu, air_mie_height, solid_radius);
+	return exp(-(air_rayleigh + air_absorption) * rayleigh_path - vec3(air_mie) * mie_path);
+}
 
 
 // The fraction of the star's disk above the horizon at a point whose unit normal is `up`, given the star's

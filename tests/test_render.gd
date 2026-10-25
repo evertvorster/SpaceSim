@@ -35,11 +35,13 @@ func run(h, root: Node) -> void:
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_phase_term_is_a_disc_average(h)
 	_test_shader_defaults_are_the_hosts(h)
+	_test_the_star_occludes_itself(h, scene, root)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_heights_are_derived(h, scene, sol)
 	_test_the_condensation_levels(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
 	_test_the_greenhouse(h, scene)
+	_test_the_air_takes_its_share_of_the_starlight(h, scene)
 	_test_hiding_a_body_hides_everything_it_draws(h, scene)
 
 	scene.container.free()
@@ -804,6 +806,203 @@ func _test_hiding_a_body_hides_everything_it_draws(h, scene: SpacesimSystemScene
 	h.check(orphaned.is_empty(),
 		"and nothing a body draws sits outside that node, because `P` sets the node alone (%s)"
 			% [orphaned])
+
+
+## **The air takes its share of the star's light on the way IN, and that share is the sunset.**
+##
+## The quantity is `exp(-tau)` along the star's own ray, per channel. Three things have to be true for the
+## picture to be right, and none of them is visible to a headless run:
+##
+##   1. the air mass is ~1 overhead and diverges to a finite horizon value (the Chapman function — the
+##      plane-parallel `1/cos` is unbounded there and wrong by a factor of two a few degrees above it);
+##   2. **it is per channel**, which is the whole point: on Earth at the horizon blue is cut ~140x and red ~7x,
+##      so the light arrives orange and dim. That is why a ridge near the terminator, and a cloud at the limb,
+##      can no longer be white — Evert, 2026-10-25: *"you should never see bright spots for these clouds from
+##      the far side of the planet"*;
+##   3. **a point above the surface sees further past its own horizon**, `sqrt(1 - (R/(R+h))^2)` — 0 at the
+##      ground, 1.2 deg at 1.4 km, 1.8 deg at 3 km. That is what keeps a cloud lit after the ground beneath it
+##      has gone dark, from geometry rather than from a knob.
+##
+## **The law lives in `SpacesimAtmosphereModel` and the shader transcribes it**, the arrangement
+## `SpacesimCloudBand` has: a closed form in a shader cannot be run headlessly, so the arithmetic is the
+## model's and a source check pins the shape the shader carries.
+func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScene) -> void:
+	var earth_radius := 6.371e6
+	var scale_height := 8.5e3
+	# (1) The air mass: 1 overhead, sqrt(pi*R/2H) ≈ 34 at the horizon, monotone between, and it beats the
+	# secant it replaced everywhere above the horizon.
+	var overhead := SpacesimAtmosphereModel.air_mass(1.0, scale_height, earth_radius)
+	h.check_near(overhead, 1.0, "the air mass overhead is 1 (%.4f)" % overhead, 5.0e-3)
+	var horizon := SpacesimAtmosphereModel.air_mass(0.0, scale_height, earth_radius)
+	h.check_near(horizon, sqrt(PI * earth_radius / (2.0 * scale_height)),
+		"and at the horizon it is sqrt(pi*R/2H), the spherical answer rather than an infinity (%.1f)"
+			% horizon, 1.0e-6)
+	h.check(horizon > 30.0 and horizon < 40.0,
+		"which is the 38 the Chapman function gives for Earth, inside 20 %% (%.1f)" % horizon)
+	var last := INF
+	var monotone := true
+	for i in 21:
+		var mu := float(i) / 20.0
+		var got := SpacesimAtmosphereModel.air_mass(mu, scale_height, earth_radius)
+		if got > last + 1.0e-9:
+			monotone = false
+		last = got
+	h.check(monotone, "and it decreases all the way from the zenith to the horizon")
+	h.check(SpacesimAtmosphereModel.air_mass(0.5, scale_height, earth_radius) < 2.05,
+		"and at 60 degrees of zenith it is still the secant, near 2.0")
+
+	# (2) Per channel. Earth's own derived coefficients, so this is the air the game actually draws.
+	var earth := scene.body_by_id("planet:earth")
+	h.check(earth != null and not earth.air.is_empty(), "Earth has an air to test")
+	if earth == null or earth.air.is_empty():
+		return
+	var rayleigh: Vector3 = earth.air["rayleigh"]
+	var absorption: Vector3 = earth.air["absorption"]
+	var mie := float(earth.air["mie"])
+	var rayleigh_height := float(earth.air["rayleigh_scale_height"])
+	var mie_height := float(earth.air["mie_scale_height"])
+	var no_air := SpacesimAtmosphereModel.sun_transmittance(
+		Vector3.ZERO, 0.0, Vector3.ZERO, 0.0, 0.0, 1.0, 0.0, earth_radius
+	)
+	h.check(no_air.is_equal_approx(Vector3.ONE),
+		"an airless body's transmittance is exactly 1, which is why the airless case needs no branch")
+	var overhead_t := SpacesimAtmosphereModel.sun_transmittance(
+		rayleigh, rayleigh_height, absorption, mie, mie_height, 1.0, 0.0, earth_radius
+	)
+	h.check(overhead_t.x > 0.85 and overhead_t.x > overhead_t.z,
+		"overhead, the red survives best (%.3f red, %.3f blue)" % [overhead_t.x, overhead_t.z])
+	var horizon_t := SpacesimAtmosphereModel.sun_transmittance(
+		rayleigh, rayleigh_height, absorption, mie, mie_height, 0.0, 0.0, earth_radius
+	)
+	h.check(horizon_t.z < 0.05 * horizon_t.x,
+		"and at the horizon blue is cut far harder than red, so the light is orange (%.4f vs %.4f)"
+			% [horizon_t.z, horizon_t.x])
+	# **The band is wide on purpose.** Its ends are what matter — not white, not black — because the absolute
+	# number is the *model's* optical depth, not a textbook's: Earth's derived red column comes to ~0.12
+	# against the 0.047 a 650 nm Rayleigh coefficient would give, so the sunset here is dimmer and redder than
+	# the standard figure. That is a calibration question and it lives in `clear_sky_albedo`, not here; what
+	# this check pins is that the picture is a sunset at all.
+	h.check(horizon_t.x > 0.005 and horizon_t.x < 0.5,
+		"a sunset's red is dim but present, not white and not black (%.3f)" % horizon_t.x)
+
+	# (3) The dip. A tangent clears the ground for a point above it.
+	h.check_near(SpacesimAtmosphereModel.horizon_dip(0.0, earth_radius), 0.0,
+		"the ground's own horizon is the vertical one", 1.0e-9)
+	var deck_dip := SpacesimAtmosphereModel.horizon_dip(1436.0, earth_radius)
+	h.check_near(rad_to_deg(asin(deck_dip)), 1.2,
+		"a deck at 1.4 km sees 1.2 degrees past the ground's horizon (%.2f deg)"
+			% rad_to_deg(asin(deck_dip)), 0.1)
+	# **The consequence, and the reason it is worth a check**: a cloud one degree above its OWN horizon is
+	# still lit where the ground beside it is dark, and what it is lit by is orange.
+	var cloud_t := SpacesimAtmosphereModel.sun_transmittance(
+		rayleigh, rayleigh_height, absorption, mie, mie_height,
+		-sin(deg_to_rad(0.2)), 1436.0, earth_radius
+	)
+	var ground_t := SpacesimAtmosphereModel.sun_transmittance(
+		rayleigh, rayleigh_height, absorption, mie, mie_height,
+		-sin(deg_to_rad(0.2)), 0.0, earth_radius
+	)
+	h.check(cloud_t.x > ground_t.x,
+		"a lit cloud edge outlives the ground beneath it (%.4f against %.4f)"
+			% [cloud_t.x, ground_t.x])
+
+	# The shader carries the same law, and the same shape is what makes it a transcription rather than a
+	# second opinion. Checked as source, because a shader cannot be run here at all.
+	var code := FileAccess.get_file_as_string(
+		"res://addons/spacesim/render/star_transmission.gdshaderinc"
+	)
+	h.check(code.contains("star_air_mass(") and code.contains("2.0 * scale_height / (PI *"),
+		"the shader's air mass is the round/spherical form, not the secant")
+	h.check(code.contains("star_air_transmittance(") and code.contains("vec3(air_mie) * mie_path"),
+		"and its transmittance is per channel, with Mie through its own column")
+	h.check(FileAccess.get_file_as_string(
+		"res://addons/spacesim/render/body_surface.gdshader"
+	).contains("star_air_transmittance(up, body_sun, air_altitude, planet_radius)"),
+		"which the ground applies to the light it reflects")
+	h.check(FileAccess.get_file_as_string(
+		"res://addons/spacesim/render/body_deck.gdshader"
+	).contains("star_air_transmittance(p, body_sun, air_altitude, planet_radius)"),
+		"and so does a cloud — the limb spots were a cloud drawn in top-of-atmosphere sunlight")
+
+
+## **A body occludes itself, and the surface has to be told so.**
+##
+## A surface's `NORMAL` is a shading *fiction*: `body_surface.gdshader` tilts it by the ground's own relief so a
+## planet shades like terrain instead of like a billiard ball. A tilted normal faces the star from **past the
+## geometric terminator**, so a ridge that should be in darkness is drawn lit — thin bright outlines tracing every
+## coastline in the planet's dark half. Two flights have reported it, and `relief_exaggeration` 12 -> 5 with a 19°
+## clamp only narrowed it: **a clamp bounds how far a normal may lean and says nothing about where the star is.**
+##
+## So the light is zeroed where the geometry says the star is below the horizon, through `AO` with
+## `AO_LIGHT_AFFECT = 1.0` — which is the engine's direct-light occlusion, exactly a shadow, and needs no BRDF of
+## our own. Headless cannot draw it and `tests/shader_check.sh` only proves it compiles, so what is pinned here is
+## the wiring that would fail **silently**: the law is in both surface materials, and **every** drawn body is told
+## where the star is and how wide it looks.
+##
+## **The body is chosen for having no deck, and that is the point of the check.** The publish used to live inside
+## the deck's own per-frame function, after its `decks.is_empty()` early return, so an airless body kept the
+## uniform's default `Vector3.UP` — a northern sun on every terminator in the system, and nothing would have said
+## so.
+func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -> void:
+	for path in [
+		"res://addons/spacesim/render/body_surface.gdshader",
+		"res://addons/spacesim/render/body_ocean.gdshader",
+	]:
+		var shader: Shader = load(path)
+		var named := String(path).get_file()
+		if shader == null:
+			h.check(false, "%s loads" % named)
+			continue
+		h.check(shader.code.contains("star_transmission.gdshaderinc"),
+			"%s includes the star's own transmission" % named)
+		h.check(shader.code.contains("AO = star_transmission("),
+			"and applies it to the light, not to the normal" % [])
+	h.check(
+		FileAccess.get_file_as_string(
+			"res://addons/spacesim/render/star_transmission.gdshaderinc"
+		).contains("uniform float star_angle"),
+		"the law takes the star's own angular radius, which varies 77x across Sol"
+	)
+
+	# **Luna: an airless body, so it has no deck at all** — which is the case the publish used to miss, and the
+	# reason it does not live in the deck's per-frame call any more.
+	var body := scene.body_by_id("moon:luna")
+	h.check(body != null and body.decks.is_empty() and body.mesh_material != null,
+		"the system has an airless body whose surface has to be told anyway")
+	if body == null or body.mesh_material == null:
+		return
+	var star_body := scene.star()
+	h.check(star_body != null, "with a star to be lit by")
+	if star_body == null:
+		return
+
+	# **Three radii out, because the walk skips a body whose disc is under the point tier** — and a headless
+	# viewport is a few tens of pixels tall, so its pixel angle is a hundred times the flying one and a distant
+	# moon rounds to two pixels. This is the distance `test_cloud_decks` drives Earth from for the same reason.
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	camera.global_position = body.node.global_position + Vector3(0.0, 0.0, body.radius * 3.0)
+	camera.basis = Basis.looking_at(
+		(body.node.global_position - camera.global_position).normalized(), Vector3.UP
+	)
+	camera.current = true
+	scene.update_lod(camera, 0.016)
+
+	var to_star: Vector3 = star_body.position - body.position
+	var sun: Variant = body.mesh_material.get_shader_parameter("body_sun")
+	h.check(sun is Vector3, "the body's surface is told where the star is")
+	if sun is Vector3:
+		# Not the uniform's default, which is what an unpublished body keeps — and which would put every
+		# terminator in the system under a sun that is not there.
+		h.check((sun as Vector3).dot(to_star.normalized()) > 0.999,
+			"and it is the star's own direction in the body's frame (%s)" % [sun])
+	var angle: Variant = body.mesh_material.get_shader_parameter("star_angle")
+	h.check(angle is float and float(angle) > 0.0,
+		"with the star's angular radius, which is what sizes the penumbra (%s)" % [angle])
+	if angle is float:
+		h.check_near(float(angle), SpacesimLod.angular_radius(star_body.radius, to_star.length()),
+			"derived from the body's distance, not fixed at one astronomical unit", 1.0e-9)
+	camera.queue_free()
 
 
 ## **A shader uniform's default is the picture a material that missed its publish will draw**, so it has to

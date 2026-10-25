@@ -33,8 +33,9 @@ uniform float deck_threshold : hint_range(0.0, 1.0) = 1.0;
 uniform float deck_tau = 0.0;
 // Metres from this surface to the deck's TOP — the length of the shadow's lever arm.
 uniform float deck_height = 0.0;
-// The star's direction in the body's own frame, which is the frame `unit_position` is in.
-uniform vec3 deck_sun = vec3(0.0, 1.0, 0.0);
+// **The star's direction in the body's own frame** is declared in `star_transmission.gdshaderinc`, which a
+// shader using this one must include FIRST — the shadow is offset along it, and so are the occlusion and the
+// air's extinction. One uniform, one home.
 
 // **How dark a shadow is allowed to get**, as the floor on the light it leaves: `1.0` is no shadow, `0.0` is
 // the physical transmittance with nothing added back.
@@ -75,13 +76,13 @@ vec2 deck_shadow_uv(vec3 direction) {
 
 // How much of the star's light reaches a point whose unit direction is `p`: `exp(-tau · thickness / mu)`.
 float deck_transmittance(vec3 p, float planet_radius) {
-    float mu = dot(p, deck_sun);
+    float mu = dot(p, body_sun);
     // The star is at or below this point's horizon: there is no direct light to shadow.
     if (mu <= 0.0) {
         return 1.0;
     }
     float zenith = max(mu, 0.05);
-    vec3 across = deck_sun - p * mu;
+    vec3 across = body_sun - p * mu;
     float across_length = length(across);
     // **Straight up**: the shadow point is the point itself, and there is no offset to divide by.
     vec3 shadow_direction = p;
