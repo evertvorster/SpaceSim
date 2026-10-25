@@ -45,6 +45,21 @@ func _test_adaptation_halves(h) -> void:
 		"while ten seconds of it settles within a hundredth of a stop (%.4f)" % absf(target_ev - current_ev))
 	h.check(current_ev <= target_ev + 1.0e-9, "and it never overshoots")
 
+	# **And the shader is the same law, checked from the other side.** Everything above is a transcription of
+	# the GPU's arithmetic, so on its own it can only fail if someone edits *this file*: the shader could stop
+	# halving tomorrow and these checks would stay green. `--headless` cannot run the pass (no
+	# `RenderingDevice`), so the strongest headless claim available is on the SOURCE — the ease, the log2
+	# space, the mix, and the rate arriving as a push constant rather than a literal.
+	var source: String = SpacesimExposurePass.FINALIZE_SOURCE
+	h.check(source.contains("exp2(mix("),
+		"the finalize shader eases in log2 space with exp2(mix(...)), which is the law asserted above")
+	h.check(source.contains("1.0 - exp(-params.rate * params.delta)"),
+		"and takes its rate from the uniform block rather than a literal")
+	h.check(not source.contains("0.35"),
+		"so the half-life is a setting, not a number baked into the shader")
+	# **What this cannot see**, said rather than implied: the behaviour needs a render, and
+	# `tests/probe_frame_exposure.gd` is that instrument.
+
 
 func run(h, root: Node) -> void:
 	print("  light")
