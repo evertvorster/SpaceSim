@@ -46,11 +46,17 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // normal is tilted by the height gradient times it. **The silhouette does not change** — that is the mesh's
 // business, and displacement is its own rung.
 
-// **No `mipmaps` flag on these**: Godot picks a lod from the screen-space derivatives of the sampling
-// coordinates, which on an equirect map is correct except at the poles, where the longitude derivative blows
-// up and the map is read at its coarsest levels. That failure mode is *blur*, which is the safe direction,
-// and the fine detail at the poles comes from the ladder rather than from the map.
-uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
+// **`filter_linear_mipmap`, and the two hints are not the same thing.** `filter_linear` sets the sampler's
+// `max_lod` to 0 (`material_storage.cpp:2666-2692`), so the pyramid the build-time map carries
+// (`generate_mipmaps()`) is generated, uploaded and **never read** — and what minified ground does instead is
+// alias, which reads as detail. The lod comes from the screen-space derivatives of the sampling coordinates,
+// which on an equirect map is correct except at the poles, where the longitude derivative blows up and the map
+// is read at its coarsest level: that failure mode is *blur*, which is the safe direction, and the fine detail
+// at the poles comes from the ladder rather than from the map.
+//
+// **The refined maps and the tiles carry no pyramid on purpose** (they are only ever magnified, so the hint
+// costs nothing on them), which is why this is a hint and not an assumption about the texture.
+uniform sampler2D height_map : filter_linear_mipmap, repeat_enable, hint_default_black;
 // **One height map, and no window.** There was a second texture here — a sub-rectangle of the same equirect at a
 // finer raster, blended over the base map — and it is gone: its gate compared the cap's desired *pixels* against
 // the whole map's *texel count*, so it could never fire below a 4K render, and where it could it asked for a

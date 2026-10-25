@@ -34,7 +34,11 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // same texture the land shades from.
 
 // The field, as the land shader receives it. Only the *mask* and the *depth* are used.
-uniform sampler2D height_map : filter_linear, repeat_enable, hint_default_black;
+//
+// **`filter_linear_mipmap`, because `filter_linear` sets `max_lod = 0`** and the build-time map's pyramid would
+// then never be read — minified sea aliases instead of blurring. The land's `height_map` carries the same hint
+// for the same reason, and the same texture. Tiles and refined maps carry no pyramid (only ever magnified).
+uniform sampler2D height_map : filter_linear_mipmap, repeat_enable, hint_default_black;
 // **The tiles over the cap the eye can see**, as one array with a table of rectangles — the map's near field,
 // refined where the eye is looking (`SpacesimSurfaceTiles`). `tile_count` is zero when no tile is in hand, which
 // is the far case and the headless one. **The land reads the same table from the same array**, so the shore is one
