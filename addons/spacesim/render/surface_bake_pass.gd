@@ -88,7 +88,11 @@ func _notification(what: int) -> void:
 	_graveyard.clear()
 	for body_id in _ready:
 		var ready: Dictionary = _ready[body_id]
-		if (ready["rid"] as RID).is_valid():
+		# **Not every entry owns an RID.** A whole-map bake keeps its texture for the material; a tile bake
+		# is copied into the layer array and frees its own texture straight away, so it stores no `rid`. An
+		# unguarded read threw on this teardown the first time a tile bake had landed — an error only on the
+		# quit path, which is why the suite never saw it.
+		if ready.has("rid") and (ready["rid"] as RID).is_valid():
 			rd.free_rid(ready["rid"])
 	_ready.clear()
 	_status = "deleted"
