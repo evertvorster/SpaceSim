@@ -88,7 +88,7 @@ func run(h, root: Node) -> void:
 		"with every face wound the same way round, so no triangle is inside out relative to its neighbours")
 
 	# --- the winding, against the mesh every material here was written for ---------------------------
-	# **`body_surface` culls back faces and `body_atmosphere` culls front ones**, and both were written
+	# **Godot's front face is clockwise seen from outside**, and every material here is drawn from outside
 	# against Godot's own `SphereMesh`. A mesh wound the other way renders inside out — and a sphere seen
 	# inside out still looks like a disc, so the symptom does not announce itself. Measured by comparing
 	# the sign of the enclosed volume, because that is the one thing about winding that is measurable

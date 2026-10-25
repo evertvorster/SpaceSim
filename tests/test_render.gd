@@ -40,7 +40,7 @@ func run(h, root: Node) -> void:
 	_test_the_condensation_levels(h, scene, sol)
 	_test_the_temperature_profile(h, scene, sol)
 	_test_the_greenhouse(h, scene)
-	_test_hiding_bodies_hides_their_air(h, scene)
+	_test_hiding_a_body_hides_everything_it_draws(h, scene)
 
 	scene.container.free()
 
@@ -775,21 +775,34 @@ func _test_the_condensation_levels(h, scene: SpacesimSystemScene, sol: SpacesimS
 			% (methane_level.height if methane_level != null else 0.0))
 
 
-func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:
-	# `P` hides the bodies. **The mesh list is the bodies and nothing else**, because nothing else draws: the
-	# air shell and the cloud deck shells are gone. This check is inverted from what it used to be — it used
-	# to assert the list included the air shells, and now it asserts the list is exactly the surfaces, so a
-	# shell cannot come back without this going red.
-	var meshes := scene.meshes()
-	var surfaces := 0
-	var other := 0
-	for mesh in meshes:
-		if mesh.name.ends_with("Surface"):
-			surfaces += 1
+## **Hiding a body hides everything it draws, because the key sets the body's NODE.**
+##
+## So the property to assert is that everything a body draws is under that node: its surface, its deck
+## shells and its point of light. **Read off the scene tree rather than off `scene.meshes()`**, which
+## returns `body.mesh` and nothing else — an earlier version of this test asserted "no deck shell"
+## against that helper, so the decks came back and the test stayed green, which is worse than not having
+## it.
+func _test_hiding_a_body_hides_everything_it_draws(h, scene: SpacesimSystemScene) -> void:
+	var owned := 0
+	var orphaned: Array[String] = []
+	for node in scene.container.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		var owned_now := false
+		var parent: Node = mesh.get_parent()
+		while parent != null and parent != scene.container:
+			for body in scene.bodies:
+				if body.node == parent:
+					owned_now = true
+					break
+			parent = parent.get_parent()
+		if owned_now:
+			owned += 1
 		else:
-			other += 1
-	h.check(surfaces == scene.bodies.size(), "every body's surface is in the list (%d)" % surfaces)
-	h.check(other == 0, "and nothing else is: no air shell, no deck shell (%d)" % other)
+			orphaned.append(mesh.name)
+	h.check(owned > 0, "every body's surface, decks and point are under its own node (%d meshes)" % owned)
+	h.check(orphaned.is_empty(),
+		"and nothing a body draws sits outside that node, because `P` sets the node alone (%s)"
+			% [orphaned])
 
 
 ## **A shader uniform's default is the picture a material that missed its publish will draw**, so it has to

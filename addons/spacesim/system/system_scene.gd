@@ -874,8 +874,9 @@ func _cloud_palette(
 
 
 ## The star's luminosity and this body's distance from it — the pair every per-body derivation needs and
-## none of them can work out for itself. Distance rather than position, because twenty of the twenty-one
-## kilmetres of precision a GLSL float has at 1.5e11 m are lost the moment it crosses the boundary.
+## none of them can work out for itself. Distance rather than position, because a GLSL float's seven
+## significant digits at 1.5e11 m are worth about 16 km — coarser than an air column is deep — so a
+## subtraction done in the shader would lose the answer.
 func _light_at(body: SpacesimSceneBody) -> Vector2:
 	var star_body := star()
 	if star_body == null or star_body.content == null:
@@ -886,17 +887,10 @@ func _light_at(body: SpacesimSceneBody) -> Vector2:
 	)
 
 
-## Point every atmosphere at the observer and at its star.
-##
-## **Both are handed over as offsets, not positions.** Our bodies sit at ~1.5e11 m and a GLSL float
-## has ~7 significant digits, so a world coordinate would arrive with ~16 km of resolution — against
-## an air 100 km deep. Computed here in double precision, the difference is ~6.4e6 m and arrives with
-## sub-metre resolution.
 ## Point the sky at the camera and set how deep it is drawn.
 ##
-## Called once a frame, like `update_atmospheres()`: the sky follows the **camera**, not the ship,
-## because it is the eye that sees it and nothing about it depends on which body the player is
-## attached to. The depth is read from settings every frame rather than cached, so it is hot by
+## Called once a frame: the sky follows the **camera**, not the ship, because it is the eye that sees it
+## and nothing about it depends on which body the player is attached to. The depth is read from settings every frame rather than cached, so it is hot by
 ## construction like every other setting.
 func update_sky(camera: Camera3D) -> void:
 	if star_sky == null or camera == null:
@@ -956,15 +950,13 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 
 ## Hand every body the tessellation its angular size has earned, once a frame.
 ##
-## **The level is a mesh assignment.** Levels are built once and shared, so a body crossing a boundary
-## points at a different `ArrayMesh`; nothing is regenerated. Hysteresis holds a body that is sitting on
-## a boundary still, because discrete levels changing on a continuous input is a flicker otherwise.
+## **The surface is a patch tree, not one level per body.** `SpacesimPatches` selects which chunks to
+## subdivide from the same pixel budget, and the walk re-runs only when the eye has moved
+## logarithmically far enough to matter — `SpacesimPatches.walk_is_due`.
 ##
-## **And a body too small to be a disc stops being geometry at all**: its mesh and its air shell go, and
-## its point of light appears in their place. The two representations agree in brightness by
-## construction, because the splat's colour and the exposure's sum are the *same expression* —
-## `body_luminance` — so the handoff needs no cross-fade and no dead band. A body that stops being drawn
-## is still lit by, still marked, and still an effect on everything else: this reads `bodies`.
+## **And a body too small to be a disc stops being geometry at all**: its mesh goes, and its point of
+## light appears in its place, coloured by `body_luminance`. A body that stops being drawn is still lit
+## by, still marked, and still an effect on everything else: this reads `bodies`.
 ##
 ## **No body is exempt, the star included.** A star's disc is a fraction of a pixel from any distance,
 ## so it spends almost all of its time as a point of light — and that is right: what it puts on the
@@ -1487,7 +1479,7 @@ func body_luminance(body: SpacesimSceneBody, observer: Vector3, star_position: V
 	)
 
 
-## Triangles the bodies and air shells are currently drawn with, summed over the levels in use.
+## Triangles the bodies are currently drawn with, summed over the patches in use.
 func triangles() -> int:
 	return _triangles
 

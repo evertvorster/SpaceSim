@@ -7,17 +7,16 @@ extends RefCounted
 ## poles and still delivers less silhouette accuracy per triangle than the count suggests; and it has no
 ## hierarchical address. An icosphere subdivides *exactly* — one triangle into four, so levels are
 ## `20 * 4^k` — which makes a level change a pointer assignment, and its triangles carry a cell address
-## (`face 0..19`, level, subdivision path) that terrain patches will subdivide later.
+## (`face 0..19`, level, subdivision path) that `SpacesimPatches` walks.
 ##
 ## **Built at unit radius.** Every body scales the same mesh by its own radius, so the whole engine
 ## shares levels 0 to 5 — 27,300 triangles of mesh data in total, against ~16,000 *per body* before.
 ##
-## **The address is not carried yet, deliberately.** Subdivision is a deterministic function of the
-## level, so the (face, path) address of any triangle is derivable from the level whenever terrain
-## needs it — adding it later is additive, not a migration, because nothing persists a triangle index
-## today. What would have been a migration is a *flat* address or vertex data as the authority on where
-## the surface is, and neither is here: the surface stays `body_surface`'s evaluable function of
-## direction, and this mesh samples it.
+## **The address is derived, not carried.** Subdivision is a deterministic function of the level, so the
+## (face, path) address of any triangle is computable from the level, and that is what `SpacesimPatches`
+## does when it selects which chunks to subdivide. What would have been a migration is a *flat* address
+## or vertex data as the authority on where the surface is, and neither is here: the surface stays
+## `body_surface`'s evaluable function of direction, and this mesh samples it.
 
 ## The golden ratio, for the icosahedron's vertices.
 const PHI := 1.618033988749895
@@ -194,8 +193,10 @@ static func _build(level: int) -> ArrayMesh:
 	var indices := PackedInt32Array()
 	for face in faces:
 		# **Reversed, because Godot's front face is CLOCKWISE seen from outside** — which is what
-		# `SphereMesh` is wound as, and every material here was written against it: `body_surface`
-		# culls back faces and `body_atmosphere` culls front ones. The construction above is the
+		# `SphereMesh` is wound as, and every material here is written against it: a body's materials are
+		# drawn from outside and cull back faces. (The one front-culling consumer, the air shell's
+		# `body_atmosphere.gdshader`, was deleted on 2026-10-19; the convention stays because `SphereMesh`
+		# and every mesh a Godot project adds share it.) The construction above is the
 		# standard counter-clockwise one, so the flip happens here, once, where it can be seen. Getting
 		# it wrong renders a planet inside out — and **an inside-out sphere still looks like a disc**, so
 		# it shows up as a sky that is black from inside and a body with no shading, not as an obvious

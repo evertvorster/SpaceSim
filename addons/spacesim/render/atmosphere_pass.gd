@@ -358,8 +358,10 @@ func _source() -> String:
 ## **The march, in the same units as `glsl-atmosphere`** — Rye Terrell, wwwtyro.net, Unlicense — applied to
 ## a ray from the eye instead of to a shell's fragment.
 ##
-## It is a port of `body_atmosphere.gdshader`'s `sky_color`, and every hard-won correction there is carried
-## across verbatim, because each of them was a bug that showed up as a wrong picture:
+## It is a port of the deleted `body_atmosphere.gdshader`'s `sky_color` — the shell that held the sky
+## until the march replaced it on 2026-10-19, a note now in the vault's `Archive/` — and every hard-won
+## correction from it is carried across verbatim, because each was a bug that showed up as a wrong
+## picture:
 ##
 ## - the march **starts at the eye** (`max(span.x, 0)`), because from inside the air the near root is behind
 ##   the camera and using it made the step size 8,000x too large;

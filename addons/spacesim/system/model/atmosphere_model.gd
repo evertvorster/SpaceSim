@@ -7,8 +7,10 @@ extends RefCounted
 ## (Jeans escape) is the one part that is not built. Everything is a pure function of content, so the
 ## renderer cannot disagree with the model.
 ##
-## The sky itself is `body_atmosphere.gdshader`, which is `glsl-atmosphere` applied to a shell. Its
-## inputs are exactly these numbers — see [[SpaceSim/Atmospheres]].
+## The sky itself is `SpacesimAtmospherePass`: one `shader_type sky` layer marching the frame, built as
+## `glsl-atmosphere` applied to a ray rather than to a shell (the shell and its
+## `body_atmosphere.gdshader` were deleted on 2026-10-19). Its inputs are exactly these numbers — see
+## [[SpaceSim/Atmospheres]].
 
 ## A temperature for the callers that take one and for the internals that must not care. **The air's
 ## reflection does not depend on it** — see `clear_sky_albedo`, where the cancellation is spelled out —

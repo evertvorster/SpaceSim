@@ -9,8 +9,8 @@ extends RefCounted
 ##
 ## **Why a `Sky` and not a sphere mesh.** There is no mesh to keep centred on the camera, an infinite
 ## background cannot be clipped by the far plane, and `EYEDIR` is already a world-space direction —
-## verified by rolling the camera, not assumed — so the `CAMERA_POSITION_WORLD - centre` subtraction
-## that `body_atmosphere` needs, against a GLSL float's ~7 significant digits, cannot arise here.
+## verified by rolling the camera, not assumed — so the `CAMERA_POSITION_WORLD - centre` subtraction the
+## deleted air shell needed, against a GLSL float's ~7 significant digits, cannot arise here.
 ##
 ## **The camera basis is passed in rather than taken from a built-in.** The shader computes where a
 ## star lands on screen and where the pixel is on screen, and those two MUST be computed the same
