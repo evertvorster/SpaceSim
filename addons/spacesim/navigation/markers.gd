@@ -107,6 +107,15 @@ func _build_pool() -> void:
 
 
 ## Rebuild the marker set, place its labels, and hand the rings to the overlay. Call once a frame.
+##
+## **The CANVAS rect, and that is a deliberate difference from the sky, the air and `SpacesimLod.pixel_angle`,
+## which take the render target's size.** The markers are `Control`s in a `CanvasLayer`, and `unproject_position()`
+## returns coordinates in the same space they are laid out in — so this file's space is the canvas's, and the
+## other three's is the 3D buffer's. Under `video.aspect = keep` the canvas is letterboxed over a full-width
+## buffer and the two rects differ, which is the setting this has never been exercised under: the reasoning says
+## the choice is right (an off-screen label should clamp to the edge of the *visible canvas*, not the wider
+## buffer behind it), and no run has confirmed it. Recorded as a watch rather than left as an inconsistency a
+## reader would try to "fix".
 func refresh(camera: Camera3D) -> void:
 	if camera == null or _labels.is_empty():
 		return
