@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # **The GPU suite only, by default.** This script exists to exercise the path that needs a rendering
 # device; the rest of the suite asserts a worker-pool handoff that a GPU present makes synchronous, and
 # belongs in the headless run where it is true. `SPACESIM_TESTS=` (empty) runs everything.
-export SPACESIM_TESTS="${SPACESIM_TESTS-cloud_gpu}"
+export SPACESIM_TESTS="${SPACESIM_TESTS-cloud_gpu,surface_gpu}"
 
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT

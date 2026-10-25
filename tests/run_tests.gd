@@ -54,6 +54,7 @@ var suite_paths: Array = [
 	"res://tests/test_cloud_band.gd",
 	"res://tests/test_cloud_field.gd",
 	"res://tests/test_cloud_maps.gd",
+	"res://tests/test_surface_gpu.gd",
 	"res://tests/test_cloud_gpu.gd",
 ]
 

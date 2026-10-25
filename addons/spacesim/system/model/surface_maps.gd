@@ -740,6 +740,13 @@ func _open() -> bool:
 	return _gpu.open()
 
 
+## How many RIDs the bake device holds right now — **zero between bakes**, which the GPU suite asserts. The same
+## instrument its cloud twin carries, through the same shape of accessor, so a leak in either path is a failure
+## rather than a silence.
+func gpu_live_rids() -> int:
+	return 0 if _gpu == null else _gpu.live_rids()
+
+
 # ===== THE MEASUREMENTS ==============================================================
 
 ## **The value at each 1/64th of the area, ascending** — the table every band edge and the sea level is read

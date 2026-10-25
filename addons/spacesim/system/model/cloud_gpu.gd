@@ -163,9 +163,16 @@ const PARAMS_SIZE := 96
 var _device: RenderingDevice
 ## **How many RIDs this device has created and not freed.** Every bake creates three and frees three, and the
 ## shader and pipeline live until `close()` — so a number that is not zero at teardown is a leak, and this is
-## an instrument rather than a guard: the same class of bug (a per-frame allocation that is never freed)
-## exhausted the frame device's allocator twice in this project, and both times it was found by a flight, in a
-## pass that was looking at someone else's error.
+## an instrument rather than a guard.
+##
+## **Counted only once the RID exists**, which is the whole of its accuracy: three of the five increments used to
+## sit before the `is_valid()` test, so a create that failed left a phantom on the counter and `close()` reported
+## a leak that had not happened. An instrument that cries wolf is worse than none, because the next real leak
+## reads as noise.
+##
+## The same class of bug — a per-frame allocation that is never freed — exhausted the frame device's allocator
+## twice in this project, and both times it was found by a flight, in a pass that was looking at someone else's
+## error.
 var _rids_live := 0
 var _shader: RID
 var _pipeline: RID
@@ -203,17 +210,17 @@ func open() -> bool:
 		device.free()
 		return false
 	_shader = device.shader_create_from_spirv(spirv)
-	_rids_live += 1
 	if not _shader.is_valid():
 		_error = "shader_create_from_spirv() gave an invalid RID"
 		device.free()
 		return false
-	_pipeline = device.compute_pipeline_create(_shader)
 	_rids_live += 1
+	_pipeline = device.compute_pipeline_create(_shader)
 	if not _pipeline.is_valid():
 		_error = "compute_pipeline_create() gave an invalid RID"
 		device.free()
 		return false
+	_rids_live += 1
 	_device = device
 	return true
 
@@ -287,11 +294,11 @@ func bake(
 	)
 	var marker := Time.get_ticks_usec()
 	var texture := _device.texture_create(format, RDTextureView.new())
-	_rids_live += 1
 	last_microseconds["create"] = Time.get_ticks_usec() - marker
 	if not texture.is_valid():
 		_error = "texture_create() gave an invalid RID"
 		return null
+	_rids_live += 1
 
 	var vortex_bytes := _vortex_bytes(planned.stack)
 	var buffer := _device.storage_buffer_create(vortex_bytes.size(), vortex_bytes)

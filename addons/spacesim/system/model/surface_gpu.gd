@@ -34,6 +34,13 @@ extends RefCounted
 
 
 var _device: RenderingDevice
+## **How many RIDs this device has created and not freed** — the same instrument its cloud twin carries, and for
+## the same reason. A whole-map bake creates a texture and a uniform set and frees both; the shader and pipeline
+## live until [method close]. A number that is not zero at teardown is a leak, and the allocator exhaustion that
+## cost this project two flights was found in a pass that was reading someone else's error.
+##
+## **Counted only once the RID exists**, so a failed create cannot leave a phantom and make `close()` cry wolf.
+var _rids_live := 0
 var _shader: RID
 var _pipeline: RID
 var _error := ""
@@ -79,6 +86,7 @@ func open() -> bool:
 		device.free()
 		return false
 	_device = device
+	_rids_live += 2  ## the shader and the pipeline, both checked valid above
 	return true
 
 
@@ -90,8 +98,16 @@ func open() -> bool:
 func close() -> void:
 	if _device != null and _pipeline.is_valid():
 		_device.free_rid(_pipeline)
+		_rids_live -= 1
 	if _device != null and _shader.is_valid():
 		_device.free_rid(_shader)
+		_rids_live -= 1
+	if _rids_live != 0:
+		printerr(
+			"ERROR: SpacesimSurfaceGpu: %d RID(s) created and never freed — a bake's texture and uniform set "
+			% _rids_live
+			+ "must come back, or the device's allocator fills"
+		)
 	_pipeline = RID()
 	_shader = RID()
 	if _device != null:
@@ -137,6 +153,7 @@ func bake(
 	if not texture.is_valid():
 		_error = "texture_create() gave an invalid RID"
 		return null
+	_rids_live += 1
 
 	var image_uniform := RDUniform.new()
 	image_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
@@ -146,7 +163,9 @@ func bake(
 	if not uniform_set.is_valid():
 		_error = "uniform_set_create() gave an invalid RID"
 		_device.free_rid(texture)
+		_rids_live -= 1
 		return null
+	_rids_live += 1
 
 	var params := SpacesimSurfaceField.push_constants(plan_data, w, h, uv_origin, uv_size)
 	# Every `compute_list_*` call takes the list handle FIRST, and it is an `int`.
@@ -168,6 +187,7 @@ func bake(
 
 	_device.free_rid(uniform_set)
 	_device.free_rid(texture)
+	_rids_live -= 2
 
 	if data.size() != w * h * 2:
 		_error = "read back %d bytes for a %dx%d half-float map" % [data.size(), w, h]
@@ -182,3 +202,9 @@ func bake(
 ## call, not a copy of the assembly.
 func _source() -> String:
 	return SpacesimSurfaceField.source()
+
+
+## How many RIDs the device holds right now. **Zero between bakes**, and the GPU suite asserts it: an
+## instrument is only worth having if something fails when it moves.
+func live_rids() -> int:
+	return _rids_live
