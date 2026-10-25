@@ -58,26 +58,6 @@ static func sky_scale(illuminance: float) -> float:
 ## and the exposure cannot drift apart.
 const REFERENCE_LUX := 100_000.0
 
-## --- the sky's own light on the ground -----------------------------------------------------------------
-##
-## **The other half of the air.** The shell draws the scattered light for the *eye*; these constants are
-## how much of it arrives at the *ground*, which is a different integral and a different problem.
-##
-## First order, and named as such: the light the air removes from the beam is the light it has to give
-## back, `DOWN_FRACTION` of an isotropically scattered beam goes down, and `DIFFUSE_MAX` is the ceiling
-## where single scattering stops being the answer. **The ceiling is a limit, not a fit** — without it the
-## form runs away at grazing sun angles, where the beam is fully removed but most of what was removed
-## came off a path nowhere near the ground.
-const SKY_DOWN_FRACTION := 0.5
-const SKY_DIFFUSE_MAX := 0.12
-## The sun's cosine below which the path is taken as grazing rather than infinite.
-const SKY_MIN_COS_ZENITH := 0.05
-## How softly the air's own horizon shades out, in cosine. **This is the twilight term.** The ground goes
-## dark when the sun crosses ITS horizon; the air above it stays lit until the sun drops below the
-## *shell's* horizon, which is `sqrt(1 - (R / (R + h))^2)` lower — about 10 degrees for Earth. That gap is
-## the whole reason a term like this has to be evaluated at the top of the air and not at the ground.
-const SKY_SHADOW_SOFTNESS := 0.1
-
 ## **How many scale heights of air to draw.** The shell's top is derived, not authored: the air thins
 ## exponentially, so "where it ends" is a multiple of `kT/(m-bar g)` and nothing else.
 ##
