@@ -21,10 +21,6 @@ static func data_home() -> String:
 	return _base("XDG_DATA_HOME", ".local/share")
 
 
-static func state_home() -> String:
-	return _base("XDG_STATE_HOME", ".local/state")
-
-
 ## Where this application's settings live.
 static func config_dir() -> String:
 	return config_home().path_join(APP_DIR)

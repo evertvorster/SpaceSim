@@ -178,10 +178,6 @@ static func set_ambient_illuminance(environment: Environment, lux: float) -> voi
 	environment.ambient_light_energy = maxf(lux, 0.0) / REFERENCE_LUX
 
 
-func multiplier() -> float:
-	return attributes.exposure_multiplier
-
-
 ## The tone curve, the ambient and the star's glare.
 ##
 ## AgX rather than ACES: it is the one built for a wide range without the highlight colour shifts ACES

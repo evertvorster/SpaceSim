@@ -1022,7 +1022,7 @@ edit directly.
 
 | Member | |
 |---|---|
-| `config_home()`, `data_home()`, `state_home()` | XDG base directories, with fallbacks applied |
+| `config_home()`, `data_home()` | XDG base directories, with fallbacks applied |
 | `config_dir()`, `data_dir()` | those, plus `spacesim` |
 | `settings_path()` | `config_dir()/settings.cfg` |
 | `ensure_directory(path)` | create it, recursively |
@@ -1037,7 +1037,6 @@ edit directly.
 | `open(path := "")` | load; an empty path means the XDG location |
 | `get_value(key) -> Variant` | the value that stands |
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
-| `reset_value(key, save_now := false) -> bool` | back to the default, erasing the key |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |

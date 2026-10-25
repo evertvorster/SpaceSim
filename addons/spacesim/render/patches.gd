@@ -418,11 +418,3 @@ static func _children(patch: Array, stack: Array) -> void:
 	for digit in kids.size():
 		var kid: Array = kids[digit]
 		stack.append([kid[0], kid[1], kid[2], depth, face, path + str(digit)])
-
-
-static func _push(vertices: PackedVector3Array, normals: PackedVector3Array, at: int, point: Vector3) -> int:
-	vertices[at] = point
-	# On a unit sphere the position IS the normal — the same reason the level meshes carry no extra data,
-	# and why a coarse patch still shades smoothly.
-	normals[at] = point
-	return at + 1

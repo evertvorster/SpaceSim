@@ -85,12 +85,6 @@ static func built_levels() -> int:
 	return _levels.size()
 
 
-## Triangles of a level's mesh, counted from the mesh rather than from the law.
-static func face_count(level: int) -> int:
-	var mesh := mesh_at(level)
-	return mesh.get_faces().size() / 3 if mesh != null else 0
-
-
 ## **The level's worst-case deviation from the sphere, as a fraction of the radius** — the sagitta,
 ## which is what the silhouette error is made of.
 ##

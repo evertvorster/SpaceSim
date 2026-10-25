@@ -141,15 +141,6 @@ const DETAIL_VARIATION := 0.18
 ## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
 ## exactly as steep as it is.
 const DETAIL_RELIEF := 1.0
-## **And water's, which is a fiftieth of the land's** — waves are metres tall and a pixel 400 m across holds the
-## average of a hundred of them, which is flat. Evert, 2026-10-19: *"the ocean needs to be practically smooth
-## until we walk around next to it... waves as tall as mountains is a bit scary."* Gated as well, on the pixel
-## being metres wide: see `body_surface.gdshader`'s `wave_near`/`wave_far`.
-const WAVE_RELIEF := 0.02
-## Where a wave stops existing, in metres of ground per pixel. A 2 m swell is unresolved long before a pixel
-## covers a kilometre, so this is a statement about the wave rather than about the distance.
-const WAVE_NEAR_METRES := 1.0
-const WAVE_FAR_METRES := 25.0
 ## **The amplitude falloff of the octaves below the map**, and the one place the ladder deviates from the field's
 ## own spectrum. Evert, 2026-10-19: *"the landscape looks too smooth now. We need a little graininess coming up when
 ## we are close, but only a tiny amount."*

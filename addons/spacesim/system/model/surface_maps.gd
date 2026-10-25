@@ -695,9 +695,6 @@ static func _drawn(entry: Entry) -> Dictionary:
 	return {"texture": entry.base, "width": entry.width}
 
 
-func entry_for(body_id: String) -> Entry:
-	return _entries.get(body_id)
-
 
 ## How many bakes have run — one per body with a surface, and the suite asserts it does not grow per frame.
 func bakes() -> int:

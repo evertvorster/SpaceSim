@@ -266,7 +266,7 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	# **The instrument the plan's first trap names.** If the policy were being computed and not applied,
 	# the picture would be unchanged and this number with it.
 	# Counted from the MESHES rather than from the law, so this is an independent check of the HUD's
-	# number rather than the same arithmetic twice: `face_count` walks the mesh that is actually there.
+	# number rather than the same arithmetic twice.
 	var drawn := 0
 	for body in scene.bodies:
 		if body.point != null and body.point.visible:

@@ -70,7 +70,6 @@ const FALLBACK_FEATURE_ANGLE := PI / 8.0
 ## count — at 0.5 each octave has a quarter of the power of the one above it, so no number of them
 ## reaches the fine end.
 const NOISE_TYPE := FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-const NOISE_OCTAVES := 8
 const NOISE_GAIN := 0.8
 
 ## **The spectrum is split in half, and only the coarse half is warped by the eddies.**

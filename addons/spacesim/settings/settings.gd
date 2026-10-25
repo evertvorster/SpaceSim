@@ -295,10 +295,6 @@ func set_value(key: String, value: Variant, save_now := false) -> bool:
 	return true
 
 
-func reset_value(key: String, save_now := false) -> bool:
-	return set_value(key, default_of(key), save_now)
-
-
 ## Write the file, if there is anything to write. Never called by get_value: reading a setting
 ## must not touch the disk.
 func save(force := false) -> bool:

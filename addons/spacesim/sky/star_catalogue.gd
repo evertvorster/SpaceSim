@@ -35,9 +35,6 @@ var stars_texture: ImageTexture
 var colour_texture: ImageTexture
 var cells_texture: ImageTexture
 
-## The dimmest star in the file. The depth tunable above this shows the whole sky.
-var faintest := 0.0
-
 
 ## Load and upload. Returns false and says why rather than half-loading.
 func load_file(path: String) -> bool:
@@ -86,17 +83,6 @@ func colour_image_size() -> Vector2:
 
 func cell_image_size() -> Vector2:
 	return Vector2(cells_texture.get_width(), cells_texture.get_height())
-
-
-## The direction and magnitude of one star, in the order the file stores them. Used by the tests and
-## by anything that wants to check the shader's arithmetic against the data.
-func star_at(index: int) -> Array:
-	var width := STAR_WIDTH
-	var image := stars_texture.get_image()
-	var x := index % width
-	var y := index / width
-	return [image.get_pixel(x, y).r, image.get_pixel(x, y).g, image.get_pixel(x, y).b,
-		image.get_pixel(x, y).a]
 
 
 func _rows(n: int, width: int) -> int:

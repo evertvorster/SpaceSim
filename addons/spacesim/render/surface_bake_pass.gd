@@ -238,14 +238,6 @@ func bakes() -> int:
 	return _bakes
 
 
-func pending_width() -> int:
-	return int(_pending.get("width", 0))
-
-
-func status() -> String:
-	return _status
-
-
 func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
 	var rd := RenderingServer.get_rendering_device()
 	if rd == null:

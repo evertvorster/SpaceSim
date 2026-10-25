@@ -126,13 +126,6 @@ func _notification(what: int) -> void:
 				rd.free_rid(rid)
 
 
-## What happened, for a probe or a test to read. Nothing here is authoritative about the picture; it is the
-## instrument that says whether the pass ran at all, because a pass that quietly does nothing looks exactly
-## like a shader that is right.
-func status() -> String:
-	return _status if not _built else "%s, %d frames" % [_status, _frames]
-
-
 ## **Everything the frame needs, handed over in the camera's own view space.**
 ##
 ## Computed in GDScript because that is where `double` is: the offsets are metres between two quantities of

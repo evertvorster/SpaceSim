@@ -90,12 +90,6 @@ func _notification(what: int) -> void:
 					rd.free_rid(rid)
 
 
-## What happened, for a probe or a test to read. The GPU's own value is authoritative; this is the
-## instrument.
-func status() -> String:
-	return _status
-
-
 # --- the shaders ------------------------------------------------------------------------------------
 
 ## One block of the frame each: cap every texel, average the block, weight it by the radial profile.

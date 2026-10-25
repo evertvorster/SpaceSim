@@ -296,9 +296,3 @@ float surface_detail(
 }
 
 
-// The feature size, in radians on the unit sphere, of the finest thing the map can hold -- **two texels of a
-// map `width` wide**. The ladder starts there, so it can never duplicate what the map already shows, and it
-// moves when the map refines because the host recomputes it.
-float surface_map_feature(int width) {
-	return 2.0 * 6.283185307179586 / float(max(width, 1));
-}
