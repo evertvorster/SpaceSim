@@ -546,8 +546,23 @@ static func _level_for(
 ## becomes NaN. The suite caught it, which is the only reason it is not in the file.
 ##
 ## So a body's air reflects what its **own** gases scatter, scaled by its own pressure and gravity, and
-## counts no aerosol at all. A per-body aerosol column is a collection item; an Earth haze on Neptune is
+## counts no aerosol COLUMN. A per-body aerosol column is a collection item; an Earth haze on Neptune is
 ## not an approximation of one.
+##
+## **The aerosol is nevertheless inside `omega`, and that is a measured inconsistency rather than a
+## decision.** The optical depth here counts Rayleigh only, but the single-scatter albedo it multiplies comes
+## from `single_scatter_albedo()`, whose extinction *does* include `MIE_COEFFICIENT` — correctly, because
+## that function's question is "how much of what the air removes is scattering", and the sky shader's air
+## has aerosols. Measured 2026-10-25 over Sol's nine bodies: **only Earth has any absorption, so only Earth's
+## omega moves** — 0.911 with the aerosol share against 0.783 without, every other body reading exactly 1.0
+## either way. Earth's clear-sky air albedo is **0.0554 with it and 0.0476 without**, against a published
+## 0.059. So on the one body where it matters, the two errors partly cancel and land closer than the
+## consistent version does.
+##
+## That is the "check the parts, not only the sum" trap in a new dress, and the honest state is this
+## paragraph: to make the product self-consistent one of two things has to change — count a per-body aerosol
+## column in the depth (which needs real aerosol data, and a zero for Triton), or take the aerosol out of
+## omega for this caller. The second is one parameter and it moves Earth 20% away from the published number.
 ##
 ## Returned **per channel**, like the coefficient it is built from: a Rayleigh atmosphere reflects blue
 ## several times more than red, which is the same fact that makes the sky blue.
