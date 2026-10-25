@@ -320,7 +320,8 @@ static func advect(unit: Vector3, stack: Vortices) -> Vector3:
 ##    rather than hitting the envelope's veto;
 ## 3. the eddies are read at the carried position too, so the texture inside the arm is the arm's own.
 ##
-## **Bake and `intensity()` both come through here**, so the two cannot describe different fields.
+## **The bake comes through here and its GLSL twin is a transcription of it**, so the two cannot describe
+## different fields.
 ##
 ## **It takes plain numbers, not a `Morphology`, and that is the port surface.** A shader cannot be handed
 ## a Resource, so the four derived values it needs arrive as scalars: `mix` is
@@ -335,6 +336,8 @@ static func intensity_at(
 ) -> float:
 	var unit := direction.normalized()
 	var sample := advect(unit, stack)
+	# **The floor: the bands are cloud-POOR, never cloud-free**, and `mix` is the number that lifts them — the
+	# same derived quantity the verdict already produces. `Cloud Layers` §"The floor's driver" has the table.
 	var envelope := mix + (1.0 - mix) * bands_at(sample, cells, ratio, phase)
 	# **The eddies read the carried sample; the detail reads the still one.** `fine` may be null, in which
 	# case there is no high half to add — which is what a caller that only has one generator gets.
@@ -447,65 +450,6 @@ static func eddy_at(unit: Vector3, feature_angle: float, noise: FastNoiseLite) -
 	return (noise.get_noise_3d(
 		stretched.x / feature_angle, stretched.y / feature_angle, stretched.z / feature_angle
 	) + 1.0) * 0.5
-
-
-## **The field, written down once.** Everything else here is a wrapper around this.
-##
-## `bands`, `mix` and `feature` are the row-invariant parts — a band value depends only on latitude, and
-## the other two not even on that — so a bake hoists them and an individual query computes them here.
-## **That hoisting is the whole reason this exists as a separate function**: without it a per-pixel bake
-## pays for a `cos` and a `sqrt` that one row of pixels shares.
-static func intensity_unit(
-	unit: Vector3, bands: float, mix: float, feature: float, noise: FastNoiseLite
-) -> float:
-	# **THE FLOOR: the bands are cloud-POOR, never cloud-free.** `condensation_favouring` runs 1 at rising air
-	# to 0 at sinking air, and multiplying by it made a sinking branch literally cloud-free — which is what
-	# drew cut-paper stripes at every vortex strength, and why a filament could only cross a lane where a
-	# vortex happened to drag it.
-	#
-	# **The floor is `mix`, and that is the whole point: it is the number the verdict already produces.**
-	# `mixing(banding)` says how much the eddies dominate the bands — 0.85 for a `SHREDDED` body, 0.25 for a
-	# `BANDED` one — and "how much the bands matter" is the same question a floor asks:
-	#
-	#   SHREDDED  0.85 -> the bands vary only 0.85..1, so they are barely discernible and the weather is
-	#                     the picture. Evert, 2026-10-17: *"for Earth, the bands should be hardly
-	#                     discernible."*
-	#   BANDED    0.25 -> 0.25..1, so belts and zones are clear, which is what a giant is.
-	#
-	# So one derived number answers both ends, and nothing about it is authored. A moisture budget would be
-	# the fuller answer, but we do not model humidity — and the ratio of band scale to planet *is* the
-	# physical reason a body's bands matter at all, so it is the right stand-in rather than a placeholder.
-	var envelope := mix + (1.0 - mix) * clampf(bands, 0.0, 1.0)
-	if mix <= 0.0 or noise == null:
-		return envelope
-	# The bands are the ENVELOPE and the eddies modulate them, so the structure the circulation imposes
-	# survives at every mixing strength — see the class comment.
-	return clampf(envelope * (1.0 - mix + mix * eddy_at(unit, feature, noise) * 2.0), 0.0, 1.0)
-
-
-## **The field at a direction**: 0 is clear, 1 is full cloud.
-##
-## `morphology` may be a plain object with `banding`, `cells` and `eddy_angular_scale` — the shape is what
-## matters, so a shader twin can be checked against this one.
-static func intensity(
-	direction: Vector3, morphology: SpacesimCloudModel.Morphology, noise: FastNoiseLite,
-	seed_value: int = 0
-) -> float:
-	if morphology == null:
-		return 1.0
-	if morphology.banding == SpacesimCloudModel.Banding.FEATURELESS:
-		# **The noise is skipped, not merely quiet.** A uniform field needs no generator, and the caller
-		# is not asked to build one.
-		return 1.0
-	var unit := direction.normalized()
-	var latitude := asin(clampf(unit.y, -1.0, 1.0))
-	return intensity_unit(
-		unit,
-		SpacesimCloudModel.condensation_favouring(latitude, morphology.cells),
-		mixing(morphology.banding),
-		feature_angle(morphology),
-		noise
-	)
 
 
 ## **The fine half of the spectrum**, which the eddies do NOT carry.

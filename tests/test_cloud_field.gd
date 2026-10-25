@@ -188,20 +188,32 @@ func _test_it_is_continuous_where_the_seam_is(h, earth: SpacesimCloudModel.Morph
 
 	# The pole is the other place a parameterised field goes wrong — a cylinder would pinwheel here.
 	# Sampling a cap around it must stay finite, in range, and continuous with the pole itself.
-	var noise := SpacesimCloudField.noise_for(SpacesimCloudField.seed_for("planet:earth", 0))
-	var pole := SpacesimCloudField.intensity(Vector3(0.0, 1.0, 0.0), earth, noise)
+	# **Through `plan()`, because that is what the bake reads** — the pole has to be right in the shipped
+	# field, not in a simplified copy of it that no longer exists.
+	var plan := SpacesimCloudField.plan(SpacesimCloudField.seed_for("planet:earth", 0), earth)
+	var pole := _field_at(Vector3(0.0, 1.0, 0.0), plan)
 	var bad := 0
 	var worst := 0.0
 	for step in 64:
 		var angle := float(step) / 64.0 * TAU
 		var near_pole := Vector3(cos(angle) * 0.01, 0.99995, sin(angle) * 0.01).normalized()
-		var value := SpacesimCloudField.intensity(near_pole, earth, noise)
+		var value := _field_at(near_pole, plan)
 		if not (is_finite(value) and value >= 0.0 and value <= 1.0):
 			bad += 1
 		worst = maxf(worst, absf(value - pole))
 	h.check(bad == 0, "and 64 samples in a cap at the pole are all finite and in range")
 	h.check(worst < 0.5,
 		"and the cap is continuous with the pole itself (worst %.3f of the field's range)" % worst)
+
+
+## One direction through the real field, with the plan the bake would have used.
+func _field_at(direction: Vector3, plan: SpacesimCloudField.Plan) -> float:
+	if plan.uniform:
+		return 1.0
+	return SpacesimCloudField.intensity_at(
+		direction, plan.mix, plan.cells, plan.ratio, plan.feature,
+		plan.noise, plan.stack, plan.phase, plan.fine
+	)
 
 
 ## Every value in range, and the field's mean is the band profile's mean — the eddy term is written so the
