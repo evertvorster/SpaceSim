@@ -72,6 +72,12 @@ func place_in_frame(subject: Node3D, frame: SpacesimFrame, position: Vector3) ->
 	# **A teleport, not motion.** A save says where something is, so without this the interpolator
 	# would render it gliding in from wherever it used to be. Called *after* moving, which is the order
 	# the engine asks for.
+	#
+	# **The interpolated transform is read first, on purpose.** `get_global_transform_interpolated()`
+	# creates the pump that the reset then talks to, and the engine asks for it to have been read at
+	# least once before a reset — otherwise a followed node can streak on first sight. `game/player_ship`
+	# does the same on the same path; this is where a save load goes.
+	subject.get_global_transform_interpolated()
 	subject.reset_physics_interpolation()
 
 
