@@ -22,8 +22,12 @@ extends RefCounted
 ## makes the metre's *behaviour* checkable headlessly. The only part of Track B that can be.
 ##
 ## **The metre's own policy is the three constants below**, and each says what it is for. What is *not*
-## here is the smoothing (it stays in `SpacesimExposure`, where the existing lerp already lives) and the
-## frame-wide multiply (Track B3).
+## here is the smoothing — the exponential ease in log2 space lives in `SpacesimExposurePass`'s
+## `FINALIZE_SOURCE`, in GLSL, at `ADAPTATION_RATE` — nor the frame-wide multiply, which is the same pass.
+##
+## *(This paragraph sent a reader to `SpacesimExposure` "where the existing lerp already lives". It did for
+## a week; the pass took the adaptation and the lerp went into the shader. `SpacesimExposure` now holds the
+## window and the rate, and nothing that runs a frame.)*
 
 ## The weight's scale, in units of the frame's **half-diagonal**: the centre is `(0,0)` and a corner is
 ## at distance 1.
