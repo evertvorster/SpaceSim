@@ -398,13 +398,18 @@ static func _band_colour(edges: Array, value: float, fallback: Color) -> Color:
 	return edges[edges.size() - 1][2]
 
 
-## A one-texel map at a neutral height, so a body with no bake yet draws its colour ramp rather than black.
+## A one-texel map at the neutral height, so a body with no bake yet draws its colour ramp rather than black.
 ## **The shader's samplers default to black**, which for a height field means "the datum everywhere" — that
 ## happens to be harmless, and a flat 0.5 makes the intent explicit rather than relying on it.
-static func flat_height(value: float) -> ImageTexture:
+##
+## **One image, and it takes no argument.** It used to take the height and cache the first caller's value for
+## the whole process — every caller passed 0.5, so the parameter was a promise the function did not keep.
+const FLAT_HEIGHT := 0.5
+
+static func flat_height() -> ImageTexture:
 	if _flat == null:
 		var image := Image.create_empty(1, 1, false, Image.FORMAT_RH)
-		image.set_pixel(0, 0, Color(value, 0.0, 0.0, 1.0))
+		image.set_pixel(0, 0, Color(FLAT_HEIGHT, 0.0, 0.0, 1.0))
 		_flat = ImageTexture.create_from_image(image)
 	return _flat
 
@@ -458,7 +463,7 @@ static func surface_material(
 	var material := ShaderMaterial.new()
 	material.shader = SURFACE_SHADER
 	material.set_shader_parameter("colour_ramp", ramp)
-	material.set_shader_parameter("height_map", flat_height(0.5))
+	material.set_shader_parameter("height_map", flat_height())
 	material.set_shader_parameter("planet_radius", body.radius)
 	material.set_shader_parameter(
 		"field_amplitude", SpacesimSurfaceField.plan(body.id, body.radius).amplitude
@@ -526,7 +531,7 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("deep_metres", OCEAN_DEEP_METRES)
 	material.set_shader_parameter("roughness_value", OCEAN_ROUGHNESS)
 	material.set_shader_parameter("specular_value", OCEAN_SPECULAR)
-	material.set_shader_parameter("height_map", flat_height(0.5))
+	material.set_shader_parameter("height_map", flat_height())
 	material.set_shader_parameter("planet_radius", body.radius)
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	material.set_shader_parameter("field_amplitude", plan.amplitude)
@@ -803,8 +808,8 @@ static func cloud_gain(albedo: float, palette: Color, mean: float) -> Gain:
 ## **A one-texel white map**, for a deck the model places but the field has nothing to bake for: a
 ## `FEATURELESS` body's uniform shroud, with `threshold = 0` so the whole disc is cloud.
 ##
-## Its own texture rather than [method flat_height]'s, because that one caches a single image whatever value
-## it is asked for — fine where everything wants the same neutral, wrong here.
+## Its own texture rather than [method flat_height]'s, because that one is the neutral height and this has to
+## be white — a deck's `cover` is a field, not a height.
 static var _white: ImageTexture
 static func white_texel() -> ImageTexture:
 	if _white == null:
