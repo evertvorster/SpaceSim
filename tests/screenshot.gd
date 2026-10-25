@@ -142,9 +142,22 @@ func _hide_ship() -> void:
 
 
 ## **What the decks were actually drawn with.** A map that never refined looks exactly like a map that
-## refined and is being sampled wrongly, and neither is visible in the file name — so the width, the
-## threshold and the veil are printed, from the materials the frame was rendered with.
+## refined and is being sampled wrongly, and neither is visible in the file name — so the width, the mip
+## chain, the threshold, the opacity ramp and the detail's own parameters are printed, from the materials
+## the frame was rendered with.
+##
+## **The names are checked against the shader before anything is read.** A rig that reads a uniform by
+## name cannot fail: `get_shader_parameter` returns `null` for a name that no longer exists, so this
+## report printed a plausible `window -` on every run for a whole session after the mechanism it named
+## was deleted, and described a shader that was not there. The uniform list is what makes the name real.
+const DECK_REPORTED := [
+	"cover", "threshold", "veil", "ramp_gain", "tau_full",
+	"detail_strength", "detail_feature", "detail_seed",
+]
+
+
 func _report_decks() -> void:
+	var declared := _deck_uniforms()
 	var decks := 0
 	for node in get_root().find_children("*Deck*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
@@ -153,25 +166,50 @@ func _report_decks() -> void:
 		var material := mesh.material_override as ShaderMaterial
 		if material == null:
 			continue
+		if not declared.is_empty():
+			var missing: Array[String] = []
+			for name in DECK_REPORTED:
+				if not declared.has(name):
+					missing.append(name)
+			if not missing.is_empty():
+				print("SHOT deck %-18s MISMATCH — the shader declares no %s, so the numbers below are not "
+					% [mesh.name, ", ".join(missing)]
+					+ "about what is drawn")
 		var cover := material.get_shader_parameter("cover") as Texture2D
-		# **And the window, because it is a second texture and a picture cannot tell you which one drew.**
-		# `detail_size` zero is the far regime, and a non-zero one names the rectangle the patch occupies in
-		# the map's `(u, v)` — which is the only way to see from outside that it is not covering everything.
-		var detail := material.get_shader_parameter("detail") as Texture2D
-		var detail_size: Vector2 = material.get_shader_parameter("detail_size")
-		var window := "-"
-		if detail_size.x > 0.0 and detail != null:
-			window = "%dx%d at (%s)" % [detail.get_width(), detail.get_height(), str(detail_size)]
+		var mips := "\u2014"
+		if cover != null:
+			var image := cover.get_image()
+			if image != null:
+				mips = str(image.get_mipmap_count())
 		decks += 1
-		print("SHOT deck %-18s base %sx%s  window %s  threshold=%.3f  veil=%.3f" % [
-			mesh.name,
-			"-" if cover == null else str(cover.get_width()),
-			"-" if cover == null else str(cover.get_height()),
-			window,
-			float(material.get_shader_parameter("threshold")),
-			float(material.get_shader_parameter("veil")),
-		])
+		print("SHOT deck %-18s base %sx%s mips=%s  threshold=%.3f  veil=%.3f  ramp=%.3f  tau=%.3f  "
+			% [mesh.name,
+				"-" if cover == null else str(cover.get_width()),
+				"-" if cover == null else str(cover.get_height()),
+				mips,
+				float(material.get_shader_parameter("threshold")),
+				float(material.get_shader_parameter("veil")),
+				float(material.get_shader_parameter("ramp_gain")),
+				float(material.get_shader_parameter("tau_full"))]
+			+ "detail=%.2f of rung %.3f, seed %d" % [
+				float(material.get_shader_parameter("detail_strength")),
+				float(material.get_shader_parameter("detail_feature")),
+				int(material.get_shader_parameter("detail_seed"))])
 	print("SHOT: %d deck(s) in the tree" % decks)
+
+
+## The deck shader's own uniform names, read off the first deck's material — so a name the report
+## prints is a name that exists. Empty when there is no deck in the tree to ask.
+func _deck_uniforms() -> Dictionary:
+	var names := {}
+	for node in get_root().find_children("*Deck*", "MeshInstance3D", true, false):
+		var material := (node as MeshInstance3D).material_override as ShaderMaterial
+		if material == null or material.shader == null:
+			continue
+		for entry in material.shader.get_shader_uniform_list():
+			names[String(entry["name"])] = true
+		break
+	return names
 
 
 ## The frame cost of a view, as numbers. `SHOT_PROFILE=1` reports this **instead of** saving a picture
