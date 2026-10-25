@@ -7,17 +7,20 @@ extends CompositorEffect
 ##
 ## ## Why a pass and not a shell
 ##
-## The shell that drew the air until now could never shade the air in front of the planet's disk, because
-## the geometry that would carry those pixels is *behind* the planet and loses the depth test — its own
-## header says so. A pass owns every pixel, so the air is shaded wherever the ray passes through it: over
-## the disk from space, around the limb, and from inside as the sky.
+## The shell that drew the air until then could never shade the air in front of the planet's disk, because
+## the geometry that would carry those pixels is *behind* the planet and loses the depth test. A pass owns
+## every pixel, so the air is shaded wherever the ray passes through it: over the disk from space, around
+## the limb, and from inside as the sky.
 ##
-## **The clouds are out of this file as of 2026-10-18**, and deliberately: every version of them written
-## here was wrong, and they are rebuilt from a clean slate as a volume of their own. Their reason for living
-## in a volumetric pass still stands — a cloud drawn as a *surface* is lit from one side only, so from below
-## it is a black lid, and passing through it steps the frame's luminance hard enough to swing the exposure —
-## which is why the rebuild is a volume too. **Measured at this baseline: 340 fps in flight**; the deck in
-## the march took it to 90, and that is the cost the rebuild has to earn back.
+## **The clouds went out of this file on 2026-10-18 and came back on 2026-10-21**, and the interval is worth
+## knowing because it is why the deck is drawn as it is. Every version of them written here first was wrong
+## (an opaque deck can only show its thresholded silhouette, and nothing had proved it was translucent), so
+## they were rebuilt from a clean slate as a volume of their own. What returned is a **segment**: the ray is
+## walked front to back — haze, air, deck, air — with the boundaries from `SpacesimCloudBand.spans()`, which
+## is what makes looking up from *below* a deck correct. `MARCHES_DECK` is false because the shell also draws
+## the deck from both sides and the air must not be split at radii nothing occludes; `march_deck`/`deck_span`
+## are kept for the next rung. **Measured at the 2026-10-18 baseline: 340 fps in flight**; the deck in the
+## march took it to 90, and that is the cost each rung has to earn back.
 ##
 ## ## The composite, and what it replaces
 ##

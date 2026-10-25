@@ -316,9 +316,9 @@ static func morphology(
 ## outside in.
 ##
 ## A filter over `SpacesimAtmosphereModel.condensation_levels()` rather than a second derivation: it
-## returns the `LEVEL` regime only, so a `FOG` (colder than its condensation point everywhere — the ice
-## giants) and a `NONE` (never cold enough in the troposphere) contribute nothing, which is their honest
-## answer rather than a missing value.
+## returns the `LEVEL` regime only, so a `DEEP` (it genuinely condenses, but below the depth the model
+## represents — a giant's water cloud) and a `NONE` (never cold enough in the troposphere) contribute
+## nothing, which is their honest answer rather than a missing value.
 static func layers(
 	atmosphere: SpacesimAtmosphere,
 	materials: SpacesimMaterialTable,

@@ -50,10 +50,9 @@ extends RefCounted
 ##   by more than one level, halving it again), not a wall of skirt geometry you can see in wireframe.
 
 ## How deep the tree may go, before a triangle budget stops it. Each level splits a patch into four, so
-## this is the hard ceiling on the finest triangle: 2^-12 of an icosahedron face, which at Earth's radius
-## is about 5 m. The budget is what actually stops the walk.
-## 2^-20 of a face is about 2 m at Earth's radius, which is the finest a walk from 20 m altitude asks for
-## (a 1.3e-4 rad facet) — the budget is what actually stops it.
+## this is the hard ceiling on the finest triangle: 2^-20 of an icosahedron face is about 2 m at Earth's
+## radius, which is the finest a walk from 20 m altitude asks for (a 1.3e-4 rad facet). The budget is what
+## actually stops the walk; this is only the floor under it.
 const MAX_DEPTH := 20
 
 ## **How many times a chunk is subdivided internally**, and the one number that trades walk cost against

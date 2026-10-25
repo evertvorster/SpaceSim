@@ -6,7 +6,8 @@
 //  - `SpacesimCloudGpu`/`SpacesimSurfaceGpu` assemble it as TEXT with a kernel and hand the result to
 //    `shader_compile_spirv_from_source()`, which processes no directives — so `_source()` concatenates
 //    this file in front of the kernel on purpose;
-//  - a Godot fragment shader reaches it with `#include`, and will, when the surface's detail ladder lands.
+//  - a Godot fragment shader reaches it with `#include` — `body_deck.gdshader` does exactly that, for the
+//    detail below the map's own Nyquist.
 //
 // **It declares no `shared` memory, which is what makes it legal in a fragment shader at all.** The cloud
 // field's vortex stack does not have that luxury and stays compute-only.

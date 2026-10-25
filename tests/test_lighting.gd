@@ -1,5 +1,5 @@
 extends RefCounted
-## The star as a light source, and the camera that exposes for it.
+## The star as a light source, and the window the frame's metre clamps into.
 ## The physics here is checkable against measured values, and that is the point: the solar constant
 ## and the Sun's effective temperature are two independently measured numbers the model has to land
 ## on. Whether it *looks* right, and whether exposure pumps while flying, are not checkable and are

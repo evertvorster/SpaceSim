@@ -204,8 +204,9 @@ void fragment() {
 	}
 	SPECULAR = land_specular;
 
-	// **The relief, from four taps of the same map.** `eps` is one texel of *that* map, because a fixed
-	// epsilon would sample detail the map in hand does not hold and read as noise on distant ground.
+	// **The relief, from four taps of the same map.** The tap distance is a multiple of one texel of *that*
+	// map, because a fixed epsilon would sample detail the map in hand does not hold and read as noise on
+	// distant ground.
 	// **Three texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
 	// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
 	// plate belt and the waterline meet — the difference swings the normal tens of degrees from pixel to

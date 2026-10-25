@@ -12,9 +12,11 @@ extends RefCounted
 ## the same shape as `SpacesimPatches.walk_is_due` — and an idle frame does no surface work at all. Bakes run on
 ## the render thread through `SpacesimSurfaceBakePass`, one in flight.
 ##
-## The map carries the shading height, the gradient the normals come from, the ocean mask and the colour bands.
-## The detail *below* the map's texel is the ladder's job (S3), which is a per-pixel evaluation and needs no
-## texture at all.
+## **The map carries one thing: the shading height**, in a single `R16F` channel that every reader takes as
+## `.r`. The gradient the normals come from is differenced off that height at the pixel, the ocean is a
+## comparison against `sea_level`, and the colour bands are the percentile table below — none of them is
+## stored. The detail *below* the map's texel is the ladder's job (S3), which is a per-pixel evaluation and
+## needs no texture at all.
 ##
 ## ## Where the percentile table comes from, and why it is the useful object
 ##
@@ -745,8 +747,8 @@ func _open() -> bool:
 ##
 ## **Sampled, not exhaustive.** `get_pixel()` is a GDScript call, so a full pass over a 2,048 map was already
 ## two million of them and an 8,192 map would be thirty-three — measured in seconds per body, at build, for a
-## percentile. Every `QUANTILE_STEP`th texel in each axis is a regular subsample: unbiased for a distribution,
-## and it makes the cost independent of the map's size.
+## percentile. The subsample step is whatever brings the count under `QUANTILE_BUDGET`, which makes the cost
+## independent of the map's size; a regular stride is unbiased for a distribution.
 static func quantiles_of(image: Image) -> PackedFloat32Array:
 	var bins := PackedInt32Array()
 	bins.resize(HISTOGRAM_BINS)

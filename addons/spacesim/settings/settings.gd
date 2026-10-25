@@ -35,10 +35,11 @@ const KNOWN_VALIDATORS := ["key_binding"]
 
 ## Every setting the engine knows, with the single declaration of its default.
 ##
-## Keys are `section.key`, which is how they appear in the file. PLAYER-scope keys are what the
-## player's file may carry; WORLD-scope keys are resolved from the world's file instead. `min` and
-## `max` are optional guards for the values that would otherwise be able to break something — a
-## wrong camera far plane is a black screen.
+## Keys are `section.key`, which is how they appear in the file, and this file is one machine-written
+## store per player — there is no second, world-scoped store: `enum Scope` has PLAYER and nothing else,
+## because a world's values are content and come from the system's own `.tres`. `min` and `max` are
+## optional guards for the values that would otherwise be able to break something — a wrong camera far
+## plane is a black screen.
 const REGISTRY := {
 	# --- the window and the display. Three sizes, and they are three different things: the canvas
 	# resolution is the UI's coordinate space (and so how large the HUD reads), the render resolution

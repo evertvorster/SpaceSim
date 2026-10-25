@@ -1,17 +1,13 @@
 extends Node3D
 ## Fly **Sol** and land on planets.
 ##
-## The keys below are the registry's **defaults**; every one except Esc is a rebindable setting, and
-## the readout at the bottom of the HUD is generated from whatever is bound rather than from this
-## list.
+## **The controls are the registry's, not this file's.** Every key but Esc is a `bindings.*` setting with a
+## default in `SpacesimSettings`, and the bottom line of the HUD is generated from whatever is bound — so a
+## list written here would be a second copy that drifts. It did: the version of this paragraph before
+## 2026-10-25 had throttle on `W`/`S`, roll on `A`/`D`, and the error budget on the brackets, all three of
+## which had moved. Read the defaults in the registry, or the HUD.
 ##
-##   W / S      throttle (a fraction of the local travel unit)
-##   mouse      pitch and yaw
-##   A / D      roll
-##   Esc        release the mouse    (click to take it back)
-##   P          hide/show the bodies
-##   [ / ]      the mesh error budget (`lod.error_budget`), which is what sets every body's
-##              tessellation — the trim for judging a level's silhouette in flight
+## Esc is the one exception, because it is not a binding: it releases the mouse, and a click takes it back.
 ##
 ## The solar system comes from `systems/sol.tres`; this script only adds input, the camera's
 ## render range and a readout. A different system file should not need this script changed.

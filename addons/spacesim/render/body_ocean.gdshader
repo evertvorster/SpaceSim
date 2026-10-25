@@ -6,12 +6,17 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // **The deck above, as a shadow** — the same law the land uses, so a shadowed shore meets a shadowed sea.
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
-// **The ocean: a level, absorbing surface, and nothing else.**
+// **The ocean: a level, absorbing surface.**
 //
-// Water and land are fundamentally different things, so they are different shaders. This one has **no relief
-// code at all** — not a strength set to zero, an absence — because a sea is the one surface whose height is
-// known exactly. The land shader carries the height field, the band ramp and an eight-rung detail ladder; none
-// of that is here.
+// Water and land are fundamentally different things, so they are different shaders. The sea's *height* is
+// known exactly — it is the datum — so there is no map-derived relief here: the land's height field, band
+// ramp and eighteen-rung ladder are not in this file.
+//
+// **The waves are the exception, and they are not the land's mechanism.** A swell is a shape with a
+// wavelength and a direction, so it is generated from its own seed, stretched downwind
+// (`wave_stretch`) and faded by what a pixel can resolve — see `OCEAN_WAVE_METRES` and
+// `OCEAN_WAVE_RELIEF` in `body_renderer.gd`. The tone octaves below are the same generator at a coarser
+// scale: what makes a sea read as water rather than as ground.
 //
 // ---------------------------------------------------------------- WHY IT IS OPAQUE
 //

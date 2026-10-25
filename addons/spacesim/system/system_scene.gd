@@ -621,17 +621,6 @@ func _add_lighting() -> void:
 	container.add_child(world_environment)
 
 
-## **How tall this body's air is** — the one fact about the air that something still asks for.
-##
-## Derived, because it is a property of the air: `SHELL_SCALE_HEIGHTS` scale heights of it, and one
-## authored altitude for the whole system is right for exactly one body — 100 km is twelve scale heights
-## over Earth and four over Jupiter, where the air is still 2% of surface density at the top. Floored by
-## the framing's own atmosphere altitude, because the atmosphere frame begins there.
-##
-## **Nothing here draws anything.** The shell that used to be built from these numbers is gone, and the
-## march that draws the air (`SpacesimAtmospherePass`, merged as `416294b`) is given the numbers, and the
-## camera's
-## far plane reads it (`sky_reach`) and it is a fact about the body rather than about a renderer.
 ## **Which body's air the frame is looking through** — the nearest one that has any, from the observer, with
 ## everything the march needs. Empty when there is nothing to draw.
 ##
@@ -731,6 +720,17 @@ func near_deck(body: SpacesimSceneBody, observer: Vector3) -> Dictionary:
 	}
 
 
+## **The air's numbers, derived once per body**: its scattering coefficients, its heights, and the
+## dictionary `SpacesimAtmospherePass` reads.
+##
+## **How tall it is, and why that is derived.** `SHELL_SCALE_HEIGHTS` scale heights, floored by the
+## framing's own atmosphere altitude — one authored altitude for the whole system is right for exactly one
+## body: 100 km is twelve scale heights over Earth and four over Jupiter, where the air is still 2% of
+## surface density at the top. `SpacesimSystemScene.sky_reach()` then reads it, because the camera's far
+## plane has to reach the sky.
+##
+## **Nothing here draws anything.** The shell that used to be built from these numbers is gone; the march
+## that draws the air (`SpacesimAtmospherePass`) is given the numbers, and that is the only consumer.
 func _derive_air(body: SpacesimSceneBody) -> void:
 	if body.content == null or body.content.atmosphere == null:
 		return
@@ -1096,7 +1096,7 @@ func _count_drawn_triangles() -> int:
 ## from them in `_poll_patch_builds`, because `add_surface_from_arrays` is a `RenderingServer` call and
 ## that is the one boundary that cannot be crossed.
 ##
-## **`patch_key` is not written until the arrays land**: the triangle count on the body describes the mesh
+## **`patch_triangles` is not written until the arrays land**: the count on the body describes the mesh
 ## that is actually there, never the one that was asked for.
 func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
 	body.patch_task_chunks = body.patch_chunks

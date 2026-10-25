@@ -177,7 +177,8 @@ func bake(
 	return image
 
 
-## The noise, then the field, then the kernel, under one `#version`. Assembled rather than `#include`d
-## because a source string gets no preprocessor help.
+## The noise, then the field, then the kernel, under one `#version` — assembled by
+## `SpacesimSurfaceField.source()`, because a source string gets no preprocessor help. This is the one
+## call, not a copy of the assembly.
 func _source() -> String:
 	return SpacesimSurfaceField.source()

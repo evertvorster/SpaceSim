@@ -3,7 +3,7 @@
 // Two consumers, and neither is a reimplementation:
 //
 //  - `SpacesimSurfaceGpu` compiles it inside a compute kernel and bakes the whole-body map from it;
-//  - the surface shader will `#include` it for the detail below the map's own Nyquist.
+//  - `body_surface.gdshader` includes it for the detail below the map's own Nyquist.
 //
 // The GDScript side (`SpacesimSurfaceField`) owns the **numbers** — the frequencies, the octave counts, the
 // strengths, the FBM normalisers — and hands them over as a `SurfacePlan`. A constant typed in here would

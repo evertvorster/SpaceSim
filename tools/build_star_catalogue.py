@@ -82,9 +82,13 @@ VERSION = 1
 RECORD = struct.Struct("<hhh hh")   # x, y, z, mag_milli, ci_milli
 CELL = struct.Struct("<II")         # offset, count
 
-## Cells per cube-face edge. 6 * 84^2 = 42,336 cells, so an average cell is 0.97 square degrees:
-## about one star at magnitude 8 and three at the full depth of the catalogue. Finer would cost the
-## same per pixel -- the lookup is one cell either way -- and only shrink the per-cell star list.
+## Cells per cube-face edge. 6 * 32^2 = 6,144 cells, so an average cell is 6.7 square degrees.
+##
+## **84 was the first value and it bought nothing.** It was chosen for a per-cell loop bound, and the
+## magnitude sort made that bound irrelevant: the shader leaves each cell's run early. The fine grid then
+## cost about 3% of the stars, because a cell-bucketed lookup admits a star by the cell its ray lands in
+## and covers it by a half-pixel box — two lattices, so a star within half a pixel of a boundary had its
+## covering pixel across that boundary, already filtered out. Coarsening reduces the loss in proportion.
 GRID = 32
 
 
