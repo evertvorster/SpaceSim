@@ -337,20 +337,6 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	h.check(facing_scale.is_equal_approx(Vector3.ONE * expected_size),
 		"and it carries its size on that same basis, so nothing has to be preserved by hand")
 
-	# **The exposure cannot tell whether a body is drawn** — the trap the plan names, made into a
-	# measurement: if `view_luminance_at` ever learns to skip an invisible body, this goes red, because
-	# Luna's mesh is hidden at the moment of the second call and the two must still agree.
-	var tan_half := Vector2(tan(deg_to_rad(FOV * 0.5)) * 16.0 / 9.0, tan(deg_to_rad(FOV * 0.5)))
-	var looking := (luna.node.global_position - camera.global_position).normalized()
-	var observer := camera.global_position
-	var culled: float = scene.view_luminance_at(observer, looking, tan_half)
-	scene.update_lod(camera)
-	scene.await_patch_builds()
-	var culled_again: float = scene.view_luminance_at(observer, looking, tan_half)
-	h.check(culled > 0.0, "a lit body is what the exposure follows even when it is a point (%.4f)" % culled)
-	h.check(culled == culled_again,
-		"and the sum is the same before and after a cull, so what is drawn cannot change what is lit")
-
 	# Over the threshold the other way round, and the body is still a body the overlay can find.
 	_place_at_screen_radius(camera, luna, to_star_from_luna,
 		SpacesimLod.POINT_TIER_SCREEN_RADIUS * 10.0, pixel)

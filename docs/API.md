@@ -223,11 +223,9 @@ have no derived mass yet, so a moon of one stands still.
 | `meshes() -> Array[MeshInstance3D]` | every body's mesh, for the hide debug key |
 | `ship_start() -> Vector3` | the system's start position |
 | `star() -> SpacesimSceneBody` | |
-| `illuminance_at(position) -> float` | the light falling on a surface at a position, in lux (irradiance × efficacy). **Not what the camera exposes for** — `view_luminance_at` is, because adaptation follows what the eye is *looking at* |
-| `view_luminance_at(observer, forward, tan_half) -> float` | **what the eye is looking at** — the view integrated as each source's radiance weighted by its share of it. A body's share is weighted by its **disc-averaged illuminated fraction**, `SpacesimSurfaceModel.lambert_phase`, not by a clamped cosine. Zero means dark-adapted. The exposure follows this |
 | `update_sky(camera) -> void` | points the sky at the camera, hands it the depth and the gain, and re-sums the ambient when the depth changes. Called once a frame |
-| `update_lod(camera) -> void` | **hands every body the representation its angular size has earned**, once a frame: the screen radius from `camera`'s field, the render target's height and the observer's distance, a level from `SpacesimLod`, and a mesh assignment. **Below `SpacesimLod.POINT_TIER_SCREEN_RADIUS` the body stops being geometry** — mesh hidden, point of light shown, **the star included**, since its disc is a fraction of a pixel from any distance and what it puts on the screen is its own emission over the same area — and `lod.error_budget` is read here, so it is hot. **The exposure cannot tell**: a body that is not drawn still contributes to what the eye is looking at, and `tests/test_lod.gd` asserts the sum is identical before and after a cull |
-| `body_luminance(body, observer, star_position) -> float` | **what the eye sees of a body**, lux/sr: `illuminance · albedo · lambert_phase(α) / π`. The gathering is here; **the expression itself is `SpacesimLuminance.disc_luminance`**, and that is the point — **one expression used by two things**, the exposure's sum and the point of light, which is what makes the handoff at the mesh threshold free rather than a pair of curves that happen to meet |
+| `update_lod(camera) -> void` | **hands every body the representation its angular size has earned**, once a frame: the screen radius from `camera`'s field, the render target's height and the observer's distance, a level from `SpacesimLod`, and a mesh assignment. **Below `SpacesimLod.POINT_TIER_SCREEN_RADIUS` the body stops being geometry** — mesh hidden, point of light shown, **the star included**, since its disc is a fraction of a pixel from any distance and what it puts on the screen is its own emission over the same area — and `lod.error_budget` is read here, so it is hot. **Nothing about the cull is visible outside this function**: a hidden body is still an entry in `bodies`, and nothing else reads whether it is drawn |
+| `body_luminance(body, observer, star_position) -> float` | **what the eye sees of a body**, lux/sr: `illuminance · albedo · lambert_phase(α) / π`. The gathering is here; **the expression itself is `SpacesimLuminance.disc_luminance`**, so the number the point of light is coloured by has one home |
 | `_place_point(…)` | sizes and colours a body's point of light. **It carries the body's whole flux into the pixel once the disc is under one**: `min(1, pi * r_px^2)`, the disc's share of the pixel's solid angle — the same term `sky_stars.gdshader` carries as `lux / d_omega`. Without it a receding body keeps its full surface brightness instead of fading as `1/d^2` (a body at 0.077 px is ~170x over the law), and with it a distant planet lands in the same currency as the star field, which is where it is judged. **It applies the exposure itself**, and that is Godot's doing rather than a choice: Godot does not scale the frame by the camera's exposure, it bakes the factor into the **sky** and into the **light energy**, while the tonemap uses the *Environment's* `tonemap_exposure` (unset here, so 1.0). A material that is `unshaded` therefore receives **no exposure at all** — and a splat is the one such thing in the 3D pass that is not the star's own disc. The read is `camera.attributes.exposure_multiplier`, the same object `SpacesimExposure` mutates, so there is no second source. The engine's factor is `exposure_multiplier * exposure_normalization` and only the first is readable from GDScript; the second is a constant here, so the **variation** is exact and the residual belongs to the splat's absolute level |
 | `triangles() -> int` | triangles the bodies and points are currently drawn with — the instrument for "the picture is unchanged and so is the cost", which means the policy is not being consulted |
 
@@ -342,7 +340,7 @@ physics says (H₂O ≫ CH₄ > CO₂), and N₂, O₂, Ar, He and H₂ are zero
 4.2 K between perihelion and aphelion and sits 2.2 K above its own mean at J2000. Nothing models a
 season — it falls out of asking the orbit for a position.
 
-**Three named limitations, and the third is not the atmosphere's fault.**
+**Two named limitations, both in the sky itself.**
 
 1. The adiabat is **dry**, so Earth's tropopause comes out 4 km low. Moist convection is the fix;
    cloud *bases* are unaffected.
@@ -350,12 +348,11 @@ season — it falls out of asking the orbit for a position.
    depth of 16.6. The real surface is a diffuse **3-3.5 klux** orange dome — about **2.5%** of the
    sunlight gets through 92 bar of CO₂, per the Venera landers. One scattering event cannot make that
    dome; multiple scattering is the fix.
-3. **`illuminance_at()` does not subtract the air**, so the camera exposes for the light at the *top*
-   of the atmosphere rather than at the observer. On Venus that is a factor of forty: the surface
-   renders ~40x too dark *whatever the sky shader does*. The whole point of computing the exposure is
-   to expose for **the light that is actually there**, and the light at a surface is not the light
-   above it. This is the smallest of the three to fix, and the one to do first — see
-   `Notes/Projects/Programming/SpaceSim/Lighting and Exposure.md` §3a.
+A third limitation used to sit here — the exposure exposed for the light at the *top* of the air rather
+than at the observer, worth a factor of forty on Venus — and **`SpacesimExposurePass` closed it** by
+metering the finished frame instead of the model: the air is in the buffer before the metre reads it. See
+`Notes/Projects/Programming/SpaceSim/Lighting and Exposure.md` §3a for the reasoning and §6a for the
+meter.
 
 | `SpacesimAtmosphereModel` | `model/atmosphere_model.gd` — the air's scattering and its **condensation levels**: `static rayleigh_coefficient(atmosphere, materials, temperature)` (the per-channel `kRlh` the sky shader takes, summed as each species' cross-section times its number density), `static absorption_coefficient(...)` and `static single_scatter_albedo(...)` (the visible absorbers — ozone so far — and `w = scatter/extinct`), `static condensation_levels(atmosphere, materials, gravity, equilibrium, body)` (**`body` is optional**, and where it carries `overrides.mean_surface_temperature` that pinned temperature IS the surface — ignoring it was the bug that kept the giants from having a deck at all, since `sol.tres` has carried Jupiter's 165 K since it was authored), `static condensation_temperature_at(material, fraction, total_pressure)` (**Clausius-Clapeyron at the species' PARTIAL pressure**, which is worth 80 K on Jupiter's ammonia: 263 Pa condenses it at 159 K, not the 1-atm 240 K) (**where a cloud deck sits**, derived from where a species reaches its `condensation_temperature`; returns per species a `Condensation` with a `Regime` of `LEVEL`, `DEEP` or `NONE` — **`DEEP` means it genuinely condenses but below the depth the model represents** (`MODELLED_PRESSURE_MULTIPLE`, one stated calibration and nothing per body, so a generated system cannot author an impossible depth), `NONE` means the troposphere never gets cold enough. **A level's `height` may be NEGATIVE**: the model's datum is the reference pressure, not a surface, so a gas giant's water cloud is a real deck at −43 km and 7 bar. `temperature_at` extends the adiabat below the datum for the same reason — the clamp at zero height is what made every sub-datum deck inexpressible) — **and it now says HOW each level formed**: `Condensation.formation` is `CONDENSATION` for a gas in the mix, or `REACTION` for a product that is *not* in the mix and exists only where **all** of its `SpacesimSpecies.formed_from` reactants are present (ammonium hydrosulphide is NH3 and H2S meeting at a level, not a gas anyone puts in an atmosphere). **And since 2026-10-20 it says how DEEP the deck is**: `Condensation.thickness` is the **condensate scale height** `(R/L)·T_base²/Γ` — the height over which the saturation mixing ratio falls by e, from Clausius-Clapeyron along the body's own lapse, capped by the tropopause so a cloud cannot rise past it. Derived, so `SpacesimCloudLayer` carries no thickness; zero for a regime that is not `LEVEL`, and zero for a species with no `latent_heat` (this module's *not stated*). Measured: **Earth 1,604 m, Jupiter 3,969 m, Venus 160 m** — Earth and Jupiter are the order of the real decks (Venus's miss is its photochemical H₂SO₄, and its base sits *on* the tropopause so the cap binds rather than the scale). A species that is both an input and a product gets one level, not two, `static pressure_at(height, surface_pressure, scale_height)` (**hydrostatic on ONE scale height, good for about two and no further** — see the note below), `static scale_height(...)` (`kT/(m-bar g)`), `static shell_reach(...)` (**how many scale heights of air to draw** — see **The sky**), `static surface_gravity(body)`, `static reference_temperature(...)` (what content **pinned**, or equilibrium temperature), `static equilibrium_temperature(...)` (§3.6's first row, the placeholder), `static sky_scale(illuminance)`, `static coverage(...)`, and **the air's own reflection**: `static clear_sky_albedo(atmosphere, materials, gravity)` returns the per-channel fraction of starlight a cloudless sky scatters back — `0.5 * omega * (1 - exp(-tau))` with `tau = k(1/m) * H`, the half being the Rayleigh phase function's up/down symmetry and `omega` separating what is scattered from what is absorbed — and `static clear_sky_scalar(...)` weights the three channels (equal weights by default, which is a *stated* simplification: this is an energy question so luminance would be wrong, and the right weights are Planck at the star's effective temperature). **It takes no temperature and that is a result rather than a simplification**: the optical depth is `[sigma p / kT] * [kT / m-bar g] = sigma p / (m-bar g)`, so the temperature cancels exactly — which is also what stops `bond_albedo` depending on itself through the equilibrium temperature computed *from* it. **Aerosols are excluded on purpose:** `MIE_COEFFICIENT` is an Earth-authored volume coefficient applied to every body by the sky shader, and counting it here gave 1.4 Pa Triton an aerosol optical depth of 0.30, pushing its clear-sky albedo past 1.0 and every temperature on it to NaN. Dropping it took Earth's air from 0.123 to **0.055 against a published 0.059**. |
 | | **Three conventions the deck derivation rests on, and every one was got wrong once.** The tropopause is the skin temperature of the **equilibrium** temperature (`tropopause_temperature(equilibrium)`), not of the greenhouse-adjusted surface — passing it the surface put the ceiling 28 K too warm, and `temperature_at`, `surface_temperature` and `condensation_levels` now share the one pairing. And the deck check is a **height** against the literature's altitude ranges, because `pressure_at` cannot span more than a couple of scale heights: Earth's cloud base comes to 0.82 bar against a real ~0.9, Venus's to 3.5 against a real ~0.7–1. And **`condensation_levels`' `equilibrium` argument must be `equilibrium_temperature()`, never `reference_temperature()`** — the latter returns what content *pinned*, and passing a pinned 737 K Venus here raises the tropopause to 620 K and returns `NONE` for every species, deleting the planet's deck (measured 2026-10-20) |
@@ -398,15 +395,14 @@ it off, Godot ignores `light_intensity_lux` entirely and every number below is c
 
 ### `SpacesimExposure` — `RefCounted`
 
-**Computed from the light, not metered from the frame.** Godot's auto-exposure averages the frame and
-drives that average toward middle grey, and it has **no metering mode** — the API is `enabled`,
-`scale`, `speed` and an EV clamp, and nothing else. On a frame that is mostly empty space with one lit
-body in it, it has exactly one way to reach its target: raise exposure until that body is white. Which
-is what it did.
+**The window and the rate live here; the frame is metered.** `SpacesimExposurePass` reads the rendered
+pixels and applies one multiplier to them — the `Lighting` section below has the mechanism. What is left
+in this class is what the pass cannot own: the two ends of the window, the adaptation rate, the reference
+lux the ambient is expressed in, and the camera attributes that must stay attached at identity.
 
-The illuminance at the observer is already derived, so the exposure that puts a lit body at middle
-grey is arithmetic: `multiplier = REFERENCE_LUX / illuminance`. Deterministic, impossible to fool with
-an empty frame, no pumping, and **testable headlessly** — which image-based metering is not.
+**It is not Godot's auto-exposure**, which averages the frame with **no metering mode** at all — the API
+is `enabled`, `scale`, `speed` and an EV clamp, and nothing else — so a frame of empty space with one lit
+body drives it the only way it can: white. The pass is the metered replacement for that, not for this.
 
 | Member | |
 |---|---|
@@ -414,13 +410,10 @@ an empty frame, no pumping, and **testable headlessly** — which image-based me
 | `MIN_MULTIPLIER` | **1/π** — **fully light-adapted**, the floor the exposure may not stop down past. Past a scene luminance of `LIGHT_ADAPTED_LUMINANCE` (100,000 lux/sr, sunlit snow) the eye has nowhere left to go, and that is what being dazzled *is*; a picture that stops down further is modelling a state that does not exist. A sunlit surface filling the view lands at 2.5 and the day sky with the Sun in it at 0.45, both inside it — **the Sun starts to dazzle inside about 0.83 au**, so Venus and Mercury reach the floor and nothing further out does |
 | `MAX_MULTIPLIER` | the top of the same range: **32 stops** above the floor, the wide end of what a human eye spans. Not a state of anything on its own — it is the ceiling the pass's metre clamps its gain to. **The ceiling in force is the setting `exposure.range_stops`**, in stops above the floor: 32.0 is this value and 0.0 allows no boost. Derived from the floor rather than written beside anything, so the floor cannot be dragged around by the ceiling |
 | `max_multiplier_for_stops(stops)` | `MIN_MULTIPLIER * 2^stops` — the arithmetic behind `exposure.range_stops`, so the setting and the window cannot disagree. Pinned by test against `MAX_MULTIPLIER` at 32.0 |
-| `MIN_SOLID_ANGLE` | 9.6e-6 sr — **the eye's own pooling scale**, a disk 0.2° across. Below it a source cannot be resolved as a surface, so it has no surface brightness to adapt to and can only glare. This one number is what makes looking at the Sun mean different things at 1 au and at Saturn |
-| `DAYLIGHT_SKY_LUMINANCE` | 8,000 lux/sr — a clear sky's own luminance (Schlyter's 25,000 lux on the ground is `pi*L`) |
 | `ADAPTATION_RATE` | how fast exposure follows a change, per second |
 | `attributes: CameraAttributesPhysical` | **auto-exposure off**; assign to `Camera3D.attributes` |
-| `static target_multiplier(lux) -> float` | 0.78 at one au (128,000 lux), 707 at Neptune (141 lux) — the 9.8 stops between them is derived, not tuned |
-| `static target_multiplier_for_luminance(lux_per_sr) -> float` | **the form a scene wants**, and the two agree: `target_multiplier(E)` and `target_multiplier_for_luminance(E/pi)` are the same number |
-| `update(lux, delta)` / `update_to(target, delta)` / `snap_to(lux)` | follow a light level, follow a multiplier, or land on it at once |
+| `identity() -> void` | put the camera's multiplier at 1.0, because the pass applies it frame-wide |
+| `static set_ambient_illuminance(environment, lux)` | the night side's light, from the star field's own summed illuminance |
 | `static configure(environment)` | AgX, **both** white points, the ambient, `glow_*` |
 
 **The white point is set twice, and that is not belt-and-braces.** AgX *ignores* `tonemap_white` —
@@ -433,12 +426,14 @@ about 4% and the faint half of the field does not move at all. It is a consisten
 brightness one — an earlier version of this paragraph claimed 2.72×, taken from the class reference's
 description of `tonemap_white`, and that is not what the shader does.
 
-**A luminance, not an irradiance — and that was a real bug.** `illuminance_at()` is a property of where
-the observer *is*; adaptation follows what the observer is *looking at*. Same difference, two symptoms:
-looking at Sol from Saturn's distance faded the whole sky 122×, and there was no body term at all, so a
-planet filling the frame did not stop the exposure down and flying close to Saturn was blown out.
-`SpacesimSystemScene.view_luminance_at` integrates what is actually in front of the eye, as each
-source's radiance weighted by its share of the view, and `MIN_SOLID_ANGLE` is what excludes points.
+**A luminance, not an irradiance — and that is why the metre meters.** The light falling where the
+observer *is* is an irradiance; adaptation follows the **luminance** of what they are looking at. Conflating
+the two produced two reports: looking at Sol from Saturn's distance faded the whole sky 122×, and a planet
+filling the frame did not stop the exposure down at all, so flying close to Saturn was blown out. The
+physics chain that answered it from the scene — the view integrated as each source's radiance weighted by
+its share of it — was superseded on 2026-10-21 by metering the rendered frame, which answers the same
+question from the picture and needs no policy about which bodies count. `Lighting and Exposure` §3a has the
+argument.
 
 > **The dark-adapted multiplier is gone — removed 2026-10-16, and this is why.**
 >
@@ -531,7 +526,6 @@ supplies luminances and gets a multiplier — so its behaviour is checkable head
 | `weight(offset) -> float` | `exp(-(r/SIGMA)^2)`, with `r` in **half-diagonal units** — the centre is 1 and a corner 0.0019. Monotonic in the radius, and steep enough that a bright thing at the perimeter "contributes only a little" |
 | `weighted_mean(samples, width, height) -> float` | the **capped**, weighted mean of a row-major grid. The centre is the grid's own centre, so the weighting is the same shape at any reduction |
 | `target_multiplier(mean) -> float` | `TARGET_AVERAGE / mean`, clamped to `SpacesimExposure.MIN_MULTIPLIER`…`MAX_MULTIPLIER` — the same 32-stop window, so nothing here can run away. A mean of zero **pins at the ceiling** rather than dividing by it |
-| `target_multiplier_for_grid(...)` | the two in one call, for a caller that has a grid and wants a number |
 | `SIGMA` | **0.4.** The one look value here, and the only number that could be tuned without anything becoming wrong: the weights are normalised, so a uniformly lit frame returns its own brightness whatever this is — only the selectivity moves |
 | `CAP` | **1.0**, the reference white. Anything brighter **counts as white**, so a source saturates the metre but cannot own it. This is frame control, *not* protection for the star's brightness — a disc at 24× white survives any realistic dim, because 4.5 stops brings 24 down to 1.0 and it is still clipping |
 | `TARGET_AVERAGE` | **0.18**, middle grey. Derived as far as it can be: an 18%-grey surface lit at `REFERENCE_LUX` reads about 0.23 in this currency, so the metre is **neutral on an ordinarily-lit scene** and moves only when the light or the composition is unusual |
@@ -637,19 +631,16 @@ swept by `sky.star_depth`; the catalogue is a *complete* sky to magnitude 8 and 
 beyond (0.99 at 8, 0.69 at 9), so the setting belongs in 6.5 to 8.0 with 9.5 a soft ceiling.
 
 **The light path.** `SpacesimSystemScene.update_sky(camera)` points the sky at the camera once a frame,
-and `view_luminance_at(observer, forward, tan_half)` answers **what the eye is looking at** — a mean
-luminance over the view, weighted by each source's share of it. It is not `illuminance_at()`, which is
-the light falling on a surface: at 1 au that answer is 128,000 lux whether you are looking at the Sun
-or at empty sky. **Zero means "nothing extended is in front of the eye"**, which the metre answers by
-opening the frame up toward the top of its window — that is what lets the stars appear at all.
+sets its depth and gain from settings, and re-sums the ambient from the catalogue when the depth changes.
+The **frame's** exposure is the pass's: it reads the rendered pixels, so what the eye is looking at is
+whatever the picture ended up containing — an empty frame included, which the metre answers by opening
+up toward the top of its window. That is what lets the stars appear at all.
 
-**"In front of the eye" includes being behind the planet.** `SpacesimLuminance.in_view` is a cone test,
-so on a planet's night side the Sun is in the frame *through the planet* whenever the camera looks at
-the ground — and counting it stopped the exposure down **75,000x** (measured) for a Sun nobody can see,
-taking the sky with it. `SpacesimLuminance.occluded` is a point-to-segment test against one body's
-sphere, applied to the star and to each body; it clamps the projection at the observer, which is what
-keeps the planet under the player's feet from occluding it and lets a Sun just below the horizon stay
-unoccluded. **The tests are `SpacesimLuminance`'s; which bodies may occlude is `SpacesimSystemScene`'s.**
+**What metering made unnecessary.** The chain this replaced integrated the view in GDScript — sources in
+the frame's cone, each weighted by its share of the view, a point-to-segment occlusion test per body, and
+a solid-angle floor at the eye's 0.2° pooling scale so a star could not own the frame. Every one of those
+is a policy about what the *scene* contains, and the rendered frame already contains the answer. The
+reasoning and the measurements are in `Lighting and Exposure`; nothing about them is in the code any more.
 
 **Two ways for a bright object to hide the stars, and only one is built.** This one is *global and slow*:
 the exposure stops down when something extended fills the view. The other is **veiling glare** — the

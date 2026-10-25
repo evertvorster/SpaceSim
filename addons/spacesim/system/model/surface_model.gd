@@ -124,11 +124,11 @@ static func reflectance_terms(
 ##     f(a) = (sin a + (pi - a) * cos a) / pi
 ##
 ## 1 at full, **1/pi at half**, 0 only at new, and smooth across the half moon. That smoothness is the
-## point. `view_luminance_at` used `cos(a)` clamped at zero, which is not a worse approximation but a
+## point. The earlier form was `cos(a)` clamped at zero, which is not a worse approximation but a
 ## different statement: **it deletes every body past the half moon.** At 122 degrees — near the
-## terminator, a crescent — the dot product is -0.53, so the body was dropped from the sum entirely,
-## the exposure rested at the dark-adapted ceiling with that body filling the frame, and the lit part
-## blew out. The true disc average there is 0.098, and it is never zero until the body is exactly new.
+## terminator, a crescent — the dot product is -0.53, so the body was dropped from the sum entirely, and
+## a crescent filling the frame contributed nothing. The true disc average there is 0.098, and it is
+## never zero until the body is exactly new.
 ##
 ## It is better on the gibbous side too, where the disc average includes the bright limb: at 60
 ## degrees it is 0.609 against a cosine of 0.5.

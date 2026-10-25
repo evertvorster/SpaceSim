@@ -78,10 +78,10 @@ static func pixel_angle(fov_degrees: float, render_height: float) -> float:
 ## A body's angular radius as seen from a distance, in radians: `asin(R / d)`.
 ##
 ## **One quantity, several consumers, and two of them want a diameter.** This radius serves the drawn
-## disc, the LOD law, a body's share of the view (`view_luminance_at`, and through it the exposure), the
-## penumbra of a body's shadow, and total-versus-annular — while Godot's `light_angular_distance` wants
-## an angular **diameter in degrees** (the engine's own doc gives the Sun from Earth as "approximately
-## 0.5"), so `SpacesimStarLight.aim_at` passes it `rad_to_deg(2 * angular_radius(R, d))`.
+## disc, the LOD law, the penumbra of a body's shadow, and total-versus-annular — while Godot's
+## `light_angular_distance` wants an angular **diameter in degrees** (the engine's own doc gives the Sun
+## from Earth as "approximately 0.5"), so `SpacesimStarLight.aim_at` passes it
+## `rad_to_deg(2 * angular_radius(R, d))`.
 ##
 ## **Deriving it rather than stating it is the whole point**, and it is the same argument as the light's
 ## strength: a value fixed at one distance is wrong at every other. The constant this replaced was the

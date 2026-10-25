@@ -233,22 +233,6 @@ func view_distance() -> float:
 	return system_frame.travel_length_max
 
 
-## The illuminance at a position, in lux: the light falling on a surface there.
-##
-## **This is not what the camera exposes for.** Adaptation follows what the eye is *looking at*, which
-## is `view_luminance_at()` — and the two are genuinely different quantities (an irradiance versus a
-## luminance), which was a real bug when they were conflated. This one is used for the one-time
-## `snap_to()` at startup and for the atmosphere's own inputs.
-func illuminance_at(position: Vector3) -> float:
-	if star_light == null:
-		return 0.0
-	var star_body := star()
-	var origin := Vector3.ZERO
-	if star_body != null and star_body.node != null:
-		origin = star_body.node.global_position
-	return star_light.lux_at(position.distance_to(origin))
-
-
 ## Point the star's light correctly for something at `position`, and set its strength for that
 ## distance. A single directional light cannot light a whole system from a star, so it lights
 ## wherever the player is: the planet you are at is lit from the right side, and a planet on the far
@@ -933,122 +917,6 @@ func update_sky(camera: Camera3D) -> void:
 		SpacesimExposure.set_ambient_illuminance(environment, star_sky.illuminance(depth))
 
 
-## **What the eye is looking at**, as a mean luminance over the view — which is what the exposure must
-## follow, and is emphatically NOT the light falling on a surface where the observer is.
-##
-## `illuminance_at()` answers "how brightly is a surface here lit", and at 1 au the answer is 128,000
-## lux whether you are looking at the Sun or at empty sky. That is an **irradiance**: a property of
-## where you *are*. Adaptation follows a **luminance**: a property of what you are *looking at*. Two
-## faults Evert reported are the same mistake made in two directions — looking at Sol from Saturn's
-## distance faded the whole sky 122x, and flying close to Saturn was blown out because a planet
-## filling the frame contributed nothing at all.
-##
-## So this integrates what is actually in front of the eye, as radiance weighted by each source's share
-## of the view:
-##
-## | looking at | share of the view | what it does |
-## |---|---|---|
-## | Sol at 1 au | 6.8e-5 sr, five times the eye's pooling scale | a sky you adapt to — the stars go |
-## | Sol at Saturn | 7.4e-7 sr, ten times *smaller* | a glare source and no more — the sky is left alone |
-## | a planet up close | large | stops the exposure down hard |
-## | a lit sky, from inside | fills the view | stops it down |
-## | empty sky | nothing extended at all | 0.0, which the caller reads as dark-adapted |
-##
-## **Nothing here counts a source that is behind something.** `SpacesimLuminance.in_view` asks whether a source is in
-## the frame, and on a planet's night side the Sun is in the frame *through the planet*: it is 180
-## degrees from the local zenith, and a fraction of a degree from the direction the camera points when
-## the player looks down at the ground. Measured, that counted: the exposure stopped down 75,000x for
-## a Sun that could not be seen, and took the whole sky with it for as long as the adaptation takes to
-## come back. `_occluded` is that fix, and it applies to every body as well as to the star.
-##
-## **`MIN_SOLID_ANGLE` is the whole of the fix**, and `SpacesimExposure` carries the reasoning: a source
-## below the eye's 0.2 degree pooling scale cannot be resolved as a surface, so it has no surface
-## brightness to adapt to. `tan_half` is the field's tangent half-extents, the same pair the sky
-## shader is given.
-func view_luminance_at(observer: Vector3, forward: Vector3, tan_half: Vector2) -> float:
-	var star_body := star()
-	if star_body == null or star_body.node == null or star_light == null:
-		return 0.0
-	var star_position := star_body.node.global_position
-
-	# The view's own solid angle, and the cone a source has to be inside. **Both are arithmetic in
-	# `SpacesimLuminance`** — the shape `SpacesimLod` established: the maths is pure and testable on its
-	# own, and what stays here is the policy (which bodies count, and what can occlude what).
-	var view_omega := SpacesimLuminance.pyramid_solid_angle(tan_half)
-	if view_omega <= 0.0:
-		return 0.0
-	var half_diagonal := SpacesimLuminance.half_diagonal(tan_half)
-
-	var total := 0.0
-
-	# --- the star -------------------------------------------------------------------------------
-	# Its surface radiance is its illuminance over its own solid angle, so its share of the view comes
-	# to `illuminance / view_omega` — the disc's own solid angle cancels. Which is exactly why the
-	# eye's pooling scale has to be applied first: without it the Sun's *radiance* dominates everything
-	# at every distance, because radiance does not fall off with distance even though its area does.
-	var to_star := star_position - observer
-	var star_distance := to_star.length()
-	if star_distance > star_body.radius:
-		var star_angle := SpacesimLod.angular_radius(star_body.radius, star_distance)
-		var star_omega := SpacesimLuminance.cone_solid_angle(star_angle)
-		if star_omega >= SpacesimExposure.MIN_SOLID_ANGLE \
-				and SpacesimLuminance.in_view(
-					forward, to_star / star_distance, half_diagonal, star_angle
-				) \
-				and not _occluded(observer, star_position, star_body):
-			total += star_light.lux_at(star_distance) / view_omega
-
-	# --- every lit body in the view --------------------------------------------------------------
-	# A body's luminance is its albedo times the light falling on it over pi, weighted by how much of it
-	# is lit. Its share of the view is what makes "close" mean something: the same body a million
-	# kilometres away changes nothing, and filling half the frame changes everything.
-	for body in bodies:
-		if body.node == null or body == star_body:
-			continue
-		var to_body := body.node.global_position - observer
-		var distance := to_body.length()
-		if distance <= body.radius:
-			continue
-		var body_angle := SpacesimLod.angular_radius(body.radius, distance)
-		var body_omega := SpacesimLuminance.cone_solid_angle(body_angle)
-		if body_omega < SpacesimExposure.MIN_SOLID_ANGLE:
-			continue
-		if not SpacesimLuminance.in_view(forward, to_body / distance, half_diagonal, body_angle):
-			continue
-		if _occluded(observer, body.node.global_position, body):
-			continue
-		var luminance := body_luminance(body, observer, star_position)
-		if luminance <= 0.0:
-			continue
-		total += luminance * minf(body_omega / view_omega, 1.0)
-
-	# --- a lit sky, from inside it -----------------------------------------------------------------
-	# It fills the view, so its share is 1 and no solid angle is needed. Answered regardless of which way
-	# the camera points, because inside a lit atmosphere there is a bright sky in every direction.
-	var active := frame_tree.active_frame
-	var air: SpacesimSceneBody = air_body(active) if active != null else null
-	if air != null and air.node != null:
-		var up := observer - air.node.global_position
-		var to_star_from_body := star_position - air.node.global_position
-		if up.length() > 0.0 and to_star_from_body.length() > 0.0 \
-				and up.normalized().dot(to_star_from_body.normalized()) > 0.0:
-			total += SpacesimExposure.DAYLIGHT_SKY_LUMINANCE
-
-	return total
-
-
-## **Whether a body is standing in front of the source.** The test itself is
-## `SpacesimLuminance.occluded`; **what stays here is the policy** — which bodies may occlude, which is
-## every body with a node except the source being looked at, since a body cannot occlude itself.
-func _occluded(observer: Vector3, target: Vector3, source: SpacesimSceneBody) -> bool:
-	for body in bodies:
-		if body.node == null or body == source:
-			continue
-		if SpacesimLuminance.occluded(observer, target, body.node.global_position, body.radius):
-			return true
-	return false
-
-
 ## A body's geometry: a shared unit icosphere, scaled by the body's radius.
 ##
 ## **Levels are built once at unit radius and shared by every body**, which is the whole point of the
@@ -1096,8 +964,7 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## its point of light appears in their place. The two representations agree in brightness by
 ## construction, because the splat's colour and the exposure's sum are the *same expression* —
 ## `body_luminance` — so the handoff needs no cross-fade and no dead band. A body that stops being drawn
-## is still lit by, still marked, and still an effect on everything else: this reads `bodies`, and so
-## does `view_luminance_at`.
+## is still lit by, still marked, and still an effect on everything else: this reads `bodies`.
 ##
 ## **No body is exempt, the star included.** A star's disc is a fraction of a pixel from any distance,
 ## so it spends almost all of its time as a point of light — and that is right: what it puts on the
@@ -1544,38 +1411,11 @@ func await_patch_builds(rounds: int = 8) -> void:
 ## object from a distant dot, through a two-pixel disc, to the handover to a mesh. Below a pixel it
 ## cannot shrink further, which is what stops a receding body flickering out.
 ##
-## The colour is the body's mean radiance in the engine's units, **tinted by the body's own colour** and
-## **multiplied by the exposure itself** — see below for why it has to be.
-##
-## **The exposure has to be applied here by hand, and that is Godot's doing rather than a choice.**
-## Godot does not scale the frame by the camera's exposure; it *bakes* the factor into specific paths:
-##
-##   * the **sky**, which is why the star field responds to the EV (`sky.glsl` says so in as many words
-##     — *"we also bake in the exposure value for the environment and camera"*);
-##   * the **light energy**, `light_data.energy *= exposure_normalization_factor` — which is why every
-##     lit surface responds, and which phase 1a measured as a planet view going 86.7 to 52.5;
-##   * and the **tonemap** uses the *Environment's* `tonemap_exposure` — which this project never sets,
-##     so it is 1.0.
-##
-## So a material that is **`unshaded`** — no light, no sky — receives **no exposure at all**, and this is
-## the only such material in the 3D pass that is not the star's own disc. Found by flight test: flying
-## toward Venus with Sol entering and leaving the frame stepped the whole sky up and down and left the
-## splat at exactly the same brightness (Evert, 2026-10-15). The handoff at the mesh threshold had looked
-## free because it was measured at a multiplier of about 1, where the two agree either way.
-##
-## **The engine's factor is `exposure_multiplier * exposure_normalization`, and only the first is readable**
-## from GDScript. The second is a constant here — the physical camera's aperture and shutter are left at
-## their defaults and nothing changes them — so this gets the *variation* exactly right, which is what the
-## flight test is about, and what remains is a constant. That constant belongs with the splat's absolute
-## brightness rather than with its response to the EV, and it is one of the reasons that level is still an
-## open question.
-##
-## **A star's point is deliberately NOT scaled, because its disc is not either.** `body_star.gdshader` is
-## `unshaded` too, so the Sun's own disc receives no exposure — for the same reason, and over the same
-## range of EVs. Scaling only the splat would break the very handoff this file works to keep free, so the
-## two are left consistent and the fact is recorded here instead. It is invisible while the star's emission
-## is 24x and clips whatever the exposure does; it would stop being invisible if the exposure ever
-## stopped the Sun out of the white point, and that belongs with the star's glare and bloom.
+## The colour is the body's mean radiance in the engine's units, **tinted by the body's own colour**.
+## **No exposure is applied here**: `SpacesimExposurePass` scales the finished frame, which covers this and
+## every disc together, by construction. It used to be applied by hand because an `unshaded` material
+## receives none of Godot's per-path baking — the flight test that found that is in
+## `Lighting and Exposure`.
 ##
 ## **Still missing, and named rather than hidden:** §5 of the plan has the splat carry the body's whole
 ## flux into one pixel — `L * omega_disc / omega_px` — which for a disc under the floor falls as `1/d^2`,
@@ -1625,10 +1465,9 @@ func _place_point(
 ##
 ##     L = illuminance_at_body * albedo * lambert_phase(phase) / pi
 ##
-## **One expression, used by two things** — the exposure's sum in `view_luminance_at`, and the point of
-## light a body becomes when it is too small to be a disc. That is what makes the handoff at the mesh
-## threshold free: the splat and the disc agree in brightness there because they are the same number,
-## not because two arithmetics happen to coincide.
+## **One expression, and one consumer** — the point of light a body becomes when it is too small to be a
+## disc. It was the exposure's sum too, until the pass began metering the frame; with that gone it is the
+## statement of what a body is worth at a distance, and the splat is what draws it.
 func body_luminance(body: SpacesimSceneBody, observer: Vector3, star_position: Vector3) -> float:
 	if body.content == null or body.node == null or star_light == null:
 		return 0.0

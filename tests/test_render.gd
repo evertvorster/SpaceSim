@@ -33,7 +33,7 @@ func run(h, root: Node) -> void:
 	_test_the_ladder_is_only_where_there_is_a_sphere(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
-	_test_the_exposure_follows_the_view(h, scene)
+	_test_the_phase_term_is_a_disc_average(h)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_heights_are_derived(h, scene, sol)
 	_test_the_condensation_levels(h, scene, sol)
@@ -210,103 +210,14 @@ func _test_the_background_is_the_real_sky(h, scene: SpacesimSystemScene) -> void
 			% (naked_eye * 1e4))
 
 
-## **The exposure is anchored to what the eye is looking at, not to the light arriving at the
-## observer.** Both faults Evert reported come from that difference and both are arithmetic, so they
-## are checked here without a GPU:
+## **The phase term is a disc average, not a clamped cosine.**
 ##
-##   * looking at Sol from Saturn's distance faded the whole sky 122x, which it must not — a point
-##     source has no surface brightness to adapt to;
-##   * flying close to Saturn was blown out, because nothing in the frame could affect the exposure.
-##
-## The instrument is `MIN_SOLID_ANGLE`, the eye's ~0.2 degree pooling scale. The Sun's disk is 0.53
-## degrees at 1 au — above it, so it is a sky you adapt to — and 0.053 at Saturn, ten times below, so
-## it is a glare source and no more. That is the whole fix, in one number.
-func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
-	var sun := scene.body_by_id("star:sol")
-	if sun == null or sun.node == null:
-		return
-	# A 37.8 degree vertical field at 16:9, which is what the game runs at.
-	var tan_half := Vector2(tan(deg_to_rad(18.9)) * (16.0 / 9.0), tan(deg_to_rad(18.9)))
-	var sun_position := sun.node.global_position
-	var au := 1.495978707e11
-
-	# --- empty space, far from every body --------------------------------------------------------
-	# 25 au out, where the Sun is 0.021 degrees across. Nothing else is anywhere near.
-	var empty := sun_position + Vector3(0.0, 0.0, 25.0 * au)
-	var to_sun := (sun_position - empty).normalized()
-	h.check(scene.view_luminance_at(empty, to_sun, tan_half) == 0.0,
-		"25 au out the Sun is ten times under the eye's pooling scale, so it is a glare source and "
-		+ "nothing more — looking at it from there leaves the sky alone, which is the bug this fixes")
-	h.check(scene.view_luminance_at(empty, -to_sun, tan_half) == 0.0,
-		"and looking away from it there is nothing at all, which is the dark-adapted case")
-
-	# --- at 1 au the Sun IS a sky you adapt to ----------------------------------------------------
-	# Placed 0.9 au out rather than on top of a planet, so that the body the observer would otherwise
-	# be sitting on cannot be what the check is really measuring.
-	var near := sun_position + Vector3(0.0, 0.0, 0.9 * au)
-	var at_sun := (sun_position - near).normalized()
-	var looking: float = scene.view_luminance_at(near, at_sun, tan_half)
-	h.check(looking > 0.0,
-		"at 1 au the Sun's disk is five times the pooling scale, so it is a sky you adapt to "
-		+ "(%.1f e5 lux/sr)" % (looking * 1e-5))
-	var at_one_au := SpacesimExposure.target_multiplier_for_luminance(looking)
-	# The reference moved with the dark-adapted multiplier's removal (2026-10-16): what the exposure
-	# stops down *from* is no longer an anchor, it is the light-adapted floor, which is a state of the
-	# eye and still stated.
-	h.check(at_one_au < 8.0 * SpacesimExposure.MIN_MULTIPLIER,
-		"so staring at the Sun stops the exposure down to %.2f, near the light-adapted floor of %.2f"
-			% [at_one_au, SpacesimExposure.MIN_MULTIPLIER])
-
-	# --- a planet filling the frame ---------------------------------------------------------------
-	# On the SUB-SOLAR side, so it is fully lit and its phase is 1. The first version of this placed the
-	# observer on the night side, which measured 0.0 — correctly — and read as a broken body term.
-	var saturn := scene.body_by_id("planet:saturn")
-	if saturn == null or saturn.node == null:
-		return
-	var toward_sun := (sun_position - saturn.node.global_position).normalized()
-	var close := saturn.node.global_position + toward_sun * (saturn.radius + 4.0e5)
-	var down := (saturn.node.global_position - close).normalized()
-	var body: float = scene.view_luminance_at(close, down, tan_half)
-	h.check(body > 0.0,
-		"a lit body filling the frame is what the exposure follows now (%.1f lux/sr)" % body)
-	h.check(SpacesimExposure.target_multiplier_for_luminance(body)
-			< SpacesimExposure.MAX_MULTIPLIER * 1.0e-3,
-		"so flying close to Saturn stops the exposure down instead of blowing out")
-	h.check(scene.view_luminance_at(close, -down, tan_half) == 0.0,
-		"while looking away from it at the same place is empty sky again")
-
-	# --- a source the planet is standing in front of -------------------------------------------------
-	# The Sun is *in the frame* from Earth's night side whenever the camera points at the ground — which
-	# it does by pointing at the planet's centre, and the Sun is behind that. Counting it as a sky you
-	# adapt to stopped the exposure down 75,000x (measured) for a Sun that cannot be seen, and took the
-	# whole sky with it for as long as the adaptation takes to come back.
-	var earth := scene.body_by_id("planet:earth")
-	if earth != null and earth.node != null:
-		var earth_position: Vector3 = earth.node.global_position
-		var to_sun_from_earth: Vector3 = (sun_position - earth_position).normalized()
-		var night := earth_position - to_sun_from_earth * (earth.radius + 2000.0)
-		# A **bound** rather than zero, and the reason is a consequence of the phase fix: a crescent Luna
-		# now contributes where the clamped cosine dropped it. The Sun's own term is what this is about,
-		# and without the occlusion test this value is 71,356 lux/sr — so four orders of margin, and the
-		# check no longer depends on where Luna happens to be.
-		var night_ground := scene.view_luminance_at(night, to_sun_from_earth, tan_half)
-		h.check(night_ground < 100.0,
-			"the planet hides the Sun from its night side, so looking down at the ground is not a sky "
-			+ "you adapt to — a Sun that cannot be seen is not 71,356 lux/sr (%.1f)" % night_ground)
-		h.check(scene.view_luminance_at(night, -to_sun_from_earth, tan_half) < 1.0,
-			"and looking up at the actual night sky leaves the exposure dark-adapted")
-
-		# The control, and it is the half that matters: with the same geometry on the **lit** side the Sun
-		# is overhead and must still count. Without it, discarding the term would pass the checks above.
-		var day := earth_position + to_sun_from_earth * (earth.radius + 2000.0)
-		h.check(scene.view_luminance_at(day, to_sun_from_earth, tan_half) > 0.0,
-			"while on the day side it is overhead and counts, as it must — occlusion is not a deleted term")
-
-	# --- the phase function, against the values it is defined by ------------------------------------
-	# Three points of the Lambert phase function are fixed rather than fitted, and the fourth is the
-	# regression: the clamped cosine this replaced returned **exactly zero** for every body past the
-	# half moon, so a crescent planet filling the frame was dropped from the sum and the exposure rested
-	# at the dark-adapted ceiling while the lit part blew out.
+## Three points of the Lambert phase function are fixed rather than fitted, and the fourth is the
+## regression: the clamped cosine it replaced returned **exactly zero** for every body past the half
+## moon, so a crescent filling the frame contributed nothing anywhere its brightness was asked for. The
+## exposure's own sum over the view is gone — `SpacesimExposurePass` meters the frame — and
+## `SpacesimLuminance.disc_luminance`, which colours the point of light, is what still asks.
+func _test_the_phase_term_is_a_disc_average(h) -> void:
 	h.check_near(SpacesimSurfaceModel.lambert_phase(0.0), 1.0,
 		"a fully lit disc reflects all of it", 1.0e-6)
 	h.check_near(SpacesimSurfaceModel.lambert_phase(PI * 0.5), 1.0 / PI,
@@ -315,7 +226,6 @@ func _test_the_exposure_follows_the_view(h, scene: SpacesimSystemScene) -> void:
 	var crescent := SpacesimSurfaceModel.lambert_phase(deg_to_rad(122.0))
 	h.check(crescent > 0.09 and crescent < 0.11,
 		"while a crescent is a tenth of the disc and not zero (%.3f at 122 degrees)" % crescent)
-
 
 ## A star emits; it does not reflect. Drawn with the ordinary surface material it was lit by its own
 ## light — which travels from the star toward the observer, so its near face was back-lit and came out

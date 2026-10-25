@@ -200,24 +200,13 @@ func _run() -> void:
 
 	# --- decomposition: `_update_view` is one call but seven operations, and 10 ms has to live in one
 	# --- of them. Timed with the same values `_update_view` itself computes.
-	var eye: Transform3D = camera.get_global_transform_interpolated()
 	var observer: Vector3 = main._ship.get_global_transform_interpolated().origin
-	var tan_y := tan(deg_to_rad(camera.fov * 0.5))
-	var view_size := Vector2(camera.get_viewport().size)
-	var tan_half := Vector2(tan_y, tan_y)
-	if view_size.y > 0.0:
-		tan_half.x = tan_y * view_size.x / view_size.y
 	var decomposition_calls := 300
 
 	var piece := Time.get_ticks_usec()
 	for _i in decomposition_calls:
 		main._system.aim_sun_at(observer)
 	rows.append(["  of which: aim_sun_at", _per_call(piece, decomposition_calls), decomposition_calls])
-
-	piece = Time.get_ticks_usec()
-	for _i in decomposition_calls:
-		main._system.update_atmospheres(eye.origin)
-	rows.append(["  of which: update_atmospheres", _per_call(piece, decomposition_calls), decomposition_calls])
 
 	piece = Time.get_ticks_usec()
 	for _i in decomposition_calls:
@@ -228,11 +217,6 @@ func _run() -> void:
 	for _i in decomposition_calls:
 		main._system.update_lod(camera)
 	rows.append(["  of which: update_lod", _per_call(piece, decomposition_calls), decomposition_calls])
-
-	piece = Time.get_ticks_usec()
-	for _i in decomposition_calls:
-		main._system.view_luminance_at(observer, -eye.basis.z, tan_half)
-	rows.append(["  of which: view_luminance_at", _per_call(piece, decomposition_calls), decomposition_calls])
 
 	# `exposure.update_to` used to be timed here. It is gone: the adaptation is `SpacesimExposurePass`'s
 	# now, on the GPU, so there is no CPU-side exposure call left in the frame to measure.

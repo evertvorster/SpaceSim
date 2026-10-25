@@ -2,16 +2,16 @@ class_name SpacesimExposure
 extends RefCounted
 ## How bright the camera treats the scene.
 ##
-## **Computed from the physics, not metered from the image.** Godot's auto-exposure averages the
-## frame and drives that average toward middle grey, and it has no metering mode — probed on 4.7.2,
-## the API is `auto_exposure_enabled`, `_scale`, `_speed` and an EV clamp, and nothing else. So on a
-## frame that is mostly empty space with one lit body in it, it has exactly one way to reach its
-## target: raise exposure until that body is white. Which is what it did.
+## **This module states the window and the rate; the frame is metered.** `SpacesimExposurePass` reads the
+## rendered pixels and applies one multiplier to them, on Evert's instruction that the EV *"should not be
+## location aware at all, only adjust to what is on the screen"* (2026-10-21). What lives here is what that
+## pass cannot own: the two ends of the window, both of them states of the eye, the adaptation rate, the
+## reference lux the ambient is expressed in, and the camera attributes that must stay attached at identity.
 ##
-## We do not have to guess, because the illuminance at the observer is already derived. The exposure
-## that puts a lit body at middle grey is therefore arithmetic — and unlike image-based metering it is
-## deterministic, it cannot be fooled by an empty frame, it does not pump, and it can be tested
-## headlessly.
+## **What it is not** is Godot's auto-exposure, which has no metering mode at all — probed on 4.7.2, the API
+## is `auto_exposure_enabled`, `_scale`, `_speed` and an EV clamp, and nothing else — so a frame of empty
+## space with one lit body drives it the only way it can: white. `Lighting Plan` §6a has the argument and
+## `Lighting and Exposure` the measurements.
 ##
 ## On the emitter: the star is a *source*, not a reflector. It cannot be brought into range without
 ## making everything else black, so it is allowed to clip and `glow_*` handles how that reads. Nothing
@@ -63,30 +63,6 @@ const MAX_MULTIPLIER := MIN_MULTIPLIER * 4294967296.0 ## 2^32: the range is 32 s
 ## the correct EV."* A halving rate is exactly that, with one number to adjust.
 const ADAPTATION_RATE := 2.0
 
-## A clear blue sky's own **luminance**, in lux per steradian (the same number as cd/m²). Schlyter's
-## "full daylight, not direct sun" is 10,000-25,000 lux *on a horizontal surface*, and a uniform sky of
-## luminance L gives pi*L on the ground — so L = 25,000/pi = 8,000, which is the order a real clear sky
-## measures.
-##
-## It matters because **you do not have to look at the Sun to lose the stars.** Stand in a lit
-## atmosphere with the Sun behind you and the sky in front of you is still daylight.
-const DAYLIGHT_SKY_LUMINANCE := 8000.0
-
-## The solid angle below which a source is a **POINT** and does not set adaptation: about 9.6e-6 sr,
-## a disk 0.2 degrees across.
-##
-## That is the eye's own pooling scale — the vault's note is that a dark-adapted eye sums over roughly
-## 0.2 degrees — and it is the whole reason a star field behaves differently from a planet. Below it a
-## source cannot be resolved as a surface, so there is no surface brightness for the eye to adapt to;
-## it can only dazzle.
-##
-## **It is what makes "looking at the Sun" mean different things in different places**, which was the
-## bug it fixes. The Sun's disk is 0.53 degrees at 1 au — five times the pooling scale, so it is a sky
-## you adapt to and the stars go. At Saturn it is 0.053 degrees, ten times *smaller* than the scale, so
-## it is a glare source and no more, and the sky must be left alone. Evert reported exactly that on
-## 2026-10-14, and it is why the exposure was anchored to the wrong thing.
-const MIN_SOLID_ANGLE := 9.6e-6
-
 ## The ceiling on the metre's gain, for a window `stops` above the light-adapted floor.
 ##
 ## The window's two ends are both states of the eye, and this is the top of it: `MAX_MULTIPLIER` is
@@ -107,36 +83,6 @@ func _init() -> void:
 	attributes.auto_exposure_enabled = false
 	# **Identity.** The frame's exposure is applied by `SpacesimExposurePass` — see `identity()`.
 	attributes.exposure_multiplier = 1.0
-
-
-## The multiplier that puts a lit surface at middle grey, given the illuminance at the observer.
-##
-## A surface's luminance is proportional to the light falling on it, so the correction is proportional
-## to the reciprocal of the illuminance, and `REFERENCE_LUX` is the light at which no correction is
-## needed. At one au (128,000 lux) this gives 0.78; at Neptune (141 lux) it gives 709 — a little over
-## nine stops, which is the honest difference between the two places.
-##
-## **This no longer drives the frame.** `SpacesimExposurePass` meters the rendered pixels and applies one
-## number to them, on Evert's instruction that the EV *"should not be location aware at all, only adjust
-## to what is on the screen"* — so what is kept here is the statement of what the currency means, which
-## the light and the sky are judged against and which the tests still work from. The frame's own arithmetic
-## is `SpacesimExposureMeter`'s.
-static func target_multiplier(lux: float) -> float:
-	if lux <= 0.0:
-		return MAX_MULTIPLIER
-	return clampf(REFERENCE_LUX / lux, MIN_MULTIPLIER, MAX_MULTIPLIER)
-
-
-## The multiplier that puts a scene of mean **luminance** at middle grey.
-##
-## A luminance and an illuminance differ by pi for a Lambertian surface, so this is the rule above with
-## that factor folded in — and the two agree, which is the point: `target_multiplier(E)` and
-## `target_multiplier_for_luminance(E/pi)` are the same number.
-##
-## It is the *luminance* form that a scene wants, because adaptation follows what the eye is looking
-## at, not the light arriving at the observer. See `SpacesimSystemScene.view_luminance_at`.
-static func target_multiplier_for_luminance(lux_per_sr: float) -> float:
-	return target_multiplier(lux_per_sr * PI)
 
 
 ## Put the camera's exposure at **identity**, because `SpacesimExposurePass` applies it frame-wide.

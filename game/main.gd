@@ -46,8 +46,8 @@ var _ship: Node3D
 var _camera: Camera3D
 ## Set by the stop key and consumed by the next physics step.
 var _throttle_stop := false
-## The camera's exposure. Physics-computed — see SpacesimExposure — so it needs updating as the
-## player moves rather than being left to the engine's frame average.
+## The camera's exposure attributes, held only so they can be put at **identity**: the frame-wide pass
+## applies the multiplier, so anything here would be applied twice. See `SpacesimExposure`.
 var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass

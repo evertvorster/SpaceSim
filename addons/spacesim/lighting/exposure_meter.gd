@@ -126,10 +126,3 @@ static func target_multiplier(mean_luminance: float) -> float:
 		TARGET_AVERAGE / mean_luminance, SpacesimExposure.MIN_MULTIPLIER,
 		SpacesimExposure.MAX_MULTIPLIER
 	)
-
-
-## The whole metre in one call, for the caller that has a grid and wants a number.
-static func target_multiplier_for_grid(
-	samples: PackedFloat32Array, width: int, height: int
-) -> float:
-	return target_multiplier(weighted_mean(samples, width, height))

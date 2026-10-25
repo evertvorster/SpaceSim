@@ -151,36 +151,19 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	h.check(SpacesimLod.angular_radius(0.0, AU) == 0.0,
 		"and a body with no radius has no angular size, rather than a division by nothing")
 
-	# The exposure that puts a lit body at middle grey is arithmetic, not a measurement. Godot's
-	# auto-exposure averages the frame and has no metering mode, so on a frame that is mostly empty
-	# space it raises exposure until the one lit body in it is white — which is what it did.
+	# **The camera's own multiplier is identity**, because `SpacesimExposurePass` applies the exposure
+	# frame-wide; anything else here would be applied twice. Godot's auto-exposure stays off, so the frame
+	# average is not allowed to set it either.
 	var attributes := SpacesimExposure.new().attributes
 	h.check(not attributes.auto_exposure_enabled,
 		"auto-exposure is off: the frame average is not allowed to set this")
 	h.check_near(attributes.exposure_multiplier, 1.0, "and starts at Godot's own reference", 1.0e-9)
 
-	# One au is a little over the reference light, so slightly less exposure than neutral.
-	var at_one_au := SpacesimExposure.target_multiplier(SpacesimStarLight.illuminance(luminosity, AU))
-	h.check_near(at_one_au, 0.78, "one au lands at %.3f times neutral" % at_one_au, 0.01)
-
-	# Neptune is nine and a half stops dimmer, and the correction is exactly that — derived, not tuned.
-	var at_neptune := SpacesimExposure.target_multiplier(dim)
-	h.check_near(at_neptune, 707.0, "Neptune lands at %.0f times neutral" % at_neptune, 5.0)
-	var stops := log(at_neptune / at_one_au) / log(2.0)
-	h.check_near(stops, 9.8, "which is the %.1f stops between them" % stops, 0.1)
-
-	# Monotonic, and clamped: nothing here may chase a frame that contains no light at all.
-	h.check(SpacesimExposure.target_multiplier(1000.0) > SpacesimExposure.target_multiplier(10000.0),
-		"a dimmer light gets more exposure")
-	h.check(SpacesimExposure.target_multiplier(0.0) == SpacesimExposure.MAX_MULTIPLIER,
-		"and with no light at all it settles at the clamp rather than flying off")
-
-	# **The adaptation is not checked here any more.** It was `SpacesimExposure.snap_to`/`update`, driving
-	# the camera's multiplier from the light at the *observer*; `SpacesimExposurePass` does that work against
-	# the rendered frame instead, and **the suite cannot see it**: `tests/run.sh` runs `--headless`, where
+	# **The metre's arithmetic and the adaptation are not checked here.** `SpacesimExposurePass` does both
+	# against the rendered frame, and **the suite cannot see it**: `tests/run.sh` runs `--headless`, where
 	# there is no `RenderingDevice` and nothing is drawn. What is checkable headlessly is the arithmetic
-	# (`tests/test_meter.gd`), this module's arithmetic above, and the wiring below; the *behaviour* needs a
-	# render, and `tests/probe_frame_exposure.gd` is that instrument.
+	# (`tests/test_meter.gd`) and the wiring below; the *behaviour* needs a render, and
+	# `tests/probe_frame_exposure.gd` is that instrument.
 
 	# **The range is 32 stops, and both ends of it are states of the eye** — the floor is fully
 	# light-adapted, the ceiling is how far a dark-adapted eye opens. Evert, 2026-10-15: *"open the
@@ -271,12 +254,10 @@ func _test_the_star_light(h, sol: SpacesimSolarSystem, root: Node) -> void:
 	# **Evert's test of the dark end**, 2026-10-15: *"the shadow side of earth, with no moonlight or
 	# other source of light but starlight should be barely visible, a little above black."*
 	#
-	# **The ratio it was written as is gone with the dark-adapted multiplier.** It read
-	# `dark_adapted_multiplier(fov) / target_multiplier_for_luminance(albedo * sky_lux / pi)` — the
-	# surface at the resting exposure over the exposure that would put it at middle grey. That multiplier
-	# was a compensation dressed as a constant and was removed on 2026-10-16; what a night side renders
-	# at is now `SpacesimExposurePass`'s answer for that frame, which is as invisible to this suite as
-	# the rest of the pass's behaviour. What is still checkable is the light that does it.
+	# **The ratio it was written as is gone with the dark-adapted multiplier**, which was a compensation
+	# dressed as a constant and was removed on 2026-10-16. What a night side renders at is
+	# `SpacesimExposurePass`'s answer for that frame, which is as invisible to this suite as the rest of
+	# the pass's behaviour. What is still checkable is the light that does it.
 	if scene.star_sky != null:
 		var sky_lux := scene.star_sky.illuminance(6.5)
 		h.check(sky_lux > 1.0e-4,
