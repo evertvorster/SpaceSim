@@ -552,7 +552,9 @@ static func fractal_bounding(octaves: int, gain: float) -> float:
 ##
 ## **Pure, and safe to run on a worker thread** — it allocates an `Image` and touches nothing else.
 ## Measured costs to size a bake against: 2048x1024 in 192 ms and 8192x4096 in 3.1 s for the noise
-## generator alone, before this field's own arithmetic; **0.80 µs a pixel** measured end to end.
+## generator alone, before this field's own arithmetic; **7 µs a pixel** measured end to end (2026-10-25) —
+## so 1,024x512 takes 3.7 s and an 8192x4096 map takes about 230 s. The end-to-end figure read 0.80 µs
+## until it was re-measured, which is the noise generator's own cost and not the field's.
 ##
 ## `bail` is optional and is what lets a bake be abandoned mid-flight — see [Bail].
 static func bake(

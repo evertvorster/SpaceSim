@@ -5,9 +5,16 @@ extends RefCounted
 ##
 ## ## Why this exists
 ##
-## `bake()` is **92 ns a texel** — 3.10 s and 33.6 MB for an 8192x4096 map — and that is the interpreter,
-## not the arithmetic: a texel's worth of noise is a few dozen instructions. The GPU ceiling is 0.1-1 ns a
-## texel, which is why the per-texel body became a shader rather than a faster GDScript function.
+## `bake()` is **7 microseconds a texel** end to end — measured 2026-10-25 with
+## `PROBE_CPU=1 tests/probe_cloud_bake.gd`, 3,674 ms for 1,024x512 — and that is the interpreter, not the
+## arithmetic: a texel's worth of noise is a few dozen instructions. The same map takes **4.3 ms on the
+## GPU, 8.2 ns a texel**, which is why the per-texel body became a shader rather than a faster GDScript
+## function.
+##
+## **92 ns a texel is the NOISE GENERATOR ALONE** — `SpacesimCloudField.bake`'s doc quotes 3.10 s for an
+## 8192x4096 map of it — and it is 75x short of what a whole field costs, because the bands, the meander,
+## the vortex advection and the fine half all came after. This file said 92 ns for a long time and it was
+## the number that justified the GPU; the number is right, the thing it measured was not the field.
 ##
 ## ## The CPU path is the reference, and it stays
 ##

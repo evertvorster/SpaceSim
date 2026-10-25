@@ -21,12 +21,14 @@ extends RefCounted
 ## main thread** in `poll()` — the project's law, and the reason a finished bake sits in an `Image` until
 ## the next poll rather than becoming a texture in the task.
 
-## The map baked synchronously on first sight. **Measured 0.80 us a pixel, so this is 26 ms** — a frame
-## or two of stall, once, in exchange for a body never being cloudless by accident.
+## The map baked synchronously on first sight. **Measured 7 us a pixel (2026-10-25), so this is 230 ms** —
+## several frames of stall, once, in exchange for a body never being cloudless by accident. It read 26 ms
+## until the same measurement was re-run: that number was `0.80 us a pixel`, taken before the vortices, the
+## meander and the fine half were added to the field.
 const FLOOR_WIDTH := 256
 
 ## The ceiling. The device allows 32,768 (measured, RTX 4090); 8,192 is where an 8k Earth map already
-## stops resolving at 3,768 km and a bake costs 27 s, so a bigger one is for nobody.
+## stops resolving at 3,768 km and a CPU bake costs about 230 s, so a bigger one is for nobody.
 const MAX_WIDTH := 8192
 
 ## **How many maps are kept, and the bound is SOFT.** A session visits systems, and every entry is up to
@@ -421,7 +423,7 @@ func _bake_floor(
 ## **The one place a map is generated**, so the GPU path is a substitution and not a second code path.
 ##
 ## The GPU is tried first and the CPU is the fallback, in that order and for one reason each: the field
-## costs **6.9 microseconds a texel interpreted and 1.4 nanoseconds on the GPU** (measured — see
+## costs **7 microseconds a texel interpreted and 8 nanoseconds on the GPU** (measured 2026-10-25 — see
 ## `tests/probe_cloud_bake.gd`), and **a local rendering device does not exist in headless mode** — so a
 ## headless run, which is every run of `tests/run.sh`, uses the CPU path by construction rather than by a
 ## flag, and the GPU path being exercised is something `tests/gpu_check.sh` asserts rather than assumes.
