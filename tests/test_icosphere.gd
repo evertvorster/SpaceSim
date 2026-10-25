@@ -2,12 +2,10 @@ extends RefCounted
 ## The icosphere: levels built once, closed, and measured against the sphere they approximate —
 ## including its WINDING, which is the one property that fails invisibly.
 ##
-## **The point of testing this headlessly is that the law can then be checked against real geometry.**
-## `test_lod.gd` asserts the arithmetic; this asserts what the arithmetic was for — that a level's
-## actual silhouette error in pixels is inside the budget it was chosen by, and by how much. That ratio
-## is the number phase 5 calibrates `epsilon` against, and it is a measurement rather than a prediction.
-
-const EPSILON := 4.0 ## The budget `lod.error_budget` starts at
+## **The point of testing this headlessly is that the geometry can be measured rather than predicted.**
+## A level's relative sagitta times its triangle count is a fact about the built mesh, and the product
+## is what the pixel error budget was ever derived from. The per-body law that read it is gone
+## (2026-10-25); the relation it stood on is still the thing worth pinning.
 
 
 func run(h, root: Node) -> void:
@@ -131,45 +129,14 @@ func run(h, root: Node) -> void:
 		"and its deviation is a QUARTER of the level above, so error falls as phi^2 where the law "
 			+ "applies: %s" % [ratios.map(func(r): return snappedf(r, 0.001))])
 
-	# **The measurement phase 4 exists for: the law's constant, taken from the geometry.**
-	# A level's relative sagitta times its triangle count is what turns `N ~ c * r_px / epsilon` into
-	# "the error at the chosen level is `epsilon`": error in pixels is `sagitta * r_px`, so choosing the
-	# level whose `N` reaches `c * r_px / epsilon` gives an error of `sagitta * N / c * epsilon`, and
-	# that is `epsilon` exactly when `c` is this product. It converges as the levels refine — 5.68 at
-	# level 2, 5.833 at level 5 — so the fine levels are what the constant is read from.
+	# **The geometry's own constant.** Error in pixels is `sagitta * r_px`, so a level chosen where `N`
+	# reaches `c * r_px / epsilon` has an error of `sagitta * N / c * epsilon` — exactly `epsilon` when
+	# `c` is this product. It converges as the levels refine (5.68 at level 2, 5.833 at level 5), so the
+	# fine levels are what it is read from, and the check is against the mesh rather than against the
+	# number, so the two cannot drift.
 	var product := SpacesimIcosphere.relative_sagitta(6) * SpacesimLod.triangles_at(6)
 	h.check_near(product, SpacesimLod.TRIANGLES_PER_SCREEN_RADIUS,
 		"the law's constant is the geometry's own: sagitta x triangles = %.4f" % product, 0.01)
-
-	# **And the budget is honoured EVERYWHERE in a level's range, not just at its edges.** The range runs
-	# from `level_exit(level) / 4` — where the level is taken up and its error is at its smallest — up to
-	# `level_exit(level)`, where the next level takes over and its error is at its largest, which is the
-	# budget itself. So the error lies in `[epsilon / 4, epsilon]` and **never exceeds the budget**, which is
-	# what makes `epsilon` mean what it says. Sampled across the range, because a pair of endpoints is not
-	# an interval. (An earlier version of this comment claimed the error reached four times the budget,
-	# which had the range inside out.)
-	var worst_ratio := 0.0
-	var lines := []
-	for level in 6:
-		var exit_px := SpacesimLod.level_exit(level, EPSILON)
-		var entry_px := exit_px / 4.0
-		var sagitta := SpacesimIcosphere.relative_sagitta(level)
-		for step in 33:
-			var radius := lerpf(entry_px, exit_px, float(step) / 32.0)
-			if SpacesimLod.level_for_screen_radius(radius, EPSILON) != level:
-				continue
-			worst_ratio = maxf(worst_ratio, sagitta * radius / EPSILON)
-		lines.append("level %d: taken up %8.1f px (error %.2f), left %8.1f px (error %.2f)"
-			% [level, entry_px, sagitta * entry_px, exit_px, sagitta * exit_px])
-	print("    ---- silhouette error across each level's range, budget %.1f px ----" % EPSILON)
-	for line in lines:
-		print("      ", line)
-	h.check(worst_ratio <= 1.0,
-		"and every level stays INSIDE the budget for the whole range it is used over — the worst is "
-			+ "%.3f of it" % worst_ratio)
-	h.check(worst_ratio > 0.95,
-		"and reaches it, as a calibrated budget should, rather than sitting wastefully under it (%.3f)"
-			% worst_ratio)
 
 	_test_the_line_mesh(h)
 

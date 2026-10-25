@@ -13,8 +13,14 @@ extends RefCounted
 ## engine already has: the body's angular size, the field of view, the render height, and a budget.
 ##
 ## **A scaling law, not a count.** The constant in [constant TRIANGLES_PER_SCREEN_RADIUS] is measured,
-## not derived, and the real value of `epsilon` is a judgement that only a render settles. Numbers here
-## choose a level; they are not defended to a third digit.
+## not derived, and the real value of `epsilon` is a judgement that only a render settles.
+##
+## **The per-body level law that read this is gone** (2026-10-25). It chose one uniform level per body
+## from its screen radius; `SpacesimPatches` decides per patch instead, from the same error budget in
+## pixels, so a body is no longer one level and the law had no caller but its tests. What lives here is
+## the projection both of them share — [method pixel_angle], [method angular_radius],
+## [method screen_radius_pixels] — plus the closed form for a level's triangle count, which
+## `tests/test_icosphere.gd` checks the built meshes against.
 ##
 ## **The silhouette is the only thing the mesh carries.** A sphere with per-vertex radial normals
 ## interpolates its normals *exactly* along facet edges — interpolation runs linearly between two correct
@@ -31,27 +37,19 @@ extends RefCounted
 const ICO_BASE_TRIANGLES := 20
 const MAX_LEVEL := 6
 
-## How far past a level's boundary a body must go before it changes level, as a fraction of that
-## boundary.
+## **A level's relative sagitta times its triangle count**, and it is measured from the built mesh rather
+## than derived: it converges to **5.8355** — 5.7963 at level 3, 5.8334 at level 5.
 ##
-## **Needed because the levels are discrete and the input is continuous.** A body sitting on a boundary
-## whose screen radius is jittering by a pixel would swap meshes back and forth — a visible flicker and
-## a write per frame. This is the same idea as `SpacesimTransitionRule` for frame bands: a decision
-## boundary with a dead band. Ten percent is comfortably more than pixel jitter at the radii a boundary
-## sits at (13.7 px and up) and far less than the 4x step between levels.
-const HYSTERESIS_BAND := 0.1
-
-## The constant in `N ~ c * screen_radius / epsilon`, and **it is measured from the built mesh rather
-## than derived.** A level's relative sagitta times its triangle count converges to **5.8355** — 5.7963
-## at level 3, 5.8334 at level 5 — and that product is exactly what makes the law honour the budget: at
-## the screen radius where a level is chosen, its error comes to `epsilon` rather than a multiple of it.
+## It was the constant in `N ~ c * screen_radius / epsilon`, and it is the number that made that law
+## honour its budget: at the screen radius where a level was chosen, its error came to `epsilon` rather
+## than a multiple of it. **The law is gone** (2026-10-25 — see the class comment) and the product is
+## kept because it is a fact about the geometry: `tests/test_icosphere.gd` measures it against the
+## meshes, and it is the relation the patch tree's sagitta target descends from.
 ##
 ## The derivation in the class comment gets the *shape* right and the constant wrong: it takes a facet's
 ## angular width from its solid angle, `phi = sqrt(4*pi/N)`, and the real width is about **1.93x** that,
 ## because a facet is a triangle whose corners lie on the sphere rather than a spherical cap. `5` was
-## the first estimate of this and put the drawn error **1.17x over** the budget at every level — the
-## sort of thing `tests/test_icosphere.gd` exists to catch, since it measures the product against the
-## geometry and so cannot drift from this number.
+## the first estimate of this and put the drawn error **1.17x over** the budget at every level.
 const TRIANGLES_PER_SCREEN_RADIUS := 5.836
 
 
@@ -105,57 +103,6 @@ static func screen_radius_pixels(angular_radius: float, pixel_angle: float) -> f
 	if pixel_angle <= 0.0:
 		return 0.0
 	return tan(clampf(angular_radius, 0.0, PI * 0.5)) / pixel_angle
-
-
-## The icosphere level for a screen radius at an error budget in pixels, quantised to the levels that
-## can be built.
-##
-## **Quantised, because the answer has to be a pointer assignment.** Levels are built once and shared by
-## every body, so changing level costs nothing at all; a continuous answer would rebuild a mesh every
-## frame, which is worse than the problem it solves. Hysteresis on the crossing belongs to the caller —
-## `SpacesimTransitionRule` is the established shape for a decision boundary with a dead band.
-##
-## `epsilon` is the error budget in pixels, and it is the **caller's** to supply — a setting while it is
-## being judged by eye by flying, frozen to a constant once a render set justifies the number. Taking it
-## as a parameter rather than reading it here is what keeps this a pure function that a test can call.
-static func level_for_screen_radius(screen_radius: float, epsilon: float) -> int:
-	if screen_radius <= 0.0 or epsilon <= 0.0:
-		return 0
-	var wanted := TRIANGLES_PER_SCREEN_RADIUS * screen_radius / epsilon
-	var level := 0
-	while level < MAX_LEVEL and float(triangles_at(level)) < wanted:
-		level += 1
-	return level
-
-
-## The screen radius at which a level **gives way to the next one** — where the finer level's triangle
-## count is first met, so it is the coarser level's own exit point. `level_exit(0, 4)` is 13.7 px, which
-## is where level 1 begins.
-static func level_exit(level: int, epsilon: float) -> float:
-	return float(triangles_at(level)) * epsilon / TRIANGLES_PER_SCREEN_RADIUS
-
-
-## `level_for_screen_radius` with a dead band, so a body sitting on a boundary does not flicker between
-## two meshes.
-##
-## A change of more than one level is taken at once — that is flying, not jitter, and stepping through
-## the levels one frame at a time would make a fast approach crawl. A single-level change is held off
-## until the screen radius is `band` past the crossing it crossed, and the crossing between two adjacent
-## levels is the **coarser** one's exit — `mini`, because the band has to be measured against the same
-## radius whichever direction the body is travelling in.
-static func level_with_hysteresis(
-	current: int, screen_radius: float, epsilon: float, band: float = HYSTERESIS_BAND
-) -> int:
-	var target := level_for_screen_radius(screen_radius, epsilon)
-	if absi(target - current) != 1:
-		return target
-	var crossing := level_exit(mini(target, current), epsilon)
-	if band > 0.0:
-		if target > current and screen_radius < crossing * (1.0 + band):
-			return current
-		if target < current and screen_radius > crossing * (1.0 - band):
-			return current
-	return target
 
 
 static func triangles_at(level: int) -> int:

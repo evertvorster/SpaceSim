@@ -73,121 +73,15 @@ func _test_the_law(h) -> void:
 	h.check(close_px > 600.0 and close_px < 700.0,
 		"and at 10,000 km %.0f px, against the plan's 611 — the projection it linearised" % close_px)
 
-	# --- the levels, against the law's own triangle column ------------------------------------------
-	# `N ~ 5 * r_px / epsilon`, quantised up to the icosphere's `20 * 4^k`. The plan's table gives ~280
-	# triangles for the 100,000 km case at epsilon 1 and ~70 at epsilon 4; these are the levels those
-	# counts land in.
-	h.check(SpacesimLod.level_for_screen_radius(orbit_px, 4.0) == 1,
-		"Earth at 100,000 km takes level 1 — 80 triangles — at a 4 px budget")
-	h.check(SpacesimLod.level_for_screen_radius(orbit_px, 1.0) == 2,
-		"and level 2 at a 1 px budget, which is what a tighter budget buys")
-	h.check(SpacesimLod.level_for_screen_radius(close_px, 4.0) == 3,
-		"a body at 10,000 km takes level 3")
-	h.check(SpacesimLod.level_for_screen_radius(one_au_px, 1.0) == 0,
-		"and a sub-pixel body takes the coarsest level there is, which is the floor rather than a cull "
-		+ "— deciding not to draw it is the cull's business, not the law's")
-
 	# Deep space, as the game's own default start is: the numbers phase 0 measured.
 	var deep := SpacesimLod.screen_radius_pixels(SpacesimLod.angular_radius(EARTH_RADIUS, 9.95e9), p)
 	h.check(deep > 0.4 and deep < 0.6,
 		"from 9.95 Gm — where the game begins — a planet is %.2f px" % deep)
-	h.check(SpacesimLod.level_for_screen_radius(deep, 4.0) == 0, "and takes level 0")
 
-	# --- the boundaries, and the direction of travel -------------------------------------------------
-	# A level change is a **crossing**, so the boundary is where the policy is wrong if it is wrong
-	# anywhere. Level 0 to 1 sits at `20 * 4 / 5.836` = 13.708 px and level 1 to 2 at 54.832, so these
-	# straddle them by a tenth of a pixel rather than a hundredth — the comparison is `>=` on a float
-	# count, and a boundary test that only passes by rounding is not testing the boundary.
-	h.check(SpacesimLod.level_for_screen_radius(13.6, 4.0) == 0,
-		"13.6 px needs level 0's 20 triangles, so it stays on level 0")
-	h.check(SpacesimLod.level_for_screen_radius(13.8, 4.0) == 1,
-		"and a fifth of a pixel past that boundary crosses to level 1")
-	h.check(SpacesimLod.level_for_screen_radius(54.7, 4.0) == 1, "54.7 px is still level 1")
-	h.check(SpacesimLod.level_for_screen_radius(54.9, 4.0) == 2, "and 54.9 has crossed to level 2")
-	h.check(SpacesimLod.level_for_screen_radius(219.3, 4.0) == 2, "219.3 px is still level 2")
-	h.check(SpacesimLod.level_for_screen_radius(219.4, 4.0) == 3, "and 219.4 has crossed to level 3")
-
-	# Monotonic in both directions, which is the property the crossing behaviour depends on: more screen
-	# means never fewer triangles, and a more generous budget means never more.
-	var monotone := true
-	for i in 400:
-		var radius := float(i) * 8.0
-		if SpacesimLod.level_for_screen_radius(radius + 8.0, 4.0) \
-				< SpacesimLod.level_for_screen_radius(radius, 4.0):
-			monotone = false
-		if SpacesimLod.level_for_screen_radius(radius, 8.0) \
-				> SpacesimLod.level_for_screen_radius(radius, 0.5):
-			monotone = false
-	h.check(monotone,
-		"a bigger body never takes fewer triangles, and a looser budget never takes more")
-
-	# And it stops: level 6 is the last, so the law cannot ask for a mesh nobody built.
-	h.check(SpacesimLod.level_for_screen_radius(1.0e9, 0.25) == SpacesimLod.MAX_LEVEL,
-		"a body filling the sky at the tightest budget asks for the last level and no further")
-
-	# --- the levels themselves ----------------------------------------------------------------------
-	h.check(SpacesimLod.triangles_at(0) == 20, "a level 0 icosphere is 20 triangles")
-	var counts := []
-	var total := 0
-	for level in 6:
-		counts.append(SpacesimLod.triangles_at(level))
-		total += SpacesimLod.triangles_at(level)
-	h.check(counts == [20, 80, 320, 1280, 5120, 20480],
-		"and each subdivision is exactly four times the one before: %s" % [counts])
-	h.check(total == 27300,
-		"so levels 0 to 5 are %d triangles — 20 * (1+4+16+64+256+1024) — of SHARED mesh data for the "
-			% total
-			+ "whole engine, against ~16,000 PER BODY before this")
-
-	# Degenerate inputs, which a policy called once a frame for every body will meet.
-	h.check(SpacesimLod.level_for_screen_radius(0.0, 4.0) == 0, "a zero-size body takes level 0")
-	h.check(SpacesimLod.level_for_screen_radius(-5.0, 4.0) == 0, "and so does a negative one")
-	h.check(SpacesimLod.level_for_screen_radius(100.0, 0.0) == 0,
-		"and a zero budget is level 0 rather than a division by nothing")
-	h.check(SpacesimLod.screen_radius_pixels(0.5, 0.0) == 0.0, "as is a frame with no pixels")
+	# Degenerate inputs, which the projection meets every frame for every body.
+	h.check(SpacesimLod.screen_radius_pixels(0.5, 0.0) == 0.0, "a frame with no pixels is zero pixels")
 	h.check(SpacesimLod.angular_radius(EARTH_RADIUS, 1.0e3) == PI * 0.5,
 		"an observer inside the body is at the horizon, clamped rather than NaN")
-
-	# --- hysteresis, which is what makes a discrete level usable on a continuous input -----------------
-	# **A crossing is a place a body can sit.** Level 2 gives way to 3 at `320 * 4 / 5.836` = 219.33 px,
-	# and without a dead band a body hovering there — which is any body under manual throttle — swaps
-	# meshes on the frames its screen radius jitters across.
-	var crossing := SpacesimLod.level_exit(2, BUDGET)
-	h.check_near(crossing, 219.33, "level 2 gives way to level 3 at %.2f px" % crossing, 0.01)
-
-	# Climbing from level 2: held below the crossing plus the band, released past it.
-	h.check(SpacesimLod.level_with_hysteresis(2, crossing, BUDGET) == 2,
-		"a body at the crossing keeps the coarser level rather than flapping onto the finer one")
-	h.check(SpacesimLod.level_with_hysteresis(2, crossing * 1.05, BUDGET) == 2,
-		"and it is still held five percent past it")
-	h.check(SpacesimLod.level_with_hysteresis(2, crossing * 1.2, BUDGET) == 3,
-		"but twenty percent past, it has clearly grown and takes level 3")
-
-	# And descending, where the band is on the other side.
-	h.check(SpacesimLod.level_with_hysteresis(3, crossing * 0.95, BUDGET) == 3,
-		"coming back down, level 3 is kept five percent below the crossing")
-	h.check(SpacesimLod.level_with_hysteresis(3, crossing * 0.85, BUDGET) == 2,
-		"and released fifteen percent below it")
-
-	# **A jump of more than one level is flying, not jitter, and is taken at once** — stepping one level
-	# per frame would make a fast approach crawl through five levels over five frames of real time.
-	h.check(SpacesimLod.level_with_hysteresis(0, crossing * 1.05, BUDGET) == 3,
-		"a body two or more levels out takes the level it has earned immediately")
-	h.check(SpacesimLod.level_with_hysteresis(5, crossing * 0.1, BUDGET) == 1,
-		"in either direction — five levels down to one, at once")
-	h.check(SpacesimLod.level_with_hysteresis(2, crossing, BUDGET, 0.0)
-			== SpacesimLod.level_for_screen_radius(crossing, BUDGET),
-		"and a zero band is exactly the plain policy, so the dead band is not baked into the law")
-
-	# The property that matters in flight: shivering around a crossing moves nothing.
-	var held := true
-	var settled := 2
-	for i in 40:
-		var jitter := 1.0 + 0.02 * (1.0 if i % 2 == 0 else -1.0)
-		settled = SpacesimLod.level_with_hysteresis(settled, crossing * jitter, BUDGET)
-		if settled != 2:
-			held = false
-	h.check(held, "and forty alternating two-percent jitters around the crossing never move the level")
 
 
 ## That a built scene hands its bodies the levels the law asks for — the wiring, not the arithmetic.
