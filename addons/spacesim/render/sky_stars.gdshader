@@ -82,12 +82,6 @@ const float LUX_PER_MAG0 = 2.54e-6;
 // comes out too dim or too bright, what is wrong is the exposure or the physics, never this.
 const float UNIT_LUX_PER_SR = 100000.0 / 3.14159265358979;
 
-// **The bound is the worst cell in the catalogue**, printed by `tools/build_star_catalogue.py` and
-// CHECKED against the asset by `tests/test_render.gd`, because a grid change moves the worst cell and
-// nothing else would notice. At GRID 32 it is 70.
-//
-// It is only a bound: the loop leaves early on the depth filter below, since the tool writes each
-// cell's stars in ascending magnitude order.
 // **The bound is the worst cell in the catalogue, and it is checked rather than trusted.**
 // `tools/build_star_catalogue.py` prints it (`stars a cell: median .., 99th .., worst ..`) and
 // `tests/test_render.gd` reads this constant and asserts it covers the asset's worst cell, so a grid

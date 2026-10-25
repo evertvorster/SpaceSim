@@ -429,29 +429,6 @@ func _physics_process(delta: float) -> void:
 	_sync_player_location()
 
 
-## Everything that is **drawn** rather than simulated, and it runs once per drawn frame.
-##
-## **Presentation belongs here and not in `_physics_process`**, and two reasons point the same way.
-## The physics tick is pinned to `physics/common/physics_ticks_per_second` (60), so anything derived
-## there is quantised to it — the camera among them, and nothing interpolates it because
-## `physics/common/physics_interpolation` is off. And when a frame runs long Godot takes up to
-## `max_physics_steps_per_frame` (8) physics steps before drawing one frame, so every call below used
-## to run **up to eight times for a single frame** — the work multiplying exactly when there was the
-## least time for it. See vault `SpaceSim/Engine Review 2026-10-15 — Actions.md`.
-##
-## Nothing here feeds the simulation, which is what makes the split safe: the ship has already been
-## stepped and the frame tree already evaluated by the time this runs.
-##
-## **Every transform read here is the INTERPOLATED one**, because `physics/common/physics_interpolation`
-## is on and this is not the physics frame. `get_global_transform()` is only accurate to the most
-## recent physics tick, so deriving the sky, the LOD or the markers from it would describe a different
-## frame than the one being drawn — a lag no interpolation could undo. Godot's own note on
-## `get_global_transform_interpolated` names this exact case: "frame-based operations that take place
-## in `_process` … examples include `Camera3D`s focusing on a node".
-##
-## `Camera3D`'s *methods* already do this for us — `unproject_position` reads `get_camera_transform()`,
-## which returns the interpolated transform outside the physics frame — so only the direct
-## `global_transform` reads need saying out loud.
 ## How often the readout is rebuilt, in seconds. **Everything on it either moves at human speed** — the
 ## date, the frame, names, the selected target — **or jitters faster than anyone can read** — altitude
 ## and speed to a centimetre. It was rebuilt every drawn frame, which is a 13-line string with a format
@@ -459,14 +436,6 @@ func _physics_process(delta: float) -> void:
 ## 0.12% of a frame it is not a cost problem; it is a *shape* problem, and this is the shape.
 const HUD_INTERVAL := 0.1
 var _hud_since := 0.0
-
-## **Nothing here may touch the `RenderingDevice`.** It belongs to the render thread and its RID allocator
-## is not thread safe — reading it from `_process` demonstrated that with thousands of `Element limit
-## reached` errors. The exposure metre's numbers are read *inside* the pass, on the render thread, and the
-## readback that reported them (and printed every jump) was an instrument from a landing investigation; it
-## is gone, with its state, rather than left running in the game.
-
-
 
 ## **Which code is running, said once at startup.**
 ##
@@ -519,14 +488,40 @@ func _update_atmosphere_volume(observer: Vector3) -> void:
 	)
 
 
+## Everything that is **drawn** rather than simulated, and it runs once per drawn frame.
+##
+## **Presentation belongs here and not in `_physics_process`**, and two reasons point the same way.
+## The physics tick is pinned to `physics/common/physics_ticks_per_second` (60), so anything derived
+## there is quantised to it — the camera among them, and nothing interpolates it because
+## `physics/common/physics_interpolation` is off. And when a frame runs long Godot takes up to
+## `max_physics_steps_per_frame` (8) physics steps before drawing one frame, so every call below used
+## to run **up to eight times for a single frame** — the work multiplying exactly when there was the
+## least time for it. See vault `SpaceSim/Engine Review 2026-10-15 — Actions.md`.
+##
+## Nothing here feeds the simulation, which is what makes the split safe: the ship has already been
+## stepped and the frame tree already evaluated by the time this runs.
+##
+## **Every transform read here is the INTERPOLATED one**, because `physics/common/physics_interpolation`
+## is on and this is not the physics frame. `get_global_transform()` is only accurate to the most
+## recent physics tick, so deriving the sky, the LOD or the markers from it would describe a different
+## frame than the one being drawn — a lag no interpolation could undo. Godot's own note on
+## `get_global_transform_interpolated` names this exact case: "frame-based operations that take place
+## in `_process` … examples include `Camera3D`s focusing on a node".
+##
+## `Camera3D`'s *methods* already do this for us — `unproject_position` reads `get_camera_transform()`,
+## which returns the interpolated transform outside the physics frame — so only the direct
+## `global_transform` reads need saying out loud.
+##
+## **Nothing here may touch the `RenderingDevice`.** It belongs to the render thread and its RID allocator
+## is not thread safe — reading it from `_process` demonstrated that with thousands of `Element limit
+## reached` errors.
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
 	_system.aim_sun_at(observer)
 	# **The air is one march over the whole frame** (`SpacesimAtmospherePass`), told which body to march — or
-	# nothing — below. The decks are not built: their mechanism is `Cloud Volumes` §6a's decision, and a deck
-	# drawn before this pass gets its air in front for free, because this pass attenuates what is already in
-	# the colour buffer.
+	# nothing — below. The body's decks go over with the air (`_update_decks` hands them to the pass), so the
+	# march draws cloud and air in one integral.
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.

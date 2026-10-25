@@ -38,19 +38,19 @@ enum Domain { SOLID, LIQUID, GAS }
 ## Venus's 737 K come from. Each value is fixed against one measured surface temperature; N₂, O₂,
 ## Ar, He and H₂ are explicitly **zero**, so "known transparent" and "not known" do not look alike.
 @export var greenhouse: PackedFloat32Array = []
-@export var condensation_temperature: float = 0.0 ## kelvin, 0 where it does not apply
 ## **`condensation_temperature` is the 1-ATMOSPHERE VAPOUR-PRESSURE REFERENCE** — the temperature at
-## which the pure substance' s vapour pressure equals 101,325 Pa. That is the normal **boiling point** for
+## which the pure substance's vapour pressure equals 101,325 Pa. That is the normal **boiling point** for
 ## a liquid, and the **sublimation point** for a solid with no liquid phase at 1 atm.
 ##
 ## **It is NOT a melting or triple point, and this table held both meanings at once** until 2026-10-16.
 ## Water's was 273.15 (its triple point) while ammonia's was 239.8 (its boiling point), so a
 ## Clausius-Clapeyron correction from it gave ammonia the right answer and water a dew point **60 K too
 ## low** — which would have put Earth's cloud base at 8 km instead of 1.7.
-@export var latent_heat: float = 0.0
+@export var condensation_temperature: float = 0.0 ## kelvin, 0 where it does not apply
 ## **Latent heat, J/mol** — what turns the 1-atm reference above into a condensation temperature at the
 ## pressure the species is actually at. Zero means "not known", and the table's 1-atm value is then used
 ## unchanged, which is right for nothing but a pure substance at 1 bar.
+@export var latent_heat: float = 0.0
 ## **The species this one is MADE FROM, or empty if it is not a product.**
 ##
 ## Ammonium hydrosulphide is not a gas anybody puts in an atmosphere: NH\u2083 and H\u2082S meet at a level

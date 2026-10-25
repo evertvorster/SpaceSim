@@ -237,14 +237,14 @@ func close() -> void:
 	_tried = false
 
 
-## Why `open()` did not work, or an empty string. Reported rather than thrown: a bake that cannot run on
-## the GPU is a bake that runs on the CPU.
 ## How many RIDs the device holds right now. **Zero between bakes**, and the GPU suite asserts it: the
 ## instrument is only worth having if something fails when it moves.
 func live_rids() -> int:
 	return _rids_live
 
 
+## Why `open()` did not work, or an empty string. Reported rather than thrown: a bake that cannot run on
+## the GPU is a bake that runs on the CPU.
 func error() -> String:
 	return _error
 

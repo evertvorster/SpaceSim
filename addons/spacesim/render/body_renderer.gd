@@ -473,8 +473,9 @@ static func surface_material(
 	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
 	# different field from the map it extends. **The ladder is the field's own octaves**, so what it needs is not a
 	# feature size but the field's own base frequency, its seed, and which octave the map stopped at:
-	# `first_octave = log2(width / (2 * base_frequency))`, the octave whose feature is two texels of the brick in
-	# hand (`surface_detail` carries the reasoning).
+	# `first_octave = log2(width / (4 pi * base_frequency))`, the octave whose feature is two texels of the brick
+	# in hand — **the 4 pi is load-bearing**: as `width / (2 * base_frequency)` it was 2.65 octaves out and left
+	# a band of nothing between the map and the ladder. `first_detail_octave` carries the reasoning.
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	material.set_shader_parameter("detail_seed", plan.seed)
 	material.set_shader_parameter("detail_base_frequency", plan.continent_frequency)
@@ -641,9 +642,9 @@ static func apply_surface_maps(
 ##
 ## **The thickness is simulated, not built.** Evert, 2026-10-20: *"We can simulate the thickness by using a
 ## similar thing to the land textures. At any real distance from the observer this would be sufficient."* So
-## The deck's geometry is one sphere at its TOP radius; the base is a shading fact, not a surface.
-## the top is 1.0 in model space. The shader samples the base's own crossing of the eye ray from underneath,
-## which is genuine parallax of thickness rather than a fudge.
+## the deck's geometry is one sphere at its TOP radius, which is 1.0 in model space; the base is a shading
+## fact, not a surface. The shader samples the base's own crossing of the eye ray from underneath, which is
+## genuine parallax of thickness rather than a fudge.
 ##
 ## `seed_layer` is the content layer's index, which is what `SpacesimCloudField.seed_for()` keys the weather
 ## by — so a body's decks are different clouds rather than the same one at two heights.
@@ -726,9 +727,6 @@ static func face_deck(material: Material, eye_offset: Vector3) -> void:
 	if deck == null:
 		return
 	deck.set_shader_parameter("eye_local", eye_offset)
-	# **The star, in the deck's own frame** — the base's light needs it, and it is the same convention `eye_local`
-	# uses: both are world-space vectors handed over already normalised, because the deck node is a uniform scale
-	# and no rotation.
 
 
 ## **The light a cloud base transmits, from the air's own numbers** — `Cloud Decks Plan` §D6.
