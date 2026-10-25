@@ -93,10 +93,15 @@ uniform float detail_lacunarity = 2.0;
 // How much the detail moves the *colour*, as a fraction of the band's own. **Now scaled by the field's own
 // amplitude at that octave**, which for fine octaves is a fraction of a percent — this is a knob that only
 // becomes visible again if the field's spectrum gets rougher.
-uniform float detail_variation : hint_range(0.0, 1.0) = 0.0;
+//
+// **The defaults below are the host's own values**, and that is a rule rather than a coincidence: a uniform's
+// default is the picture a material that missed its publish will draw, so it has to move when the constant
+// behind it moves. These were 0.0/0.0, which is a surface that runs the whole 18-rung ladder and shows none
+// of it — cost with no picture. `tests/test_render.gd` pins each one against `SpacesimBodyRenderer`.
+uniform float detail_variation : hint_range(0.0, 1.0) = 0.18;
 // How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
 // one place the ladder's relief is calibrated.
-uniform float detail_relief = 0.0;
+uniform float detail_relief = 1.0;
 // **Whether this body has an ocean at all**, which decides whether the discard below exists. A body with no
 // liquid on its surface — Mercury, Luna, Io, Europa, Venus — has no sea layer, and `sea_level` then resolves to
 // the field's own minimum; a naive `height < sea_level` discard would punch a hole in whatever ground sits at
@@ -114,8 +119,9 @@ uniform float sea_level = 0.0;
 uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
 // How much the normal is tilted by the gradient — see the header. The one number here that is a look rather
-// than a derivation, and it is a *uniform* so the host owns it.
-uniform float relief_exaggeration = 12.0;
+// than a derivation, and it is a *uniform* so the host owns it. The default is the host's, for the reason
+// above: 12.0 was 2.4x what anything publishes.
+uniform float relief_exaggeration = 5.0;
 // The detail map's width, which is what turns a texel into an angle.
 uniform int map_width = 1024;
 
@@ -127,6 +133,11 @@ uniform float land_specular : hint_range(0.0, 1.0) = 0.15;
 
 const float SURFACE_PI = 3.141592653589793;
 const float SURFACE_TAU = 6.283185307179586;
+
+// **The map's own tilt ceiling**, and it is NOT `relief_max_tilt` — see the clamp below. 0.35 is about 19°:
+// steeper than real terrain at a 19 km sampling scale, and the most a normal may lean before the shading
+// fiction starts inventing light.
+const float MAP_MAX_TILT = 0.35;
 
 // Model space: the unit-sphere position, which **is** the direction. Captured in `vertex()` because
 // `VERTEX` inside `fragment()` is in VIEW space.
@@ -223,11 +234,13 @@ void fragment() {
 	// dark while the flat interiors beside it stay black. Nothing in the picture says "relief"; it says
 	// "coastlines are lit", which is what a flown screenshot showed.
 	//
-	// 0.35 is about 19°, which is already steeper than real terrain at a 19 km sampling scale and is the most
-	// a normal may lean before it starts inventing light. The real fix is geometric relief (displacement), where
-	// a back-lit slope is genuinely back-lit.
-	slope_east = clamp(slope_east, -0.35, 0.35);
-	slope_north = clamp(slope_north, -0.35, 0.35);
+	// **Two ceilings, and they are deliberately different numbers.** This one bounds the MAP's slope: 0.35 is
+	// about 19°, already steeper than real terrain at a 19 km sampling scale and the most a normal may lean
+	// before it starts inventing light. `relief_max_tilt` below bounds the ladder's fine bumps instead, which
+	// are a shading fiction at pixel scale and bear a steeper lean. Tuning the uniform does not move this one —
+	// they answer different questions, and naming the literal is what says so.
+	slope_east = clamp(slope_east, -MAP_MAX_TILT, MAP_MAX_TILT);
+	slope_north = clamp(slope_north, -MAP_MAX_TILT, MAP_MAX_TILT);
 
 	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
 	// pixel spans — the same quantity the mesh's error budget spends — so the fade needs no distance and

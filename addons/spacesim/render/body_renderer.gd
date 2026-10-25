@@ -190,6 +190,11 @@ const POINT_TRIANGLES := 2
 ## is the property that matters, because both are measured off the *map's* distribution.
 const DECK_DETAIL_STRENGTH := 0.2
 
+## **How wide the deck's coverage edge is, in field units** — the `smoothstep` around `threshold`. Published
+## rather than left to the shader's own default: it was a `hint_range` uniform nobody set, which reads as a
+## knob and is a constant. Named here and handed over, so the host owns it like every other look number.
+const DECK_SOFTNESS := 0.05
+
 ## The wireframe view's one material — see [method wireframe_material].
 static var _wireframe: StandardMaterial3D
 ## The one-texel neutral height map every un-baked material starts with.
@@ -659,6 +664,7 @@ static func deck_material(
 	material.set_shader_parameter("cloud_color", palette.srgb_to_linear())
 	material.set_shader_parameter("detail_seed", SpacesimCloudField.seed_for(body.id, seed_layer))
 	material.set_shader_parameter("detail_strength", DECK_DETAIL_STRENGTH)
+	material.set_shader_parameter("softness", DECK_SOFTNESS)
 	# **Every deck is centred on the same body, so a distance sort cannot separate the stack** — the order has
 	# to be stated. The deepest composites first (lower priority is drawn earlier), leaving the highest deck
 	# over the top of it, which is what a belt *is*: a thin bright deck over a browner one.

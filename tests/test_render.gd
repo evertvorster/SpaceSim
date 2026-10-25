@@ -34,6 +34,7 @@ func run(h, root: Node) -> void:
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_phase_term_is_a_disc_average(h)
+	_test_shader_defaults_are_the_hosts(h)
 	_test_the_sky_is_derived(h, scene, sol, earth, luna)
 	_test_the_air_heights_are_derived(h, scene, sol)
 	_test_the_condensation_levels(h, scene, sol)
@@ -789,3 +790,50 @@ func _test_hiding_bodies_hides_their_air(h, scene: SpacesimSystemScene) -> void:
 			other += 1
 	h.check(surfaces == scene.bodies.size(), "every body's surface is in the list (%d)" % surfaces)
 	h.check(other == 0, "and nothing else is: no air shell, no deck shell (%d)" % other)
+
+
+## **A shader uniform's default is the picture a material that missed its publish will draw**, so it has to
+## move when the constant behind it moves. Every entry below has been the *superseded* value at some point,
+## and three of them reproduced a fault this project has already fixed: the ocean's ramp defaulted to the
+## 2 m / 40 m pair whose own comment says "every pixel of the ocean was deep", `detail_relief` defaulted to
+## zero — the whole 18-rung ladder for no picture — and `wave_stretch` defaulted to 1.0, which is isotropic.
+##
+## **Checked against the source text**, because a `ShaderMaterial` whose parameter was never set returns
+## `null` rather than the shader's own default: the mistake is invisible to anything that reads a material.
+func _test_shader_defaults_are_the_hosts(h) -> void:
+	var surface := "res://addons/spacesim/render/body_surface.gdshader"
+	var ocean := "res://addons/spacesim/render/body_ocean.gdshader"
+	var pairs := [
+		[surface, "detail_variation", SpacesimBodyRenderer.DETAIL_VARIATION],
+		[surface, "detail_relief", SpacesimBodyRenderer.DETAIL_RELIEF],
+		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
+		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],
+		[ocean, "shallow_metres", SpacesimBodyRenderer.OCEAN_SHALLOW_METRES],
+		[ocean, "deep_metres", SpacesimBodyRenderer.OCEAN_DEEP_METRES],
+		[ocean, "wave_relief", SpacesimBodyRenderer.OCEAN_WAVE_RELIEF],
+		[ocean, "wave_stretch", SpacesimBodyRenderer.OCEAN_WAVE_STRETCH],
+		[ocean, "tone_variation", SpacesimBodyRenderer.OCEAN_TONE_VARIATION],
+		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
+	]
+	for pair in pairs:
+		var shader: Shader = load(pair[0])
+		if shader == null:
+			h.check(false, "%s loads" % String(pair[0]).get_file())
+			continue
+		var found: Variant = _shader_default(shader.code, String(pair[1]))
+		if found == null:
+			h.check(false, "%s declares %s with a default" % [String(pair[0]).get_file(), pair[1]])
+			continue
+		h.check_near(found, float(pair[2]),
+			"%s's default is the host's value, so a material that missed a publish draws the intended "
+				% pair[1] + "look (%.4f)" % found, 1.0e-6)
+
+
+## `uniform <type> <name> ... = <number>;` — the declared default, or null if the name is not there.
+func _shader_default(code: String, name: String) -> Variant:
+	var pattern := RegEx.new()
+	pattern.compile("uniform\\s+\\w+\\s+" + name + "\\b[^;]*=\\s*([-0-9.]+)\\s*;")
+	var found := pattern.search(code)
+	if found == null:
+		return null
+	return found.get_string(1).to_float()

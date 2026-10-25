@@ -50,8 +50,11 @@ uniform int map_width = 2048;
 // band's own colour — so this shader decides no colour at all.
 uniform vec3 shallow_color : source_color = vec3(0.2, 0.5, 0.5);
 uniform vec3 deep_color : source_color = vec3(0.02, 0.06, 0.15);
-uniform float shallow_metres = 2.0;
-uniform float deep_metres = 40.0;
+// **The host's values, not the numbers this started with.** 2 m / 40 m is the ramp that made `deep_color`
+// arrive at 0.45% of the water column, so every pixel of the ocean was "deep" — one flat colour from orbit.
+// A uniform's default is what a material that missed its publish draws, so it follows the constant.
+uniform float shallow_metres = 5.0;
+uniform float deep_metres = 3000.0;
 
 // Water's shading: glossy, with the sun's glint and the bright limb coming out of the BRDF for nothing.
 uniform float roughness_value : hint_range(0.0, 1.0) = 0.14;
@@ -72,7 +75,8 @@ uniform float wave_feature = 0.0;
 uniform float wave_relief = 0.0015;
 // **The wind's stretch**, along the east tangent: 3 means a swell three times longer than it is wide. See
 // `OCEAN_WAVE_STRETCH` — an isotropic sea is indistinguishable from ground.
-uniform float wave_stretch = 1.0;
+// 1.0 is ISOTROPIC — the mottling that made the sea look exactly like land. The host publishes 3.0.
+uniform float wave_stretch = 3.0;
 
 // ===== THE SEA'S OWN COLOUR STRUCTURE =====
 //
@@ -84,7 +88,7 @@ uniform int tone_octaves = 0;
 uniform int tone_seed = 0;
 uniform float tone_gain = 0.5;
 uniform float tone_lacunarity = 2.0;
-uniform float tone_variation : hint_range(0.0, 1.0) = 0.0;
+uniform float tone_variation : hint_range(0.0, 1.0) = 0.12;
 
 const float OCEAN_PI = 3.141592653589793;
 const float OCEAN_TAU = 6.283185307179586;
