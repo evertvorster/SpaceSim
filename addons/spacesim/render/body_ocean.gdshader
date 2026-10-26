@@ -133,15 +133,18 @@ void fragment() {
 	// **The near field**, the same table the land shader reads and in the same order — finest first, first match
 	// wins, feathered to the whole-body map at the tile's edge. Without this the sea's threshold would be the base
 	// map's while the land's was the tile's, and the coast would be a band where both layers drew or neither did.
+	// **The same clipmap the land composites**, and it must be the same: the sea's threshold decides the coast, so a
+	// sea reading one layer where the land read another would put a seam along every shore. Coarse first, each layer
+	// fading in at its own edge, no break.
 	for (int i = 0; i < tile_count; i++) {
 		vec4 tile = tile_rect[i];
-		if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
-			vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
-			vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
-				* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
-			height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
-			break;
+		if (uv.x < tile.x || uv.x > tile.z || uv.y < tile.y || uv.y > tile.w) {
+			continue;
 		}
+		vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+		vec2 edge = smoothstep(vec2(0.0), vec2(0.1), local)
+			* (1.0 - smoothstep(vec2(0.9), vec2(1.0), local));
+		height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
 	}
 
 	// **Land is not this shader's business.** The complementary test to the land's own discard, on the same

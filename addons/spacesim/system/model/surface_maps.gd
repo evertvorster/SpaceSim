@@ -402,8 +402,9 @@ func tiles_for(body_id: String) -> Dictionary:
 		if own.body_id != body_id or not own.ready:
 			continue
 		ready.append(own)
-	# Finest first: the smallest rectangle wins a pixel, and a coarser neighbour never hides a finer one.
-	ready.sort_custom(func(a, b): return (a.level > b.level) if a.level != b.level else (a.y < b.y))
+	# **Coarse first, because the shader composites in list order**: each layer is drawn over the one before it, so
+	# the finest ring ends up on top. That is the stack's own law, and it is why nothing has to be reconciled.
+	ready.sort_custom(func(a, b): return (a.level < b.level) if a.level != b.level else (a.y < b.y))
 	var rects := PackedVector4Array()
 	var layers := PackedInt32Array()
 	for slot in ready:

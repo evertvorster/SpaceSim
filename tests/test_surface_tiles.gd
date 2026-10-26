@@ -76,13 +76,16 @@ func _test_the_law(h) -> void:
 		h.check(tiles.size() <= SpacesimSurfaceTiles.MAX_TILES,
 			"and never more than the table holds (%d)" % tiles.size())
 
-	var monotone := true
-	for index in range(1, counts.size()):
-		if counts[index] < counts[index - 1]:
-			monotone = false
-	monotone = monotone and depths[depths.size() - 1] >= depths[0]
-	h.check(monotone, "closing in asks for at least as many tiles, and at least as deep "
-		+ "(counts %s, depths %s)" % [str(counts), str(depths)])
+	# **A stack, not a cut, so the count is not the monotone thing — the DEPTH is.** Each level up covers a quarter
+	# of the area, so a ring holds about the same number of tiles whatever the altitude; what changes as the eye
+	# closes is how many rings there are and how deep the finest one goes.
+	var deeper := true
+	for index in range(1, depths.size()):
+		if depths[index] < depths[index - 1]:
+			deeper = false
+	h.check(deeper, "closing in asks for at least as deep a finest ring (depths %s)" % str(depths))
+	h.check(int(depths[depths.size() - 1]) - int(depths[0]) >= 4,
+		"and by several levels between 2,000 km and 10 km (%d -> %d)" % [depths[0], depths[depths.size() - 1]])
 
 	# A distance at or inside the surface has no visible cap, and a nonsense pixel angle has no law.
 	h.check(SpacesimSurfaceTiles.select(earth, earth, eye, pixel, 640).is_empty(),
@@ -119,16 +122,47 @@ func _test_the_selection(h) -> void:
 			inside = false
 	h.check(inside, "every tile's rectangle is inside the map")
 
-	var overlaps := 0
-	for a in rects.size():
-		for b in range(a + 1, rects.size()):
-			var one: Vector4 = rects[a]
-			var other: Vector4 = rects[b]
-			var disjoint: bool = one.z <= other.x or other.z <= one.x or one.w <= other.y or other.w <= one.y
-			if not disjoint:
-				overlaps += 1
-	h.check(overlaps == 0, "and no two tiles overlap — a quadtree's leaves partition what it covers (%d)"
-		% overlaps)
+	# **A stack is nested by design, so overlap is the point** — a finer ring must sit inside the coarser one it is
+	# drawn over. What has to hold is that no two tiles at the SAME level are the same tile, that the levels are
+	# contiguous ascending (coarse first, which is the order the shader composites in), and that each ring's reach
+	# shrinks as the level rises.
+	var seen := {}
+	var duplicates := 0
+	for tile in tiles:
+		var key := "%d/%d/%d" % [int(tile[0]), int(tile[1]), int(tile[2])]
+		if seen.has(key):
+			duplicates += 1
+		seen[key] = true
+	h.check(duplicates == 0, "no tile is selected twice (%d)" % duplicates)
+
+	var levels: Array = []
+	for tile in tiles:
+		if levels.is_empty() or levels[levels.size() - 1] != int(tile[0]):
+			levels.append(int(tile[0]))
+	var ascending := true
+	for index in range(1, levels.size()):
+		if levels[index] != levels[index - 1] + 1:
+			ascending = false
+	h.check(ascending, "the rings are contiguous and coarse first (%s)" % str(levels))
+
+	# Each ring's reach, as the largest angle from the eye's direction to a tile centre in it — it must shrink with
+	# the level, or the stack is not nested and a fine ring would not sit inside the coarse one.
+	var reach: Array = []
+	for level in levels:
+		var widest := 0.0
+		for tile in tiles:
+			if int(tile[0]) != level:
+				continue
+			var rect := SpacesimSurfaceTiles.rect_of(level, int(tile[1]), int(tile[2]))
+			var centre: Vector3 = SpacesimSurfaceTiles.direction_of(
+				(rect.x + rect.z) * 0.5, (rect.y + rect.w) * 0.5)
+			widest = maxf(widest, eye.angle_to(centre))
+		reach.append(widest)
+	var nested := true
+	for index in range(1, reach.size()):
+		if reach[index] > reach[index - 1] + SpacesimSurfaceTiles.tile_extent(levels[index]):
+			nested = false
+	h.check(nested, "and every ring reaches less far than the one under it (%s)" % str(reach))
 
 	# **Where the eye is looking is where the detail goes.** The tile containing the sub-eye point against the
 	# deepest tile at the limb: the budget must be spent under the eye, not on the horizon.

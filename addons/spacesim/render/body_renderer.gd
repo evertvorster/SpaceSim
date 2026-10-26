@@ -628,6 +628,7 @@ static func apply_surface_tiles(
 	surface.set_shader_parameter("tile_rect", padded_rects)
 	surface.set_shader_parameter("tile_layer", padded_layers)
 	surface.set_shader_parameter("tile_count", mini(live, size))
+	surface.set_shader_parameter("tile_texels", float(SpacesimSurfaceTiles.TILE_TEXELS))
 
 
 static func apply_surface_maps(

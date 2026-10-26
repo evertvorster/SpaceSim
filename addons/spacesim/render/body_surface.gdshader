@@ -134,6 +134,11 @@ uniform float planet_radius = 1.0;
 uniform float relief_exaggeration = 5.0;
 // The detail map's width, which is what turns a texel into an angle.
 uniform int map_width = 1024;
+// **A tile's texel count**, which turns a tile's uv span into the width of the raster it is — and so into the
+// feature size the banded detail ladder starts from when a tile is the raster in hand.
+uniform float tile_texels = 512.0;
+// How much of a layer's own edge it fades in over, as a fraction of the tile's side.
+const float TILE_BLEND = 0.1;
 // **The banded detail ladder's two numbers, and this is what the surface was missing.**
 //
 // `detail_feature` is **two texels of the raster in hand**, in radians of sphere-arc — where the map stops and the
@@ -188,20 +193,33 @@ void fragment() {
 	// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
 	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 	float height = texture(height_map, uv).r;
+	// **The raster in hand**, as a width: the whole-body map, or the finest tile that covers this pixel. The detail
+	// ladder's feature size follows it, so the ground's texture starts exactly where the raster it is drawn from
+	// stops — any raster size, the same law.
+	float width_now = float(max(map_width, 1));
 
-	// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
-	// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
-	// because a pixel just inside a boundary must not jump between two rasters; with 512-texel tiles that band is
-	// ten texels, which reads as softness rather than as a seam.
+	// **The near field is a CLIPMAP: nested rings of tiles, coarse first, each drawn over the one before it.** Every
+	// layer that covers this pixel contributes, so a pixel under the eye may read six or eight of them — that
+	// overdraw is the price of the shape, and it buys three things nothing has to be reconciled: a finer ring
+	// cannot leave a hole (the coarser one is under it), two rasters never have to *agree* at a boundary, and a level
+	// change is just another layer appearing.
+	//
+	// **Each layer fades in at its own edge**, over `TILE_BLEND` of the tile. That is not a seam-hider: it is the
+	// blend between two samplings of one field where the finer one is the finer *version* of the other, so the only
+	// thing that changes across the band is how much detail there is. The whole-body map underneath is the coarsest
+	// layer of the same stack, and it is already in `height`.
 	for (int i = 0; i < tile_count; i++) {
 		vec4 tile = tile_rect[i];
-		if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
-			vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
-			vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
-				* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
-			height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
-			break;
+		if (uv.x < tile.x || uv.x > tile.z || uv.y < tile.y || uv.y > tile.w) {
+			continue;
 		}
+		vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+		vec2 edge = smoothstep(vec2(0.0), vec2(TILE_BLEND), local)
+			* (1.0 - smoothstep(vec2(1.0 - TILE_BLEND), vec2(1.0), local));
+		height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
+		// **The finest layer that covers this pixel is the raster in hand** for the detail ladder below, which wants
+		// two of *its* texels as the scale its own rungs start from.
+		width_now = tile_texels / max(tile.z - tile.x, 1.0e-6);
 	}
 
 	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
@@ -338,9 +356,10 @@ float detail = 0.0;
 	// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
 	// wider than a slab's.
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+		float feature = detail_feature * float(max(map_width, 1)) / max(width_now, 1.0);
+		int rungs = int(ceil(log2(max(feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
 		detail += banded_detail(
-			up, footprint_angle, detail_seed, detail_feature, detail_strength, rungs
+			up, footprint_angle, detail_seed, feature, detail_strength, rungs
 		);
 	}
 

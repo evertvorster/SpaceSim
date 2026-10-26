@@ -1,6 +1,6 @@
 class_name SpacesimSurfaceTiles
 extends RefCounted
-## **The map's raster as a quadtree over uv** — the near field subdivides under the eye, as the mesh does.
+## **The map's raster as a CLIPMAP** — nested rings of ever-finer tiles, all resident, drawn coarse to fine.
 ##
 ## The whole-body map answers *how fine should the planet be?* for one raster covering everything. Past its
 ## ceiling that answer is fixed and the ground under the eye wants more, so the map is refined exactly where the
@@ -43,19 +43,22 @@ const TILE_TEXELS := 512
 ## under a 10 km descent would be some 700 Mtexel.
 const MAX_TILES := 32
 
-## **How many of those the walk may select, and it is deliberately fewer than the table holds.** A selection change
-## has to keep the tiles it is *replacing* until their children land — that is the fix for the pulse — and those two
-## sets have to fit at once. With the budget equal to the table there is no room for both, so a level change cannot
-## place anything, the regions that needed refining fall back to the whole-body map, and the ground **softens then
-## sharpens**: exactly what Evert saw on the F4/F6 flight, *"a couple of cases where a texture refinement was drawn,
-## and then reverted"*.
-##
-## Eight spare layers is a quarter of the table: enough to hold a whole level's worth of ancestors at a time, and the
-## loss of eight tiles of near field is not visible against the budget's own truncation.
-const RESERVE := 8
+## **The whole table, and there is no reserve any more.** The reserve existed because a *cut* had to hold the tiles
+## it was replacing until their children landed, or a region fell back to the whole-body map and the ground
+## *softened then sharpened* — Evert, on the F4/F6 flight: *"a couple of cases where a texture refinement was drawn,
+## and then reverted."* **A stack has no such transition**: the coarser ring is wanted anyway, so there is nothing to
+## reserve for and the budget is the table.
+const TILE_BUDGET := MAX_TILES
 
-## The walk's default budget: the table, less the reserve that makes replaced tiles survivable.
-const TILE_BUDGET := MAX_TILES - RESERVE
+## **Tiles per ring.** The clipmap invariant is that each level up covers a quarter of the area at twice the
+## resolution, so a ring holds roughly the same number of tiles at every level — this one number sets the ring's
+## size, and the stack's total is `RING_TILES × the number of rings`. Four is enough for the coarsest ring to cover
+## the cap at the altitudes the near field starts, and it leaves the table room for six or seven rings.
+const RING_TILES := 4
+
+## **Half-width, in tiles, of the uv window a ring is searched in.** The cone's uv radius is `limit · 2^L / TAU`, and
+## `limit` halves as the level doubles, so this window covers every ring at every depth — see `_ring`.
+const RING_WINDOW := 3
 
 ## How deep the uv tree may go before the walk stops on its own. `2^12` of the map in each axis is a texel
 ## finer than any display can resolve at the altitudes the budget allows, so this is a guard rather than a
@@ -90,18 +93,36 @@ static func direction_of(u: float, v: float) -> Vector3:
 	return Vector3(ring * cos(longitude), sin(latitude), ring * sin(longitude))
 
 
-## **The tiles worth drawing for one eye**, nearest first, at most `budget` of them.
+## **The tiles worth drawing for one eye, as a stack of nested rings** — coarse first, then every ring finer.
+##
+## ## Why a stack and not a cut
+##
+## The first version selected a **quadtree cut**: a partition of the visible cap in which each region was covered by
+## exactly one tile, the one whose texel was about a pixel. It worked, and it needed three pieces of machinery to be
+## correct — a cross-fade at every tile edge (two rasters of the field had to *agree* at a boundary), an ancestor
+## hold so a region did not fall back to the whole-body map while its children baked (the pulse), and a
+## "must beat the map" gate. **A stack makes all three unnecessary**: a finer ring is drawn *over* a coarser one, so
+## nothing has to agree with anything, nothing falls into a hole, and a level change is just another layer.
+##
+## ## The shape
+##
+## Level `k` of the stack is a ring of tiles at quadtree level `L`, and the rings nest: **each level up halves its
+## angular radius**, so it covers a quarter of the previous level's area at twice the resolution. A tile at level
+## `L+1` has a quarter of the area of one at `L`, so a ring holds *the same number of tiles at every level* — that
+## invariant is what makes the stack affordable in a fixed table, and it is why `per_ring` is the only size knob.
+##
+## **Each ring is a cone around the eye's own direction**, in tiles whose centre falls inside it. The cone is the
+## clipmap's clip: what falls outside a ring is drawn by the ring below it, and what falls outside the coarsest ring
+## is drawn by the whole-body map, which is always there underneath.
 ##
 ## `eye_direction` is the unit vector from the body's centre toward the eye and `distance` is how far the eye is
-## from that centre. The result is a list of `[level, x, y]`, and it **partitions the visible cap**: every tile
-## is a leaf of one tree, so no two overlap and a pixel is covered at most once — the base map underneath is what
-## a pixel falls back to when the budget stopped the walk above it.
+## from that centre. The result is a list of `[level, x, y]`, **coarse first** — the order the shader composites in.
 static func select(
 	radius: float, distance: float, eye_direction: Vector3, pixel_angle: float,
-	base_width: int, budget: int = TILE_BUDGET
+	base_width: int, per_ring: int = RING_TILES, budget: int = TILE_BUDGET
 ) -> Array:
 	var tiles: Array = []
-	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or budget <= 0:
+	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or budget <= 0 or per_ring <= 0:
 		return tiles
 	var to_eye := eye_direction.normalized()
 	# **The horizon, exactly**: a point at unit direction `u` is visible from `distance` along `v` if and only if
@@ -112,58 +133,98 @@ static func select(
 	# sphere is nearer than this. Without it the recursion never converges under the eye.
 	var altitude := maxf(distance - radius, 1.0)
 	var camera := to_eye * distance
-	var stack: Array = [[0, 0, 0]]
-	while not stack.is_empty():
-		var tile: Array = stack.pop_back()
-		var level := int(tile[0])
-		var x := int(tile[1])
-		var y := int(tile[2])
-		var rect := rect_of(level, x, y)
-		# The four corners, on the sphere: the extent is the largest chord, which is the tile's angular size to
-		# within a percent at anything this walk recurses into.
-		var corners: Array = [
-			direction_of(rect.x, rect.y), direction_of(rect.z, rect.y),
-			direction_of(rect.x, rect.w), direction_of(rect.z, rect.w),
-		]
-		var extent := 0.0
-		var nearest := INF
-		for a in corners:
-			for b in corners:
-				extent = maxf(extent, a.distance_to(b))
-			nearest = minf(nearest, (camera - a * radius).length())
-		# **The tile's centre direction is its uv midpoint, NOT the sum of its corners.** A root tile has two
-		# corners at each pole, and that sum comes out as `(-1.2e-16, 0, 0)` — so normalising it amplifies rounding
-		# noise into `(-1, 0, 0)`, the root tests as facing away from the eye, and the walk returns nothing at all.
-		# The midpoint of a rectangle is well defined everywhere, including at the caps.
-		var centre: Vector3 = direction_of((rect.x + rect.z) * 0.5, (rect.y + rect.w) * 0.5)
-		if centre.dot(to_eye) < cos(minf(horizon + extent, PI)):
-			continue
-		var to_tile := maxf(nearest, altitude)
-		var screen := radius * extent / to_tile / pixel_angle
-		# **finer than the map in hand**, or there is nothing to gain: `TILE_TEXELS * 2^level` texels over the
-		# region the whole-body map covers with `base_width / 2^level` of its own.
-		var finer_than_base := float(TILE_TEXELS) * float(1 << level) > float(base_width)
-		# **The budget is the table, and a full table simply stops.** What is left over falls back to the
-		# whole-body map — which is always drawn underneath, so a refusal here is softness rather than a hole. The
-		# selection is nearest-first, so what gets dropped is the far field, which is the cheap thing to lose.
-		if tiles.size() >= budget:
-			continue
-		if level >= MAX_LEVEL or (screen <= float(TILE_TEXELS) and finer_than_base):
-			if finer_than_base:
-				tiles.append([level, x, y])
-			continue
-		# **Nearest last, because the stack pops from the back** — so the budget is spent under the eye rather
-		# than on the limb, which is the whole point of refining where the eye is.
-		var children: Array = [
-			[level + 1, x * 2, y * 2], [level + 1, x * 2 + 1, y * 2],
-			[level + 1, x * 2, y * 2 + 1], [level + 1, x * 2 + 1, y * 2 + 1],
-		]
-		children.sort_custom(
-			func(a, b): return _child_distance(a, radius, camera) > _child_distance(b, radius, camera)
-		)
-		for child in children:
-			stack.append(child)
+	# **Where the stack starts**: the first level whose tiles beat the map (`TILE_TEXELS · 2^L > base_width`),
+	# because below that a tile is a second raster showing what the map already has.
+	var first_level := 0
+	while float(TILE_TEXELS) * float(1 << first_level) <= float(base_width):
+		first_level += 1
+	# **And where it ends**: the level whose tile is already no bigger on screen than its own texel count, at the
+	# nearest ground the eye can see. Deeper than that is a tile finer than a pixel.
+	# **The first level that satisfies the law**, not the one before it: `screen(level) ≤ TILE_TEXELS` is the test a
+	# ring has to pass, so the stack ends *on* the level that passes rather than one short of it.
+	var last_level := first_level
+	while last_level < MAX_LEVEL \
+			and radius * tile_extent(last_level) / altitude / pixel_angle > float(TILE_TEXELS):
+		last_level += 1
+	var rings := last_level - first_level + 1
+	var per_kind := maxi(1, budget / maxi(rings, 1))
+	for level in range(first_level, last_level + 1):
+		# **Half the angular radius per level**: a quarter of the area, at twice the resolution — the clipmap's
+		# own invariant, and the reason each ring can hold the same number of tiles.
+		var limit := horizon * pow(0.5, float(level - first_level))
+		var ring := _ring(radius, camera, to_eye, horizon, level, limit, pixel_angle,
+			float(per_kind), float(TILE_TEXELS))
+		# **Coarse first**, so the shader can composite in list order and a finer ring overwrite a coarser one.
+		tiles.append_array(ring)
 	return tiles
+
+
+## **One ring**: the tiles at `level` whose centre lies within `limit` of the eye's own direction, nearest first.
+##
+## **The window is small and it does not grow with depth**, which is the clipmap invariant paying off: the cone's
+## uv window is `limit · 2^L / TAU` and `limit` halves as `2^L` doubles, so a ±`RING_WINDOW` tile window around the
+## eye's uv covers every ring at every depth. A walk that enumerated the quadtree instead re-did the same work at
+## every level for no gain.
+static func _ring(
+	radius: float, camera: Vector3, to_eye: Vector3, horizon: float,
+	level: int, limit: float, pixel_angle: float, per_ring: float, texels: float
+) -> Array:
+	var span := 1 << level
+	var uv := direction_to_uv(to_eye)
+	var centre_u := int(floor(uv.x * float(span)))
+	var centre_v := int(floor(uv.y * float(span)))
+	var candidates: Array = []
+	for dy in range(-RING_WINDOW, RING_WINDOW + 1):
+		for dx in range(-RING_WINDOW, RING_WINDOW + 1):
+			var x := centre_u + dx
+			var y := centre_v + dy
+			# **The poles and the seam wrap**: `u` is longitude, so it is periodic; `v` is not.
+			x = posmod(x, span)
+			if y < 0 or y >= span:
+				continue
+			var rect := rect_of(level, x, y)
+			var centre: Vector3 = direction_of((rect.x + rect.z) * 0.5, (rect.y + rect.w) * 0.5)
+			if centre.dot(to_eye) < cos(minf(horizon + tile_extent(level), PI)):
+				continue
+			if centre.dot(to_eye) < cos(minf(limit + tile_extent(level), PI)):
+				continue
+			var extent := tile_extent(level)
+			var nearest := INF
+			for corner_u in [rect.x, rect.z]:
+				for corner_v in [rect.y, rect.w]:
+					var corner: Vector3 = direction_of(corner_u, corner_v)
+					nearest = minf(nearest, (camera - corner * radius).length())
+			var to_tile := maxf(nearest, maxf(camera.length() - radius, 1.0))
+			var screen := radius * extent / to_tile / pixel_angle
+			candidates.append({"tile": [level, x, y], "distance": to_tile, "screen": screen})
+	# Nearest first, and never a tile finer than a pixel — the ring's own band-limit.
+	candidates.sort_custom(func(a, b): return float(a["distance"]) < float(b["distance"]))
+	var ring: Array = []
+	for candidate in candidates:
+		if ring.size() >= int(per_ring):
+			break
+		ring.append(candidate["tile"])
+	return ring
+
+
+## **A tile's largest corner-to-corner chord on the unit sphere, at `level`** — its angular size to within a percent
+## at anything this walk selects, which is what the screen-size law is measured in.
+static func tile_extent(level: int) -> float:
+	var span := 1.0 / float(1 << clampi(level, 0, MAX_LEVEL))
+	# **Measured at the equator, centred**, which is where a tile is its largest: an equirect's tiles collapse
+	# towards the poles, so a size taken at the poles would say a level is finer than it is over most of the body.
+	var half := span * 0.5
+	var a := direction_of(0.5 - half, 0.5 - half)
+	var b := direction_of(0.5 + half, 0.5 + half)
+	return a.distance_to(b)
+
+
+## The uv of a direction — `equirect()`'s inverse's other half, and the one place a level's grid meets a direction.
+static func direction_to_uv(direction: Vector3) -> Vector2:
+	return Vector2(
+		0.5 + atan2(direction.z, direction.x) / TAU,
+		0.5 - asin(clampf(direction.y, -1.0, 1.0)) / PI
+	)
 
 
 ## A child's distance from the eye, **for the ordering only** — the law itself uses the nearest corner, but the
