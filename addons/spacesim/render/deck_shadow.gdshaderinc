@@ -66,7 +66,7 @@ uniform int deck_detail_seed = 0;
 uniform float deck_detail_feature = 0.0;
 uniform float deck_detail_strength : hint_range(0.0, 0.5) = 0.0;
 
-#include "res://addons/spacesim/render/cloud_detail.gdshaderinc"
+#include "res://addons/spacesim/render/detail_ladder.gdshaderinc"
 
 
 bool deck_shadow_present() {
@@ -116,8 +116,9 @@ float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_de
     if (with_detail && deck_detail_strength > 0.0 && deck_detail_feature > 0.0) {
         float at_deck = length(fwidth(p)) * (deck_height / max(planet_radius, 1.0));
         field = clamp(
-            field + cloud_detail(
-                crossing, at_deck, deck_detail_seed, deck_detail_feature, deck_detail_strength
+            field + banded_detail(
+                crossing, at_deck, deck_detail_seed, deck_detail_feature, deck_detail_strength,
+                DETAIL_RUNGS
             ),
             0.0, 1.0
         );

@@ -143,7 +143,7 @@ uniform float detail_strength : hint_range(0.0, 0.5) = 0.0;
 // own altitude rather than at the ground's — a deck at 1.4 km stays lit 1.2° after the ground beside it has
 // gone dark, and the transmittance is what decides how red it is while it does.
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
-#include "res://addons/spacesim/render/cloud_detail.gdshaderinc"
+#include "res://addons/spacesim/render/detail_ladder.gdshaderinc"
 
 // Model space, the offset from the body's centre — which for a unit sphere IS its direction. Captured in
 // `vertex()` because **`VERTEX` inside `fragment()` is in VIEW space**.
@@ -191,9 +191,9 @@ void fragment() {
 	// nothing to keep in sync with the camera.
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
 		field = clamp(
-			field + cloud_detail(
+			field + banded_detail(
 				p, length(fwidth(local_position)),
-				detail_seed, detail_feature, detail_strength
+				detail_seed, detail_feature, detail_strength, DETAIL_RUNGS
 			),
 			0.0, 1.0
 		);

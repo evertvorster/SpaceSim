@@ -137,6 +137,11 @@ const DETAIL_MAX_RUNGS := 18
 ## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
 ## fitted to, and a large swing would move the drawn average away from it.
 const DETAIL_VARIATION := 0.18
+## **The banded detail ladder's loudness, in the field's own units.** This is the number that decides whether a tile
+## is a textured piece of ground or a smooth square: the ladder is normalised to `detail_strength` and its first rung
+## carries half of it, so 0.15 is 7.5 % of the field's ±1 at the largest rung — tens of metres of relief at the map's
+## two-texel scale, which is what a hillside has.
+const SURFACE_DETAIL_STRENGTH := 0.15
 ## **The relief's exaggeration**, in the sloped sense: the shader computes a real slope (metres of height per
 ## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
 ## exactly as steep as it is.
@@ -442,6 +447,16 @@ static func first_detail_octave(base_frequency: float, width: int) -> int:
 	return int(round(log(float(width) / (4.0 * PI * base_frequency)) / log(2.0)))
 
 
+## **Two texels of a `width`-wide equirect, in radians of sphere-arc** — where the banded detail ladder starts.
+##
+## `u` spans `TAU` around the equator, so one texel is `TAU/width` and two are `2·TAU/width`: the same quantity
+## `first_detail_octave` divides by, kept as an angle because the ladder fades on the *footprint*, which is an angle.
+static func detail_feature(width: int) -> float:
+	if width <= 0:
+		return 0.0
+	return 2.0 * TAU / float(width)
+
+
 ## **How deep the detail ladder may go on this body**: none at all where there is no sphere to put it on.
 ##
 ## A gas giant used to be handed the full eight-rung ladder for a surface that is not its visible face — noise
@@ -488,6 +503,12 @@ static func surface_material(
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
+	# **Two texels of the raster in hand**, which is where the banded ladder starts. The width moves when a rung
+	# lands, so `apply_surface_maps` republishes it; the strength never moves.
+	material.set_shader_parameter("detail_strength", SURFACE_DETAIL_STRENGTH)
+	material.set_shader_parameter(
+		"detail_feature", detail_feature(SpacesimSurfaceMaps.BUILD_WIDTH)
+	)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
@@ -632,6 +653,7 @@ static func apply_surface_maps(
 		# landing, and invisible to the suite because a headless run has no surface maps at all. A caller that
 		# passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
 		surface.set_shader_parameter("detail_first_octave", first_detail_octave(base_frequency, width))
+		surface.set_shader_parameter("detail_feature", detail_feature(width))
 
 
 ## **The cloud deck's material** — the far regime's cloud, from the derivation and the layer's own numbers.

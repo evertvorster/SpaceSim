@@ -1134,6 +1134,7 @@ func _test_shader_defaults_are_the_hosts(h) -> void:
 	var ocean := "res://addons/spacesim/render/body_ocean.gdshader"
 	var pairs := [
 		[surface, "detail_variation", SpacesimBodyRenderer.DETAIL_VARIATION],
+		[surface, "detail_strength", SpacesimBodyRenderer.SURFACE_DETAIL_STRENGTH],
 		[surface, "detail_relief", SpacesimBodyRenderer.DETAIL_RELIEF],
 		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
 		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],

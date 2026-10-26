@@ -9,6 +9,7 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
 // **The star: where it is, how wide it looks, and what the air leaves of it.** First, because it declares
 // `body_sun` and the include below reads it — a shader compiles top to bottom.
+#include "res://addons/spacesim/render/detail_ladder.gdshaderinc"
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 // **The deck above, as a shadow.** One law, shared with the sea, so the two cannot disagree.
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
@@ -133,6 +134,17 @@ uniform float planet_radius = 1.0;
 uniform float relief_exaggeration = 5.0;
 // The detail map's width, which is what turns a texel into an angle.
 uniform int map_width = 1024;
+// **The banded detail ladder's two numbers, and this is what the surface was missing.**
+//
+// `detail_feature` is **two texels of the raster in hand**, in radians of sphere-arc — where the map stops and the
+// ladder starts. `detail_strength` is how loud it is, in the field's own units.
+//
+// The old ladder was a *faithful continuation* of the field's own spectrum, so its first rung sat at
+// `bounding · gain^first_octave` = 0.2 % of the field for a 7680-wide map: drawn, and invisible, which is why a tile
+// came out as a perfectly smooth square. **This one is its own unit** — six-plus rungs normalised by their own sum —
+// so the first rung is half of it and the last is still visible. Same mechanism the cloud deck has had all along.
+uniform float detail_feature = 0.0;
+uniform float detail_strength : hint_range(0.0, 1.0) = 0.15;
 
 
 // The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
@@ -320,6 +332,16 @@ float detail = 0.0;
 				detail_gain, detail_tail_gain, detail_lacunarity, detail_bounding, footprint_angle
 			);
 		}
+	}
+
+	// **The detail field the raster cannot hold**, from two of its texels down to two pixels — the ladder the cloud
+	// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
+	// wider than a slab's.
+	if (detail_strength > 0.0 && detail_feature > 0.0) {
+		int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+		detail += banded_detail(
+			up, footprint_angle, detail_seed, detail_feature, detail_strength, rungs
+		);
 	}
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
