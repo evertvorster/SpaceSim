@@ -18,9 +18,15 @@ GPU and adapting in **stops** — exponential, so it closes a large gap quickly 
 composition — a Voronoi plate partition with each plate standing or sagging, a region term slower than a plate
 so one continent stands higher than another, structure inside each plate, and mountain belts where plates meet.
 The field is baked to an `R16F` map on the GPU, refined on the render thread as the eye approaches, and the near
-field is a quadtree of tiles. Below the map's texel a **detail ladder continues the field's own octaves** — the
-same function, evaluated deeper — and the sea is its own layer, coplanar with the land and complementary to it by
-one threshold.
+field is a **clipmap**: nested rings of 512-texel tiles, each level a quarter of the area at twice the resolution,
+all resident and composited coarse to fine, so the ground under the eye is always the finest version of itself.
+**Below the map's texel the field continues by its own mechanisms** — `surface_relief` re-evaluates the plate
+partition and the ridged crests for the octaves the map could not carry, at the field's own weights, so a smaller
+part of the planet drawn closer is *more of the same terrain* rather than a different texture. The ground can also
+be **displaced geometry** (`render.surface_displacement`): the mesh's vertices move with the map, which buys the
+limb's silhouette and the near field's parallax, and on a second error term in pixels — how much ground a triangle
+flattens — so the mesh refines where the terrain needs it. The sea is its own layer, coplanar with the land and
+complementary to it by one threshold.
 
 **The air is one volumetric march over the whole frame.** A `CompositorEffect` at `POST_TRANSPARENT`, before the
 exposure pass, marching one ray per pixel with sixteen samples along it and eight toward the sun, light scattered
@@ -39,7 +45,8 @@ field rather than a shadow map.
 
 **Inside and below a deck** the air pass adds a fog, because a surface has no cross-section to draw: its strength
 is the map at the camera and its ramp runs from full at the deck's base to nothing at its top. One number, `fog.gain`,
-is hot for tuning. **The far regime draws every layer a body has; the near regime reads one deck**, so Jupiter and
+is hot for tuning. **The fog reads the same coverage field the deck draws**, so while a detail ladder perturbed that
+field the fog inherited its banding — removing the ladder fixed the fog as a side effect. **The far regime draws every layer a body has; the near regime reads one deck**, so Jupiter and
 Saturn lose their lower layer once you are inside or just under the upper one — multiple decks is the next rung and
 needs a per-deck parameter block, a sampler array and an eye-ordered walk (the vault's `Cloud Decks Plan` §D9).
 
