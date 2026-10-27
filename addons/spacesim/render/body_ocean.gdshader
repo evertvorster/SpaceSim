@@ -53,6 +53,21 @@ uniform sampler2DArray tile_map : filter_linear, repeat_disable, hint_default_bl
 uniform vec4 tile_rect[32];
 uniform int tile_layer[32];
 uniform int tile_count = 0;
+// **The field's own numbers, so the sea floor is the same terrain the land is.** The same eleven the land's shader
+// takes, published from the same `SpacesimSurfaceField.plan()` the bake compiles.
+uniform int field_seed = 0;
+uniform float field_plate_phase = 0.0;
+uniform float field_belt_width = 0.08;
+uniform float field_ridge_frequency = 11.0;
+uniform int field_ridge_octaves = 4;
+uniform float field_ridge_strength = 0.5;
+uniform float field_gain = 0.5;
+uniform float field_lacunarity = 2.0;
+uniform float field_warp_frequency = 3.0;
+uniform int field_warp_octaves = 3;
+uniform float field_warp_strength = 0.35;
+uniform float field_warp_bounding = 0.5714;
+uniform int field_octaves = 14;
 uniform float sea_level = 0.0;
 // The field's value times this is metres — which turns the map into a **depth**.
 uniform float field_amplitude = 1.0;
@@ -102,11 +117,6 @@ uniform float wave_stretch = 3.0;
 // flat colour because of it. What an ocean actually shows at range is its *colour*: eddies, fronts, slicks at
 // tens of kilometres. Same ladder, same band-limit, different mechanism: this one modulates the water's albedo
 // rather than its normal.
-uniform int tone_octaves = 0;
-uniform int tone_seed = 0;
-uniform float tone_gain = 0.5;
-uniform float tone_lacunarity = 2.0;
-uniform float tone_variation : hint_range(0.0, 1.0) = 0.12;
 
 
 
@@ -126,6 +136,10 @@ void vertex() {
 void fragment() {
 	vec3 up = unit_position;
 	vec2 uv = equirect(up);
+	// **The footprint, measured first**: the sea floor's relief, the waves and the star's own occlusion all need the
+	// angle one pixel spans, and measuring it once is what keeps them band-limited by the same quantity. Measured
+	// before the discard, because `dFdx` inside non-uniform control flow is undefined.
+	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 	float height = texture(height_map, uv).r;
 
 	// **The near field**, the same table the land shader reads and in the same order — finest first, first match
@@ -152,9 +166,33 @@ void fragment() {
 		discard;
 	}
 
-	// **The depth**, in metres — the map is a height field, and everything below sea level is water over
-	// ground. This is what the shallow end of the ramp is made of.
-	float depth = (sea_level - height) * field_amplitude;
+	// **The sea floor is the field, not the raster.** Below the map's texel the terrain is continued by its own
+	// mechanisms — the same plate partition and ridged crests the land draws — so a shallow bank and a deep basin are
+	// where the terrain puts them and the sea's colour has structure at every zoom. Before this the only structure
+	// below the map was a tone noise anchored to the raster, which banded as the map refined.
+	//
+	// **The *coverage* still follows the map's `height`**, above and below, so the coast is decided by one raster in
+	// both layers and the two cannot fight — the same rule as the land's. What the relief adds is the *depth* on the
+	// sea side, clamped at zero: a crest that rises through the water line becomes shallow water, not a hole, because
+	// the land owns that pixel and draws over it.
+	SurfacePlan relief_plan;
+	relief_plan.seed = field_seed;
+	relief_plan.plate_phase = field_plate_phase;
+	relief_plan.belt_width = field_belt_width;
+	relief_plan.ridge_frequency = field_ridge_frequency;
+	relief_plan.ridge_octaves = field_ridge_octaves;
+	relief_plan.ridge_strength = field_ridge_strength;
+	relief_plan.gain = field_gain;
+	relief_plan.lacunarity = field_lacunarity;
+	relief_plan.warp_frequency = field_warp_frequency;
+	relief_plan.warp_octaves = field_warp_octaves;
+	relief_plan.warp_strength = field_warp_strength;
+	relief_plan.warp_bounding = field_warp_bounding;
+	float sea_floor = height + surface_relief(
+		up, relief_plan, field_ridge_octaves, field_octaves, footprint_angle
+	);
+	// **The depth**, in metres — everything below sea level is water over ground, and the ground is the field.
+	float depth = max(sea_level - sea_floor, 0.0) * field_amplitude;
 	float fill = smoothstep(shallow_metres, max(deep_metres, shallow_metres * 1.01), depth);
 	ALBEDO = mix(shallow_color, deep_color, fill);
 	// **The air's share, split brightness from hue — and on water that split is the whole point.** This is the
@@ -172,7 +210,6 @@ void fragment() {
 	// transmission first, then the deck's shadow multiplying it, exactly as the land composes them. `AO` with
 	// `AO_LIGHT_AFFECT = 1.0` is the engine's direct-light occlusion before the light loop; see
 	// `star_transmission.gdshaderinc` and `deck_shadow.gdshaderinc`.
-	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 	AO = star_transmission(up, body_sun, footprint_angle);
 	AO_LIGHT_AFFECT = 1.0;
 	if (deck_shadow_present()) {
@@ -229,21 +266,9 @@ void fragment() {
 	// Evert, 2026-10-19: *"We can live with the aliasing... Mottling on land now has no aliasing, because it is
 	// implemented correctly."*
 	//
-	// **This is the one place in the project that deliberately breaks the band-limit, and the reason it may.**
-	// Land's detail drives *shading*, so detail below the sampling rate moves the normal and becomes shimmer — the
-	// near ground's carpet. This is a static *albedo* modulation: sub-pixel detail in it averages to a slightly
-	// noisier colour rather than to crawling light, so the cost of drawing it far out is small and the gain is a sea
-	// that is not one flat colour from orbit. `footprint` is passed as 0.0, which makes every rung's fade exactly
-	// 1 — full amplitude at any distance — and `tone_variation` is the only strength knob.
-	//
-	// **`first_feature` is still two texels of the map in hand**, so the pattern's *scale* follows the raster and
-	// the two layers share one notion of "finest thing on the surface".
-	if (tone_octaves > 0) {
-		float first_feature = 2.0 * MAP_TAU / float(max(map_width, 1));
-		float tone = surface_detail(
-			wave_point, tone_seed, 1.0 / first_feature, 0, tone_octaves,
-			tone_gain, tone_gain, tone_lacunarity, 1.0, 0.0
-		);
-		ALBEDO *= 1.0 + tone * tone_variation;
-	}
+	// **No tone noise.** It was `surface_detail` with the footprint passed as 0.0 — the one place in the project that
+	// deliberately broke the band-limit — anchored to two texels of the raster, so its pattern rescaled every time the
+	// map refined and it banded. The sea's colour structure now comes from the field instead: `sea_floor` below is the
+	// map *plus* the field's own mechanisms continued below it, so shallow banks and deep basins are where the terrain
+	// puts them, at every zoom, and a smaller part of the sea drawn closer is more of the same sea.
 }

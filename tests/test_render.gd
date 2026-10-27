@@ -1141,7 +1141,7 @@ func _test_shader_defaults_are_the_hosts(h) -> void:
 		[ocean, "deep_metres", SpacesimBodyRenderer.OCEAN_DEEP_METRES],
 		[ocean, "wave_relief", SpacesimBodyRenderer.OCEAN_WAVE_RELIEF],
 		[ocean, "wave_stretch", SpacesimBodyRenderer.OCEAN_WAVE_STRETCH],
-		[ocean, "tone_variation", SpacesimBodyRenderer.OCEAN_TONE_VARIATION],
+		[ocean, "field_ridge_strength", SpacesimSurfaceField.RIDGE_STRENGTH],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:

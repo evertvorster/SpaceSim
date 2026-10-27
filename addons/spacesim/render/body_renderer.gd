@@ -73,17 +73,7 @@ const OCEAN_WAVE_RELIEF := 0.0015
 ## are stretched downwind, and that anisotropy is the single thing that reads as sea.
 ## 3.0 is a light breeze's swell; a gale would be nearer 6.
 const OCEAN_WAVE_STRETCH := 3.0
-## **The sea's own colour structure**, which is the only thing an ocean shows at range: eddies, fronts and slicks.
-## Waves are geometry — nothing under 400 m can be seen from 1,000 km — so without this the far sea is one colour,
-## which is what Evert reported.
-##
-## **It starts where the land's ladder starts**: two texels of the map in hand, which the shader derives from
-## `map_width`, so the two layers begin to show texture at the same distance and by the same law. Evert,
-## 2026-10-19: *"I just wanted to reduce the strength, not the distance at which it started drawing."* The
-## strength is `OCEAN_TONE_VARIATION`; the distance is the sampling law and is not a knob.
-const OCEAN_TONE_OCTAVES := 3
-## A few per cent of the water's colour — enough to read as water moving, not enough to be paint.
-const OCEAN_TONE_VARIATION := 0.12
+
 
 ## **How dark a cloud's shadow is allowed to get** — the floor on the light it leaves, so `1.0` is no shadow and
 ## `0.0` is the physical transmittance with nothing given back.
@@ -546,6 +536,21 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("planet_radius", body.radius)
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	material.set_shader_parameter("field_amplitude", plan.amplitude)
+	# **The field's own numbers, so the sea floor is the same terrain the land is** — the same eleven the land's shader
+	# takes, plus the seed. Published rather than read back off a material, for the reason `base_frequency` is passed to
+	# the land's: a read of an absent parameter returns `null`.
+	material.set_shader_parameter("field_seed", plan.seed)
+	material.set_shader_parameter("field_plate_phase", plan.plate_phase)
+	material.set_shader_parameter("field_belt_width", plan.belt_width)
+	material.set_shader_parameter("field_ridge_frequency", plan.ridge_frequency)
+	material.set_shader_parameter("field_ridge_octaves", plan.ridge_octaves)
+	material.set_shader_parameter("field_ridge_strength", plan.ridge_strength)
+	material.set_shader_parameter("field_gain", plan.gain)
+	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
+	material.set_shader_parameter("field_warp_frequency", plan.warp_frequency)
+	material.set_shader_parameter("field_warp_octaves", plan.warp_octaves)
+	material.set_shader_parameter("field_warp_strength", plan.warp_strength)
+	material.set_shader_parameter("field_warp_bounding", plan.warp_bounding)
 	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
 	material.set_shader_parameter("wave_seed", plan.seed + 7331)
 	material.set_shader_parameter("wave_gain", plan.gain)
@@ -556,11 +561,6 @@ static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMater
 	material.set_shader_parameter("wave_octaves", OCEAN_WAVE_OCTAVES)
 	material.set_shader_parameter("wave_relief", OCEAN_WAVE_RELIEF)
 	material.set_shader_parameter("wave_stretch", OCEAN_WAVE_STRETCH)
-	material.set_shader_parameter("tone_seed", plan.seed + 5501)
-	material.set_shader_parameter("tone_gain", plan.gain)
-	material.set_shader_parameter("tone_lacunarity", plan.lacunarity)
-	material.set_shader_parameter("tone_octaves", OCEAN_TONE_OCTAVES)
-	material.set_shader_parameter("tone_variation", OCEAN_TONE_VARIATION)
 	# **The sea is shadowed by the same deck as the land**, from the same uniforms — see `deck_shadow.gdshaderinc`.
 	material.set_shader_parameter("deck_tau", 0.0)
 	material.set_shader_parameter("deck_height", 0.0)
