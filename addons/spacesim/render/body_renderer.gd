@@ -137,11 +137,7 @@ const DETAIL_MAX_RUNGS := 18
 ## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
 ## fitted to, and a large swing would move the drawn average away from it.
 const DETAIL_VARIATION := 0.18
-## **The banded detail ladder's loudness, in the field's own units.** This is the number that decides whether a tile
-## is a textured piece of ground or a smooth square: the ladder is normalised to `detail_strength` and its first rung
-## carries half of it, so 0.15 is 7.5 % of the field's ±1 at the largest rung — tens of metres of relief at the map's
-## two-texel scale, which is what a hillside has.
-const SURFACE_DETAIL_STRENGTH := 0.15
+
 ## **The relief's exaggeration**, in the sloped sense: the shader computes a real slope (metres of height per
 ## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
 ## exactly as steep as it is.
@@ -496,7 +492,6 @@ static func surface_material(
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
-	material.set_shader_parameter("detail_strength", SURFACE_DETAIL_STRENGTH)
 	# **The field's own numbers for the crest continuation**, off the same plan the bake compiles.
 	material.set_shader_parameter("field_plate_phase", plan.plate_phase)
 	material.set_shader_parameter("field_belt_width", plan.belt_width)

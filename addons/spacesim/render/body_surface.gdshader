@@ -160,9 +160,7 @@ uniform float field_warp_bounding = 0.5714;
 // How many octaves below the map the crests may be continued. A ceiling, not a count that runs: each octave fades out
 // where a pixel can no longer resolve it, so a distant body pays for two and a close one for ten.
 uniform int field_octaves = 14;
-// **The banded detail ladder's loudness**, in the field's own units. The ladder's *scale* comes from the pixel, not
-// from the raster — see the comment where it is called — so this is the only number it needs from the host.
-uniform float detail_strength : hint_range(0.0, 1.0) = 0.15;
+
 
 
 // The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
@@ -373,28 +371,10 @@ float detail = 0.0;
 	detail += surface_relief(
 		up, relief_plan, field_ridge_octaves, field_octaves, footprint_angle
 	);
-	if (detail_strength > 0.0) {
-		// **The coarse bound is the PIXEL, not the raster — and that is the correction.**
-		//
-		// The ladder used to start where the raster in hand stopped. That sounds right and is wrong, because a raster
-		// cannot carry what the ladder draws: the ladder's rungs are *synthesised* detail, and the field's own range
-		// over a tile is a fraction of the colour ramp's step. Measured (`tests/probe_tile_window.gd`, 2026-10-27):
-		// a level-11 tile spans 19.6 km with a field range of **0.009** — about two ramp texels — while a level-9 tile
-		// spans **0.034**. So a tile is *flat ground*: it carries shape, not texture.
-		//
-		// Starting the ladder at the tile's texel therefore deleted the texture exactly where a tile was drawn, and
-		// left the ground outside tiles textured by a ladder anchored to a 5 km map — which is the flat rectangle
-		// Evert photographed with straight edges, and the reason the noise strength differed from region to region.
-		//
-		// **Deriving the bound from the pixel fixes both**: every pixel gets the same sequence of rungs whatever raster
-		// is under it, so the texture is uniform across the screen, costs three or four rungs instead of thirteen, and
-		// a tile can sharpen the *shape* without touching the texture. 8x the footprint because a rung fades out at
-		// 4x it — this leaves the coarsest rung at full strength and one octave of presence above the fade.
-		float coarsest = 8.0 * max(footprint_angle, 1.0e-9);
-		detail += banded_detail(
-			up, footprint_angle, coarsest, detail_seed, detail_strength
-		);
-	}
+	// **No noise ladder.** It was meant as the garnish, and it was not: with the crests continued below the map
+	// (`surface_relief` above), its fbm rode on real structure at a strength that turned every slope it tilted into a
+	// black pit, because its own gradient is the steepest thing in this shader. **Deleted rather than turned down** —
+	// three of its four faults existed only while it was carrying the texture, and now it is not carrying anything.
 
 	// A tangent basis on the sphere: east from the polar axis, north from the two.
 	// **`east` must be the direction `slope_east` was measured in, and it was not.** The slopes above come from
