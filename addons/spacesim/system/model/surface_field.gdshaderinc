@@ -240,6 +240,78 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 }
 
 
+// ===== THE CRESTS, CONTINUED: THE FIELD'S OWN MECHANISMS BELOW THE RASTER ==========================
+//
+// **The planet's texture is a function that makes ranges and ridges, and at close range it must still be that
+// function.** What a pixel sees when we draw a smaller part of the planet at higher resolution is *more of the same
+// terrain* — not a second field of noise laid over it. Evert, 2026-10-27: *"the planet's texture is supposed to be
+// drawn with a function that gives ranges and ridges and so on. Then, when we draw smaller parts of it in higher
+// resolution, we are supposed to get more detail. If there is a little noise applied over it, that's fine, but it
+// should not be the dominant feature."*
+//
+// That is why this exists and why the fbm ladder does not serve: `surface_height`'s shape is `crest · ridged`, the
+// belt weight from the plate partition and the crests from ridged noise — and **neither was ever continued below the
+// map**. The continents' fbm was, at 0.2 % of the field, which is invisible; the belts and crests simply stopped.
+//
+// **The belt is evaluated per pixel and it is free of noise**: fourteen dot products and a smoothstep, and it has to
+// be per pixel because the map stores the *sum* and not its factors. It is smooth at every zoom — a plate level and a
+// belt width change over thousands of kilometres — so it cannot alias however close the eye gets.
+//
+// **The octaves are the field's own, at the field's own weights**: octave `j` of the ridged sum carries `gain^j` over
+// the normaliser `surface_ridged3` uses, so the spectrum is *continuous* across the seam where the map stops. Nothing
+// here is normalised per rung and nothing is inflated — the previous ladder's carpet came from exactly that.
+//
+// And it is band-limited by the pixel like everything else: a crest finer than the sampling rate is faded out, never
+// drawn as shimmer.
+float surface_relief(vec3 unit, SurfacePlan plan, int first_octave, int octaves, float footprint) {
+	if (octaves <= 0 || first_octave < 0) {
+		return 0.0;
+	}
+	// The same warp `surface_height` uses, so the belts fall in exactly the same places the map has them.
+	vec3 warp = vec3(
+		fnl_fbm3(unit.yzx, plan.seed + 101, plan.warp_frequency, plan.warp_octaves,
+			plan.gain, plan.lacunarity, plan.warp_bounding),
+		fnl_fbm3(unit.zxy, plan.seed + 211, plan.warp_frequency, plan.warp_octaves,
+			plan.gain, plan.lacunarity, plan.warp_bounding),
+		fnl_fbm3(unit.xyz, plan.seed + 307, plan.warp_frequency, plan.warp_octaves,
+			plan.gain, plan.lacunarity, plan.warp_bounding)
+	);
+	vec3 q = normalize(unit + plan.warp_strength * warp);
+	float level;
+	float belt;
+	surface_plates(q, plan.plate_phase, plan.belt_width, level, belt);
+	float crest = belt * belt;
+	// **The map's own normaliser**, so the octaves below are the continuation of one spectrum rather than a new sum.
+	float normaliser = 0.0;
+	float weight = 1.0;
+	for (int index = 0; index < plan.ridge_octaves; index++) {
+		normaliser += weight;
+		weight *= plan.gain;
+	}
+	normaliser = max(normaliser, 1.0e-6);
+	float amplitude = pow(plan.gain, float(first_octave)) / normaliser;
+	float total = 0.0;
+	for (int rung = 0; rung < octaves; rung++) {
+		int octave = first_octave + rung;
+		float feature = 1.0 / (plan.ridge_frequency * exp2(float(octave)));
+		float fade = 1.0 - smoothstep(feature * 0.25, feature * 0.5, footprint);
+		if (fade <= 0.0) {
+			break;
+		}
+		// `q * ridge_frequency` and `2^octave` exactly as `surface_ridged3` samples them — this IS octave `octave` of
+		// the field's ridge sum, not a lookalike.
+		float rung_value = fnl_fbm3(
+			q * plan.ridge_frequency, plan.seed + 991 + octave, exp2(float(octave)), 1,
+			plan.gain, plan.lacunarity, 1.0
+		);
+		float ridge = 1.0 - abs(rung_value);
+		total += amplitude * ridge * ridge * fade;
+		amplitude *= plan.gain;
+	}
+	return plan.ridge_strength * crest * total;
+}
+
+
 // ===== THE LADDER: THE FIELD'S OWN OCTAVES, BELOW WHAT THE MAP COULD HOLD ==========================
 //
 // **`surface_height` is a sum of octaves, and a bake stops at the octave its width can resolve.** The rest of

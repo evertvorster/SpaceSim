@@ -142,6 +142,24 @@ uniform float relief_exaggeration = 5.0;
 uniform int map_width = 1024;
 // How much of a layer's own edge it fades in over, as a fraction of the tile's side.
 const float TILE_BLEND = 0.1;
+// **The field's own numbers, so the shader can continue the planet's mechanisms below the map.** These are the plan's
+// values, published from the same `SpacesimSurfaceField.plan()` the bake compiles — one field, two compilers — and
+// only the fields `surface_relief` reads are here: the plate partition's phase and belt width, the ridge spectrum,
+// the warp that makes the plate cells irregular, and the FBM's own gain and lacunarity.
+uniform float field_plate_phase = 0.0;
+uniform float field_belt_width = 0.08;
+uniform float field_ridge_frequency = 11.0;
+uniform int field_ridge_octaves = 4;
+uniform float field_ridge_strength = 0.5;
+uniform float field_gain = 0.5;
+uniform float field_lacunarity = 2.0;
+uniform float field_warp_frequency = 3.0;
+uniform int field_warp_octaves = 3;
+uniform float field_warp_strength = 0.35;
+uniform float field_warp_bounding = 0.5714;
+// How many octaves below the map the crests may be continued. A ceiling, not a count that runs: each octave fades out
+// where a pixel can no longer resolve it, so a distant body pays for two and a close one for ten.
+uniform int field_octaves = 14;
 // **The banded detail ladder's loudness**, in the field's own units. The ladder's *scale* comes from the pixel, not
 // from the raster — see the comment where it is called — so this is the only number it needs from the host.
 uniform float detail_strength : hint_range(0.0, 1.0) = 0.15;
@@ -336,6 +354,25 @@ float detail = 0.0;
 	// **The detail field the raster cannot hold**, from two of its texels down to two pixels — the ladder the cloud
 	// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
 	// wider than a slab's.
+	// **The crests, continued — the field's own mechanisms, not noise.** `surface_relief` re-evaluates the plate
+	// partition and the ridged crests for the octaves the map could not carry, at the field's own weights, so a
+	// smaller part of the planet drawn at higher resolution is *more of the same terrain*.
+	SurfacePlan relief_plan;
+	relief_plan.seed = detail_seed;
+	relief_plan.plate_phase = field_plate_phase;
+	relief_plan.belt_width = field_belt_width;
+	relief_plan.ridge_frequency = field_ridge_frequency;
+	relief_plan.ridge_octaves = field_ridge_octaves;
+	relief_plan.ridge_strength = field_ridge_strength;
+	relief_plan.gain = field_gain;
+	relief_plan.lacunarity = field_lacunarity;
+	relief_plan.warp_frequency = field_warp_frequency;
+	relief_plan.warp_octaves = field_warp_octaves;
+	relief_plan.warp_strength = field_warp_strength;
+	relief_plan.warp_bounding = field_warp_bounding;
+	detail += surface_relief(
+		up, relief_plan, field_ridge_octaves, field_octaves, footprint_angle
+	);
 	if (detail_strength > 0.0) {
 		// **The coarse bound is the PIXEL, not the raster — and that is the correction.**
 		//
