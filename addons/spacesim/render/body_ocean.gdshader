@@ -43,6 +43,7 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // **`filter_linear_mipmap`, because `filter_linear` sets `max_lod = 0`** and the build-time map's pyramid would
 // then never be read — minified sea aliases instead of blurring. The land's `height_map` carries the same hint
 // for the same reason, and the same texture. Tiles and refined maps carry no pyramid (only ever magnified).
+#include "res://addons/spacesim/render/surface_displacement.gdshaderinc"
 uniform sampler2D height_map : filter_linear_mipmap, repeat_enable, hint_default_black;
 // **The tiles over the cap the eye can see**, as one array with a table of rectangles — the map's near field,
 // refined where the eye is looking (`SpacesimSurfaceTiles`). `tile_count` is zero when no tile is in hand, which
@@ -56,6 +57,9 @@ uniform float sea_level = 0.0;
 // The field's value times this is metres — which turns the map into a **depth**.
 uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
+// **The same switch the land has, and it must be the same value**: the sea and the ground share one mesh, so a sea
+// left on the sphere under displaced land would put a cliff along every coast.
+uniform float displace = 0.0;
 uniform int map_width = 2048;
 
 // **The depth ramp**, in metres below the surface: the bottom's own colour showing through near the shore, and
@@ -104,8 +108,7 @@ uniform float tone_gain = 0.5;
 uniform float tone_lacunarity = 2.0;
 uniform float tone_variation : hint_range(0.0, 1.0) = 0.12;
 
-const float OCEAN_PI = 3.141592653589793;
-const float OCEAN_TAU = 6.283185307179586;
+
 
 // Model space, and on a unit sphere that IS the direction. Captured in `vertex()` because `VERTEX` inside
 // `fragment()` is in VIEW space.
@@ -113,15 +116,10 @@ varying vec3 unit_position;
 
 
 void vertex() {
+	// **The direction first, then the displacement** — identical to the land's, through the same include.
 	unit_position = normalize(VERTEX);
-}
-
-
-vec2 equirect(vec3 direction) {
-	return vec2(
-		0.5 + atan(direction.z, direction.x) / OCEAN_TAU,
-		0.5 - asin(clamp(direction.y, -1.0, 1.0)) / OCEAN_PI
-	);
+	float grounded = textureLod(height_map, equirect(unit_position), 0.0).r * displace;
+	VERTEX = displaced(unit_position, grounded, field_amplitude, planet_radius);
 }
 
 
@@ -241,7 +239,7 @@ void fragment() {
 	// **`first_feature` is still two texels of the map in hand**, so the pattern's *scale* follows the raster and
 	// the two layers share one notion of "finest thing on the surface".
 	if (tone_octaves > 0) {
-		float first_feature = 2.0 * OCEAN_TAU / float(max(map_width, 1));
+		float first_feature = 2.0 * MAP_TAU / float(max(map_width, 1));
 		float tone = surface_detail(
 			wave_point, tone_seed, 1.0 / first_feature, 0, tone_octaves,
 			tone_gain, tone_gain, tone_lacunarity, 1.0, 0.0

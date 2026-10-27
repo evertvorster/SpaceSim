@@ -1191,8 +1191,13 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3) -> void:
 	# The eye in body radii — the model space every surface direction is measured in, and the same units the
 	# deck's own material is handed as `eye_local`.
 	var eye_local := (observer - body.node.global_position) / maxf(body.radius, 1.0)
+	# **The displacement switch, on the same materials and in the same pass**: it is a property of the body's ground,
+	# not of its light, but both are read per frame so the setting stays hot, and one loop is cheaper than two.
+	var displaced := bool(SpacesimSettings.get_value("render.surface_displacement"))
 	for material in materials:
 		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle, eye_local)
+		if material == body.mesh_material or material == body.ocean_material:
+			SpacesimBodyRenderer.apply_displacement(material, displaced)
 
 
 ## **A deck, per frame, per layer**: the eye in the deck's own frame, and the map it should be sampling.

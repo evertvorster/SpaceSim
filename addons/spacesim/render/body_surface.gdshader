@@ -10,6 +10,8 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // **The star: where it is, how wide it looks, and what the air leaves of it.** First, because it declares
 // `body_sun` and the include below reads it — a shader compiles top to bottom.
 #include "res://addons/spacesim/render/detail_ladder.gdshaderinc"
+// **The mapping and the displacement**, shared with the sea so the two cannot tear a coastline apart.
+#include "res://addons/spacesim/render/surface_displacement.gdshaderinc"
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 // **The deck above, as a shadow.** One law, shared with the sea, so the two cannot disagree.
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
@@ -128,6 +130,10 @@ uniform float sea_level = 0.0;
 // The field's own value times this is metres, and the metres are what the normal needs. From the plan.
 uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
+// **Whether this body's ground is geometry or a smooth sphere with a lie painted on it.** 0 is the sphere exactly as
+// it was; 1 displaces every vertex by the map's height. Published from `render.surface_displacement`, per frame, so
+// the two pictures are one setting apart in a build that still flies.
+uniform float displace = 0.0;
 // How much the normal is tilted by the gradient — see the header. The one number here that is a look rather
 // than a derivation, and it is a *uniform* so the host owns it. The default is the host's, for the reason
 // above: 12.0 was 2.4x what anything publishes.
@@ -157,8 +163,7 @@ uniform float detail_strength : hint_range(0.0, 1.0) = 0.15;
 uniform float land_roughness : hint_range(0.0, 1.0) = 0.9;
 uniform float land_specular : hint_range(0.0, 1.0) = 0.15;
 
-const float SURFACE_PI = 3.141592653589793;
-const float SURFACE_TAU = 6.283185307179586;
+
 
 // **The map's own tilt ceiling**, and it is NOT `relief_max_tilt` — see the clamp below. 0.35 is about 19°:
 // steeper than real terrain at a 19 km sampling scale. **It bounds the lean; it never was the guard against
@@ -172,17 +177,11 @@ varying vec3 unit_position;
 
 
 void vertex() {
+	// **The direction first, then the displacement** — the field is a function of direction, and looking the height up
+	// at the displaced direction would slide the terrain sideways as it rises. See `surface_displacement.gdshaderinc`.
 	unit_position = normalize(VERTEX);
-}
-
-
-// The mapping, and it must be the exact inverse of the bake's — `u` around the equator, `v` north-at-the-top.
-// A mismatch here does not look like an error, it looks like bad geography.
-vec2 equirect(vec3 direction) {
-	return vec2(
-		0.5 + atan(direction.z, direction.x) / SURFACE_TAU,
-		0.5 - asin(clamp(direction.y, -1.0, 1.0)) / SURFACE_PI
-	);
+	float grounded = textureLod(height_map, equirect(unit_position), 0.0).r * displace;
+	VERTEX = displaced(unit_position, grounded, field_amplitude, planet_radius);
 }
 
 
@@ -305,8 +304,8 @@ void fragment() {
 
 	// Metres per texel, which is what turns a height difference into a slope. The east-west one shrinks with
 	// latitude and is floored, because the equirect map's texels collapse at the poles.
-	float metres_east = SURFACE_TAU * planet_radius * max(cos(asin(clamp(up.y, -1.0, 1.0))), 0.05) * texel;
-	float metres_north = SURFACE_PI * planet_radius * texel;
+	float metres_east = MAP_TAU * planet_radius * max(cos(asin(clamp(up.y, -1.0, 1.0))), 0.05) * texel;
+	float metres_north = MAP_PI * planet_radius * texel;
 	float slope_east = (toward_east - toward_west) * field_amplitude * relief_exaggeration
 		/ (2.0 * max(metres_east, 1.0e-3));
 	float slope_north = (toward_north - toward_south) * field_amplitude * relief_exaggeration

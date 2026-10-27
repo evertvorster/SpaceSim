@@ -97,6 +97,9 @@ const REGISTRY := {
 	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
 	# nothing.
 	"render.cloud_decks": {"default": true, "scope": Scope.PLAYER},
+	# **Whether a body's ground is geometry or a smooth sphere with the relief painted on.** Off by default while the
+	# two pictures are compared: the same shaders draw both, and this is the only thing that changes between them.
+	"render.surface_displacement": {"default": false, "scope": Scope.PLAYER},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
 	},

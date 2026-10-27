@@ -657,6 +657,18 @@ static func apply_surface_maps(
 		surface.set_shader_parameter("detail_feature", detail_feature(width))
 
 
+## **Whether this body's ground is drawn as geometry.** One writer for both layers, because the land and the sea share
+## a mesh: a sea left on the sphere under displaced land is a cliff along every coast.
+##
+## Read through `get_value` by the caller and handed here, so the switch stays hot — a setting cached at startup is a
+## cold setting, and this one exists to be flipped while flying.
+static func apply_displacement(material: Material, displaced: bool) -> void:
+	var surface := material as ShaderMaterial
+	if surface == null:
+		return
+	surface.set_shader_parameter("displace", 1.0 if displaced else 0.0)
+
+
 ## **The cloud deck's material** — the far regime's cloud, from the derivation and the layer's own numbers.
 ##
 ## A deck is the body's own patch mesh at `radius + height + thickness`, so **the node is the geometry and
