@@ -113,6 +113,19 @@ const BELT_WIDTH := 0.08
 ## right before anything can be drawn, and the picture does not depend on the third digit.
 const RELIEF_FRACTION := 0.0014
 
+## **How the height varies across a patch of a given size — and it is NOT the spectrum's gain.**
+##
+## A patch's height variation follows `extent^0.5` in radians, measured from the game's own bake against the real
+## walk (`tests/probe_displacement_field.gd`, 2026-10-26): a median **670 m** across 26 km patches, 617 m across
+## 26 km, 696 m across 52 km — `variation ≈ amplitude · extent^0.5` reproduces those to within 15 %.
+##
+## **Why it is not the field's own gain.** The field falls at `0.5` per octave, which would put a 26 km patch's own
+## octave at ~36 m — twenty times less than what is measured. The reason is that a patch's variation is dominated by
+## **the largest structure crossing it** — a plate level, a belt, a coastline — not by the fbm octave that happens to
+## be 26 km wide. The exponent is therefore a measured property of the *field as observed*, and it is the number the
+## displacement walk refines on; `Surface Displacement — Results` has the table it came from.
+const TERRAIN_VARIATION_EXPONENT := 0.5
+
 ## **There is no width constant here, and that is deliberate.** A map's widths belong to
 ## `SpacesimSurfaceMaps` — the build width, the ceiling the display implies, and the rungs between them — so a
 ## second copy of those numbers in the field could only drift from the one the ladder actually bakes at. Two

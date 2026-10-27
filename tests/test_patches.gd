@@ -25,6 +25,7 @@ func run(h, root: Node) -> void:
 	_test_the_mesh(h)
 	_test_the_cache_makes_a_rebuild_cheap(h)
 	_test_the_drawn_triangle_is_inside_the_law(h)
+	_test_the_terrain_error(h)
 	_test_the_walk_is_gated(h)
 
 
@@ -341,3 +342,43 @@ static func _solid_angle(a: Vector3, b: Vector3, c: Vector3) -> float:
 	var product := tan(half_sum * 0.5) * tan((half_sum - side_a) * 0.5) \
 		* tan((half_sum - side_b) * 0.5) * tan((half_sum - side_c) * 0.5)
 	return 4.0 * atan(sqrt(maxf(product, 0.0)))
+
+
+## **The second error quantity: the height a triangle flattens.**
+##
+## `epsilon` bounds the *sphere's* sagitta and says nothing about terrain — one triangle over a mountain range is
+## hundreds of metres out and within half a metre of the ball. This is the term the displacement work refines on, and
+## the three things worth asserting are that it is off by default, that it fires where the ground is *seen edge-on*
+## rather than under the eye, and that the triangle budget is what actually bounds the cost.
+func _test_the_terrain_error(h) -> void:
+	var earth := 6.371e6
+	var pixel := 1.2966806e-3
+	var eye := Vector3.RIGHT
+	var plain := SpacesimPatches.select(earth + 4.0e4, eye, earth, pixel, 0.5)
+	var off := SpacesimPatches.select(earth + 4.0e4, eye, earth, pixel, 0.5,
+		SpacesimPatches.TRIANGLE_BUDGET, 0.0)
+	h.check(plain.size() == off.size(),
+		"a terrain budget of zero changes nothing (%d chunks either way)" % off.size())
+
+	# **Under the eye the term must barely fire; toward the limb it must.** Same altitude, same budget, only the
+	# camera's own direction changed — face-on geometry is identical to the picture, so paying for it there is waste.
+	var budget := 8.0
+	var budget_cap := 16000
+	var nadir := SpacesimPatches.select(earth + 4.0e4, eye, earth, pixel, 0.5, budget_cap, budget)
+	var grazing := SpacesimPatches.select(
+		earth + 4.0e4, Vector3(cos(deg_to_rad(85.0)), sin(deg_to_rad(85.0)), 0.0),
+		earth, pixel, 0.5, budget_cap, budget)
+	h.check(nadir.size() > off.size(),
+		"a terrain budget refines under the eye too, but from a standing start (%d against %d)"
+			% [nadir.size(), off.size()])
+	h.check(grazing.size() >= nadir.size(),
+		"and the grazing view wants at least as much geometry (%d against %d)" % [grazing.size(), nadir.size()])
+
+	# **The budget is the cost control**, not the error term: with a tighter budget the walk still fills it, because
+	# the visible cap is grazing-dominated at every altitude below orbit.
+	var small := SpacesimPatches.select(earth + 4.0e4, eye, earth, pixel, 0.5, 8000, budget)
+	var large := SpacesimPatches.select(earth + 4.0e4, eye, earth, pixel, 0.5, 32000, budget)
+	h.check(small.size() * SpacesimPatches.CHUNK_TRIANGLES <= 8000,
+		"8,000 triangles is honoured (%d)" % (small.size() * SpacesimPatches.CHUNK_TRIANGLES))
+	h.check(large.size() >= small.size(),
+		"and a larger budget buys at least as much (%d against %d)" % [large.size(), small.size()])

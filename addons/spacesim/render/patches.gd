@@ -102,7 +102,8 @@ static var _chunk_cache_lock := Mutex.new()
 ## sphere, and the frame's own frustum culls the rest for free once they are drawn.
 static func select(
 	distance: float, camera_direction: Vector3, radius: float,
-	pixel_angle: float, epsilon: float, budget: int = TRIANGLE_BUDGET
+	pixel_angle: float, epsilon: float, budget: int = TRIANGLE_BUDGET,
+	terrain_error_px: float = 0.0
 ) -> Array:
 	var chunks: Array = []
 	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or epsilon <= 0.0:
@@ -142,6 +143,27 @@ static func select(
 	# **The loosened budget that makes a chunk legal**: its own triangles are `4^s` finer than the chunk, so
 	# a chunk may be `4^s` times larger than a leaf and its interior still lands on ε.
 	var loosen := float(CHUNK_TRIANGLES)
+	# **The terrain error, when it is asked for.** `epsilon` bounds the *sphere's* sagitta — how far a triangle cuts
+	# inside the ball — and that says nothing about the ground a triangle flattens: one triangle over a mountain range
+	# is out by hundreds of metres and perfectly within half a metre of the sphere. So a second quantity refines the
+	# walk where the *height* needs it, and it is the parallax error in pixels, because that is the failure a smooth
+	# surface cannot hide:
+	#
+	#     variation = amplitude · extent^0.5        measured, not the spectrum's gain — see
+	#                                              `SpacesimSurfaceField.TERRAIN_VARIATION_EXPONENT`
+	#     parallax  = variation · tan(φ) / (d · p)  φ from the patch's own normal toward the eye
+	#
+	# At face-on `tan φ` is zero and the term never fires — the picture is identical without geometry, which is the
+	# whole reason this is a per-patch quantity and not a distance threshold. It grows toward the limb, where a
+	# silhouette and a ridge's occlusion are the only things that can be right.
+	#
+	# **0 switches it off**, and it must be off while the geometry is smooth: refining triangles for terrain nobody
+	# is displacing is cost with no picture.
+	var relief_amplitude := radius * SpacesimSurfaceField.RELIEF_FRACTION
+	var relief_exponent := SpacesimSurfaceField.TERRAIN_VARIATION_EXPONENT
+	# `tan φ` is unbounded at the limb; 80 degrees is a wall the eye is already grazing, and capping it is what stops
+	# the walk refining the horizon ring to nothing.
+	const MAX_TAN := 5.671
 	# A chunk at depth `d` carries triangles at depth `d + s`, so the ceiling moves up by `s` to keep the
 	# finest triangle where it was.
 	var depth_ceiling := MAX_DEPTH - CHUNK_SUBDIVISIONS
@@ -172,7 +194,20 @@ static func select(
 		if centre.dot(camera_direction) < cos(minf(horizon + extent, PI)) \
 				or (chunks.size() + stack.size()) * CHUNK_TRIANGLES >= budget:
 			continue
-		if int(patch[3]) >= depth_ceiling or edge_squared <= minimum_edge_squared:
+		# **The terrain test**, and it is a second reason to refine rather than a replacement for the first: a patch is
+		# fine enough when the sphere is inside ε *and* the height it flattens is under the parallax budget.
+		var terrain_ok := true
+		if terrain_error_px > 0.0:
+			# φ is the angle between the patch's own normal (its centre direction) and the direction to the eye from
+			# the patch — the only honest grazing measure, and one normalise.
+			var to_eye_from_patch := (camera - centre * radius).normalized()
+			var cosine := clampf(centre.dot(to_eye_from_patch), 0.0, 1.0)
+			var tan_phi := minf(sqrt(maxf(1.0 - cosine * cosine, 0.0)) / maxf(cosine, 1.0e-4), MAX_TAN)
+			var variation := relief_amplitude * pow(maxf(extent, 1.0e-9), relief_exponent)
+			var parallax := variation * tan_phi / maxf(to_patch * pixel_angle, 1.0e-9)
+			terrain_ok = parallax <= terrain_error_px
+		if int(patch[3]) >= depth_ceiling \
+				or (edge_squared <= minimum_edge_squared and terrain_ok):
 			chunks.append([int(patch[4]), String(patch[5]), int(patch[3])])
 			continue
 		_children(patch, stack)

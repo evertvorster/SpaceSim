@@ -70,6 +70,44 @@ func _init() -> void:
 				chunks.size() * SpacesimPatches.CHUNK_TRIANGLES])
 
 	print("")
+	print("=== D2: the terrain error term, and what it costs in triangles")
+	print("    %-10s %-9s %-9s %-9s %-9s %s" % ["alt", "off", "2 px", "4 px", "8 px", "16 px"])
+	for altitude in [3.19e5, 1.0e5, 4.0e4, 1.0e4, 1.0e3]:
+		var line := "    %-10s" % ("%.0f m" % altitude)
+		for budget in [0.0, 2.0, 4.0, 8.0, 16.0]:
+			var chunks := SpacesimPatches.select(
+				EARTH + altitude, Vector3.RIGHT, EARTH, PIXEL, 0.5,
+				SpacesimPatches.TRIANGLE_BUDGET, budget)
+			line += " %-9d" % (chunks.size() * SpacesimPatches.CHUNK_TRIANGLES)
+		print(line)
+	print("    and under a SMALLER triangle budget, where the term must spend it nearest-first:")
+	print("    %-10s %-9s %-9s %-9s %s" % ["alt", "8k", "16k", "32k", "finest depth"])
+	for altitude in [4.0e4, 1.0e4]:
+		var line := "    %-10s" % ("%.0f m" % altitude)
+		for budget in [8000, 16000, 32000]:
+			var chunks := SpacesimPatches.select(
+				EARTH + altitude, Vector3.RIGHT, EARTH, PIXEL, 0.5, budget, 8.0)
+			line += " %-9d" % (chunks.size() * SpacesimPatches.CHUNK_TRIANGLES)
+		var deepest := 0
+		var shallowest := 99
+		for chunk in SpacesimPatches.select(EARTH + altitude, Vector3.RIGHT, EARTH, PIXEL, 0.5, 16000, 8.0):
+			deepest = maxi(deepest, int(chunk[2]))
+			shallowest = mini(shallowest, int(chunk[2]))
+		line += " d%d..d%d" % [shallowest, deepest]
+		print(line)
+	print("    and at the limb, where the term is meant to fire:")
+	for altitude in [4.0e4, 1.0e4]:
+		var line := "    %-10s" % ("%.0f m" % altitude)
+		for budget in [0.0, 2.0, 4.0, 8.0, 16.0]:
+			# A camera direction tilted 70 degrees off the ground under it: the grazing case.
+			var eye_dir := Vector3(cos(deg_to_rad(70.0)), sin(deg_to_rad(70.0)), 0.0)
+			var chunks := SpacesimPatches.select(
+				EARTH + altitude, eye_dir, EARTH, PIXEL, 0.5,
+				SpacesimPatches.TRIANGLE_BUDGET, budget)
+			line += " %-9d" % (chunks.size() * SpacesimPatches.CHUNK_TRIANGLES)
+		print(line)
+
+	print("")
 	print("=== B2/D2: the merge, warm, and with a per-vertex attribute alongside")
 	print("    %-9s %-8s %-10s %-10s %s" % ["alt", "verts", "merge", "+attribute", "per vertex"])
 	for altitude in [4.0e4, 1.0e4, 1.0e3]:

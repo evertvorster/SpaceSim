@@ -124,6 +124,11 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	# **How many pixels of parallax the geometry may be out by**, when the ground is displaced — the second error
+	# quantity, in the currency the failure actually appears in. Zero would be the picture, and the investigation's
+	# arithmetic says it is unreachable: at 40 km it wants 200 m patches. 8 is a starting point, to be settled by a
+	# flight; the *triangle budget* is what bounds the cost, because the visible cap is grazing-dominated.
+	"lod.terrain_error_px": {"default": 8.0, "scope": Scope.PLAYER, "min": 0.0, "max": 64.0},
 	# --- the surface map's ceiling, **as a fraction of the resolution the scene is being rendered at.** The
 	# ceiling is always derived — there is no absolute width in the file — because it is a property of the
 	# display rather than of the body: 0.5 makes the texture half the scene's resolution, and that follows the

@@ -1044,8 +1044,15 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
 			pixel, epsilon, body.radius, body.patch_walk_epsilon
 		) or wireframe != body.patch_walk_wireframe:
+			# **The terrain error term is only asked for when the ground is geometry.** Refining triangles for terrain
+			# nobody is displacing is cost with no picture — the sphere shades identically at any density — so the
+			# switch that displaces the vertices is also the switch that refines them.
+			var terrain_px := 0.0
+			if bool(SpacesimSettings.get_value("render.surface_displacement")):
+				terrain_px = float(SpacesimSettings.get_value("lod.terrain_error_px"))
 			body.patch_chunks = SpacesimPatches.select(
-				distance, to_eye, body.radius, pixel, epsilon
+				distance, to_eye, body.radius, pixel, epsilon,
+				SpacesimPatches.TRIANGLE_BUDGET, terrain_px
 			)
 			# **A selection of nothing has a reason, and it is worth printing once.** `select()` refuses a
 			# sphere it cannot see round — the eye at or below the surface, or a pixel angle or budget of
