@@ -355,10 +355,12 @@ float detail = 0.0;
 	// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
 	// wider than a slab's.
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		float feature = detail_feature * float(max(map_width, 1)) / max(width_now, 1.0);
-		int rungs = int(ceil(log2(max(feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+		// **Two texels of the raster in hand is the coarse bound** — what the map or the tile already carries. The
+		// rungs themselves are at absolute sizes, so a rung landing *drops* the coarsest few instead of rescaling the
+		// rest; that was the bug that made the ground re-texture itself as the map climbed.
+		float coarsest = detail_feature * float(max(map_width, 1)) / max(width_now, 1.0);
 		detail += banded_detail(
-			up, footprint_angle, detail_seed, feature, detail_strength, rungs
+			up, footprint_angle, coarsest, detail_seed, detail_strength
 		);
 	}
 

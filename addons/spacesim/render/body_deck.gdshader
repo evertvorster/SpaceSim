@@ -192,8 +192,8 @@ void fragment() {
 	if (detail_strength > 0.0 && detail_feature > 0.0) {
 		field = clamp(
 			field + banded_detail(
-				p, length(fwidth(local_position)),
-				detail_seed, detail_feature, detail_strength, DETAIL_RUNGS
+				p, length(fwidth(local_position)), detail_feature,
+				detail_seed, detail_strength
 			),
 			0.0, 1.0
 		);

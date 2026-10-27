@@ -54,6 +54,28 @@ func _init() -> void:
 		quit(1)
 		return
 	var texture := ImageTexture.create_from_image(map)
+	# **And the same map as a `Texture2DRD`**, which is what the game samples once a rung lands: the refined map is an
+	# RD texture, and a vertex stage that cannot bind it would read garbage rather than zero.
+	var rd := RenderingServer.get_rendering_device()
+	var rd_texture := RID()
+	if rd != null:
+		var format := RDTextureFormat.new()
+		format.format = RenderingDevice.DATA_FORMAT_R16_SFLOAT
+		format.width = WIDTH
+		format.height = HEIGHT
+		format.depth = 1
+		format.array_layers = 1
+		format.mipmaps = 1
+		format.usage_bits = (RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+			| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT)
+		rd_texture = rd.texture_create(format, RDTextureView.new())
+		# **The bake already comes back as `R16F`**, so its own bytes are the upload — a `PackedFloat32Array` is
+		# 32-bit and the device rejects it, which silently leaves the texture zeroed and makes the whole test read
+		# `0.735` (the sRGB of zero) while looking like a result.
+		var bytes := map.get_data()
+		print("    RD upload: %d bytes for %dx%d R16F (%d expected)" % [
+			bytes.size(), WIDTH, HEIGHT, WIDTH * HEIGHT * 2])
+		rd.texture_update(rd_texture, 0, bytes)
 
 	var viewport := SubViewport.new()
 	viewport.size = SIZE
@@ -105,6 +127,45 @@ func _init() -> void:
 		print("    OK: the vertex stage's fetch drives both the geometry and the colour, and the sphere deforms.")
 	else:
 		print("    FAIL: the fetch returned data to the fragment stage but the vertices did not move.")
+
+	# **The game's own case**: the refined map is a `Texture2DRD`. Same two renders, same counts.
+	if rd_texture.is_valid():
+		var rd_material := ShaderMaterial.new()
+		var rd_shader := Shader.new()
+		rd_shader.code = SHADER
+		rd_material.shader = rd_shader
+		var wrapper := Texture2DRD.new()
+		wrapper.texture_rd_rid = rd_texture
+		rd_material.set_shader_parameter("heights", wrapper)
+		sphere.material_override = rd_material
+		var rd_flat := await _render(viewport, rd_material, 0.0)
+		var rd_displaced := await _render(viewport, rd_material, 400.0)
+		var rd_differing := 0
+		var rd_brightest := 0.0
+		for y in SIZE.y:
+			for x in SIZE.x:
+				var a := rd_flat.get_pixel(x, y)
+				var b := rd_displaced.get_pixel(x, y)
+				if absf(a.r - b.r) > 0.01:
+					rd_differing += 1
+				rd_brightest = maxf(rd_brightest, a.r)
+		print("")
+		print("=== the same, through a Texture2DRD (what the game samples once a rung lands)")
+		print("    brightest: %.3f   pixels differing: %d of %d" % [
+			rd_brightest, rd_differing, SIZE.x * SIZE.y])
+		if rd_brightest <= 0.02:
+			print("    ** FAIL: the vertex stage reads nothing from an RD texture. In the game that is a zero")
+			print("       displacement (harmless) — unless it reads garbage instead, which would explain a vanished")
+			print("       surface: NaN in VERTEX removes every triangle.")
+		elif rd_differing < 200:
+			print("    ** FAIL: the RD texture reaches the fragment stage but does not move the vertices.")
+		else:
+			print("    OK: the RD texture drives the geometry as well as the image texture.")
+		if rd_texture.is_valid():
+			rd.free_rid(rd_texture)
+	else:
+		print("")
+		print("    (no rendering device for the RD half)")
 	quit()
 
 

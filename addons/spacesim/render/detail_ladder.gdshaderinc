@@ -21,35 +21,47 @@
 // the average with it.
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 
-// Rungs in the ladder below the map. Six reaches from two texels of an 8k map (9.8 km on Earth) down to about
-// 300 m, which is past anything the map can hold and past where the near regime takes over — **for a cloud slab**.
-// The ground is the same ladder with a count the *pixel* decides: from two texels of the raster in hand down to two
-// pixels, which at 40 km is nine rungs and at 1 km is thirteen. That is why the count is a parameter and not a
-// constant: the caller is the only one that knows how deep the gap between its raster and its pixels is.
-const int DETAIL_RUNGS = 6;
-// A ceiling for a caller that derives its own count, so a pathological pair of numbers cannot unroll the loop.
-const int DETAIL_RUNGS_MAX = 16;
-
-
-// One octave per rung, each faded out where a pixel spans more than a quarter of its feature.
+// **The rungs are at ABSOLUTE sizes, and that is what stops the ground re-noising itself.**
 //
-// **`feature` is two texels of the raster in hand**, in radians of sphere-arc, so the ladder starts exactly where
-// that raster stops; `footprint` is the angle one pixel spans, in the same units, so no distance and no camera
-// term is needed. `p` is the model-space direction.
-float banded_detail(vec3 p, float footprint, int seed, float feature, float strength, int rungs) {
+// Rung `i` is `DETAIL_ANCHOR · 2^-i` radians — a fixed sequence, independent of whatever raster is in hand. What the
+// caller changes is only **which** rungs are drawn: `coarsest` is the raster's own two-texel feature, so a finer map
+// or a landing tile *drops* the coarse end of the sequence rather than sliding the whole ladder up or down.
+//
+// The version before this scaled every rung to the raster in hand (`feature = 2·TAU/width_now`), which meant every
+// rung that landed **rescaled the noise field**: the ground visibly re-textured each time the map climbed, and until
+// the first rung landed the ladder was anchored to a 256-wide map's 313 km features. Evert, 2026-10-26: *"areas where
+// a clipmap has not been rendered yet show up completely smooth, and the noise value for the texture changes."*
+// One bug, two symptoms, and the fix is an anchor that does not move.
+const float DETAIL_ANCHOR = 1.0;
+// From a whole-radian feature down to a pixel at walking height is about twenty doublings; this is the ceiling on the
+// sequence, not a count that runs.
+const int DETAIL_RUNGS_MAX = 24;
+
+
+float banded_detail(vec3 p, float footprint, float coarsest, int seed, float strength) {
+	if (coarsest <= 0.0 || strength <= 0.0) {
+		return 0.0;
+	}
+	// The first rung the raster in hand did not carry, and where the sequence starts — a `log2`, not a rescale.
+	int first = max(int(ceil(log2(DETAIL_ANCHOR / coarsest))), 0);
 	float total = 0.0;
 	float weight = 0.0;
-	float amplitude = 1.0;
-	float size = feature;
-	int count = clamp(rungs, 1, DETAIL_RUNGS_MAX);
-	for (int rung = 0; rung < count; rung++) {
+	for (int rung = first; rung < DETAIL_RUNGS_MAX; rung++) {
+		float size = DETAIL_ANCHOR * exp2(-float(rung));
+		// **Faded out where a pixel spans more than a quarter of it** — band-limited by the sampling rate, which is
+		// the law every mechanism here obeys — and the loop stops at the first rung that is inaudible, because the
+		// ones below it are finer still.
 		float audible = 1.0 - smoothstep(0.25, 0.5, footprint / size);
+		if (audible <= 0.0) {
+			break;
+		}
+		// **The amplitude belongs to the rung, not to the count that ran**, so a rung appearing cannot change the
+		// strength of its neighbours.
+		float amplitude = exp2(-float(rung));
 		total += fnl_os2s3(seed + rung * 1013, p / size) * amplitude * audible;
-		weight += amplitude;
-		amplitude *= 0.5;
-		size *= 0.5;
+		weight += amplitude * audible;
 	}
-	// **Normalised by the weight of the rungs it ran**, so the ladder's total amplitude is `strength` whatever the
-	// count — which is what lets the ground ask for more rungs without the texture getting louder.
+	// Normalised by what was audible, so the ladder's *contrast* is `strength` whatever the raster and whatever the
+	// altitude — which is what lets the same number serve a 256-wide map and a 512-texel tile.
 	return weight > 0.0 ? total / weight * strength : 0.0;
 }
