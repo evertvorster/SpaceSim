@@ -140,21 +140,10 @@ uniform float displace = 0.0;
 uniform float relief_exaggeration = 5.0;
 // The detail map's width, which is what turns a texel into an angle.
 uniform int map_width = 1024;
-// **A tile's texel count**, which turns a tile's uv span into the width of the raster it is — and so into the
-// feature size the banded detail ladder starts from when a tile is the raster in hand.
-uniform float tile_texels = 512.0;
 // How much of a layer's own edge it fades in over, as a fraction of the tile's side.
 const float TILE_BLEND = 0.1;
-// **The banded detail ladder's two numbers, and this is what the surface was missing.**
-//
-// `detail_feature` is **two texels of the raster in hand**, in radians of sphere-arc — where the map stops and the
-// ladder starts. `detail_strength` is how loud it is, in the field's own units.
-//
-// The old ladder was a *faithful continuation* of the field's own spectrum, so its first rung sat at
-// `bounding · gain^first_octave` = 0.2 % of the field for a 7680-wide map: drawn, and invisible, which is why a tile
-// came out as a perfectly smooth square. **This one is its own unit** — six-plus rungs normalised by their own sum —
-// so the first rung is half of it and the last is still visible. Same mechanism the cloud deck has had all along.
-uniform float detail_feature = 0.0;
+// **The banded detail ladder's loudness**, in the field's own units. The ladder's *scale* comes from the pixel, not
+// from the raster — see the comment where it is called — so this is the only number it needs from the host.
 uniform float detail_strength : hint_range(0.0, 1.0) = 0.15;
 
 
@@ -192,10 +181,6 @@ void fragment() {
 	// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
 	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 	float height = texture(height_map, uv).r;
-	// **The raster in hand**, as a width: the whole-body map, or the finest tile that covers this pixel. The detail
-	// ladder's feature size follows it, so the ground's texture starts exactly where the raster it is drawn from
-	// stops — any raster size, the same law.
-	float width_now = float(max(map_width, 1));
 
 	// **The near field is a CLIPMAP: nested rings of tiles, coarse first, each drawn over the one before it.** Every
 	// layer that covers this pixel contributes, so a pixel under the eye may read six or eight of them — that
@@ -216,9 +201,6 @@ void fragment() {
 		vec2 edge = smoothstep(vec2(0.0), vec2(TILE_BLEND), local)
 			* (1.0 - smoothstep(vec2(1.0 - TILE_BLEND), vec2(1.0), local));
 		height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
-		// **The finest layer that covers this pixel is the raster in hand** for the detail ladder below, which wants
-		// two of *its* texels as the scale its own rungs start from.
-		width_now = tile_texels / max(tile.z - tile.x, 1.0e-6);
 	}
 
 	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
@@ -354,11 +336,24 @@ float detail = 0.0;
 	// **The detail field the raster cannot hold**, from two of its texels down to two pixels — the ladder the cloud
 	// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
 	// wider than a slab's.
-	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		// **Two texels of the raster in hand is the coarse bound** — what the map or the tile already carries. The
-		// rungs themselves are at absolute sizes, so a rung landing *drops* the coarsest few instead of rescaling the
-		// rest; that was the bug that made the ground re-texture itself as the map climbed.
-		float coarsest = detail_feature * float(max(map_width, 1)) / max(width_now, 1.0);
+	if (detail_strength > 0.0) {
+		// **The coarse bound is the PIXEL, not the raster — and that is the correction.**
+		//
+		// The ladder used to start where the raster in hand stopped. That sounds right and is wrong, because a raster
+		// cannot carry what the ladder draws: the ladder's rungs are *synthesised* detail, and the field's own range
+		// over a tile is a fraction of the colour ramp's step. Measured (`tests/probe_tile_window.gd`, 2026-10-27):
+		// a level-11 tile spans 19.6 km with a field range of **0.009** — about two ramp texels — while a level-9 tile
+		// spans **0.034**. So a tile is *flat ground*: it carries shape, not texture.
+		//
+		// Starting the ladder at the tile's texel therefore deleted the texture exactly where a tile was drawn, and
+		// left the ground outside tiles textured by a ladder anchored to a 5 km map — which is the flat rectangle
+		// Evert photographed with straight edges, and the reason the noise strength differed from region to region.
+		//
+		// **Deriving the bound from the pixel fixes both**: every pixel gets the same sequence of rungs whatever raster
+		// is under it, so the texture is uniform across the screen, costs three or four rungs instead of thirteen, and
+		// a tile can sharpen the *shape* without touching the texture. 8x the footprint because a rung fades out at
+		// 4x it — this leaves the coarsest rung at full strength and one octave of presence above the fade.
+		float coarsest = 8.0 * max(footprint_angle, 1.0e-9);
 		detail += banded_detail(
 			up, footprint_angle, coarsest, detail_seed, detail_strength
 		);
