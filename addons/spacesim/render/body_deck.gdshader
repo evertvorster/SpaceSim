@@ -128,11 +128,8 @@ uniform float planet_radius = 1.0;
 // **Zero-mean, and small.** `fnl_os2s3` is already centred on zero, so the ladder adds the same amount either
 // side of the map's value. That matters because the threshold is a percentile of the *map's* distribution and
 // `ramp_gain` is fitted to its mean: a biased term would move the drawn coverage and the average with it.
-uniform int detail_seed = 0;
 // **The coarsest detail feature, in radians on the unit sphere** — two texels of the map *in hand*, set on
 // every publish, so the ladder starts exactly where the map stops and can never duplicate it.
-uniform float detail_feature = 0.0;
-uniform float detail_strength : hint_range(0.0, 0.5) = 0.0;
 
 // **The star, and what the air leaves of it.** A cloud is a reflector like the ground: the light that wakes it
 // has crossed the air on the way in, and at the limb that path is thousands of kilometres long — so a cloud
@@ -189,15 +186,15 @@ void fragment() {
 	// **And the structure the map is too coarse to hold.** `fwidth` of the model-space direction is the angle
 	// one pixel spans, so the fade is in the units the feature sizes are in: no distance, no scale factor, and
 	// nothing to keep in sync with the camera.
-	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		field = clamp(
-			field + banded_detail(
-				p, length(fwidth(local_position)), detail_feature,
-				detail_seed, detail_strength
-			),
-			0.0, 1.0
-		);
-	}
+	// **No noise ladder**, for the reason the ground lost its own: the ladder is not the texture, it is a stand-in
+	// for structure the field already has. A rung at 2-4 px tilting a coverage field is the steepest thing here, and
+	// it is where the banding and the extra noise came from.
+	//
+	// **This is only half of what the ground got**, and that is deliberate: there, the ladder was deleted *and* the
+	// field's own plate belts and crests were continued below the map in the same breath. A cloud continuation is the
+	// same idea — `SpacesimCloudField.fine_for()`: the same seed, frequency 16, gain 0.8, sampled at the *physical*
+	// direction — but it needs the field's zonal stretch in the fragment stage, so it is its own step. Until then the
+	// deck draws its map, which refines by the same width law the ground's does.
 
 	// **The percentile as a step, softened**, then the thickness above it. `threshold = 0` makes the whole
 	// field cloud, which is what a body the model calls FEATURELESS should be and what a one-texel white map

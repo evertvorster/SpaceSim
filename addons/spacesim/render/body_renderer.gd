@@ -185,12 +185,6 @@ const UNIT_LUX_PER_SR := 100000.0 / PI
 ## drawn can only ever under-report.
 const POINT_TRIANGLES := 2
 
-## **How far the deck's detail ladder may push the field either side of the map's own value.** Measured when
-## this was last built (`tests/probe_deck_detail.gd`, 2026-10-18): coverage 60.5 % → 57.3 %, mean thickness
-## 0.3419 → 0.3396 — small enough that the percentile threshold and the fitted ramp gain stay honest, which
-## is the property that matters, because both are measured off the *map's* distribution.
-const DECK_DETAIL_STRENGTH := 0.2
-
 ## **How wide the deck's coverage edge is, in field units** — the `smoothstep` around `threshold`. Published
 ## rather than left to the shader's own default: it was a `hint_range` uniform nobody set, which reads as a
 ## knob and is a constant. Named here and handed over, so the host owns it like every other look number.
@@ -711,8 +705,6 @@ static func deck_material(
 	# **Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing.** The
 	# authored colour is a palette value; what the deck reflects is `ramp_gain`'s business, one level up.
 	material.set_shader_parameter("cloud_color", palette.srgb_to_linear())
-	material.set_shader_parameter("detail_seed", SpacesimCloudField.seed_for(body.id, seed_layer))
-	material.set_shader_parameter("detail_strength", DECK_DETAIL_STRENGTH)
 	material.set_shader_parameter("softness", DECK_SOFTNESS)
 	# **Every deck is centred on the same body, so a distance sort cannot separate the stack** — the order has
 	# to be stated. The deepest composites first (lower priority is drawn earlier), leaving the highest deck
@@ -746,10 +738,6 @@ static func apply_cloud_map(
 		return
 	if texture != null and deck.get_shader_parameter("cover") != texture:
 		deck.set_shader_parameter("cover", texture)
-	if width > 0:
-		# **The ladder starts at two texels of the map in hand**, so it can never duplicate what the map shows
-		# and it moves as the map refines. A texel spans `TAU / width` in longitude.
-		deck.set_shader_parameter("detail_feature", TAU * 2.0 / float(width))
 	deck.set_shader_parameter("threshold", threshold)
 	deck.set_shader_parameter("ramp_gain", ramp_gain)
 	deck.set_shader_parameter("veil", veil)
@@ -786,8 +774,7 @@ static func face_deck(material: Material, eye_offset: Vector3) -> void:
 ## bright as the cloud's albedo would make it, which is what "the multiply-scattered light" means without a
 ## multiple-scattering model this project does not have.
 static func apply_deck_shadow(
-	material: Material, texture: Texture2D, threshold: float, tau: float, height: float,
-	detail_seed: int, detail_feature: float
+	material: Material, texture: Texture2D, threshold: float, tau: float, height: float
 ) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null or tau <= 0.0 or height <= 0.0:
@@ -797,12 +784,6 @@ static func apply_deck_shadow(
 	surface.set_shader_parameter("deck_threshold", threshold)
 	surface.set_shader_parameter("deck_tau", tau)
 	surface.set_shader_parameter("deck_height", height)
-	# **The deck's own ladder, so the shadow is the image of the field the cloud draws** — not of the map
-	# alone, which is what made it blotchy where the cloud was whispy. The seed and the first feature must be
-	# the deck's exactly, or the shadow would be a different cloud from the one casting it.
-	surface.set_shader_parameter("deck_detail_seed", detail_seed)
-	surface.set_shader_parameter("deck_detail_feature", detail_feature)
-	surface.set_shader_parameter("deck_detail_strength", DECK_DETAIL_STRENGTH)
 	surface.set_shader_parameter("deck_shadow_floor", DECK_SHADOW_FLOOR)
 
 

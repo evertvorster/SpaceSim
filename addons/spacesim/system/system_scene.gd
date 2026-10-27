@@ -1304,14 +1304,9 @@ func _publish_deck_shadow(
 	body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck, texture: Texture2D, threshold: float,
 	width: int
 ) -> void:
-	# **The deck's own ladder numbers, passed rather than read back off its material** — `detail_feature` is
-	# two texels of the map in hand, so a refinement moves it, and the shadow has to move with it or it would
-	# be a different cloud from the one casting it.
-	var feature := TAU * 2.0 / float(width) if width > 0 else 0.0
 	for material in [body.mesh_material, body.ocean_material]:
 		SpacesimBodyRenderer.apply_deck_shadow(
-			material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness,
-			SpacesimCloudField.seed_for(body.id, deck.index), feature
+			material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness
 		)
 
 

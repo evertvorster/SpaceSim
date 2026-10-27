@@ -92,9 +92,10 @@ func _test_a_stack(h, scene: SpacesimSystemScene) -> void:
 			"and the ammonia deck is the higher of the two (%.0f against %.0f m above the centre)" % [
 				upper.node.scale.x, lower.node.scale.x])
 		# **Different weather, not the same cloud twice**: the field's seed is keyed by the layer, so a stack
-		# is two maps rather than one map at two heights.
-		h.check(upper.material.get_shader_parameter("detail_seed")
-			!= lower.material.get_shader_parameter("detail_seed"),
+		# is two maps rather than one map at two heights. **Asked of the field, not of a shader uniform** — the
+		# seed's home is `SpacesimCloudField.seed_for`, and the deck no longer carries a copy of it since the
+		# noise ladder went.
+		h.check(SpacesimCloudField.seed_for(id, upper.index) != SpacesimCloudField.seed_for(id, lower.index),
 			"while each has its own field seed, so the two are different clouds")
 		# **And the deeper deck is drawn first**, because every deck is centred on the same body and a
 		# distance sort cannot separate them.
@@ -262,12 +263,10 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	# Publish what a landed map would publish, and check both surfaces took it.
 	var cover := SpacesimBodyRenderer.white_texel()
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness,
-		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 2048.0
+		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
 	)
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.ocean_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness,
-		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 2048.0
+		earth.ocean_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
 	)
 	var sea := earth.ocean_material as ShaderMaterial
 	for pair in [[land, "land"], [sea, "sea"]]:
@@ -296,20 +295,15 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	refined.fill(Color(0.5, 0.5, 0.5, 1.0))
 	var refined_texture := ImageTexture.create_from_image(refined)
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, refined_texture, 0.7, deck.shadow_tau, deck.height + deck.thickness,
-		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 4096.0
+		earth.mesh_material, refined_texture, 0.7, deck.shadow_tau, deck.height + deck.thickness
 	)
 	h.check(land.get_shader_parameter("deck_cover") == refined_texture,
 		"and a refined map replaces the shadow's copy of it")
 	h.check_near(float(land.get_shader_parameter("deck_threshold")), 0.7,
 		"with the percentile of the map it arrived with", 1.0e-9)
-	# **And the ladder moves with it**, because the ladder is what makes the visible texture: a shadow that
-	# sampled only the map would be blotchy where the cloud is whispy — which is what flight showed.
-	h.check_near(float(land.get_shader_parameter("deck_detail_feature")), TAU * 2.0 / 4096.0,
-		"and the ladder's first feature follows the map's width, as the deck's own does", 1.0e-12)
-	h.check(int(land.get_shader_parameter("deck_detail_seed"))
-		== int(deck.material.get_shader_parameter("detail_seed")),
-		"with the deck's own field seed, so the shadow is the same cloud")
+	# **The shadow and the deck now sample one thing — the map — because neither has a ladder.** The check that
+	# matters is therefore that they read the *same map*, which is asserted above; a seed comparison would be
+	# comparing two uniforms that no longer exist.
 
 	# **A body with no deck keeps its shadow switched off**, which is the shader's `deck_shadow_present()` gate
 	# and the reason the path costs nothing on the bodies without air.
