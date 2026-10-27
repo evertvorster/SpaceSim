@@ -667,6 +667,17 @@ static func apply_displacement(material: Material, displaced: bool) -> void:
 	if surface == null:
 		return
 	surface.set_shader_parameter("displace", 1.0 if displaced else 0.0)
+	# **The exaggeration is the fiction's, and it goes with the fiction.** `relief_exaggeration` exists because a
+	# smooth sphere needs a lie to read as 3D — 5.0 times the true gradient. With the vertices carrying the relief the
+	# geometry *is* the shape, so shading it at 5x counts the mountain twice and reads as crumpled paper. It is
+	# derived rather than tuned: the honest value with geometry is 1.0, the surface shading as steep as it is.
+	#
+	# `detail_relief` stays as it is — the ladder's sub-triangle bumps are still a fiction, and the geometry cannot
+	# carry anything finer than the map's own texel.
+	surface.set_shader_parameter(
+		"relief_exaggeration",
+		1.0 if displaced else RELIEF_EXAGGERATION
+	)
 
 
 ## **The cloud deck's material** — the far regime's cloud, from the derivation and the layer's own numbers.
