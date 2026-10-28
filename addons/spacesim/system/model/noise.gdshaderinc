@@ -240,10 +240,23 @@ float fnl_os2s3(int seed, vec3 p) {
 //
 // Weighted strength is 0 in Godot's default, which is what makes the amplitude a plain `amp *= gain`; a
 // non-zero one would multiply it by `lerp(1, (noise + 1) * 0.5, weight)` and there is no caller for it.
-float fnl_fbm3(
-	vec3 p, int seed, float frequency, int octaves, float gain, float lacunarity, float fractal_bounding
+// **The same sum, with the octaves a pixel cannot resolve FADED rather than drawn.** `footprint` is the angle one
+// pixel spans, in the same units as a feature — radians of sphere-arc — and **`0.0` means no limit**, which is what a
+// bake wants: its own raster *is* its resolution, so nothing it stores is aliased.
+//
+// **Faded and not skipped**, because a fade is continuous and a skip is a step: the octave count changes with distance
+// on every frame of an approach, and a sum whose terms appeared and vanished would make the ground pop as it refined.
+// Full while a pixel holds four samples per feature, gone by two — the sampling limit, and the same law
+// `banded_detail` (the deck's ladder) uses the same law.
+//
+// **The feature starts at `1/frequency`** because `p` is a direction: octave `i` samples the generator at
+// `direction * frequency * lacunarity^i`, so its feature is `1/(frequency * lacunarity^i)` radians across the sphere.
+float fnl_fbm3_banded(
+	vec3 p, int seed, float frequency, int octaves, float gain, float lacunarity,
+	float fractal_bounding, float footprint
 ) {
 	p *= frequency;
+	float feature = 1.0 / max(frequency, 1.0e-9);
 	// `TransformType3D_DefaultOpenSimplex2`: rotation, not skew.
 	float r = (p.x + p.y + p.z) * (2.0 / 3.0);
 	p = vec3(r - p.x, r - p.y, r - p.z);
@@ -251,9 +264,21 @@ float fnl_fbm3(
 	float sum = 0.0;
 	float amp = fractal_bounding;
 	for (int octave = 0; octave < octaves; octave++) {
-		sum += fnl_os2s3(seed + octave, p) * amp;
+		float fade = 1.0 - smoothstep(feature * 0.25, feature * 0.5, footprint);
+		if (fade <= 0.0) {
+			break;
+		}
+		sum += fnl_os2s3(seed + octave, p) * amp * fade;
 		p *= lacunarity;
 		amp *= gain;
+		feature /= lacunarity;
 	}
 	return sum;
+}
+
+
+float fnl_fbm3(
+	vec3 p, int seed, float frequency, int octaves, float gain, float lacunarity, float fractal_bounding
+) {
+	return fnl_fbm3_banded(p, seed, frequency, octaves, gain, lacunarity, fractal_bounding, 0.0);
 }

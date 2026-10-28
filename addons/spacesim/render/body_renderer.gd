@@ -80,10 +80,6 @@ const DETAIL_MAX_RUNGS := 18
 ## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
 ## fitted to, and a large swing would move the drawn average away from it.
 const DETAIL_VARIATION := 0.18
-## **How many octaves below the map the crests may be continued**, and it is a ceiling rather than a count.
-## Each octave fades out where a pixel can no longer resolve it, so a distant body pays for two and a close one for
-## ten; the shader's own footprint decides. 14 reaches from a whole-radian plate down past a metre of ground.
-const FIELD_OCTAVES := 14
 ## **The relief's exaggeration**, in the sloped sense: the shader computes a real slope (metres of height per
 ## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
 ## exactly as steep as it is.
@@ -435,22 +431,32 @@ static func surface_material(
 	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
 	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
-	# **The field's own numbers for the crest continuation**, off the same plan the bake compiles: the plate
-	# partition's phase and belt width, the ridge spectrum, the warp that makes the plate cells irregular, and the
-	# FBM's own gain and lacunarity. Only the fields `surface_relief` reads, so a number here that nothing draws
-	# cannot appear.
-	material.set_shader_parameter("field_plate_phase", plan.plate_phase)
-	material.set_shader_parameter("field_belt_width", plan.belt_width)
+	# **The field's own numbers, and now the WHOLE plan** — the shader evaluates the field itself, so every number the
+	# bake compiles has to reach it or the two are different fields. Only the fields `surface_height` reads are here;
+	# a number in the struct that nothing reads would be a number nothing draws.
+	material.set_shader_parameter("field_seed", plan.seed)
+	material.set_shader_parameter("field_amplitude", plan.amplitude)
+	material.set_shader_parameter("field_continent_frequency", plan.continent_frequency)
+	material.set_shader_parameter("field_continent_octaves", plan.continent_octaves)
+	material.set_shader_parameter("field_continent_share", plan.continent_share)
+	material.set_shader_parameter("field_continent_bounding", plan.continent_bounding)
 	material.set_shader_parameter("field_ridge_frequency", plan.ridge_frequency)
 	material.set_shader_parameter("field_ridge_octaves", plan.ridge_octaves)
 	material.set_shader_parameter("field_ridge_strength", plan.ridge_strength)
-	material.set_shader_parameter("field_gain", plan.gain)
-	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("field_warp_frequency", plan.warp_frequency)
 	material.set_shader_parameter("field_warp_octaves", plan.warp_octaves)
 	material.set_shader_parameter("field_warp_strength", plan.warp_strength)
 	material.set_shader_parameter("field_warp_bounding", plan.warp_bounding)
-	material.set_shader_parameter("field_octaves", FIELD_OCTAVES)
+	material.set_shader_parameter("field_region_frequency", plan.region_frequency)
+	material.set_shader_parameter("field_region_octaves", plan.region_octaves)
+	material.set_shader_parameter("field_region_share", plan.region_share)
+	material.set_shader_parameter("field_region_bounding", plan.region_bounding)
+	material.set_shader_parameter("field_plate_bias_share", plan.plate_bias_share)
+	material.set_shader_parameter("field_belt_width", plan.belt_width)
+	material.set_shader_parameter("field_plate_phase", plan.plate_phase)
+	material.set_shader_parameter("field_mottle_plain_gain", plan.mottle_plain_gain)
+	material.set_shader_parameter("field_gain", plan.gain)
+	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)

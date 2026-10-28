@@ -89,5 +89,5 @@ void main() {
 	plan.region_bounding = params.region_bounding;
 	plan.mottle_plain_gain = params.mottle_plain_gain;
 
-	imageStore(out_map, pos, vec4(surface_height(direction, plan), 0.0, 0.0, 1.0));
+	imageStore(out_map, pos, vec4(surface_height(direction, plan, 0.0), 0.0, 0.0, 1.0));
 }

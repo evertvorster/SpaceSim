@@ -149,39 +149,62 @@ void surface_plates(vec3 q, float phase, float belt_width, out float level, out 
 // the R3 rotation every other sample of this generator gets, so a bare lattice call would be a *different
 // field* under the same seed. One octave also makes `fractal_bounding` exactly 1, so the rung comes back on
 // [-1, 1] and the weighting below is the whole of the shape.
-float surface_ridged3(vec3 p, int seed, int octaves, float gain, float lacunarity) {
+// **The ridged sum, band-limited by the pixel** — the same law as `fnl_fbm3_banded`, and full strength at
+// `footprint` 0 so a bake is untouched. `p` is already multiplied by the caller's `ridge_frequency`, so octave 0's
+// feature is one unit of `p`, which is one radian of sphere-arc.
+float surface_ridged3_banded(
+	vec3 p, int seed, int octaves, float gain, float lacunarity, float footprint
+) {
 	float sum = 0.0;
 	float amplitude = 1.0;
 	float weight = 0.0;
 	float frequency = 1.0;
+	float feature = 1.0;
 	for (int octave = 0; octave < octaves; octave++) {
 		// **Not `sample`**: that is a RESERVED WORD in GLSL, and the error it produces names the wrong
 		// thing entirely — *"syntax error, unexpected SAMPLE, expecting COMMA or SEMICOLON"* on a line that
 		// looks correct. `filter`, `input`, `output`, `common`, `partition` and `active` are in the same set.
+		float fade = 1.0 - smoothstep(feature * 0.25, feature * 0.5, footprint);
+		if (fade <= 0.0) {
+			break;
+		}
 		float rung = fnl_fbm3(p, seed + octave, frequency, 1, gain, lacunarity, 1.0);
 		float ridge = 1.0 - abs(rung);
-		sum += amplitude * ridge * ridge;
+		sum += amplitude * ridge * ridge * fade;
 		weight += amplitude;
 		amplitude *= gain;
 		frequency *= lacunarity;
+		feature /= lacunarity;
 	}
-	return sum / weight;
+	return sum / max(weight, 1.0e-6);
+}
+
+
+float surface_ridged3(vec3 p, int seed, int octaves, float gain, float lacunarity) {
+	return surface_ridged3_banded(p, seed, octaves, gain, lacunarity, 0.0);
 }
 
 
 // **The field.** `unit` must be a unit vector; the return is the field's own value, about ±1.
-float surface_height(vec3 unit, SurfacePlan plan) {
+//
+// **`footprint` is the angle one pixel spans, and it is what lets this be the ground's ONLY height source**: every
+// octave is faded where a pixel can no longer resolve it, so the same function serves a 20-pixel moon and the ground
+// at walking height, at a cost that follows what is resolvable rather than what is stored. **`0.0` means no limit**,
+// which is what the bake passes — its raster is its own resolution. Evert, 2026-10-28: *"I would like to stop having
+// a raster at all."* Before this, the height came from a baked map with a quadtree of tiles over the cap the eye could
+// see, and the raster's own texel grid decided where a coastline was.
+float surface_height(vec3 unit, SurfacePlan plan, float footprint) {
 	// **The domain warp, as a vec3**: three samples of one generator through three different swizzles of
 	// the same position, which decorrelates them without a second generator (Planet 3D's trick). A scalar
 	// warp displaces everything along one direction and looks extruded. This is also what makes the plate
 	// cells irregular without jittering their centres.
 	vec3 warp = vec3(
-		fnl_fbm3(unit.yzx, plan.seed + 101, plan.warp_frequency, plan.warp_octaves,
-			plan.gain, plan.lacunarity, plan.warp_bounding),
-		fnl_fbm3(unit.zxy, plan.seed + 211, plan.warp_frequency, plan.warp_octaves,
-			plan.gain, plan.lacunarity, plan.warp_bounding),
-		fnl_fbm3(unit.xyz, plan.seed + 307, plan.warp_frequency, plan.warp_octaves,
-			plan.gain, plan.lacunarity, plan.warp_bounding)
+		fnl_fbm3_banded(unit.yzx, plan.seed + 101, plan.warp_frequency, plan.warp_octaves,
+			plan.gain, plan.lacunarity, plan.warp_bounding, footprint),
+		fnl_fbm3_banded(unit.zxy, plan.seed + 211, plan.warp_frequency, plan.warp_octaves,
+			plan.gain, plan.lacunarity, plan.warp_bounding, footprint),
+		fnl_fbm3_banded(unit.xyz, plan.seed + 307, plan.warp_frequency, plan.warp_octaves,
+			plan.gain, plan.lacunarity, plan.warp_bounding, footprint)
 	);
 	// Back onto the sphere, because the field is a function of *direction* and nothing else may shift.
 	vec3 q = normalize(unit + plan.warp_strength * warp);
@@ -200,9 +223,9 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 	// is low, a sagging plate floods deeper somewhere than elsewhere, and the interior of a plate stays flat
 	// while a slow field varies across it. An additive term would tilt those interiors instead of scaling
 	// them, which is the opposite of a plain.
-	float region = fnl_fbm3(
+	float region = fnl_fbm3_banded(
 		q, plan.seed + 733, plan.region_frequency, plan.region_octaves,
-		plan.gain, plan.lacunarity, plan.region_bounding
+		plan.gain, plan.lacunarity, plan.region_bounding, footprint
 	);
 	float standing = level * (1.0 + plan.region_share * region);
 
@@ -221,12 +244,15 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 	// **Structure within a plate**: the broad shape inside a continent, not the continents themselves —
 	// those are the plate levels, and a low-frequency fbm big enough to make its own continents would
 	// fight them and produce a planet that is neither.
-	float variation = fnl_fbm3(
+	float variation = fnl_fbm3_banded(
 		q, plan.seed + 577, plan.continent_frequency, plan.continent_octaves,
-		plan.gain, plan.lacunarity, plan.continent_bounding
+		plan.gain, plan.lacunarity, plan.continent_bounding, footprint
 	);
-	float mountains = surface_ridged3(
-		q * plan.ridge_frequency, plan.seed + 991, plan.ridge_octaves, plan.gain, plan.lacunarity
+	// The `ridge_frequency` scaling moves into the footprint too: octave 0 of the ridged sum has a feature of
+	// `1/ridge_frequency` radians, not one radian.
+	float mountains = surface_ridged3_banded(
+		q * plan.ridge_frequency, plan.seed + 991, plan.ridge_octaves, plan.gain, plan.lacunarity,
+		footprint * plan.ridge_frequency
 	);
 	// Squared, so a belt is a *chain* with a crest rather than a wide band of hills.
 	float crest = belt * belt;
@@ -238,133 +264,3 @@ float surface_height(vec3 unit, SurfacePlan plan) {
 		+ plan.continent_share * mottle * variation
 		+ plan.ridge_strength * mountains * crest;
 }
-
-
-// ===== THE CRESTS, CONTINUED: THE FIELD'S OWN MECHANISMS BELOW THE RASTER ==========================
-//
-// **The planet's texture is a function that makes ranges and ridges, and at close range it must still be that
-// function.** What a pixel sees when we draw a smaller part of the planet at higher resolution is *more of the same
-// terrain* — not a second field of noise laid over it. Evert, 2026-10-27: *"the planet's texture is supposed to be
-// drawn with a function that gives ranges and ridges and so on. Then, when we draw smaller parts of it in higher
-// resolution, we are supposed to get more detail. If there is a little noise applied over it, that's fine, but it
-// should not be the dominant feature."*
-//
-// That is why this exists and why the fbm ladder does not serve: `surface_height`'s shape is `crest · ridged`, the
-// belt weight from the plate partition and the crests from ridged noise — and **neither was ever continued below the
-// map**. The continents' fbm was, at 0.2 % of the field, which is invisible; the belts and crests simply stopped.
-//
-// **The belt is evaluated per pixel and it is free of noise**: fourteen dot products and a smoothstep, and it has to
-// be per pixel because the map stores the *sum* and not its factors. It is smooth at every zoom — a plate level and a
-// belt width change over thousands of kilometres — so it cannot alias however close the eye gets.
-//
-// **The octaves are the field's own, at the field's own weights**: octave `j` of the ridged sum carries `gain^j` over
-// the normaliser `surface_ridged3` uses, so the spectrum is *continuous* across the seam where the map stops. Nothing
-// here is normalised per rung and nothing is inflated — the previous ladder's carpet came from exactly that.
-//
-// And it is band-limited by the pixel like everything else: a crest finer than the sampling rate is faded out, never
-// drawn as shimmer.
-float surface_relief(vec3 unit, SurfacePlan plan, int first_octave, int octaves, float footprint) {
-	if (octaves <= 0 || first_octave < 0) {
-		return 0.0;
-	}
-	// The same warp `surface_height` uses, so the belts fall in exactly the same places the map has them.
-	vec3 warp = vec3(
-		fnl_fbm3(unit.yzx, plan.seed + 101, plan.warp_frequency, plan.warp_octaves,
-			plan.gain, plan.lacunarity, plan.warp_bounding),
-		fnl_fbm3(unit.zxy, plan.seed + 211, plan.warp_frequency, plan.warp_octaves,
-			plan.gain, plan.lacunarity, plan.warp_bounding),
-		fnl_fbm3(unit.xyz, plan.seed + 307, plan.warp_frequency, plan.warp_octaves,
-			plan.gain, plan.lacunarity, plan.warp_bounding)
-	);
-	vec3 q = normalize(unit + plan.warp_strength * warp);
-	float level;
-	float belt;
-	surface_plates(q, plan.plate_phase, plan.belt_width, level, belt);
-	float crest = belt * belt;
-	// **The map's own normaliser**, so the octaves below are the continuation of one spectrum rather than a new sum.
-	float normaliser = 0.0;
-	float weight = 1.0;
-	for (int index = 0; index < plan.ridge_octaves; index++) {
-		normaliser += weight;
-		weight *= plan.gain;
-	}
-	normaliser = max(normaliser, 1.0e-6);
-	float amplitude = pow(plan.gain, float(first_octave)) / normaliser;
-	float total = 0.0;
-	for (int rung = 0; rung < octaves; rung++) {
-		int octave = first_octave + rung;
-		float feature = 1.0 / (plan.ridge_frequency * exp2(float(octave)));
-		float fade = 1.0 - smoothstep(feature * 0.25, feature * 0.5, footprint);
-		if (fade <= 0.0) {
-			break;
-		}
-		// `q * ridge_frequency` and `2^octave` exactly as `surface_ridged3` samples them — this IS octave `octave` of
-		// the field's ridge sum, not a lookalike.
-		float rung_value = fnl_fbm3(
-			q * plan.ridge_frequency, plan.seed + 991 + octave, exp2(float(octave)), 1,
-			plan.gain, plan.lacunarity, 1.0
-		);
-		float ridge = 1.0 - abs(rung_value);
-		total += amplitude * ridge * ridge * fade;
-		amplitude *= plan.gain;
-	}
-	return plan.ridge_strength * crest * total;
-}
-
-
-// ===== THE LADDER: THE FIELD'S OWN OCTAVES, BELOW WHAT THE MAP COULD HOLD ==========================
-//
-// **`surface_height` is a sum of octaves, and a bake stops at the octave its width can resolve.** The rest of
-// the sum is still a formula, and this is where it is evaluated. So the ladder is not a second texture: it is the
-// *same* fbm at octaves the map never carried, with the field's own seeds, frequencies and amplitudes.
-//
-// **Why that is a correction and not a nicety.** Evert, 2026-10-19: *"my idea for this texture was that it
-// contains both large and small features, and since the shader is a mathematical function, it should not matter if
-// it's drawing the whole texture or a smaller patch at a higher detail."* The ladder did not do that. It ran its
-// own `fnl_fbm3` from the map's Nyquist with its own seeds and its own frequencies, and — the part that decided
-// the picture — **its own normalisation, which re-inflated every rung to one octave's full amplitude.**
-//
-// The field's spectrum falls at `gain` per octave, so the octave at a 30 m wavelength (the nineteenth) carries
-// 0.5^19 of the first one's amplitude: **about 2 cm of Earth's 8,919 m range.** Renormalised, those octaves were
-// drawn at full strength instead, and that is what covered the near ground in uniform grain and tilted the normal
-// far enough to catch sunlight past the terminator. Reproduced octave for octave, at their own weights, they are
-// what the field says they are: almost nothing.
-//
-// **The honest consequence, stated here so nobody rediscovers it as a bug:** with this spectrum there is
-// *almost no detail below the map*, at any distance. Real terrain is rougher than a `gain` of 0.5 (its amplitude
-// falls more like 0.7 per octave, which is what makes a 30 m hill metres tall rather than centimetres), so if the
-// ground should have fine relief, the FIELD's spectrum is what has to change — one constant, and a look change to
-// the map as well, which is why it is its own decision.
-//
-// **Band-limited by the PIXEL FOOTPRINT, never by distance.** A rung is faded out where a pixel is too big to
-// resolve it: `fade = 1 - smoothstep(feature*0.25, feature*0.5, footprint)` — full while a pixel holds four
-// samples per feature, gone by two, which is the sampling limit. Detail finer than the sampling rate is not "more
-// detail", it is aliasing, and it is also what makes a distant body free.
-float surface_detail(
-	vec3 unit, int seed, float base_frequency, int first_octave, int octaves,
-	float gain, float tail_gain, float lacunarity, float bounding, float footprint
-) {
-	if (octaves <= 0 || first_octave < 0) {
-		return 0.0;
-	}
-	// **Continuous with the field at the seam**: octave `first_octave` carries exactly the amplitude the field
-	// gives it, and the octaves above fade at `tail_gain` instead of `gain` — see `DETAIL_TAIL_GAIN`.
-	float amplitude = bounding * pow(gain, float(first_octave));
-	float sum = 0.0;
-	for (int rung = 0; rung < octaves; rung++) {
-		int octave = first_octave + rung;
-		// The octave's own frequency and feature size, in radians on the unit sphere.
-		float frequency = base_frequency * exp2(float(octave));
-		float feature = 1.0 / frequency;
-		float fade = 1.0 - smoothstep(feature * 0.25, feature * 0.5, footprint);
-		if (fade > 0.0) {
-			// `seed + octave` and the same frequency the map's octave `octave` had, because `fnl_fbm3` applies its
-			// transform once and then scales by the lacunarity — so this IS octave `octave` of the field's fbm.
-			sum += fnl_fbm3(unit, seed + octave, frequency, 1, gain, lacunarity, 1.0) * amplitude * fade;
-		}
-		amplitude *= tail_gain;
-	}
-	return sum;
-}
-
-

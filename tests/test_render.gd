@@ -30,7 +30,7 @@ func run(h, root: Node) -> void:
 	var luna := scene.body_by_id("moon:luna")
 
 	_test_surface_is_derived(h, earth, luna)
-	_test_the_crests_carry_the_detail(h, earth)
+	_test_the_ground_is_the_field(h, earth)
 	_test_the_ladder_is_only_where_there_is_a_sphere(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
@@ -61,44 +61,31 @@ func run(h, root: Node) -> void:
 ## filling the frame is the only thing that reaches it. Eighteen rungs reach ~2 m on the 720p default's 512-wide
 ## map, where a 1 km descent asks for 17; the constant it replaced, eight rungs, stopped at 271 m whatever the
 ## altitude.
-## **The ground's fine structure is the field's own crests, and the noise ladder is gone.**
+## **The ground's height is the field itself — there is no raster anywhere in it.**
 ##
-## The ladder was a stand-in for structure the map could not carry, and every fault it had — flat tiles, rescaling
-## noise, banding, the carpet, black pits — was a fault of a mechanism that should not have been carrying the picture.
-## `surface_relief` continues the planet's plate partition and ridged crests below the map at the field's own weights
-## instead, so a smaller part of the planet drawn finer is *more of the same terrain*.
+## The history this pins down, because every step of it was a workaround that is now gone: the height came from a baked
+## map with a ladder of refinements and a quadtree of tiles over the cap the eye could see. A coastline is a *level set*
+## of the height, so it was exactly as smooth as the raster, and a raster gave a staircase one texel wide with corners
+## at every texel boundary. Four separate mechanisms grew to hide that — a Catmull-Rom reconstruction for the corners, a
+## sub-texel grain for the quantisation, a banded ladder for the detail below the map, and the field's own crests
+## continued below it. **Evaluating the field at the pixel makes all four unnecessary**, which is why this test is
+## mostly about absence: what is checked is that nothing of the old path remains to be consulted.
 ##
-## Two things are pinned, and both would fail silently: **that the crests are what the ground calls**, and **that every
-## `field_*` uniform the shader declares is published** — a `get_shader_parameter` on a name nobody wrote returns
-## `null`, and `float(null)` is an error thrown once per body per build, which reads as an unrelated crash.
-func _test_the_crests_carry_the_detail(h, earth: SpacesimSceneBody) -> void:
+## What must hold: the shader calls `surface_height` with a footprint (so the octave count is the pixel's), every
+## `field_*` uniform it declares is published (`null` from an unpublished name throws once per body), and no height
+## raster is sampled at all.
+func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 	var code := FileAccess.get_file_as_string("res://addons/spacesim/render/body_surface.gdshader")
-	h.check(code.contains("surface_relief("),
-		"the ground continues the field's own crests below the map")
-	# **The ladder is a SHAPE here and never a texture**, and the distinction is the whole history: as a texture it
-	# carried a constant strength (`detail_strength`), which turned plains into archipelagos and its own gradient into
-	# black pits. Now its only amplitude is `hidden` — the height the raster is hiding inside one of its own texels,
-	# measured from the four relief taps — so a plain is perturbed by nothing and a coast by exactly what it hides.
-	h.check(not code.contains("detail_strength"),
-		"the ladder carries no strength of its own any more")
-	h.check(code.contains("grain * hidden"),
-		"and what it perturbs is bounded by the height the raster hides")
-	var bound := FileAccess.get_file_as_string(
-		"res://addons/spacesim/system/model/surface_field.gdshaderinc"
-	)
-	h.check(bound.contains("float surface_relief("),
-		"with the crests available for the relief below the map")
-	# **The height is RECONSTRUCTED, not left to the hardware's bilinear filter.** A coastline is a level set of the
-	# height, so it is exactly as smooth as the reconstruction: bilinear is C⁰, its gradient jumps at every texel
-	# boundary, and the level set is a polyline with a corner at each one — which is the staircase Evert photographed at
-	# 4K on 2026-10-28, one texel wide and reading as a grid. **Checked as an absence**, because a raster sampled the
-	# old way is invisible: it looks like a slightly coarser coast, not like a missing function.
-	h.check(code.contains("float height_smooth(") and code.contains("float tile_height_smooth("),
-		"the height is reconstructed with a C1 kernel, for the map and for a tile")
-	h.check(not code.contains("texture(height_map, uv).r"),
-		"and no raster is point-sampled for the height any more")
-	h.check(not code.contains("texture(tile_map, vec3(local,"),
-		"nor is a tile")
+	h.check(code.contains("surface_height(up, plan, footprint_angle)"),
+		"the height is the field, evaluated at the resolution the pixel can resolve")
+	h.check(code.contains("SurfacePlan surface_plan()"),
+		"from the plan the host publishes, one place")
+	# **Absences, each one a mechanism that existed only to work around a raster.**
+	for gone in [
+		"height_map", "tile_map", "tile_count", "height_smooth(", "banded_detail(",
+		"surface_relief(", "surface_detail(", "map_width", "detail_variation",
+	]:
+		h.check(not code.contains(gone), "and no %s" % gone)
 	var material := earth.mesh_material as ShaderMaterial
 	h.check(material != null, "Earth has a surface material to read")
 	if material == null:
@@ -1180,11 +1167,8 @@ func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -
 func _test_shader_defaults_are_the_hosts(h) -> void:
 	var surface := "res://addons/spacesim/render/body_surface.gdshader"
 	var pairs := [
-		[surface, "detail_variation", SpacesimBodyRenderer.DETAIL_VARIATION],
-		[surface, "detail_relief", SpacesimBodyRenderer.DETAIL_RELIEF],
 		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
 		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],
-		[surface, "tile_texels", SpacesimSurfaceTiles.TILE_TEXELS],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:
