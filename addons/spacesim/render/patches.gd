@@ -49,11 +49,38 @@ extends RefCounted
 ##   sliver, and the honest fix if it ever shows is the standard *balance* rule (neighbours never differ
 ##   by more than one level, halving it again), not a wall of skirt geometry you can see in wireframe.
 
-## How deep the tree may go, before a triangle budget stops it. Each level splits a patch into four, so
-## this is the hard ceiling on the finest triangle: 2^-20 of an icosahedron face is about 2 m at Earth's
-## radius, which is the finest a walk from 20 m altitude asks for (a 1.3e-4 rad facet). The budget is what
-## actually stops the walk; this is only the floor under it.
-const MAX_DEPTH := 20
+## **The smallest a triangle may be, on the ground, in metres** — the one floor on the subdivision, and the replacement
+## for a depth ceiling.
+##
+## Evert, 2026-10-28: *"lets make the minimum size for a triangle 1m on the sides."* A **distance** rather than a depth,
+## because a depth is a different distance on every body: the ceiling is derived per walk from the body's radius (see
+## `depth_ceiling_for`), so Earth stops at 1.6 m triangles and a moon stops at its own 1.6 m rather than at Earth's
+## level. Below ~46 m altitude the floor binds and facets grow with the screen again — that is the honest place for the
+## refinement to stop, and it is a metre the eye can see rather than a level number.
+const MIN_FACET_METRES := 1.0
+
+## The icosahedron's edge at unit circumradius: every patch angle below is a fraction of it.
+const ROOT_EDGE := 1.0514622242382672
+
+## **A recursion guard, not a policy.** `depth_ceiling_for` sets the real ceiling from `MIN_FACET_METRES`; this only
+## stops a pathological radius (zero, or a body smaller than its own floor) from walking forever.
+const MAX_DEPTH := 40
+
+## **The apparent size a facet may be, in radians — and it is not a setting, because it is the subdivision.**
+##
+## The sagitta law (`lod.error_budget`) bounds a facet's *curvature*, which near the ground is an error the eye cannot
+## resolve: at 1 km altitude and ε 0.5 it permits a facet 5.8 km across, which is ~17,700 pixels of screen. What a person
+## sees instead is the facet's **apparent size**, so the walk also requires a facet to subtend no more than this — 2
+## degrees, which on a 1080p 70° view is about 27 pixels. Evert, 2026-10-28: *"I just want the subdivision to be based on
+## camera view angle… the visible triangles are roughly the same size, ie: heavily subdivided close to the camera so they
+## have the same apparent size as something far away."*
+##
+## **An angle and not a pixel count**, so it means the same thing on any display: a facet is 2° of view, and a denser
+## screen simply draws that facet with more pixels. **The walk takes the smaller of this and the sagitta limit**, so this
+## binds close in — its limit is linear in the distance where the sagitta's is a square root — and the sagitta still
+## bounds the silhouette from far out. That is what keeps a distant body's shape while the near ground is subdivided
+## hard enough to look like ground.
+const FACET_ANGLE := 0.03490658503988659  ## 2 degrees.
 
 ## **How many times a chunk is subdivided internally**, and the one number that trades walk cost against
 ## over-refinement. `s = 2` was measured, not chosen: the walk is then 16x smaller than the leaf walk
@@ -63,14 +90,14 @@ const CHUNK_SUBDIVISIONS := 2
 ## Triangles in one chunk — `4^s`, and the unit the budget counts in.
 const CHUNK_TRIANGLES := 1 << (2 * CHUNK_SUBDIVISIONS)
 
-## **Chunks the cache may hold before it is dropped wholesale.** A cap rather than an LRU, because a chunk
-## is cheap to rebuild and the point of the cache is to be off the frame's critical path: `4096` chunks is
-## 65k triangles of shared geometry, and a long flight visits many.
-const CHUNK_CACHE_LIMIT := 4096
-
-## Triangles of geometry the mesh may carry — the thing that stops "the eye is on the ground" from
-## asking for a million. A chunk contributes `CHUNK_TRIANGLES`.
-const TRIANGLE_BUDGET := 60000
+## **Chunks the cache may hold before it is dropped wholesale.** A cap rather than an LRU, because a chunk is cheap
+## to rebuild and the point of the cache is to be off the frame's critical path.
+##
+## **It must hold one whole selection or it is not a cache.** At 2 degrees of apparent size a walk from 1 km asks for
+## about **ten thousand chunks**, so a 4,096-entry cap was cleared wholesale on *every* walk — the geometry rebuilt from
+## scratch each time the eye moved a tenth, which is the opposite of what the cache is for. 16,384 chunks is 262k
+## triangles of shared geometry, about 19 MB, and it covers the largest selection the law produces with headroom.
+const CHUNK_CACHE_LIMIT := 16384
 
 ## The cosines and vertices of the twenty root faces, from the icosphere's own construction — so the
 ## roots are the same triangles at the same places, and a patch cannot drift from the level meshes.
@@ -102,7 +129,7 @@ static var _chunk_cache_lock := Mutex.new()
 ## sphere, and the frame's own frustum culls the rest for free once they are drawn.
 static func select(
 	distance: float, camera_direction: Vector3, radius: float,
-	pixel_angle: float, epsilon: float, budget: int = TRIANGLE_BUDGET
+	pixel_angle: float, epsilon: float
 ) -> Array:
 	var chunks: Array = []
 	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or epsilon <= 0.0:
@@ -144,7 +171,7 @@ static func select(
 	var loosen := float(CHUNK_TRIANGLES)
 	# A chunk at depth `d` carries triangles at depth `d + s`, so the ceiling moves up by `s` to keep the
 	# finest triangle where it was.
-	var depth_ceiling := MAX_DEPTH - CHUNK_SUBDIVISIONS
+	var depth_ceiling := depth_ceiling_for(radius)
 	while not stack.is_empty():
 		var patch: Array = stack.pop_back()
 		var a: Vector3 = patch[0]
@@ -166,11 +193,19 @@ static func select(
 			minf((camera - b * radius).length_squared(), (camera - c * radius).length_squared())
 		)
 		var to_patch := maxf(sqrt(nearest_corner), altitude)
-		var minimum_edge_squared := loosen * _edge_limit_squared(to_patch, pixel_angle, epsilon, radius)
-		# **The budget counts TRIANGLES, not entries.** A selection is a hundred references, so comparing the
-		# entry count against a triangle budget would let a walk through at 16x its cost.
-		if centre.dot(camera_direction) < cos(minf(horizon + extent, PI)) \
-				or (chunks.size() + stack.size()) * CHUNK_TRIANGLES >= budget:
+		# **The smaller of two limits: apparent size and curvature.** A facet may not subtend more than `FACET_ANGLE`
+		# whatever its distance — that limit is linear in `d`, so it binds close in — and it may not sag more than ε
+		# pixels — that one is a square root, so it binds far out and is what holds the silhouette from orbit.
+		var apparent := FACET_ANGLE * to_patch / radius
+		var minimum_edge_squared := loosen * minf(
+			_edge_limit_squared(to_patch, pixel_angle, epsilon, radius),
+			apparent * apparent
+		)
+		# **A triangle budget is gone (2026-10-28).** It rationed the walk by a constant — the count knew nothing about
+		# what was on screen — and Evert's instruction is *"we don't care about budget, that should be removed. Just have
+		# the count so I can judge."* So the walk refines to its law and the HUD reports what that costs. What still
+		# bounds it is the law itself and `MIN_FACET_METRES` — a distance on the ground, not a ration.
+		if centre.dot(camera_direction) < cos(minf(horizon + extent, PI)):
 			continue
 		if int(patch[3]) >= depth_ceiling or edge_squared <= minimum_edge_squared:
 			chunks.append([int(patch[4]), String(patch[5]), int(patch[3])])
@@ -215,10 +250,37 @@ static func walk_is_due(
 
 ## **The smallest patch the eye is asking for, in radians** — the angle the walk's own law converges to.
 ## Half of it is how far the eye may swing before the chunk under it changes.
+## **The deepest a chunk may sit**, from the body's own radius: `MIN_FACET_METRES` on the ground.
+##
+## A chunk is drawn with `CHUNK_TRIANGLES` = `4^CHUNK_SUBDIVISIONS` triangles, so its own edge is `4` times a triangle's
+## there; the level whose chunk edge is `4 * MIN_FACET_METRES` metres is the last one that may exist. Earth gives 20
+## (a 6.4 m chunk edge, 1.6 m triangles), the Moon 18.
+static func depth_ceiling_for(radius: float) -> int:
+	var chunk_edge := float(1 << CHUNK_SUBDIVISIONS) * MIN_FACET_METRES
+	var ratio := ROOT_EDGE * radius / chunk_edge
+	if ratio <= 1.0:
+		return 0
+	return clampi(
+		int(floor(log(ratio) / log(2.0))), 0, MAX_DEPTH - CHUNK_SUBDIVISIONS
+	)
+
+
 static func finest_edge_angle(
 	distance: float, pixel_angle: float, epsilon: float, radius: float
 ) -> float:
-	return sqrt(_edge_limit_squared(maxf(distance - radius, ALTITUDE_FLOOR), pixel_angle, epsilon, radius))
+	var to_patch := maxf(distance - radius, ALTITUDE_FLOOR)
+	# **The same minimum the walk takes**, or the gate's own idea of the finest patch disagrees with the walk's and the
+	# eye has to move further than it should before the selection is rebuilt.
+	var apparent := FACET_ANGLE * to_patch / radius
+	var law := sqrt(minf(_edge_limit_squared(to_patch, pixel_angle, epsilon, radius), apparent * apparent))
+	# **No finer than the floor allows**, or the gate keeps asking for a level that cannot exist and the eye has to move
+	# further than the picture actually changes before the selection is rebuilt. This function answers in **leaf** angles
+	# and `depth_ceiling_for` answers in **chunk** depths, which differ by `CHUNK_SUBDIVISIONS` — getting that wrong made
+	# the floor four times too coarse and it won everywhere.
+	var floor_angle := ROOT_EDGE / pow(
+		2.0, float(depth_ceiling_for(radius) + CHUNK_SUBDIVISIONS)
+	)
+	return maxf(law, floor_angle)
 
 
 ## **The cached geometry for one chunk**: `[vertices, normals]` on the **unit sphere**, so one cached
@@ -279,58 +341,224 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 			continue
 		for kid in _child_triangles(patch[0], patch[1], patch[2]):
 			stack.append([kid[0], kid[1], kid[2], int(patch[3]) + 1])
+	# **One vertex per POINT, and indices that share it.** Evert, 2026-10-28: *"all the triangles are connected
+	# together with shared vertices, there can never be a gap."* A soup of three vertices a triangle throws that
+	# away: it triples the vertex data, and — once the points are translated by a height — it lets the same point be
+	# displaced twice from two different triangles. Sharing makes the displacement single-valued by construction.
+	#
+	# The dedup is exact rather than approximate: adjacent leaves compute a shared midpoint with the same two
+	# inputs, and `a + b == b + a` in floating point, so the two results are the same bits and one dictionary entry.
+	# **No normals.** On a unit sphere the position IS the direction, so the surface's normal is derivable in the vertex
+	# stage from the position and the body's origin — and a normal array is half the bytes in every upload, for something
+	# the GPU can compute in three instructions.
 	var vertices := PackedVector3Array()
-	var normals := PackedVector3Array()
-	vertices.resize(leaves.size() * 3)
-	normals.resize(leaves.size() * 3)
-	var at := 0
+	var indices := PackedInt32Array()
+	var seen := {}   # Vector3 -> vertex index; the point IS the key
 	for leaf in leaves:
 		# **Reversed**, because Godot's front face is clockwise seen from outside and the face list is the
 		# standard counter-clockwise one — the same single flip `SpacesimIcosphere._build` makes.
 		for point in [leaf[0], leaf[2], leaf[1]]:
-			vertices[at] = point
-			# On a unit sphere the position IS the normal — the same reason the level meshes carry no
-			# extra data, and why a coarse patch still shades smoothly.
-			normals[at] = point
-			at += 1
-	return [vertices, normals]
+			var index: int = seen.get(point, -1)
+			if index < 0:
+				index = vertices.size()
+				vertices.append(point)
+				seen[point] = index
+			indices.append(index)
+	return [vertices, indices]
 
 
 ## **A selection as one set of arrays** — the merged vertices and normals for the whole body, and the one
 ## expensive step in a rebuild. Pure and safe on a worker thread: it reads the chunk cache (which locks)
 ## and touches no node.
-static func arrays_of(chunks: Array) -> Array:
+## `tinted` builds the per-vertex colour the depth tint rides on. It is **off** unless `render.depth_tint` is on,
+## because that colour is a debug view and it is not free: a GDScript append per vertex, and 16 bytes a vertex uploaded
+## with the mesh. Evert, 2026-10-28: *"We don't need color for wireframe, its all white."*
+## **A body's lattice, kept between walks.** `points` is unit-space and append-only, `slot` maps a point to its
+## index in it, and `blocks` maps a chunk key to that chunk's indices *already in slots* — so a merge is
+## `append_array` per chunk and no per-vertex work at all, and a walk that changes a hundred chunks pays for a hundred
+## chunks instead of rebuilding eleven thousand.
+##
+## It is per body and owned by the scene, not this script: the points are shared by every body, but the *slots* are one
+## body's, and a static cache here would mix radii.
+class Lattice:
+	extends RefCounted
+	var points := PackedVector3Array()
+	var slot := {}
+	var blocks := {}
+	var merges := 0
+
+
+## **A chunk's indices in lattice slots**, built once per body and then reused. The points it needs are inserted into
+## the body's buffer if they are not there yet — which for a subdivided patch is mostly points that already exist,
+## because subdivision only ever adds the three midpoints.
+static func _lattice_block(lattice: Lattice, chunk: Array) -> PackedInt32Array:
+	var arrays := chunk_arrays(chunk)
+	var chunk_vertices: PackedVector3Array = arrays[0]
+	var chunk_indices: PackedInt32Array = arrays[1]
+	var block := PackedInt32Array()
+	block.resize(chunk_indices.size())
+	var map := PackedInt32Array()
+	map.resize(chunk_vertices.size())
+	for vertex in chunk_vertices.size():
+		var point := chunk_vertices[vertex]
+		var index: int = lattice.slot.get(point, -1)
+		if index < 0:
+			index = lattice.points.size()
+			lattice.points.append(point)
+			lattice.slot[point] = index
+		map[vertex] = index
+	for index in chunk_indices.size():
+		block[index] = map[chunk_indices[index]]
+	return block
+
+
+## **The whole selection from the lattice**: indices by concatenation, and one pass to put the points in metres.
+##
+## The buffer is append-only, so it holds points whose chunks have since been discarded — `_lattice_compact` reclaims
+## them. They cost a vertex each in the upload and are never referenced, so the buffer is allowed to run to a few times
+## the selection before it is rebuilt.
+static func _arrays_lattice(
+	lattice: Lattice, chunks: Array, radius: float, origin: Vector3
+) -> Array:
+	if lattice.points.size() > 4 * chunks.size() * POINTS_PER_CHUNK:
+		lattice.points = PackedVector3Array()
+		lattice.slot = {}
+		lattice.blocks = {}
+	lattice.merges += 1
+	var indices := PackedInt32Array()
+	for chunk in chunks:
+		var key := "%d/%s" % [int(chunk[0]), String(chunk[1])]
+		var block: PackedInt32Array = lattice.blocks.get(key, PackedInt32Array())
+		if block.is_empty():
+			block = _lattice_block(lattice, chunk)
+			lattice.blocks[key] = block
+		indices.append_array(block)
+	var points := lattice.points
+	var vertices := PackedVector3Array()
+	vertices.resize(points.size())
+	for index in points.size():
+		vertices[index] = points[index] * radius - origin
+	return [vertices, indices]
+
+
+## **The points a chunk of `CHUNK_SUBDIVISIONS` has**, for the buffer's compaction trigger: the lattice of a triangle
+## split `s` times is `(2^s + 1)(2^s + 2) / 2` points, which is 15 at the shipped `s = 2`.
+const POINTS_PER_CHUNK := 15
+
+
+static func arrays_of(
+	chunks: Array, radius := 1.0, origin := Vector3.ZERO, tinted := false,
+	lattice: Lattice = null
+) -> Array:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
+	# **A colour per chunk, by its depth.** The surface shader multiplies it by `tint_amount`, which is zero unless
+	# `render.depth_tint` is on — so the debug view costs the same arrays and no second material, and the tree is legible
+	# where a shader could not be read: a boundary between levels is a colour step, a crack is a colour step that is
+	# darker, and a region that stopped refining is a flat patch of one hue.
+	# **A tinted build uses the fresh path**, because a colour belongs to a chunk's level and a shared point can sit on
+	# two chunks of different depths — a conflict a debug view can pay for by being slower.
+	if lattice != null and not tinted:
+		return _arrays_lattice(lattice, chunks, radius, origin)
+	var colors := PackedColorArray()
+	var indices := PackedInt32Array()
+	# **ONE lattice for the whole selection**, not one per chunk: a point on a chunk boundary belongs to both chunks,
+	# and sharing it is what makes it a single vertex that a height can translate once instead of once per chunk that
+	# draws it. The chunk cache stays per chunk (its geometry is local); the *sharing* happens here, where the whole
+	# selection is in view.
+	#
+	# `ponytail:` a dictionary lookup per corner, on the merge worker. It buys ~46% fewer vertices to upload and, more
+	# importantly, single-valued displacement; if that becomes the cost, the lattice is addressable by index
+	# arithmetic instead of hashed — that is the upgrade, and it wants a key of (face, level, i, j) rather than a point.
+	var seen := {}   # Vector3 -> merged vertex index
 	for chunk in chunks:
 		var arrays := chunk_arrays(chunk)
-		vertices.append_array(arrays[0])
-		normals.append_array(arrays[1])
-	return [vertices, normals]
+		var chunk_vertices: PackedVector3Array = arrays[0]
+		var chunk_indices: PackedInt32Array = arrays[1]
+		var map := PackedInt32Array()
+		map.resize(chunk_vertices.size())
+		for vertex in chunk_vertices.size():
+			var point := chunk_vertices[vertex]
+			var index: int = seen.get(point, -1)
+			if index < 0:
+				index = vertices.size()
+				vertices.append(point)
+				seen[point] = index
+			map[vertex] = index
+		for index in chunk_indices:
+			indices.append(map[index])
+		if not tinted:
+			continue
+		# **A colour per MERGED vertex, assigned through the map.** Appending per chunk vertex gave 84,810 colours for
+		# 45,845 vertices — an array that does not line up with what it describes, which the suite caught. And a shared
+		# point can sit on two chunks of different depths, so the tint is the last chunk's that referenced it: this is a
+		# debug view, and the honest alternative would be a second vertex per boundary point, which is what the sharing
+		# exists to remove.
+		colors.resize(vertices.size())
+		var tint := depth_tint(int(chunk[2]))
+		for slot in map:
+			colors[slot] = tint
+	rebase(vertices, radius, origin)
+	# **Vertices, indices, and a colour only when the tint asked for one** — so the tint costs nothing until it is used
+	# and `mesh_from` accepts either shape.
+	return [vertices, indices, colors] if tinted else [vertices, indices]
+
+
+## **Put the geometry in metres, measured from `origin`** — the one thing that makes a planet-sized mesh precise.
+##
+## Godot's double-precision build emulates double in the **translation** of the modelview matrix and leaves the *basis*
+## single precision (`scene_forward_clustered.glsl`: *"We separate the basis from the origin because the basis is fine
+## with single point precision"*). A node **scaled by the planet's radius** therefore rounds every vertex at
+## `2^-23 * 6.371e6` = **0.76 m** in float32 — and the rounding field moves with the view, which is what a wavy
+## wireframe is. Evert, 2026-10-28: *"still some waveyness … and it changes when the camera orientation changes."*
+##
+## So the scale is applied **here, in double** (`Vector3` is float64 in this build) and the vertices are measured from
+## a local origin near the eye, which puts them back at a magnitude where float32 is sub-millimetre: at 1 km from the
+## origin the spacing is 0.06 mm. The node then carries the origin as its **position** — the part the engine emulates —
+## and its scale is 1, so the basis stays identity and nothing is rounded.
+##
+## `ponytail:` one GDScript pass over every vertex, on the merge worker. That is O(n) with a large constant
+## (~1.2 M vertices at 1 km altitude) and it is the obvious thing to vectorise or move wholesale when this gets
+## optimised — the shape it needs is exactly this: a pure function over plain arrays.
+static func rebase(vertices: PackedVector3Array, radius: float, origin: Vector3) -> void:
+	if is_equal_approx(radius, 1.0) and origin == Vector3.ZERO:
+		return
+	for index in vertices.size():
+		vertices[index] = vertices[index] * radius - origin
+
+
+## **The colour a chunk's level is drawn in** — a hue that turns with depth, so neighbouring levels are obviously
+## different and the whole ladder is visible in one frame. Pure, so the worker building the arrays can call it.
+static func depth_tint(depth: int) -> Color:
+	return Color.from_hsv(fposmod(float(depth) * 0.13, 1.0), 0.65, 1.0, 1.0)
 
 
 ## The same selection as line segments, for the wireframe view — one segment per triangle edge.
-static func lines_of(chunks: Array) -> Array:
-	var segments := PackedVector3Array()
-	for chunk in chunks:
-		var vertices: PackedVector3Array = chunk_arrays(chunk)[0]
-		var index := 0
-		while index + 2 < vertices.size():
-			var a := vertices[index]
-			var c := vertices[index + 1]
-			var b := vertices[index + 2]
-			segments.append(a)
-			segments.append(b)
-			segments.append(b)
-			segments.append(c)
-			segments.append(c)
-			segments.append(a)
-			index += 3
-	return [segments]
+static func lines_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Array:
+	# **The wireframe is the same lattice seen as edges.** Reuse the flat merge and expand each triangle into its three
+	# edges as INDICES, so the two views share one vertex buffer instead of the wireframe duplicating every point six
+	# times a triangle — it was 1.07 M vertices against 90 k, and that is exactly the 11.9x the probe measured.
+	var shared := arrays_of(chunks, radius, origin)
+	var triangles: PackedInt32Array = shared[1]
+	var edges := PackedInt32Array()
+	edges.resize(triangles.size() * 2)
+	var at := 0
+	for index in range(0, triangles.size(), 3):
+		var a := triangles[index]
+		var b := triangles[index + 1]
+		var c := triangles[index + 2]
+		edges[at] = a
+		edges[at + 1] = b
+		edges[at + 2] = b
+		edges[at + 3] = c
+		edges[at + 4] = c
+		edges[at + 5] = a
+		at += 6
+	return [shared[0], edges]
 
 
-## **One surface, so a body is one draw call however many chunks it took** — and every vertex on the unit
-## sphere, scaled by the node as the level meshes are.
+## **One surface, so a body is one draw call however many chunks it took** — and the vertices already in metres
+## (see `rebase`), so the node's scale is 1 and its basis cannot round them.
 ##
 ## **Non-indexed on purpose.** Every triangle already carries its own three vertices, so an index array
 ## would be the identity range — and building that for sixty thousand triangles in GDScript is the very
@@ -344,7 +572,12 @@ static func mesh_from(arrays: Array) -> ArrayMesh:
 	var surface := []
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
-	surface[Mesh.ARRAY_NORMAL] = arrays[1]
+	# **`[1]` is the index array**, and it is what turns the sharing into fewer uploaded bytes rather than nicer
+	# bookkeeping. A colour, when the tint asked for one, is `[2]`. **No normals**: see `_chunk_arrays_for`.
+	if arrays.size() > 1:
+		surface[Mesh.ARRAY_INDEX] = arrays[1]
+	if arrays.size() > 2:
+		surface[Mesh.ARRAY_COLOR] = arrays[2]
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface)
 	return mesh
@@ -356,6 +589,10 @@ static func lines_mesh_from(arrays: Array) -> ArrayMesh:
 	var surface := []
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
+	# **`[1]` is the edge index array** — the shared points, expanded into segments by reference. No normals: the
+	# wireframe is drawn unshaded white, so a normal per vertex would be bytes nothing reads.
+	if arrays.size() > 1:
+		surface[Mesh.ARRAY_INDEX] = arrays[1]
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, surface)
 	return mesh
@@ -417,3 +654,11 @@ static func _children(patch: Array, stack: Array) -> void:
 	for digit in kids.size():
 		var kid: Array = kids[digit]
 		stack.append([kid[0], kid[1], kid[2], depth, face, path + str(digit)])
+
+
+static func _push(vertices: PackedVector3Array, normals: PackedVector3Array, at: int, point: Vector3) -> int:
+	vertices[at] = point
+	# On a unit sphere the position IS the normal — the same reason the level meshes carry no extra data,
+	# and why a coarse patch still shades smoothly.
+	normals[at] = point
+	return at + 1

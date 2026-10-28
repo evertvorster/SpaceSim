@@ -11,4 +11,3 @@ extends Resource
 @export var surface_band: Vector2 = Vector2(1.0e2, 5.0e3)
 @export var atmosphere_altitude: float = 1.0e5 ## metres above the surface: space -> atmosphere
 @export var surface_altitude: float = 2.0e3 ## metres above the surface: atmosphere -> surface
-@export var pad_size: float = 4.0e3 ## metres; the landing pad at the zone

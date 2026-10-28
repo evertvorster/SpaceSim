@@ -15,7 +15,6 @@ extends RefCounted
 ## measured 0.306 depends on the deck's fraction and albedo.
 
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
-const OCEAN_SHADER := preload("res://addons/spacesim/render/body_ocean.gdshader")
 const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
@@ -28,62 +27,6 @@ const STAR_INTENSITY := 24.0
 ## shape from composition is the next thing the derivation can honestly supply.
 const SURFACE_ROUGHNESS := 0.9
 const SURFACE_SPECULAR := 0.15
-## **The ocean's own shading**, and the ocean is its own shader — water and land are fundamentally different
-## things (Evert, 2026-10-19). Glossy, so the sun's glint and the bright limb come out of the BRDF for free,
-## and the wave rungs keep the glint from being a hard dot.
-const OCEAN_ROUGHNESS := 0.14
-const OCEAN_SPECULAR := 0.45
-## **The depth ramp, in metres.** Shallow water returns light off the bottom, which is what its colour is; past
-## `OCEAN_DEEP_METRES` it is the water's own colour and nothing shows through.
-##
-## **It has to span real bathymetry, or the sea has no structure at all.** Evert, 2026-10-19: *"from far out, its
-## too smooth."* The ramp was 2 m to 40 m, against a field of 8,919 m on Earth — so `deep_color` arrived at 0.45 %
-## of the water column and **every pixel of the ocean was "deep"**: one flat colour from orbit, with a hairline
-## fringe at the shore. The sea floor's own structure — basins, ridges, trenches — is the only large-scale
-## variation a sea has, and the ramp was hiding all of it.
-##
-## 5 m and 3,000 m are Earth's own numbers either side of the interesting range: the shelf break is at about
-## 130-200 m, the abyssal plains are 4,000-6,000 m, and a ridge crest is 1,000-2,000 m. Filling at 3 km keeps the
-## abyss reading as one colour (it is one colour) while the ridges, rises and shelves cross the ramp.
-const OCEAN_SHALLOW_METRES := 5.0
-const OCEAN_DEEP_METRES := 3000.0
-## How much of the bottom's colour is left in the shallows, against the water's — a mix, not a tint, because the
-## shelf is where both are true.
-const OCEAN_SHALLOW_BOTTOM_SHARE := 0.7
-## **Waves**: two rungs of the field's generator, a swell of a few hundred metres, and a tilt of a fraction of a
-## degree. `OCEAN_WAVE_METRES` is the coarsest wavelength.
-## **Eight octaves, from a 400 m swell down to 3 m of chop**, and there is no separate near/far gate any more.
-## Evert, 2026-10-19: *"The sea still renders absolutely smooth all the way down to 10 km. Then, we get a rough
-## texture. We need a finer texture, and that needs to start resolving at about the same height that the mottling
-## on land starts to resolve."* Two octaves reached 200 m and a `wave_fade` clamped everything to a pixel under
-## 25 m — full below 0.8 km, gone above 20.8 km — so the *gate* decided when the sea appeared, not the sampling
-## law, and it appeared at the altitude he named. The per-rung footprint fade was always the law (**reuse the law;
-## never restate it**), and with the clamp gone a 400 m swell resolves from 166 km; eight octaves carry it down to
-## 3 m, which keeps resolving below a kilometre of altitude.
-const OCEAN_WAVE_OCTAVES := 8
-const OCEAN_WAVE_METRES := 400.0
-## **The wave's own steepness, and the reason it is 0.0015 and not 0.02.** A wave's height is a fraction of its
-## wavelength — a moderate sea is about a twentieth — so a 400 m swell is ~13 m tall, and 13 m is 0.0015 of the
-## 8,919 m field. At 0.02 the swell would have been 178 m: waves as tall as mountains, which is the *"bit scary"*
-## the earlier number was trying to avoid.
-const OCEAN_WAVE_RELIEF := 0.0015
-## **How far the swell is drawn out along the wind**, and this is what makes water look like water rather than
-## like ground. Evert, 2026-10-19: the close-up sea *"looks exactly like that mottling on land"* — because it was
-## the same isotropic generator sampled the same way, with no direction in it at all. Wind-driven swell and chop
-## are stretched downwind, and that anisotropy is the single thing that reads as sea.
-## 3.0 is a light breeze's swell; a gale would be nearer 6.
-const OCEAN_WAVE_STRETCH := 3.0
-## **The sea's own colour structure**, which is the only thing an ocean shows at range: eddies, fronts and slicks.
-## Waves are geometry — nothing under 400 m can be seen from 1,000 km — so without this the far sea is one colour,
-## which is what Evert reported.
-##
-## **It starts where the land's ladder starts**: two texels of the map in hand, which the shader derives from
-## `map_width`, so the two layers begin to show texture at the same distance and by the same law. Evert,
-## 2026-10-19: *"I just wanted to reduce the strength, not the distance at which it started drawing."* The
-## strength is `OCEAN_TONE_VARIATION`; the distance is the sampling law and is not a knob.
-const OCEAN_TONE_OCTAVES := 3
-## A few per cent of the water's colour — enough to read as water moving, not enough to be paint.
-const OCEAN_TONE_VARIATION := 0.12
 
 ## **How dark a cloud's shadow is allowed to get** — the floor on the light it leaves, so `1.0` is no shadow and
 ## `0.0` is the physical transmittance with nothing given back.
@@ -282,10 +225,10 @@ static func point_material() -> StandardMaterial3D:
 ##
 ## **A star is a source and everything else is a reflector**, so the choice is by kind rather than by
 ## anything a shader could work out for itself.
-static func material_for(body: SpacesimSceneBody, ramp: ImageTexture, has_ocean: bool) -> Material:
+static func material_for(body: SpacesimSceneBody, ramp: ImageTexture) -> Material:
 	if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return star_material(body)
-	return surface_material(body, ramp, has_ocean)
+	return surface_material(body, ramp)
 
 
 ## The colour a **point of light** is drawn with: the body's own radiance, tinted by the body's own
@@ -473,7 +416,7 @@ static func max_rungs_for(content: SpacesimSystemBody) -> int:
 ## arrive later**, when the first bake lands — `apply_surface_maps()` is the one place that sets them, so the
 ## shader cannot be told one body's maps and another's sea.
 static func surface_material(
-	body: SpacesimSceneBody, ramp: ImageTexture, has_ocean: bool
+	body: SpacesimSceneBody, ramp: ImageTexture
 ) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = SURFACE_SHADER
@@ -511,9 +454,13 @@ static func surface_material(
 	)
 	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
-	material.set_shader_parameter("has_ocean", 1.0 if has_ocean else 0.0)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
+	material.set_shader_parameter("base_color", body.color)
+	# **The debug tint starts off, published rather than left to the shader's default**: `get_shader_parameter` returns
+	# null for a parameter nobody wrote, so a material that missed its publish would report "no tint" as missing and read
+	# as an unset knob. `SpacesimSystemScene._publish_depth_tint` writes it when the setting moves.
+	material.set_shader_parameter("tint_amount", 0.0)
 	# **No deck above to begin with**: `deck_tau = 0` makes the shadow path a uniform branch, which is the
 	# honest state of every body without a cloud layer. `apply_deck_shadow()` is the one writer.
 	material.set_shader_parameter("deck_tau", 0.0)
@@ -522,64 +469,12 @@ static func surface_material(
 	# **Floor 1.0 means no shadow**, which is what a material with no deck above it should say — the gate is
 	# `deck_tau > 0`, and this makes the arithmetic agree with it rather than relying on the gate alone.
 	material.set_shader_parameter("deck_shadow_floor", 1.0)
+	# **`flat` is the platform's own mode and not a second material**: the fragment short-circuits to the derived albedo
+	# before it reads a texture, so `flat` costs no map and no ladder. Published beside the tint for the same reason.
+	material.set_shader_parameter("flat_mode", 0.0)
 	return material
 
 
-## **The ocean's material**, built from the same derivation as the land's: the deep colour is the *liquid* band's
-## own, and the shallow colour is the lowest land band — what the bottom is made of — mixed with the water's,
-## because a shelf is the one place both are true.
-##
-## **A body with no liquid band gets no ocean material at all**, which is how the phase test reaches the
-## renderer: `bands()` has no liquid entry for Mars, Venus, Mercury, Luna, Io, Europa or Triton, so no sea is
-## built there rather than a sea with zero coverage.
-static func ocean_material(body: SpacesimSceneBody, bands: Array) -> ShaderMaterial:
-	var deep := SpacesimSurfaceModel.UNPINNED_COLOR
-	var bottom := SpacesimSurfaceModel.UNPINNED_COLOR
-	for band in bands:
-		var colour: Color = band["color"]
-		if band_is_liquid(band):
-			deep = colour
-		elif bottom == SpacesimSurfaceModel.UNPINNED_COLOR:
-			bottom = colour
-	if deep == SpacesimSurfaceModel.UNPINNED_COLOR:
-		return null
-	var material := ShaderMaterial.new()
-	material.shader = OCEAN_SHADER
-	material.set_shader_parameter(
-		"shallow_color", bottom.lerp(deep, OCEAN_SHALLOW_BOTTOM_SHARE)
-	)
-	material.set_shader_parameter("deep_color", deep)
-	material.set_shader_parameter("shallow_metres", OCEAN_SHALLOW_METRES)
-	material.set_shader_parameter("deep_metres", OCEAN_DEEP_METRES)
-	material.set_shader_parameter("roughness_value", OCEAN_ROUGHNESS)
-	material.set_shader_parameter("specular_value", OCEAN_SPECULAR)
-	material.set_shader_parameter("height_map", flat_height())
-	material.set_shader_parameter("planet_radius", body.radius)
-	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
-	material.set_shader_parameter("field_amplitude", plan.amplitude)
-	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
-	material.set_shader_parameter("wave_seed", plan.seed + 7331)
-	material.set_shader_parameter("wave_gain", plan.gain)
-	material.set_shader_parameter("wave_lacunarity", plan.lacunarity)
-	material.set_shader_parameter(
-		"wave_feature", OCEAN_WAVE_METRES / maxf(body.radius, 1.0)
-	)
-	material.set_shader_parameter("wave_octaves", OCEAN_WAVE_OCTAVES)
-	material.set_shader_parameter("wave_relief", OCEAN_WAVE_RELIEF)
-	material.set_shader_parameter("wave_stretch", OCEAN_WAVE_STRETCH)
-	material.set_shader_parameter("tone_seed", plan.seed + 5501)
-	material.set_shader_parameter("tone_gain", plan.gain)
-	material.set_shader_parameter("tone_lacunarity", plan.lacunarity)
-	material.set_shader_parameter("tone_octaves", OCEAN_TONE_OCTAVES)
-	material.set_shader_parameter("tone_variation", OCEAN_TONE_VARIATION)
-	# **The sea is shadowed by the same deck as the land**, from the same uniforms — see `deck_shadow.gdshaderinc`.
-	material.set_shader_parameter("deck_tau", 0.0)
-	material.set_shader_parameter("deck_height", 0.0)
-	material.set_shader_parameter("deck_threshold", 1.0)
-	# **Floor 1.0 means no shadow**, which is what a material with no deck above it should say — the gate is
-	# `deck_tau > 0`, and this makes the arithmetic agree with it rather than relying on the gate alone.
-	material.set_shader_parameter("deck_shadow_floor", 1.0)
-	return material
 
 
 ## Whether a band entry came from a liquid material — the derivation's own answer, read off the phase it carries.
@@ -648,10 +543,10 @@ static func apply_surface_maps(
 		# octaves, so what moves is *which octave* is the first one the map did not carry.
 		#
 		# **`base_frequency` arrives as an argument, not read back off the material.** Reading it back was a crash
-		# in flight: the ocean material has no `detail_base_frequency` (it has no ladder), so the read returned
-		# `null` and `float(null)` is *"Invalid call. Nonexistent 'float' constructor"* — once per ocean per map
-		# landing, and invisible to the suite because a headless run has no surface maps at all. A caller that
-		# passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
+		# in flight: the second surface layer (the sea, which has since gone) carried no `detail_base_frequency`,
+		# so the read returned `null` and `float(null)` is *"Invalid call. Nonexistent 'float' constructor"* — once
+		# per map landing, and invisible to the suite because a headless run has no surface maps at all. A caller
+		# that passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
 		surface.set_shader_parameter("detail_first_octave", first_detail_octave(base_frequency, width))
 		surface.set_shader_parameter("detail_feature", detail_feature(width))
 

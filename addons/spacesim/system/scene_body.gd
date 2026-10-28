@@ -27,11 +27,6 @@ var mesh: MeshInstance3D
 ## The material `mesh` is drawn with when it is **not** a wireframe, kept so the debug view can restore it.
 ## Set when the body is built; `update_lod` swaps a wireframe material over it and puts this one back.
 var mesh_material: Material
-## The ocean layer: the body's own patch mesh at the same scale, drawn by `body_ocean.gdshader`. **Null for a
-## body with no liquid on its surface** — the phase test decides, through `SpacesimSurfaceModel.bands()`.
-var ocean: MeshInstance3D
-## The ocean's material, kept so the map and the sea level can be published to it with the land's.
-var ocean_material: ShaderMaterial
 ## **The cloud stack**: one deck per layer the model places a level for, highest first, each a node on the
 ## body's own patch mesh at its own derived radius. Empty for a body with no air, no authored deck, or no
 ## condensable that forms a level — which is most of them.
@@ -97,6 +92,18 @@ var patch_arrays: Array = []
 ## Triangles the mesh currently on the node holds. **Zero until the first build lands**, which is why a
 ## body draws nothing for its first frame or two rather than stalling the frame that asked for it.
 var patch_triangles := 0
+## The point the mesh's vertices are measured from, in body-space metres — captured with the build and written onto the
+## node with the mesh it belongs to. See `SpacesimPatches.rebase`.
+var patch_task_origin := Vector3.ZERO
+## **This body's vertex lattice**, kept between walks so a merge is a memcpy of index blocks rather than a rebuild.
+## Owned here because the slots are per body; see `SpacesimPatches.Lattice`.
+var lattice := SpacesimPatches.Lattice.new()
+## **The walk in flight, and the numbers it was asked with.** The selection is the expensive half of a frame and it is
+## pure arithmetic over immutable data, so it runs on a pool thread; these three fields are the whole handshake.
+var patch_walk_task := -1
+var patch_walk_chunks: Array = []
+## Whether the drawn arrays carry the depth tint, so a toggle re-walks and rebuilds them.
+var patch_walk_tinted := false
 ## Whether an empty selection has already been reported for this body, so the reason is printed once
 ## rather than once a second for the rest of the session.
 var patch_empty_reported := false

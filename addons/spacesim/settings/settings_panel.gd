@@ -104,7 +104,7 @@ func _build_editors(key: String) -> Array[Control]:
 		TYPE_STRING:
 			editors.append(_text_field(key))
 		# **A boolean has two states and no third, so a checkbox is the one control that cannot be got
-		# wrong** — and it is what `ship.visible` needed to exist as a real setting rather than as session
+		# wrong** — and it is what a saved boolean needs to exist as a real setting rather than as session
 		# state. The suite requires every declared setting to have a control, so this branch is the price
 		# of declaring one.
 		TYPE_BOOL:

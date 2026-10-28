@@ -77,13 +77,12 @@ func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemSc
 	h.check(SpacesimBodyRenderer.max_rungs_for(sol.content) == 0, "so the surface ladder is zero for it")
 	# **And the material the game actually builds carries it**, rather than the predicate being true in isolation.
 	var jupiter_material := SpacesimBodyRenderer.material_for(
-		jupiter, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), jupiter.color),
-		false
+		jupiter, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), jupiter.color)
 	) as ShaderMaterial
 	h.check(int(jupiter_material.get_shader_parameter("detail_max_rungs")) == 0,
 		"and the material Jupiter is drawn with asks for none")
 	var earth_material := SpacesimBodyRenderer.material_for(
-		earth, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), earth.color), true
+		earth, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), earth.color)
 	) as ShaderMaterial
 	h.check(int(earth_material.get_shader_parameter("detail_max_rungs")) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
 		"while Earth's asks for the full depth (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
@@ -254,11 +253,12 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	if material == null:
 		return
 
-	# **A height field, a colour ramp and a sea**, and every number off the derivation. The old flat
-	# Lambertian's three knobs are gone: the surface is no longer one colour, so what it carries is a ramp
-	# built from `SpacesimSurfaceModel.bands()` and the body's own radius and relief.
-	h.check(material.get_shader_parameter("base_color") == null,
-		"the flat colour knob is gone, because the surface is no longer one colour")
+	# **A height field and a colour ramp**, and every number off the derivation. **One material serves both the
+	# `flat` and the `rendered` mode**, so `base_color` is not gone — it is the flat mode's knob, and the shader
+	# short-circuits every texture read to it. So the check is that the knob holds the *derived* albedo: a flat
+	# mode that fell back to a constant grey would be the old Lambertian back by the side door.
+	h.check(material.get_shader_parameter("base_color") == earth.color,
+		"the flat mode's colour is the body's derived albedo, not a constant")
 	h.check(material.get_shader_parameter("planet_radius") == earth.radius,
 		"the shader is told the body's radius, which is what turns a texel into a slope")
 	var plan := SpacesimSurfaceField.plan(earth.content.id, earth.radius)
@@ -287,19 +287,18 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 		h.check(sea.get_luminance() < 0.12,
 			"with the sea at its own darker reflectance (%.3f)" % sea.get_luminance())
 
-	# **Water and land are two layers, and the phase decides which bodies get the sea.** `bands()` carries each
-	# material's phase, so a body with no liquid on its surface has no ocean node — not one with zero coverage.
-	h.check_near(float(material.get_shader_parameter("has_ocean")), 1.0,
-		"Earth's land layer knows it has a sea below it", 1.0e-6)
-	h.check(earth.ocean != null and earth.ocean_material != null,
-		"and it has an ocean layer of its own")
-	if earth.ocean_material != null:
-		var deep: Color = earth.ocean_material.get_shader_parameter("deep_color")
-		h.check(deep.b > deep.r and deep.b > deep.g,
-			"whose deep colour is the liquid band's own (%.3f, %.3f, %.3f)" % [deep.r, deep.g, deep.b])
-		var shallow: Color = earth.ocean_material.get_shader_parameter("shallow_color")
-		h.check(shallow.get_luminance() > deep.get_luminance(),
-			"and whose shallows are lighter, because that is the bottom showing through")
+	# **There is ONE surface layer, and it draws the whole sphere.** The sea's layer is gone (2026-10-28): a liquid is
+	# a level, and the layer that drew it was a second material over the same triangles, which the plateau could afford
+	# only because both were unit spheres. So the cull that made the two halves complementary has to be gone with it —
+	# left in, Earth's 71 % of water would be a hole showing the far side, and nothing headless would report it.
+	# **Checked against the source**, because a `discard` is a shader fact no material can show.
+	var surface_source := FileAccess.get_file_as_string(
+		"res://addons/spacesim/render/body_surface.gdshader"
+	)
+	h.check(not surface_source.contains("discard"),
+		"with no sea layer, the ground is drawn everywhere — there is no cull left in it")
+	h.check(not surface_source.contains("has_ocean"),
+		"and no switch that could turn the cull back on")
 
 	# **An airless body gets its own ramp rather than a shared one** — one band, one colour, end to end.
 	var luna_material: ShaderMaterial = luna.mesh.material_override
@@ -311,11 +310,8 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 		var last := image.get_pixel(image.get_width() - 1, 0)
 		h.check(first.is_equal_approx(last),
 			"and being one material, it is one colour from the bottom to the top")
-	# **No liquid, no sea layer** — and the land's cull is switched off rather than made true by luck, or the
-	# lowest ground on an airless body would be discarded.
-		h.check(luna.ocean == null, "an airless body has no ocean layer at all")
-		h.check_near(float(luna_material.get_shader_parameter("has_ocean")), 0.0,
-			"and its land layer does not cull anything", 1.0e-6)
+	# **And there is no per-body sweep of the cull, because there is no cull**: an airless body's lowest ground is
+	# drawn like its highest, by the same line that draws Earth's sea bed.
 
 
 ## The sky: that the shader's inputs are the derivation's, and that the derivation agrees with
@@ -1010,10 +1006,7 @@ func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScen
 	# `AO`, which the engine applies to the whole light contribution, and only its hue stays on `ALBEDO`. Scaling
 	# the albedo alone left the sun's path across the water blazing at top-of-atmosphere brightness while the sea
 	# around it went almost black — a specular lobe is built from the light, not from the reflectance.
-	for path in [
-		"res://addons/spacesim/render/body_surface.gdshader",
-		"res://addons/spacesim/render/body_ocean.gdshader",
-	]:
+	for path in ["res://addons/spacesim/render/body_surface.gdshader"]:
 		var spec := FileAccess.get_file_as_string(path)
 		var named := String(path).get_file()
 		h.check(spec.contains("float air_brightness = dot(air_through"),
@@ -1050,10 +1043,7 @@ func _test_the_air_takes_its_share_of_the_starlight(h, scene: SpacesimSystemScen
 ## uniform's default `Vector3.UP` — a northern sun on every terminator in the system, and nothing would have said
 ## so.
 func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -> void:
-	for path in [
-		"res://addons/spacesim/render/body_surface.gdshader",
-		"res://addons/spacesim/render/body_ocean.gdshader",
-	]:
+	for path in ["res://addons/spacesim/render/body_surface.gdshader"]:
 		var shader: Shader = load(path)
 		var named := String(path).get_file()
 		if shader == null:
@@ -1124,25 +1114,20 @@ func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -
 ## **A shader uniform's default is the picture a material that missed its publish will draw**, so it has to
 ## move when the constant behind it moves. Every entry below has been the *superseded* value at some point,
 ## and three of them reproduced a fault this project has already fixed: the ocean's ramp defaulted to the
-## 2 m / 40 m pair whose own comment says "every pixel of the ocean was deep", `detail_relief` defaulted to
-## zero — the whole 18-rung ladder for no picture — and `wave_stretch` defaulted to 1.0, which is isotropic.
+## 2 m / 40 m pair whose own comment said "every pixel of the ocean was deep", `detail_relief` defaulted to
+## zero — the whole 18-rung ladder for no picture — and the sea's `wave_stretch` defaulted to 1.0, which is
+## isotropic. (The sea's own five entries went with the sea on 2026-10-28; the rule is what matters.)
 ##
 ## **Checked against the source text**, because a `ShaderMaterial` whose parameter was never set returns
 ## `null` rather than the shader's own default: the mistake is invisible to anything that reads a material.
 func _test_shader_defaults_are_the_hosts(h) -> void:
 	var surface := "res://addons/spacesim/render/body_surface.gdshader"
-	var ocean := "res://addons/spacesim/render/body_ocean.gdshader"
 	var pairs := [
 		[surface, "detail_variation", SpacesimBodyRenderer.DETAIL_VARIATION],
 		[surface, "detail_strength", SpacesimBodyRenderer.SURFACE_DETAIL_STRENGTH],
 		[surface, "detail_relief", SpacesimBodyRenderer.DETAIL_RELIEF],
 		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
 		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],
-		[ocean, "shallow_metres", SpacesimBodyRenderer.OCEAN_SHALLOW_METRES],
-		[ocean, "deep_metres", SpacesimBodyRenderer.OCEAN_DEEP_METRES],
-		[ocean, "wave_relief", SpacesimBodyRenderer.OCEAN_WAVE_RELIEF],
-		[ocean, "wave_stretch", SpacesimBodyRenderer.OCEAN_WAVE_STRETCH],
-		[ocean, "tone_variation", SpacesimBodyRenderer.OCEAN_TONE_VARIATION],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:

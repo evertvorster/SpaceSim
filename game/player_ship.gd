@@ -7,23 +7,19 @@ extends RefCounted
 
 const FlightController := preload("res://game/flight_controller.gd")
 
-const HULL_SIZE := Vector3(6.0, 3.0, 18.0)
+## **Where the viewpoint sits in the ship's frame** — five metres up and thirty-two behind the origin. There is no
+## hull: the placeholder box was an 18 m slab floating in front of the camera, and at a low altitude it appeared as a
+## plate on the ground — Evert, 2026-10-28: *"There is some sort of landing pad that pops up when I am close to the
+## surface. Strip that out, and clear out the mechanism that makes it."* It came back because deep space's near plane is
+## 100 m and clipped it away, and `_update_camera` pulled that plane inside the hull once it was drawn — so the box was
+## invisible from orbit and popped into view on approach. With no hull there is nothing to clip and no reason to move the
+## near plane, so both go.
 const CAMERA_OFFSET := Vector3(0.0, 5.0, 32.0)
 
 
 static func create(ship_name := "Ship") -> Node3D:
 	var ship := FlightController.new()
 	ship.name = ship_name
-
-	var box := BoxMesh.new()
-	box.size = HULL_SIZE
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.75, 0.78, 0.85)
-	var hull := MeshInstance3D.new()
-	hull.name = "Hull"
-	hull.mesh = box
-	hull.material_override = material
-	ship.add_child(hull)
 
 	var camera := Camera3D.new()
 	camera.name = "Camera"

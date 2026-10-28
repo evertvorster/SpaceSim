@@ -56,6 +56,18 @@ var _cloud_maps := SpacesimCloudMaps.new()
 ## `update_lod`, which swaps the line meshes and an unshaded white material in and out. Off, and nothing
 ## changes — it is a debug view, not a mode the renderer has to reason about.
 var wireframe := false
+## **`render.mode` is `rendered`**: the ground is drawn from its surface stack. **`rendered` is the mode that draws
+## the real surface, so nothing here hides a body for it** — the branch this platform came from had no texture at all and
+## used a flag to draw nothing; there is a map on every body now, so the only thing the mode decides is whether the
+## fragment reads it.
+var flat_shaded := true
+## The tree's numbers, counted off what is drawn — see [method chunks] and [method deepest_level].
+var _chunks := 0
+var _deepest := 0
+## The tint in force, so the shader parameter is written when the setting moves and not every frame.
+var _depth_tint := false
+## The `flat` mode in force, for the same reason as the tint: a uniform write per body per frame is pointless work.
+var _flat_shaded := true
 ## The frame the last `update_lod` ran in, so a change of frame can be seen and paid for.
 var _last_frame_id := ""
 ## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
@@ -479,12 +491,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	var quantiles := SpacesimSurfaceMaps.linear_quantiles()
 	if entry != null and not entry.quantiles.is_empty():
 		quantiles = entry.quantiles
-	# **One of these per body, and the ocean only where the derivation found liquid.** `bands()` carries each
-	# material's phase, so a body with no sea gets no sea layer rather than one with zero coverage.
-	body.ocean_material = SpacesimBodyRenderer.ocean_material(body, bands)
+	# **One material per body, and it draws the whole sphere.** There is no sea layer: a liquid is a level, and the
+	# layer that drew it assumed the ground's node was a unit sphere, which this lattice's metres-from-an-origin mesh
+	# is not. The sea comes back as its own mechanism (a volume, or a level lifted from the sphere) — see the branch's
+	# note in `Roadmap`.
 	body.mesh_material = SpacesimBodyRenderer.material_for(
-		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color),
-		body.ocean_material != null
+		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color)
 	)
 	if entry != null and entry.base != null:
 		var level := entry.value_at(body.surface_ocean_fraction)
@@ -492,26 +504,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		surface.set_shader_parameter("sea_level", level)
 		SpacesimBodyRenderer.apply_surface_maps(surface, entry.base, entry.width,
 			SpacesimSurfaceField.plan(body.id, body.radius).continent_frequency)
-		# **The two layers share one threshold and one map** — the land culls below it and the ocean draws below
-		# it, so a published sea level that reached only one of them would put a seam along every coast.
-		if body.ocean_material != null:
-			body.ocean_material.set_shader_parameter("sea_level", level)
-			SpacesimBodyRenderer.apply_surface_maps(body.ocean_material, entry.base, entry.width)
-			# 0.0 = no ladder on this material, which is what the ocean has.
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(
 		body.node, body.radius, body.mesh_material, "%sSurface" % body.name, 0
 	)
 	body.mesh.mesh = null
-	# **The ocean is the body's own triangles, coplanar**, and it exists only where content and phase put water.
-	# Sharing the mesh is the deck's arrangement: the sea's triangles *are* the ground's, so the two cannot
-	# disagree about where the surface is, and the shore is a threshold on one map rather than a fitted edge.
-	if body.ocean_material != null:
-		body.ocean = _add_body_mesh(
-			body.node, body.radius, body.ocean_material, "%sOcean" % body.name, 0
-		)
-		body.ocean.mesh = null
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
@@ -542,7 +540,6 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.add_child(body.surface)
 	frame_tree.register(body.surface)
 	place_landing_zone(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
-	_add_landing_site(body.surface)
 
 	frame_tree.add_rule(
 		TransitionRule.new(
@@ -965,9 +962,17 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## screen is its own emission, over the same area, so its glare survives the handoff exactly as a
 ## planet's brightness does. See `SpacesimBodyRenderer.point_colour` for the one by-kind difference
 ## that remains, which is that a star **emits** and everything else reflects.
-## `delta` is the frame's own — the only thing F5's projection needs, and **optional**, because an instrument (the
-## profiler, a probe) may call this without a clock and should then get no speculative work rather than a wrong rate.
-func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
+## `delta` is the frame's own — the only thing the surface map ladder's projection needs, and **optional**, because an
+## instrument (the profiler, a probe) may call this without a clock and should then get no speculative work rather than
+## a wrong rate.
+##
+## `eye` is where the level is decided, and it defaults to the camera's own origin for a rig that has no ship.
+##
+## **It must be the OBSERVER, not the camera's offset.** The camera sits `(0, 5, 32)` in the ship's frame, so when the
+## ship rotates its origin swings on a 32 m arm — and at low altitude that is a large fraction of the altitude, so the
+## walk's gate re-opened on every rotation and the mesh was re-cut underneath a still view. Evert, 2026-10-28: *"when I
+## rotate the camera, there is some vertical jiggling of the vertexes."* The vertices never moved; the triangulation did.
+func update_lod(camera: Camera3D, delta: float = 0.0, eye: Variant = null) -> void:
 	if camera == null:
 		return
 	var viewport := camera.get_viewport()
@@ -990,15 +995,19 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 	#
 	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type, so `:=`
 	# here is the `INFERENCE_ON_VARIANT` error, and everything derived from the result with it.
-	var observer: Vector3 = camera.get_global_transform_interpolated().origin
+	var observer: Vector3 = (
+		camera.get_global_transform_interpolated().origin if not (eye is Vector3) else eye
+	)
 	# **Publish whatever landed since the last frame**, before any of it is counted: a rebuild is a mesh
 	# that appears a frame or two after it was asked for, never a stall in the frame that asked.
-	# **Collected before the bodies are walked**, so a bake that landed this frame is drawn this frame.
+	# **The maps are collected before the bodies are walked**, so a bake that landed this frame is drawn this frame:
+	# the surface's, because the ground reads it, and a deck's, which lands the same way. The cloud cache has no bake
+	# pass of its own — a floor bake is synchronous and a refinement is a pool task (or a main-thread dispatch), so
+	# there is nothing to attach.
 	_surface_maps.poll()
-	# **A deck's map lands the same way the ground's does**, and it is polled before the walk so a bake that
-	# arrived this frame is drawn this frame. The cloud cache has no bake pass of its own — a floor bake is
-	# synchronous and a refinement is a pool task (or a main-thread dispatch), so there is nothing to attach.
 	_cloud_maps.poll()
+	# **And the walks next**, so a selection that lands this frame asks its rebuild in this frame rather than the next.
+	_poll_walks()
 	_poll_patch_builds()
 	for body in bodies:
 		if body.node == null:
@@ -1009,9 +1018,8 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
-		if body.ocean != null:
-			body.ocean.visible = not is_point
-		# **A wireframe view is about triangles**, and a cloud deck would cover the ones under test.
+		# **A wireframe view is about triangles**, and a cloud deck would cover the ones under test. The deck's own
+		# switch is `_update_decks`'s, one function down; this line is about the view.
 		for deck in body.decks:
 			deck.node.visible = not is_point and not wireframe
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
@@ -1043,25 +1051,11 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
 			pixel, epsilon, body.radius, body.patch_walk_epsilon
-		) or wireframe != body.patch_walk_wireframe:
-			body.patch_chunks = SpacesimPatches.select(
-				distance, to_eye, body.radius, pixel, epsilon
-			)
-			# **A selection of nothing has a reason, and it is worth printing once.** `select()` refuses a
-			# sphere it cannot see round — the eye at or below the surface, or a pixel angle or budget of
-			# zero — and an empty answer looks exactly like a body that was never walked.
-			if body.patch_chunks.is_empty() and not body.patch_empty_reported:
-				body.patch_empty_reported = true
-				print(
-					"PATCH: %s has no patches — distance %.1f m, radius %.1f m, altitude %.1f m, "
-					% [body.name, distance, body.radius, distance - body.radius]
-					+ "pixel %.6f, epsilon %.2f" % [pixel, epsilon]
-				)
-			body.patch_walk_distance = distance
-			body.patch_walk_direction = to_eye
-			body.patch_walk_epsilon = epsilon
-			body.patch_walk_wireframe = wireframe
-			_request_patch_build(body, wireframe)
+		) or wireframe != body.patch_walk_wireframe or _depth_tint != body.patch_walk_tinted:
+			# **The walk goes to a pool thread.** It measured 11-17 ms of pure recursion on the main thread at the
+			# selections a low flight asks for — a whole frame, on every tangential frame, because that is exactly
+			# when patches cross the threshold. Evert, 2026-10-28: *"flying along it there is a drop in performance."*
+			_request_walk(body, distance, to_eye, pixel, epsilon, wireframe)
 	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
 	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
 	# different scene. Drawing it with the geometry selected for the previous one is wrong however it looks,
@@ -1077,6 +1071,7 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 	# an instrument's independent count then cannot disagree about a body that landed or was culled
 	# mid-frame.
 	_triangles = _count_drawn_triangles()
+	_publish_depth_tint()
 
 
 ## **What is actually drawn this frame**, summed over the bodies: a point of light where a body is below
@@ -1084,6 +1079,8 @@ func update_lod(camera: Camera3D, delta: float = 0.0) -> void:
 ## against it, and the picture cannot disagree.
 func _count_drawn_triangles() -> int:
 	var total := 0
+	_chunks = 0
+	_deepest = 0
 	for body in bodies:
 		if body.node == null:
 			continue
@@ -1091,7 +1088,93 @@ func _count_drawn_triangles() -> int:
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 		elif body.mesh != null and body.mesh.visible:
 			total += body.patch_triangles
+			# **The tree's own numbers**, counted from the selection that is drawn, so the HUD and the mesh cannot
+			# disagree about it.
+			_chunks += body.patch_chunks.size()
+			for chunk in body.patch_chunks:
+				_deepest = maxi(_deepest, int(chunk[2]))
 	return total
+
+
+## **The debug tint and the `flat` mode, published only when one of them changes.** A uniform write per body per frame
+## would be affordable and pointless; a value cached at startup would stop the setting being hot, which is the project's
+## trap.
+func _publish_depth_tint() -> void:
+	var wanted := bool(SpacesimSettings.get_value("render.depth_tint"))
+	if wanted == _depth_tint and flat_shaded == _flat_shaded:
+		return
+	# **The tint's colour lives in the arrays**, so a change has to rebuild them — through the walk gate above, which
+	# compares `_depth_tint`; `flat` is a uniform and only ever changes a branch in the fragment.
+	_depth_tint = wanted
+	_flat_shaded = flat_shaded
+	for body in bodies:
+		var material := body.mesh_material as ShaderMaterial
+		if material == null:
+			continue
+		material.set_shader_parameter("tint_amount", 1.0 if wanted else 0.0)
+		material.set_shader_parameter("flat_mode", 1.0 if flat_shaded else 0.0)
+	# **The colour lives in the arrays now, so a tint change has to rebuild them — but through the walk gate, not from
+	# here.** Requesting a build in this function left a pool task holding the scene after teardown, which segfaults at
+	# exit (measured: 997 checks passed, then exit 139); the gate is drained by `await_patch_builds` on `tree_exiting`,
+	# so that is where a rebuild belongs — the gate below sees `_depth_tint` differ from what the last walk recorded and
+	# opens by itself.
+
+
+## **Ask for a walk, and let the pool do it.** The inputs are captured into the task's arguments rather than read off
+## the body, because a worker that reads a member the main thread reassigns is the use-after-free this project already
+## paid for. The bookkeeping is stamped *here*, when the walk actually starts, so the gate closes against the numbers
+## that walk ran with; a request arriving while one is in flight returns without stamping, and the gate asks again next
+## frame — cheaper than a queue and correct without one.
+##
+## The previous selection stays drawn until the new one lands, because `_poll_patch_builds` keeps the mesh it already
+## has. So a walk that takes a frame lags by a coarser frame, never by a hole: the LOD rule's publish-over.
+func _request_walk(
+	body: SpacesimSceneBody, distance: float, direction: Vector3, pixel: float, epsilon: float,
+	wireframe: bool
+) -> void:
+	if body.patch_walk_task != -1:
+		return
+	body.patch_walk_distance = distance
+	body.patch_walk_direction = direction
+	body.patch_walk_epsilon = epsilon
+	body.patch_walk_wireframe = wireframe
+	body.patch_walk_tinted = _depth_tint
+	body.patch_walk_task = WorkerThreadPool.add_task(
+		Callable(self, "_walk_patches").bind(
+			body, distance, direction, body.radius, pixel, epsilon
+		)
+	)
+
+
+## **Runs on a worker thread.** Pure arithmetic over immutable data — no node, no `RenderingServer`, no settings — and
+## it writes exactly one field.
+func _walk_patches(
+	body: SpacesimSceneBody, distance: float, direction: Vector3, radius: float, pixel: float,
+	epsilon: float
+) -> void:
+	body.patch_walk_chunks = SpacesimPatches.select(distance, direction, radius, pixel, epsilon)
+
+
+## **The main thread's half of a walk**, once a frame: publish the selection and ask its rebuild in the same frame.
+func _poll_walks() -> void:
+	for body in bodies:
+		if body.patch_walk_task == -1:
+			continue
+		# **Asked before waiting**, because waiting consumes the task — the same trap as the build poll below.
+		if not WorkerThreadPool.is_task_completed(body.patch_walk_task):
+			continue
+		WorkerThreadPool.wait_for_task_completion(body.patch_walk_task)
+		body.patch_walk_task = -1
+		body.patch_chunks = body.patch_walk_chunks
+		# **A selection of nothing has a reason, and it is worth printing once.** `select()` refuses a sphere it
+		# cannot see round — the eye at or below the surface, or a pixel angle or budget of zero — and an empty
+		# answer looks exactly like a body that was never walked.
+		if body.patch_chunks.is_empty() and not body.patch_empty_reported:
+			body.patch_empty_reported = true
+			print("PATCH: %s has no patches — the walk answered empty at %.1f m" % [
+				body.name, body.patch_walk_distance
+			])
+		_request_patch_build(body, body.patch_walk_wireframe)
 
 
 ## **Ask for a rebuild, without doing it here.** The merged chunk arrays are the expensive half of a
@@ -1104,21 +1187,35 @@ func _count_drawn_triangles() -> int:
 func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
 	body.patch_task_chunks = body.patch_chunks
 	body.patch_task_wireframe = lines
+	# **The origin the geometry is measured from: the ground under the eye.** Captured with the request like every
+	# other input, so the arrays and the transform that pairs with them cannot come from different frames — and it is
+	# the *ground* point rather than the eye, because what must stay small is the geometry, not the observer.
+	body.patch_task_origin = body.patch_walk_direction * body.radius
 	if body.patch_task != -1:
 		# A build is already in flight. Its result will be published and then seen to be stale, which
 		# starts the next one — cheaper than a queue and correct without one.
 		return
 	body.patch_arrays = []
 	body.patch_task = WorkerThreadPool.add_task(
-		Callable(self, "_build_patch_arrays").bind(body, body.patch_chunks, lines)
+		Callable(self, "_build_patch_arrays").bind(
+			body, body.patch_chunks, lines, body.radius, body.patch_task_origin,
+			# **Captured here, not read on the worker**: the worker touches no settings, and a tint that changed while
+			# the build was in flight must not change the arrays the next publish pairs with this origin.
+			bool(SpacesimSettings.get_value("render.depth_tint")),
+			body.lattice
+		)
 	)
 
 
 ## **Runs on a worker thread.** Reads the static chunk cache (which locks) and writes one field on one
 ## body; touches no node, no `RenderingServer` and no settings.
-func _build_patch_arrays(body: SpacesimSceneBody, chunks: Array, lines: bool) -> void:
+func _build_patch_arrays(
+	body: SpacesimSceneBody, chunks: Array, lines: bool, radius: float, origin: Vector3,
+	tinted: bool, lattice: SpacesimPatches.Lattice
+) -> void:
 	body.patch_arrays = (
-		SpacesimPatches.lines_of(chunks) if lines else SpacesimPatches.arrays_of(chunks)
+		SpacesimPatches.lines_of(chunks, radius, origin) if lines
+		else SpacesimPatches.arrays_of(chunks, radius, origin, tinted, lattice)
 	)
 
 
@@ -1159,8 +1256,7 @@ func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
 ## dark, and is dim and orange while it is. Publishing zero to every layer would put a cloud's sunset at the
 ## same instant as the ground's and take the geometry out of it.
 func _publish_air(body: SpacesimSceneBody) -> void:
-	for material in [body.mesh_material, body.ocean_material]:
-		SpacesimBodyRenderer.apply_air(material, body.air, 0.0)
+	SpacesimBodyRenderer.apply_air(body.mesh_material, body.air, 0.0)
 	for deck in body.decks:
 		SpacesimBodyRenderer.apply_air(deck.material, body.air, deck.height)
 
@@ -1183,7 +1279,7 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3) -> void:
 		var to_star: Vector3 = star_body.position - body.position
 		sun = to_star.normalized()
 		star_angle = SpacesimLod.angular_radius(star_body.radius, to_star.length())
-	var materials := [body.mesh_material, body.ocean_material]
+	var materials := [body.mesh_material]
 	# **A deck is lit by the same star**, and its own shader does its own air and occlusion maths, so it needs
 	# the direction and the width as well as the ground does.
 	for deck in body.decks:
@@ -1296,11 +1392,10 @@ func _publish_deck_shadow(
 	# two texels of the map in hand, so a refinement moves it, and the shadow has to move with it or it would
 	# be a different cloud from the one casting it.
 	var feature := TAU * 2.0 / float(width) if width > 0 else 0.0
-	for material in [body.mesh_material, body.ocean_material]:
-		SpacesimBodyRenderer.apply_deck_shadow(
-			material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness,
-			SpacesimCloudField.seed_for(body.id, deck.index), feature
-		)
+	SpacesimBodyRenderer.apply_deck_shadow(
+		body.mesh_material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness,
+		SpacesimCloudField.seed_for(body.id, deck.index), feature
+	)
 
 
 ## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
@@ -1334,12 +1429,6 @@ func _refine_surface_map(
 		body.mesh_material, chosen["texture"], chosen["width"],
 		SpacesimSurfaceField.plan(body.id, body.radius).continent_frequency
 	)
-	# **Both layers, or the shore comes apart**: the land culls on this map and the sea draws on it, so a map
-	# that reached one and not the other would put a seam along every coastline.
-	if body.ocean_material != null:
-		SpacesimBodyRenderer.apply_surface_maps(
-			body.ocean_material, chosen["texture"], chosen["width"]
-		)
 
 
 ## **The near field: the map's tiles, refined where the eye is looking**, as the mesh is.
@@ -1364,10 +1453,6 @@ func _refine_surface_tiles(
 	SpacesimBodyRenderer.apply_surface_tiles(
 		body.mesh_material, array, tiles["rects"], tiles["layers"]
 	)
-	if body.ocean_material != null:
-		SpacesimBodyRenderer.apply_surface_tiles(
-			body.ocean_material, array, tiles["rects"], tiles["layers"]
-		)
 
 
 func _poll_patch_builds() -> void:
@@ -1393,13 +1478,21 @@ func _poll_patch_builds() -> void:
 			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
 			else SpacesimPatches.mesh_from(arrays)
 		)
-		# **The ocean draws the same triangles**, so a rebuild cannot leave the sea behind on older geometry.
-		if body.ocean != null:
-			body.ocean.mesh = body.mesh.mesh
-		# **And every deck does too** — a stack is the same triangles at different scales, so a rebuild that
-		# reached the ground and the sea but not the clouds would leave the weather on last frame's sphere.
-		for deck in body.decks:
-			deck.node.mesh = body.mesh.mesh
+		# **The vertices are metres from this origin**, so the node carries the origin and drops the radius scale —
+		# and the pair is written here, beside the mesh, so the transform can never describe a different build. The
+		# scale has to be 1: a basis holding 6,371,000 is what rounded every vertex at 0.76 m (see `rebase`).
+		body.mesh.position = body.patch_task_origin
+		body.mesh.scale = Vector3.ONE
+		# **The origin the vertices are measured from, for the normal.** The mesh carries no normal array: the surface's
+		# direction is `VERTEX + patch_origin`, computed in the vertex stage. Published beside the transform it belongs
+		# to, so the two cannot describe different builds.
+		(body.mesh_material as ShaderMaterial).set_shader_parameter(
+			"patch_origin", body.patch_task_origin
+		)
+		# **No deck follows the ground any more.** A deck is the body's own mesh scaled to its base radius, and its
+		# shader reads that node's model space as a UNIT sphere — the lattice is metres now, so a deck needs its own
+		# derivation rather than a shared transform. `render.cloud_decks` is off by default because of exactly this;
+		# the clouds rung owns the adaptation.
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
@@ -1411,9 +1504,11 @@ func _poll_patch_builds() -> void:
 			push_warning("PATCH: %s has no material to publish" % body.name)
 		elif body.mesh.material_override != wanted:
 			body.mesh.material_override = wanted
+		# **Triangles come from the index array for an indexed mesh** and from the segment count for lines — reading a
+		# vertex count here would now report the number of *points*, which sharing has just made several times smaller.
 		body.patch_triangles = (
-			arrays[0].size() / 6 if body.patch_task_wireframe
-			else arrays[0].size() / 3
+			(arrays[1] as PackedInt32Array).size() / 6 if body.patch_task_wireframe
+			else (arrays[1] as PackedInt32Array).size() / 3
 		)
 		# The selection moved while this was building, so the answer is already out of date.
 		if body.patch_task_chunks != body.patch_chunks:
@@ -1429,10 +1524,18 @@ func await_patch_builds(rounds: int = 8) -> void:
 	for _round in rounds:
 		var waiting := false
 		for body in bodies:
+			# **Both halves**: a walk that outlives the join would publish a selection after the caller believed the
+			# scene settled, which reads as a mesh one selection behind.
+			while body.patch_walk_task != -1 \
+					and not WorkerThreadPool.is_task_completed(body.patch_walk_task):
+				OS.delay_usec(100)
+			if body.patch_walk_task != -1:
+				waiting = true
 			while body.patch_task != -1 and not WorkerThreadPool.is_task_completed(body.patch_task):
 				OS.delay_usec(100)
 			if body.patch_task != -1:
 				waiting = true
+		_poll_walks()
 		_poll_patch_builds()
 		_triangles = _count_drawn_triangles()
 		if not waiting:
@@ -1522,40 +1625,29 @@ func body_luminance(body: SpacesimSceneBody, observer: Vector3, star_position: V
 
 
 ## Triangles the bodies are currently drawn with, summed over the patches in use.
+##
+## **The chunks and the deepest level beside it** are the subdivision's own numbers: a count of what the walk drew, so
+## the HUD, an instrument, and the picture cannot disagree about a body that landed or was culled mid-frame.
+func chunks() -> int:
+	return _chunks
+
+
+func deepest_level() -> int:
+	return _deepest
+
+
 func triangles() -> int:
 	return _triangles
 
 
-## Meter-scale references at the landing zone, so the scale is legible once you are down.
-func _add_landing_site(surface: SpacesimFrame) -> void:
-	var pad_size := _framing.pad_size
-
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(pad_size, pad_size)
-	var pad_material := StandardMaterial3D.new()
-	pad_material.albedo_color = Color(0.18, 0.2, 0.24)
-
-	var pad := MeshInstance3D.new()
-	pad.name = "LandingPad"
-	pad.mesh = plane
-	pad.material_override = pad_material
-	# A hair above the surface plane: the pad is coplanar with the planet's sphere otherwise,
-	# and coplanar geometry z-fights.
-	pad.position = Vector3(0.0, 0.5, 0.0)
-	surface.add_child(pad)
-
-	var marker_material := StandardMaterial3D.new()
-	marker_material.albedo_color = Color(0.85, 0.6, 0.15)
-	for i in 5:
-		var box := BoxMesh.new()
-		box.size = Vector3(20.0, 40.0, 20.0)
-		var marker := MeshInstance3D.new()
-		marker.name = "Marker%d" % i
-		marker.mesh = box
-		marker.material_override = marker_material
-		var angle := TAU * float(i) / 5.0
-		marker.position = Vector3(cos(angle) * 600.0, 20.5, sin(angle) * 600.0)
-		surface.add_child(marker)
+## **The landing site is gone (2026-10-28).** It was a dark 4 km plane called `LandingPad` with five amber
+## 20 x 40 x 20 m boxes standing round it at a 600 m radius — scale references for the landing zone. Evert, flying the
+## subdivision branch: *"there is a box that pops up on the surface of the planet once you are close enough… It has some
+## yellow pillars standing on it, all of that must go."* Nothing replaced it: it was a measurement aid from before the
+## ground subdivided, and the subdivision is now its own instrument.
+##
+## `SpacesimFraming.pad_size` went with it, and the two `.tres` lines that set it. **What stays is `place_landing_zone`**,
+## which puts the *frame* on the surface — that is coordinate machinery, not scenery.
 
 
 ## How a system frame reads: "landed on Nix", "above Nix". Empty for a frame this system does not

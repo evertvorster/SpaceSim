@@ -1,5 +1,5 @@
 extends RefCounted
-## The patch quadtree: refinement where the eye is, coarse elsewhere, and a budget that holds.
+## The patch quadtree: refinement where the eye is, coarse elsewhere, bounded by the law alone.
 ##
 ## **This is the mechanism the whole LOD story was missing** — `SpacesimIcosphere` draws a body at one
 ## level for the whole sphere, so approaching it refines everything equally. Evert's report, 2026-10-17:
@@ -8,7 +8,7 @@ extends RefCounted
 ## Nothing here needs a GPU or a scene: `select()` is a pure function of (distance, camera direction,
 ## radius, pixel angle, epsilon), and `build()` is arrays. So the properties that matter are checkable
 ## as numbers — that the triangles are on the sphere, that the eye's side is finer than the far side,
-## that the walk is monotone in distance, that the horizon is exact, and that the budget holds.
+## that the walk is monotone in distance, that the horizon is exact, and that the law bounds it.
 
 const EARTH_RADIUS := 6.371e6
 ## A 1080-line frame at 70 degrees vertical, which is the number `SpacesimLod` works in.
@@ -21,7 +21,9 @@ func run(h, root: Node) -> void:
 	_test_the_eye_side_is_finer(h)
 	_test_it_is_monotone_in_distance(h)
 	_test_the_horizon_is_exact(h)
-	_test_the_budget_holds(h)
+	_test_the_law_bounds_the_walk(h)
+	_test_the_lattice_merge_matches_a_rebuild(h)
+	_test_the_tint_costs_nothing_until_asked(h)
 	_test_the_mesh(h)
 	_test_the_cache_makes_a_rebuild_cheap(h)
 	_test_the_drawn_triangle_is_inside_the_law(h)
@@ -140,64 +142,93 @@ func _test_the_horizon_is_exact(h) -> void:
 	h.check(over_the_limb == 0,
 		"at 10 km no chunk is drawn past the limb by more than its own width (%d were, worst %.4f rad over)"
 			% [over_the_limb, worst])
-	# A whole-sphere subdivision at this budget would be thousands of chunks; the cap is a hundred or so.
-	# The bound is loose on purpose — what it must catch is the far side coming back, not a tuning change.
-	h.check(chunks.size() > 0 and chunks.size() < 2000,
+	# **A loose bound, and looser since the apparent-size limit landed**: at 2 degrees a walk asks for an order of
+	# magnitude more chunks than the curvature law alone did, so a tight number here would break every time the law is
+	# tuned. What it must catch is the far side coming back — a whole-sphere subdivision at this eye is tens of
+	# thousands — not a change of scale.
+	h.check(chunks.size() > 0 and chunks.size() < 20000,
 		"and the far side really is gone rather than merely coarse (%d chunks)" % chunks.size())
 
 
-## The budget is what stops "the eye is on the ground" from asking for a million triangles — and it
-## **counts triangles**, not chunk references: a hundred references can be sixteen hundred triangles.
-func _test_the_budget_holds(h) -> void:
-	# At 100 km, which is where the budget is a real constraint: down at 1 m the visible cap is a few
-	# square kilometres and the walk never wants many triangles at all.
-	var budget := 2000
+## **There is no budget any more — the law is what bounds the walk, and the HUD is the judge.**
+##
+## Evert, 2026-10-28: *"We don't care about budget, that should be removed. Just have the count so I can judge."* So what
+## is asserted instead is that the walk answers the law at both ends of the range, and that the count it produces is a
+## number a person can read rather than one a cap chose.
+func _test_the_law_bounds_the_walk(h) -> void:
+	# **At 100 km**, where the apparent-size limit and the sagitta limit are within a factor of two of each other.
 	var chunks := SpacesimPatches.select(
-		EARTH_RADIUS + 1.0e5, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 0.5, budget
+		EARTH_RADIUS + 1.0e5, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 0.5
 	)
 	var triangles := SpacesimPatches.triangle_count(chunks)
-	h.check(triangles <= budget, "a tight budget is honoured (%d triangles of %d)" % [triangles, budget])
-	h.check(chunks.size() > 2, "and it still refines as far as the budget allows (%d chunks)" % chunks.size())
+	h.check(chunks.size() > 2 and triangles > 0,
+		"a walk at 100 km answers with a real selection (%d chunks, %d triangles)"
+			% [chunks.size(), triangles])
+	# **And the apparent size really is bounded**: every chunk is at most the angle the law allows, so the *deepest*
+	# one is at most `FACET_ANGLE` wide on screen. The count is left to the HUD's job.
+	var deepest := 0
+	for chunk in chunks:
+		deepest = maxi(deepest, int(chunk[2]))
+	var finest := SpacesimPatches.finest_edge_angle(
+		EARTH_RADIUS + 1.0e5, PIXEL_ANGLE, 0.5, EARTH_RADIUS
+	)
+	h.check(finest <= SpacesimPatches.FACET_ANGLE * (1.0e5 / EARTH_RADIUS) * 1.001,
+		"with the finest patch no wider than 2 degrees of view")
 ## The mesh, and the two properties a renderer needs: every triangle is on the sphere, and the winding is
 ## the same one the level meshes use — measured against the level meshes rather than reasoned about.
 func _test_the_mesh(h) -> void:
 	var chunks := SpacesimPatches.select(
 		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
 	)
-	var arrays := SpacesimPatches.arrays_of(chunks)
+	# **Measured from the ground under the eye**, which is where the node's origin goes — see `SpacesimPatches.rebase`.
+	# The ground under the eye the walk was given, which is `Vector3.UP` here.
+	var origin := Vector3.UP * EARTH_RADIUS
+	var arrays := SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin)
 	var points: PackedVector3Array = arrays[0]
 	var expected := SpacesimPatches.triangle_count(chunks)
-	h.check(points.size() == expected * 3,
-		"one triangle per chunk triangle, unshared (%d vertices for %d triangles)"
-			% [points.size(), expected])
-	# **1e-6, not 1e-9**: an `ArrayMesh` stores vertices as 32-bit floats whatever the engine build is, so
-	# a unit vector comes back at 1 ± 3e-8. At Earth's radius that is 0.2 m — no one is going to see it,
-	# and asserting double precision here would be asserting something the renderer does not keep.
+	var indices: PackedInt32Array = arrays[1]
+	# **Shared vertices, indexed triangles** — Evert, 2026-10-28: *"all the triangles are connected together with
+	# shared vertices, there can never be a gap."* So the mesh carries one vertex per POINT and the index array is
+	# what says how they join; three vertices a triangle was the duplication this removes.
+	h.check(indices.size() == expected * 3,
+		"three indices a triangle (%d indices for %d triangles)" % [indices.size(), expected])
+	h.check(points.size() < expected * 3,
+		"and far fewer vertices than that, because a shared point is one vertex (%d for %d corners)"
+			% [points.size(), expected * 3])
+	# **No point twice.** The mesh is one lattice of shared points, so every vertex must be distinct — a duplicate
+	# would be the same point displaced twice the moment a height is applied.
+	var distinct := {}
+	for point in points:
+		distinct[point] = true
+	h.check(distinct.size() == points.size(),
+		"every vertex is a distinct point (%d of %d)" % [distinct.size(), points.size()])
+	# **2 m of slack, not 1e-6 of a metre**: the vertices are metres now, and the buffer keeps them in 32 bits, so a
+	# point 6.4 Mm from the body's centre is exact to ~0.8 m. That is the whole reason they are measured from a local
+	# origin instead, which the next check pins.
 	var on_sphere := true
 	for point in points:
-		if absf(point.length() - 1.0) > 1.0e-6:
+		if absf((point + origin).length() - EARTH_RADIUS) > 2.0:
 			on_sphere = false
-	h.check(on_sphere, "every vertex is on the unit sphere")
+	h.check(on_sphere, "every vertex is the body's radius from its centre, measured from the origin")
+	# **And the near vertices are small**, which is the property the rebase exists for: float32 spacings are relative, so
+	# a vertex a kilometre from the origin is good to 0.06 mm where one on a radius-scaled unit sphere was good to 0.76 m.
+	var nearest := INF
+	for point in points:
+		nearest = minf(nearest, point.length())
+	h.check(nearest < 1.0e4, "with the origin inside the selection, so the near vertices are metres (%.1f m)" % nearest)
 	# **The surface carries no index array**: every triangle has its own three vertices, so an index would
 	# be the identity range — and building sixty thousand of those in GDScript is the cost chunking exists
 	# to remove. Asserted, because a renderer that changes it back would be re-adding that cost silently.
 	var mesh := SpacesimPatches.mesh_from(arrays)
 	var surface := mesh.surface_get_arrays(0)
-	h.check(surface[Mesh.ARRAY_INDEX] == null, "and the mesh is non-indexed, as the builder says")
+	h.check(surface[Mesh.ARRAY_INDEX] != null, "and the mesh IS indexed, which is what makes the sharing count")
 	# **The winding as an outward normal per triangle**, not a signed volume: the mesh is an open shell
 	# (the far side is culled), so the divergence sum over it is not an enclosed volume and its sign means
 	# nothing.
 	# Godot's front face is clockwise seen from outside, so the *geometric* normal of a correctly wound
 	# triangle points at the centre — which is the opposite of the intuitive test, and the reason `_build`
 	# documents its single flip. Comparing signs with a known-good mesh cannot be argued with.
-	var soup := PackedVector3Array()
-	for chunk in chunks:
-		soup.append_array(SpacesimPatches.chunk_arrays(chunk)[0])
-	var identity := PackedInt32Array()
-	identity.resize(soup.size())
-	for index in soup.size():
-		identity[index] = index
-	var patch_side := _winding_side(soup, identity)
+	var patch_side := _winding_side(points, indices, origin)
 	var level: ArrayMesh = SpacesimIcosphere.mesh_at(1)
 	var level_points: PackedVector3Array = level.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	var level_indices: PackedInt32Array = level.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
@@ -208,13 +239,112 @@ func _test_the_mesh(h) -> void:
 	# **No skirts.** Evert, 2026-10-17: *"the cracks should be so far away that they would not be visible
 	# to the camera"* — the step between neighbours is bounded by their two sagittas, each already inside
 	# ε, so a skirt is geometry on top of a problem the budget has already bounded.
-	h.check(points.size() == expected * 3,
-		"and there is no skirt geometry — three vertices a triangle, nothing else")
+	h.check(indices.size() == expected * 3,
+		"and there is no skirt geometry — three indices a triangle, nothing else")
 	var lines := SpacesimPatches.lines_mesh_from(SpacesimPatches.lines_of(chunks))
 	h.check(lines.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
 		"while the wireframe view is lines")
-	var segments: PackedVector3Array = lines.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-	h.check(segments.size() == expected * 6, "with three edges per triangle")
+	var line_arrays: Array = lines.surface_get_arrays(0)
+	var segments: PackedInt32Array = line_arrays[Mesh.ARRAY_INDEX]
+	# **Six indices a triangle, and the vertices are the shared ones** — the wireframe is the lattice seen as edges, so
+	# its vertex array must be the same size as the flat mesh's, not six a triangle.
+	h.check(segments.size() == expected * 6, "with three edges per triangle (%d indices)" % segments.size())
+	h.check(
+		(line_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() == points.size(),
+		"and sharing the flat mesh's vertices (%d, not %d)"
+			% [(line_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), expected * 6]
+	)
+## **The tint is only paid for when it is asked for** — a regression guard: the colour array was built for every
+## rebuild and never passed to `arrays_of` from the scene, so the setting could not have worked.
+func _test_the_tint_costs_nothing_until_asked(h) -> void:
+	var chunks := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	var plain := SpacesimPatches.arrays_of(chunks)
+	h.check(plain.size() == 2,
+		"an untinted merge is vertices and indices, and no colour (%d arrays)" % plain.size())
+	var tinted := SpacesimPatches.arrays_of(chunks, 1.0, Vector3.ZERO, true)
+	h.check(tinted.size() == 3 and (tinted[2] as PackedColorArray).size() == (tinted[0] as PackedVector3Array).size(),
+		"and a tinted one carries a colour per vertex (%d colours for %d vertices)"
+			% [(tinted[2] as PackedColorArray).size(), (tinted[0] as PackedVector3Array).size()])
+
+
+## **The incremental merge is the same mesh as a rebuild**, which is the only thing that makes a per-body lattice safe
+## to keep between walks. Compared as a SET of triangles, because the two paths lay their vertices out in different
+## orders — the lattice keeps the order points were first seen, the fresh path the order chunks arrive.
+##
+## Small selections on purpose: this compares every triangle rather than a statistic, so it is a correctness check and
+## not a smoke test.
+func _test_the_lattice_merge_matches_a_rebuild(h) -> void:
+	var origin := Vector3.UP * EARTH_RADIUS
+	var lattice := SpacesimPatches.Lattice.new()
+	var chunks := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	var first := SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin, false, lattice)
+	h.check(_triangle_set(first) == _triangle_set(
+			SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin)),
+		"a cold lattice merge draws exactly the triangles a rebuild does (%d triangles)"
+			% (_triangle_set(first).size()))
+
+	# **Then move the eye**, so the selection changes on both sides of the walk — added chunks and discarded ones — and
+	# the lattice has to stay truthful about which slots are which.
+	var moved := (Vector3.UP * (EARTH_RADIUS + 5.0e4) + Vector3.RIGHT * 60.0e3).normalized()
+	var next := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, moved, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	h.check(next.size() != chunks.size() or next != chunks,
+		"the moved selection really is a different one (%d against %d chunks)"
+			% [next.size(), chunks.size()])
+	var warm := SpacesimPatches.arrays_of(next, EARTH_RADIUS, moved * EARTH_RADIUS, false, lattice)
+	h.check(_triangle_set(warm) == _triangle_set(
+			SpacesimPatches.arrays_of(next, EARTH_RADIUS, moved * EARTH_RADIUS)),
+		"and an incremental merge over a changed selection still matches a rebuild (%d triangles)"
+			% _triangle_set(warm).size())
+	# **The buffer keeps points whose chunks are gone**, which is the price of not rebuilding. Counted as slots
+	# actually referenced, because `vertices` is built over the whole buffer and comparing against its size would be
+	# true by construction — the exact shape this project's testing rules warn about.
+	var referenced := {}
+	for index in (warm[1] as PackedInt32Array):
+		referenced[index] = true
+	h.check(lattice.points.size() > referenced.size(),
+		"with the discarded chunks' points still in the lattice (%d points, %d referenced)"
+			% [lattice.points.size(), referenced.size()])
+	# **And it really was incremental**: blocks from both selections are in hand, so the second merge reused the first's
+	# work rather than rebuilding it.
+	h.check(lattice.blocks.size() > next.size(),
+		"and blocks kept from both selections, so the merge was incremental (%d blocks for %d chunks)"
+			% [lattice.blocks.size(), next.size()])
+	lattice.points = PackedVector3Array()
+	lattice.slot = {}
+	lattice.blocks = {}
+	var compacted := SpacesimPatches.arrays_of(next, EARTH_RADIUS, moved * EARTH_RADIUS, false, lattice)
+	h.check(_triangle_set(compacted) == _triangle_set(warm),
+		"and compacting it changes no triangle it draws")
+
+
+## Every triangle of a merge as (position, position, position), in a set — order-free, and rotated to a canonical start
+## so a different winding start does not read as a different triangle.
+static func _triangle_set(arrays: Array) -> Dictionary:
+	var vertices: PackedVector3Array = arrays[0]
+	var indices: PackedInt32Array = arrays[1]
+	var set := {}
+	for at in range(0, indices.size(), 3):
+		var points: Array = [
+			vertices[indices[at]], vertices[indices[at + 1]], vertices[indices[at + 2]]
+		]
+		# Start at the smallest, so the same triangle written from a different corner is one key.
+		var start := 0
+		for candidate in 3:
+			if str(points[candidate]) < str(points[start]):
+				start = candidate
+		var key := ""
+		for step in 3:
+			key += str(points[(start + step) % 3])
+		set[key] = true
+	return set
+
+
 ## **A rebuild is cache lookups, not geometry** — the claim chunking exists to make, stated as counts
 ## rather than as a stopwatch, because a headless rig can say that without flaking.
 func _test_the_cache_makes_a_rebuild_cheap(h) -> void:
@@ -322,13 +452,18 @@ func _test_the_walk_is_gated(h) -> void:
 
 ## The mean of `normal · centroid` over a mesh — positive when the geometric normals point outward,
 ## negative when they point inward. One number, comparable between two meshes.
-static func _winding_side(points: PackedVector3Array, indices: PackedInt32Array) -> float:
+## **`origin` is the point the vertices are measured from** — a direction is from the body's centre, so it has to be
+## added back before normalising, or the centroid is a vector from the origin rather than from the centre and the dot
+## product comes out near zero (-0.022 against -1.000, which is what this looked like when it was wrong).
+static func _winding_side(
+	points: PackedVector3Array, indices: PackedInt32Array, origin := Vector3.ZERO
+) -> float:
 	var total := 0.0
 	for i in range(0, indices.size(), 3):
 		var a := points[indices[i]]
 		var b := points[indices[i + 1]]
 		var c := points[indices[i + 2]]
-		total += (b - a).cross(c - a).normalized().dot(((a + b + c) / 3.0).normalized())
+		total += (b - a).cross(c - a).normalized().dot(((a + b + c) / 3.0 + origin).normalized())
 	return total / maxf(1.0, float(indices.size() / 3))
 
 

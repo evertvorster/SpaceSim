@@ -112,18 +112,19 @@ uniform float detail_variation : hint_range(0.0, 1.0) = 0.18;
 // How much the detail tilts the normal, per unit of height difference across a pixel. A look number, and the
 // one place the ladder's relief is calibrated.
 uniform float detail_relief = 1.0;
-// **Whether this body has an ocean at all**, which decides whether the discard below exists. A body with no
-// liquid on its surface — Mercury, Luna, Io, Europa, Venus — has no sea layer, and `sea_level` then resolves to
-// the field's own minimum; a naive `height < sea_level` discard would punch a hole in whatever ground sits at
-// the bottom of the distribution. So the test is switched off rather than made true by luck.
-uniform float has_ocean = 0.0;
 // **A ceiling on the tilt**, in the same units as the slope: a normal may lean only so far before the fiction
 // becomes a hole. A bump's dark side drawn as absolute black is the missing sky as much as the relief — with no
 // air above it, nothing lifts a shadow — and that is S4's to fix.
 uniform float relief_max_tilt = 0.6;
 
-// **Where the sea is**, in field units — `value_at(ocean_fraction)` off the measured quantiles. The land is
-// culled below it; the ocean draws below it. One value, one authority.
+// **Where the sea would be**, in field units — `value_at(ocean_fraction)` off the measured quantiles.
+//
+// **Nothing culls on it any more.** It used to be the threshold that split the planet into two layers, the land
+// and the sea layer drew the complement; both went on 2026-10-28 because a
+// liquid is a level and a second field of coplanar triangles is not how one is drawn on a lattice that carries
+// metres. **It stays because it is the DATUM**, and the next thing this shader does is displace the surface by
+// `height - sea_level`: with a bare `height` the land would stand up to 1.56 km above the sphere that the ship's
+// altitude, the framings' bands and a deck's condensation level all still measure from.
 uniform float sea_level = 0.0;
 // The field's own value times this is metres, and the metres are what the normal needs. From the plan.
 uniform float field_amplitude = 1.0;
@@ -161,15 +162,11 @@ const float SURFACE_TAU = 6.283185307179586;
 // reaches a point can be invented by its normal.
 const float MAP_MAX_TILT = 0.35;
 
-// Model space: the unit-sphere position, which **is** the direction. Captured in `vertex()` because
-// `VERTEX` inside `fragment()` is in VIEW space.
+// Model space, and **on this lattice it is METRES, not a unit sphere**: a vertex is measured from an origin near the
+// eye, so a point's direction from the body's centre is `VERTEX + patch_origin` — which is why the normal is derived
+// here rather than uploaded (a normal per vertex in every upload was 12.9-13.5 ms of `mesh_from` on the device).
+// Captured in `vertex()` because `VERTEX` inside `fragment()` is in VIEW space.
 varying vec3 unit_position;
-
-
-void vertex() {
-	unit_position = normalize(VERTEX);
-}
-
 
 // The mapping, and it must be the exact inverse of the bake's — `u` around the equator, `v` north-at-the-top.
 // A mismatch here does not look like an error, it looks like bad geography.
@@ -180,221 +177,259 @@ vec2 equirect(vec3 direction) {
 	);
 }
 
+// **The point the vertices are measured from**, in model space — the node's own origin, published with the transform.
+// The mesh carries no normal array: on a unit sphere a point's direction from the centre IS its normal, and the centre
+// is at `-patch_origin` in these coordinates, so the direction is `VERTEX + patch_origin`. That saves a normal per
+// vertex in every upload, and it cannot disagree with the geometry because it is derived from it.
+uniform vec3 patch_origin = vec3(0.0);
+
+// **The platform's `flat` mode, as one uniform rather than a second material.** `render.mode` is `wireframe`, `flat` or
+// `rendered`, and `wireframe` is a different material (unshaded lines); `flat` is this shader with every texture read
+// short-circuited to the derived albedo, which is what the ground drew before it had a surface stack.
+uniform float flat_mode : hint_range(0.0, 1.0) = 0.0;
+// The body's derived colour, which is what `flat` draws.
+//
+// **The name is `flat_mode` and not `flat`: `flat` is a GLSL interpolation qualifier** — a uniform called `flat`
+// fails to compile with "Expected an identifier", which reads as a syntax error halfway up the file.
+uniform vec3 base_color : source_color = vec3(0.5, 0.5, 0.5);
+// **The debug tint, as a multiplier** — `render.depth_tint` publishes 1.0 or 0.0, so the picture is unchanged when it is
+// off and the tree is legible when it is on. The colour itself is a vertex colour per patch (`SpacesimPatches.depth_tint`),
+// so this shader does not need to know what a depth is.
+uniform float tint_amount : hint_range(0.0, 1.0) = 0.0;
+varying vec3 patch_tint;
+
+
+void vertex() {
+	// The vertex colour, which is white on any mesh that supplies none.
+	patch_tint = COLOR.rgb;
+	// **The direction, from the lattice's own origin.** Normalising a 6,371 km vector is fine in float32: the
+	// *direction* only needs relative precision.
+	unit_position = normalize(VERTEX + patch_origin);
+}
+
 
 void fragment() {
-	vec3 up = unit_position;
-	vec2 uv = equirect(up);
+	// **`flat` is the platform's mode, and it short-circuits every texture read in this shader** — no map, no tile
+	// loop, no ladder. What it draws is the body's derived albedo, which is what the ground looked like before it had a
+	// surface stack; the debug tint is the one thing it shares with `rendered`, because the tint is about the tree.
+	if (flat_mode > 0.5) {
+		ALBEDO = base_color * mix(vec3(1.0), patch_tint, tint_amount);
+		ROUGHNESS = land_roughness;
+		SPECULAR = land_specular;
+	} else {
+		vec3 up = unit_position;
+		vec2 uv = equirect(up);
 
-	// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
-	// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
-	float height = texture(height_map, uv).r;
+		// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
+		// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
+		float height = texture(height_map, uv).r;
 
-	// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
-	// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
-	// because a pixel just inside a boundary must not jump between two rasters; with 512-texel tiles that band is
-	// ten texels, which reads as softness rather than as a seam.
-	for (int i = 0; i < tile_count; i++) {
-		vec4 tile = tile_rect[i];
-		if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
-			vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
-			vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
-				* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
-			height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
-			break;
+		// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
+		// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
+		// because a pixel just inside a boundary must not jump between two rasters; with 512-texel tiles that band is
+		// ten texels, which reads as softness rather than as a seam.
+		for (int i = 0; i < tile_count; i++) {
+			vec4 tile = tile_rect[i];
+			if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
+				vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+				vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
+					* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
+				height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
+				break;
+			}
 		}
-	}
 
-	// **Land is not under water, and below the water line there is a different shader entirely.** Evert,
-	// 2026-10-19: water and land are fundamentally different things. So the ground below sea level is culled
-	// here — which also means the eight-rung ladder only runs on the 29 % of a planet that is land — and
-	// `body_ocean.gdshader` draws the complement from the same map and the same threshold. Exactly one layer
-	// survives each pixel, so two coplanar surfaces cannot fight.
-	if (has_ocean > 0.5 && height < sea_level) {
-		discard;
-	}
+		// **The ground is drawn EVERYWHERE, including where a sea would be.** It used to be culled below `sea_level`
+		// and `body_ocean.gdshader` drew the complement, so exactly one of two coplanar layers survived each pixel.
+		// There is no second layer now, so the cull is gone with it: leaving it would punch Earth's 71 % of water
+		// out of the sphere and show the far side through it.
 
-	// The colour, from the ramp the derivation built, indexed by the same height.
-	float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
-	ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
-	// **The light has crossed the air before it got here**, and that is per channel: blue first, then green,
-	// then red — which is what makes a ridge near the terminator orange rather than white.
-	//
-	// **Split into brightness and hue, because a specular lobe is built from the LIGHT and not from `ALBEDO`.**
-	// Scaling the albedo alone left the sun's glint shining through the air at full strength — Evert, flying,
-	// 2026-10-25, on the sun's path over water at sunset: *"light reflecting off the surface passes unhindered
-	// through the cloud layer"*. So the transmittance's **brightness** goes into `AO`, which the engine applies
-	// to the whole light contribution — diffuse and specular together — and only its **hue** stays on the
-	// reflectance, at unit brightness. The product is unchanged for the diffuse:
-	// `albedo·light·AO × (t/L) × L = albedo·light·t`, exactly the per-channel transmittance.
-	//
-	// **What is left imperfect**: a scalar `AO` cannot redden, so the glint dims but keeps the sun's white. A
-	// `light()` override is the only honest fix and it costs the PBR this surface was tuned with; a dim white
-	// glint at sunset is the better trade than a blinding one.
-	vec3 air_through = star_air_transmittance(up, body_sun, air_altitude, planet_radius);
-	float air_brightness = dot(air_through, vec3(0.2126, 0.7152, 0.0722));
-	ALBEDO *= air_through / max(air_brightness, 1.0e-3);
-	AO *= air_brightness;
-	ROUGHNESS = land_roughness;
-	// **Everything that decides how much of the star reaches this point, in one slot** — and it is `AO`
-	// because the engine turns that into a *direct-light* occlusion before the light loop, which is exactly
-	// what a shadow is and needs no BRDF of our own. See `deck_shadow.gdshaderinc`.
-	//
-	// **The star's own transmission is the load-bearing one.** The body occludes itself, so a point past the
-	// geometric terminator receives no starlight whatever its shading normal says — and the relief below is a
-	// fiction that leans up to a clamped 19°, far enough to face the sun from well into the dark half. That is
-	// the artefact this factor exists to kill: thin lit outlines tracing every coastline on the night side.
-	// It is applied to the LIGHT and not to the normal on purpose — the tilt is the ground.
-	//
-	// **The footprint is measured here because it is needed by both halves.** This factor is filtered by the
-	// pixel (a penumbra narrower than one is drawn as the step it averages to), and the ladder below is
-	// band-limited by it. One measurement, one currency: the angle one pixel spans.
-	// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
-	// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
-	// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
-	// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
-	float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
-	AO = star_transmission(up, body_sun, footprint_angle);
-	AO_LIGHT_AFFECT = 1.0;
-	// **A cloud's shadow multiplies the star's rather than replacing it** — a deck cannot make the sun rise.
-	if (deck_shadow_present()) {
-		AO *= deck_shadow_factor(up, planet_radius);
-	}
-	SPECULAR = land_specular;
-	// **A specular highlight is a BEAM, and the composite's `1 - alpha` is the deck's DIFFUSE transmittance.**
-	// Right for the ground's own colour; thousands of times too much for the sun's reflection on water behind a
-	// solid deck. `deck_specular_share` is the ratio of the two, at the same `deck_tau · path` the shadow casts
-	// with, so this corrects *which* transmittance applies rather than adding a second law about the cloud.
-	if (deck_shadow_present()) {
-		SPECULAR *= deck_specular_share(
-			up, normalize(body_eye_local - up), planet_radius
-		);
-	}
-
-	// **The relief, from four taps of the same map.** The tap distance is a multiple of one texel of *that*
-	// map, because a fixed epsilon would sample detail the map in hand does not hold and read as noise on
-	// distant ground.
-	// **Three texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
-	// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
-	// plate belt and the waterline meet — the difference swings the normal tens of degrees from pixel to
-	// pixel. A wider baseline is the cheap fix; the principled one is the ladder, whose octaves are
-	// band-limited by the pixel footprint.
-	float texel = 3.0 / float(max(map_width, 1));
-	float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;
-	float toward_west = texture(height_map, uv - vec2(texel, 0.0)).r;
-	// `v` increases *southward*, so the north neighbour is the smaller `v`.
-	float toward_north = texture(height_map, uv - vec2(0.0, texel)).r;
-	float toward_south = texture(height_map, uv + vec2(0.0, texel)).r;
-
-	// Metres per texel, which is what turns a height difference into a slope. The east-west one shrinks with
-	// latitude and is floored, because the equirect map's texels collapse at the poles.
-	float metres_east = SURFACE_TAU * planet_radius * max(cos(asin(clamp(up.y, -1.0, 1.0))), 0.05) * texel;
-	float metres_north = SURFACE_PI * planet_radius * texel;
-	float slope_east = (toward_east - toward_west) * field_amplitude * relief_exaggeration
-		/ (2.0 * max(metres_east, 1.0e-3));
-	float slope_north = (toward_north - toward_south) * field_amplitude * relief_exaggeration
-		/ (2.0 * max(metres_north, 1.0e-3));
-	// **And a ceiling on the tilt — the one that matters.** The relief here is a *shading fiction*: it tilts a
-	// normal on a sphere that has no relief at all. At a slope of 1:1 (45°) that fiction outshouts the
-	// geometry, and the symptom is specific and ugly: **the coastlines light up on the night side**. The coast
-	// is the one place the field is steep, so it is the one place the tilt is large — and a large enough tilt
-	// faces the sun from well past the terminator, so a thin, dotted outline of every continent glows in the
-	// dark while the flat interiors beside it stay black. Nothing in the picture says "relief"; it says
-	// "coastlines are lit", which is what a flown screenshot showed.
-	//
-	// **Two ceilings, and they are deliberately different numbers.** This one bounds the MAP's slope: 0.35 is
-	// about 19° and already steeper than real terrain at a 19 km sampling scale. `relief_max_tilt` below bounds
-	// the ladder's fine bumps instead, which are a shading fiction at pixel scale and bear a steeper lean.
-	// Tuning the uniform does not move this one — they answer different questions, and naming the literal is
-	// what says so.
-	//
-	// **A clamp was never the guard against the dark side, and that is the correction.** It bounds how far a
-	// normal may lean and says nothing about which way the star is: 0.35 still faces the sun from 19° past the
-	// terminator, so the coastlines came back after 2026-10-19 and again on 2026-10-25. What stops them is
-	// `star_transmission()` above — the light is zero where the geometry says the star is below the horizon,
-	// whatever the normal claims. The clamps stay for their own reason (a fiction may not outshout the
-	// geometry it decorates), and the honest fix for the fiction itself is displacement — `Surface.md` S5.
-	slope_east = clamp(slope_east, -MAP_MAX_TILT, MAP_MAX_TILT);
-	slope_north = clamp(slope_north, -MAP_MAX_TILT, MAP_MAX_TILT);
-
-	// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
-	// pixel spans — measured above, where the star's own occlusion is filtered by it — so the fade needs no
-	// distance and nothing to keep in step with the camera.
-float detail = 0.0;
-	if (detail_max_rungs > 0 && detail_first_octave >= 0 && detail_base_frequency > 0.0) {
-		// **The ladder's first feature**, in radians: octave `first_octave` of the field. Everything below is the
-		// sampling law, unchanged — the count is `ceil(F / 2*fp)` so it matches the band the fade draws.
-		float first_feature = 1.0 / (detail_base_frequency * exp2(float(detail_first_octave)));
-		int rungs = int(ceil(log2(max(first_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
-		rungs = clamp(rungs, 0, detail_max_rungs);
-		if (rungs > 0) {
-			detail = surface_detail(
-				up, detail_seed, detail_base_frequency, detail_first_octave, rungs,
-				detail_gain, detail_tail_gain, detail_lacunarity, detail_bounding, footprint_angle
+		// The colour, from the ramp the derivation built, indexed by the same height.
+		float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
+		ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
+		// **The light has crossed the air before it got here**, and that is per channel: blue first, then green,
+		// then red — which is what makes a ridge near the terminator orange rather than white.
+		//
+		// **Split into brightness and hue, because a specular lobe is built from the LIGHT and not from `ALBEDO`.**
+		// Scaling the albedo alone left the sun's glint shining through the air at full strength — Evert, flying,
+		// 2026-10-25, on the sun's path over water at sunset: *"light reflecting off the surface passes unhindered
+		// through the cloud layer"*. So the transmittance's **brightness** goes into `AO`, which the engine applies
+		// to the whole light contribution — diffuse and specular together — and only its **hue** stays on the
+		// reflectance, at unit brightness. The product is unchanged for the diffuse:
+		// `albedo·light·AO × (t/L) × L = albedo·light·t`, exactly the per-channel transmittance.
+		//
+		// **What is left imperfect**: a scalar `AO` cannot redden, so the glint dims but keeps the sun's white. A
+		// `light()` override is the only honest fix and it costs the PBR this surface was tuned with; a dim white
+		// glint at sunset is the better trade than a blinding one.
+		vec3 air_through = star_air_transmittance(up, body_sun, air_altitude, planet_radius);
+		float air_brightness = dot(air_through, vec3(0.2126, 0.7152, 0.0722));
+		ALBEDO *= air_through / max(air_brightness, 1.0e-3);
+		AO *= air_brightness;
+		ROUGHNESS = land_roughness;
+		// **Everything that decides how much of the star reaches this point, in one slot** — and it is `AO`
+		// because the engine turns that into a *direct-light* occlusion before the light loop, which is exactly
+		// what a shadow is and needs no BRDF of our own. See `deck_shadow.gdshaderinc`.
+		//
+		// **The star's own transmission is the load-bearing one.** The body occludes itself, so a point past the
+		// geometric terminator receives no starlight whatever its shading normal says — and the relief below is a
+		// fiction that leans up to a clamped 19°, far enough to face the sun from well into the dark half. That is
+		// the artefact this factor exists to kill: thin lit outlines tracing every coastline on the night side.
+		// It is applied to the LIGHT and not to the normal on purpose — the tilt is the ground.
+		//
+		// **The footprint is measured here because it is needed by both halves.** This factor is filtered by the
+		// pixel (a penumbra narrower than one is drawn as the step it averages to), and the ladder below is
+		// band-limited by it. One measurement, one currency: the angle one pixel spans.
+		// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
+		// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
+		// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
+		// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
+		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+		AO = star_transmission(up, body_sun, footprint_angle);
+		AO_LIGHT_AFFECT = 1.0;
+		// **A cloud's shadow multiplies the star's rather than replacing it** — a deck cannot make the sun rise.
+		if (deck_shadow_present()) {
+			AO *= deck_shadow_factor(up, planet_radius);
+		}
+		SPECULAR = land_specular;
+		// **A specular highlight is a BEAM, and the composite's `1 - alpha` is the deck's DIFFUSE transmittance.**
+		// Right for the ground's own colour; thousands of times too much for the sun's reflection on water behind a
+		// solid deck. `deck_specular_share` is the ratio of the two, at the same `deck_tau · path` the shadow casts
+		// with, so this corrects *which* transmittance applies rather than adding a second law about the cloud.
+		if (deck_shadow_present()) {
+			SPECULAR *= deck_specular_share(
+				up, normalize(body_eye_local - up), planet_radius
 			);
 		}
-	}
 
-	// **The detail field the raster cannot hold**, from two of its texels down to two pixels — the ladder the cloud
-	// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
-	// wider than a slab's.
-	if (detail_strength > 0.0 && detail_feature > 0.0) {
-		int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
-		detail += banded_detail(
-			up, footprint_angle, detail_seed, detail_feature, detail_strength, rungs
-		);
-	}
+		// **The relief, from four taps of the same map.** The tap distance is a multiple of one texel of *that*
+		// map, because a fixed epsilon would sample detail the map in hand does not hold and read as noise on
+		// distant ground.
+		// **Three texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
+		// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
+		// plate belt and the waterline meet — the difference swings the normal tens of degrees from pixel to
+		// pixel. A wider baseline is the cheap fix; the principled one is the ladder, whose octaves are
+		// band-limited by the pixel footprint.
+		float texel = 3.0 / float(max(map_width, 1));
+		float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;
+		float toward_west = texture(height_map, uv - vec2(texel, 0.0)).r;
+		// `v` increases *southward*, so the north neighbour is the smaller `v`.
+		float toward_north = texture(height_map, uv - vec2(0.0, texel)).r;
+		float toward_south = texture(height_map, uv + vec2(0.0, texel)).r;
 
-	// A tangent basis on the sphere: east from the polar axis, north from the two.
-	// **`east` must be the direction `slope_east` was measured in, and it was not.** The slopes above come from
-	// `texture(uv + vec2(texel, 0.0))` — that is **+u**, increasing longitude — while `cross(polar, up)` is the
-	// **−u** direction: at the +X equator `cross(Y, X)` is −Z, and `equirect` puts +u on +Z. Measured against the
-	// true basis the old line was `dot(shader_east, +u) = −1.00` at every latitude, so the relief's east–west
-	// tilt was inverted and its north–south tilt was right — which is exactly an Evert report of *"shadows on the
-	// wrong side of the high areas"* that also looks half-correct, and why it does not read as a clean inversion.
-	// The two lines change together: `north` is derived from `east`, so flipping one would invert both.
-	// (`cross(up, polar)` is +u, and `cross(east, up)` is then +north.)
-	vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-	vec3 east = normalize(cross(up, polar));
-	vec3 north = cross(east, up);
-	vec3 tilted = normalize(up - east * slope_east - north * slope_north);
-	// Model space in, view space out: `NORMAL` is a view-space quantity in a spatial shader, and the
-	// fragment stage has `VIEW_MATRIX` rather than `MODELVIEW_MATRIX`. A body's node carries scale and no
-	// rotation, so its model space and world space are the same space — which is why this one matrix is
-	// enough, and the same reasoning the star's splat uses when it copies the camera basis rather than
-	// billingboarding in the material.
-	NORMAL = normalize((VIEW_MATRIX * vec4(tilted, 0.0)).xyz);
+		// Metres per texel, which is what turns a height difference into a slope. The east-west one shrinks with
+		// latitude and is floored, because the equirect map's texels collapse at the poles.
+		float metres_east = SURFACE_TAU * planet_radius * max(cos(asin(clamp(up.y, -1.0, 1.0))), 0.05) * texel;
+		float metres_north = SURFACE_PI * planet_radius * texel;
+		float slope_east = (toward_east - toward_west) * field_amplitude * relief_exaggeration
+			/ (2.0 * max(metres_east, 1.0e-3));
+		float slope_north = (toward_north - toward_south) * field_amplitude * relief_exaggeration
+			/ (2.0 * max(metres_north, 1.0e-3));
+		// **And a ceiling on the tilt — the one that matters.** The relief here is a *shading fiction*: it tilts a
+		// normal on a sphere that has no relief at all. At a slope of 1:1 (45°) that fiction outshouts the
+		// geometry, and the symptom is specific and ugly: **the coastlines light up on the night side**. The coast
+		// is the one place the field is steep, so it is the one place the tilt is large — and a large enough tilt
+		// faces the sun from well past the terminator, so a thin, dotted outline of every continent glows in the
+		// dark while the flat interiors beside it stay black. Nothing in the picture says "relief"; it says
+		// "coastlines are lit", which is what a flown screenshot showed.
+		//
+		// **Two ceilings, and they are deliberately different numbers.** This one bounds the MAP's slope: 0.35 is
+		// about 19° and already steeper than real terrain at a 19 km sampling scale. `relief_max_tilt` below bounds
+		// the ladder's fine bumps instead, which are a shading fiction at pixel scale and bear a steeper lean.
+		// Tuning the uniform does not move this one — they answer different questions, and naming the literal is
+		// what says so.
+		//
+		// **A clamp was never the guard against the dark side, and that is the correction.** It bounds how far a
+		// normal may lean and says nothing about which way the star is: 0.35 still faces the sun from 19° past the
+		// terminator, so the coastlines came back after 2026-10-19 and again on 2026-10-25. What stops them is
+		// `star_transmission()` above — the light is zero where the geometry says the star is below the horizon,
+		// whatever the normal claims. The clamps stay for their own reason (a fiction may not outshout the
+		// geometry it decorates), and the honest fix for the fiction itself is displacement — `Surface.md` S5.
+		slope_east = clamp(slope_east, -MAP_MAX_TILT, MAP_MAX_TILT);
+		slope_north = clamp(slope_north, -MAP_MAX_TILT, MAP_MAX_TILT);
 
-	// **The detail's own relief, and it costs two derivatives rather than four more noise evaluations.** A
-	// procedural height computed per pixel can be bumped by its *screen-space* gradient: the position's
-	// derivatives give a tangent frame in view space, and `dFdx/dFdy` of the detail value is its slope per
-	// pixel. That is also self-band-limiting — the derivative of a band-limited function is only meaningful at
-	// the frequency the pixel resolves — so it needs no epsilon and cannot alias.
-	//
-	// Water gets a smaller tilt than land, and land's is the one that makes a coaster-sized pixel read as
-	// terrain rather than as paint.
-	if (detail != 0.0) {
-		vec3 view_x = dFdx(VERTEX);
-		vec3 view_y = dFdy(VERTEX);
-		vec3 tangent = normalize(cross(NORMAL, view_y));
-		vec3 bitangent = normalize(cross(view_x, NORMAL));
-		// **The relief as a SLOPE — metres of height per metre of ground — and that is the whole fix for the
-		// black dots and the horizon moiré.** The screen-space derivative of the relief height, divided by the
-		// ground the pixel spans in that direction, is the surface's real gradient: it does not grow as the view
-		// grazes (both the derivative and the step grow together) and it does not shrink as the pixel grows, so a
-		// bump shades by its own steepness wherever it is seen. The envelope of a fixed near/far fade could not
-		// do this: it drew a pixel covered in many bumps as if it were one.
-		float step_east = max(length(view_x), 1.0e-4);
-		float step_north = max(length(view_y), 1.0e-4);
-		vec2 gradient = vec2(dFdx(detail) / step_east, dFdy(detail) / step_north)
-			* field_amplitude * detail_relief;
-		// A bump may lean only so far — see `relief_max_tilt`.
-		float magnitude = length(gradient);
-		if (magnitude > relief_max_tilt) {
-			gradient *= relief_max_tilt / magnitude;
+		// **The ladder, from the map's nyquist down to what this pixel can resolve.** `footprint` is the angle one
+		// pixel spans — measured above, where the star's own occlusion is filtered by it — so the fade needs no
+		// distance and nothing to keep in step with the camera.
+	float detail = 0.0;
+		if (detail_max_rungs > 0 && detail_first_octave >= 0 && detail_base_frequency > 0.0) {
+			// **The ladder's first feature**, in radians: octave `first_octave` of the field. Everything below is the
+			// sampling law, unchanged — the count is `ceil(F / 2*fp)` so it matches the band the fade draws.
+			float first_feature = 1.0 / (detail_base_frequency * exp2(float(detail_first_octave)));
+			int rungs = int(ceil(log2(max(first_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+			rungs = clamp(rungs, 0, detail_max_rungs);
+			if (rungs > 0) {
+				detail = surface_detail(
+					up, detail_seed, detail_base_frequency, detail_first_octave, rungs,
+					detail_gain, detail_tail_gain, detail_lacunarity, detail_bounding, footprint_angle
+				);
+			}
 		}
-		NORMAL = normalize(NORMAL - (tangent * gradient.x + bitangent * gradient.y));
-		// And the colour, zero-mean and small — so the band's mean cannot drift from the measured distribution
-		// it was placed with.
-		ALBEDO *= 1.0 + detail * detail_variation;
+
+		// **The detail field the raster cannot hold**, from two of its texels down to two pixels — the ladder the cloud
+		// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
+		// wider than a slab's.
+		if (detail_strength > 0.0 && detail_feature > 0.0) {
+			int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
+			detail += banded_detail(
+				up, footprint_angle, detail_seed, detail_feature, detail_strength, rungs
+			);
+		}
+
+		// A tangent basis on the sphere: east from the polar axis, north from the two.
+		// **`east` must be the direction `slope_east` was measured in, and it was not.** The slopes above come from
+		// `texture(uv + vec2(texel, 0.0))` — that is **+u**, increasing longitude — while `cross(polar, up)` is the
+		// **−u** direction: at the +X equator `cross(Y, X)` is −Z, and `equirect` puts +u on +Z. Measured against the
+		// true basis the old line was `dot(shader_east, +u) = −1.00` at every latitude, so the relief's east–west
+		// tilt was inverted and its north–south tilt was right — which is exactly an Evert report of *"shadows on the
+		// wrong side of the high areas"* that also looks half-correct, and why it does not read as a clean inversion.
+		// The two lines change together: `north` is derived from `east`, so flipping one would invert both.
+		// (`cross(up, polar)` is +u, and `cross(east, up)` is then +north.)
+		vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+		vec3 east = normalize(cross(up, polar));
+		vec3 north = cross(east, up);
+		vec3 tilted = normalize(up - east * slope_east - north * slope_north);
+		// Model space in, view space out: `NORMAL` is a view-space quantity in a spatial shader, and the
+		// fragment stage has `VIEW_MATRIX` rather than `MODELVIEW_MATRIX`. A body's node carries scale and no
+		// rotation, so its model space and world space are the same space — which is why this one matrix is
+		// enough, and the same reasoning the star's splat uses when it copies the camera basis rather than
+		// billingboarding in the material.
+		NORMAL = normalize((VIEW_MATRIX * vec4(tilted, 0.0)).xyz);
+
+		// **The detail's own relief, and it costs two derivatives rather than four more noise evaluations.** A
+		// procedural height computed per pixel can be bumped by its *screen-space* gradient: the position's
+		// derivatives give a tangent frame in view space, and `dFdx/dFdy` of the detail value is its slope per
+		// pixel. That is also self-band-limiting — the derivative of a band-limited function is only meaningful at
+		// the frequency the pixel resolves — so it needs no epsilon and cannot alias.
+		//
+		// Water gets a smaller tilt than land, and land's is the one that makes a coaster-sized pixel read as
+		// terrain rather than as paint.
+		if (detail != 0.0) {
+			vec3 view_x = dFdx(VERTEX);
+			vec3 view_y = dFdy(VERTEX);
+			vec3 tangent = normalize(cross(NORMAL, view_y));
+			vec3 bitangent = normalize(cross(view_x, NORMAL));
+			// **The relief as a SLOPE — metres of height per metre of ground — and that is the whole fix for the
+			// black dots and the horizon moiré.** The screen-space derivative of the relief height, divided by the
+			// ground the pixel spans in that direction, is the surface's real gradient: it does not grow as the view
+			// grazes (both the derivative and the step grow together) and it does not shrink as the pixel grows, so a
+			// bump shades by its own steepness wherever it is seen. The envelope of a fixed near/far fade could not
+			// do this: it drew a pixel covered in many bumps as if it were one.
+			float step_east = max(length(view_x), 1.0e-4);
+			float step_north = max(length(view_y), 1.0e-4);
+			vec2 gradient = vec2(dFdx(detail) / step_east, dFdy(detail) / step_north)
+				* field_amplitude * detail_relief;
+			// A bump may lean only so far — see `relief_max_tilt`.
+			float magnitude = length(gradient);
+			if (magnitude > relief_max_tilt) {
+				gradient *= relief_max_tilt / magnitude;
+			}
+			NORMAL = normalize(NORMAL - (tangent * gradient.x + bitangent * gradient.y));
+			// And the colour, zero-mean and small — so the band's mean cannot drift from the measured distribution
+			// it was placed with.
+			ALBEDO *= 1.0 + detail * detail_variation;
+		}
+		// **The debug tint, as a multiplier on everything above it** — one line, and the only place a depth colour can
+		// change the picture. `mix` on white is the identity, so the untinted frame is byte for byte what it was.
+		ALBEDO *= mix(vec3(1.0), patch_tint, tint_amount);
 	}
 }

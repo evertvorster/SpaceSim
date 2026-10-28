@@ -76,17 +76,11 @@ const REGISTRY := {
 	},
 	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
 	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
-	# --- how far behind the ship its own camera sits, in metres. **The ship's placeholder hull is only
-	# visible when the near plane is inside it**, and the near plane follows the frame kind (deep space is
-	# 100 m), so this is the knob that decides whether you can see the ship you are flying at all. Read at
-	# the point of use in `main.gd`.
-	"camera.ship_distance": {"default": 32.0, "scope": Scope.PLAYER, "min": 10.0, "max": 2000.0},
-	# --- whether the player's own hull is drawn. **It was session state and it reset every run**, so the
-	# key had to be pressed again each time; Evert, 2026-10-16: *"I want the 'ship' in the game to remember
-	# its last setting."* A boolean row, which is the first one here — the bounds and the coercion leave an
-	# unknown type alone, so nothing else had to change to take it. Read at the point of use in `main.gd`,
-	# never cached in a variable, so the file stays hot.
-	"ship.visible": {"default": true, "scope": Scope.PLAYER},
+	# **`camera.ship_distance` and `ship.visible` went on 2026-10-28 with the placeholder hull.** Both existed for a box
+	# that was clipped at altitude by deep space's 100 m near plane and appeared as a plate on the ground once the plane
+	# was pulled inside it — Evert: *"There is some sort of landing pad that pops up when I am close to the surface. Strip
+	# that out, and clear out the mechanism that makes it."* The camera's offset is a constant in `player_ship.gd` now,
+	# and there is no hull for a key to toggle.
 	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	# --- the air. **The march is the only thing that draws air when it is on** (`SpacesimAtmospherePass`), and a
@@ -96,7 +90,13 @@ const REGISTRY := {
 	# --- the cloud decks. **One switch for one mechanism**: it reads no other switch, which is the rule a
 	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
 	# nothing.
-	"render.cloud_decks": {"default": true, "scope": Scope.PLAYER},
+	#
+	# **Off by default since the subdivision landed (2026-10-28).** A deck is the body's own patch mesh scaled to its
+	# base radius, and its shader takes that node's model space to be a UNIT sphere (`local_position = VERTEX`, then
+	# `normalize`). The lattice carries vertices in metres from a near-eye origin now, so the deck's model space has to
+	# be re-derived before it can draw: left on, it would multiply metres by the planet radius. The clouds rung owns
+	# that adaptation.
+	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
 	},
@@ -131,6 +131,19 @@ const REGISTRY := {
 	# the cost of a planet at close range. Read per frame in `SpacesimSystemScene.update_lod` through
 	# `SpacesimSurfaceMaps.base_max_width`, never cached: a cached setting is a cold setting.
 	"surface.max_base_fraction": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.05, "max": 2.0},
+	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
+	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
+	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the
+	# real surface**: the whole-body map, its near-field tiles, the detail ladder and the relief. All three are the same
+	# mesh and the same material; the mode is a uniform and a line material, never a second geometry.
+	"render.mode": {"default": "flat", "scope": Scope.PLAYER, "choices": ["wireframe", "flat", "rendered"]},
+	# **Tint each patch by its chunk's depth**, so the tree is legible at a glance: where it refines, where it stops, and
+	# whether a boundary is a step or a crack. Off by default, so `flat` stays exactly the picture it was.
+	"render.depth_tint": {"default": false, "scope": Scope.PLAYER},
+	# **EV compensation, as a switch rather than a replacement.** On is the frame's own metre (a compute pass on the
+	# rendered pixels); off disables it, so the frame is drawn at Godot's reference — 100,000 lux on a white Lambertian
+	# reads 1.0 — and a difference in the picture is a difference in the geometry, not in the exposure.
+	"render.ev_compensation": {"default": true, "scope": Scope.PLAYER},
 	# --- the exposure's ceiling. The metre drives the frame toward middle grey, and a frame of nothing
 	# but stars has almost no mean luminance to answer with, so it drives toward the *top* of the
 	# window — which is what this caps. In STOPS above the light-adapted floor, so 32 is the whole
@@ -201,7 +214,6 @@ const REGISTRY := {
 	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.ship_toggle": {"default": "O", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding"},
 }
 

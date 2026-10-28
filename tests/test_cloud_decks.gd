@@ -172,13 +172,17 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	# than a wait. The first version of this check failed intermittently for exactly that reason.
 	for frame in 30:
 		scene.update_lod(camera, 0.016)
-		if earth.patch_triangles > 0 and earth.decks[0].node.mesh != null:
+		if earth.patch_triangles > 0:
 			break
 
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.node.visible, "the deck is visible once the frame has walked it")
-	h.check(deck.node.mesh != null and deck.node.mesh == earth.mesh.mesh,
-		"and it draws the body's own triangles, not a mesh of its own")
+	# **A deck is drawn on the body's own mesh, and it is NOT handed it yet.** The lattice carries vertices in metres
+	# from a near-eye origin, and the deck's shader reads its node's model space as a unit sphere, so sharing the mesh
+	# would multiply metres by the planet radius. `render.cloud_decks` defaults off for exactly this reason and the
+	# clouds rung owns the adaptation — so what is asserted is the state that keeps the trap visible.
+	h.check(deck.node.mesh == null,
+		"and it is NOT given the metres-based lattice, which its model space cannot read")
 	h.check(deck.published_width > 0, "with a map the size law asked for (%d wide)" % deck.published_width)
 	# **The one number that decides whether the deck is DRAWN.** `alpha = covered * veil * (1 - transmit)` with
 	# `transmit = 1/(1 + tau_full * thickness / mu)`, so `tau_full = 0` is a completely invisible deck — which is
@@ -219,7 +223,7 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	camera.queue_free()
 
 
-## **The deck's shadow reaches the ground, and the sea with it.** What can be asserted is the *contract*
+## **The deck's shadow reaches the ground.** What can be asserted is the *contract*
 ## between the deck and the surface it darkens: the same map, the same percentile, a depth, and the lever arm
 ## the offset is measured along. What cannot be asserted here is how the shadow looks — one tap of a field in
 ## the star's direction is arithmetic GLSL does, not GDScript.
@@ -259,18 +263,15 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	h.check_near(float(land.get_shader_parameter("deck_tau")), deck.shadow_tau,
 		"and the frame walk has already given the land that depth", 1.0e-9)
 
-	# Publish what a landed map would publish, and check both surfaces took it.
+	# Publish what a landed map would publish, and check the surface took it. **One surface now**: the sea's layer is
+	# gone (2026-10-28) and with it the "both layers" half of this contract — the deck's shadow reaches the ground,
+	# which is the only thing drawn below it.
 	var cover := SpacesimBodyRenderer.white_texel()
 	SpacesimBodyRenderer.apply_deck_shadow(
 		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness,
 		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 2048.0
 	)
-	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.ocean_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness,
-		deck.material.get_shader_parameter("detail_seed"), TAU * 2.0 / 2048.0
-	)
-	var sea := earth.ocean_material as ShaderMaterial
-	for pair in [[land, "land"], [sea, "sea"]]:
+	for pair in [[land, "land"]]:
 		var material: ShaderMaterial = pair[0]
 		if material == null:
 			continue
