@@ -1080,6 +1080,12 @@ func _poll_patch_builds() -> void:
 		# scale has to be 1: a basis holding 6,371,000 is what rounded every vertex at 0.76 m (see `rebase`).
 		body.mesh.position = body.patch_task_origin
 		body.mesh.scale = Vector3.ONE
+		# **The origin the vertices are measured from, for the normal.** The mesh carries no normal array: the surface's
+		# direction is `VERTEX + patch_origin`, computed in the vertex stage. Published beside the transform it belongs
+		# to, so the two cannot describe different builds.
+		(body.mesh_material as ShaderMaterial).set_shader_parameter(
+			"patch_origin", body.patch_task_origin
+		)
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
@@ -1095,7 +1101,7 @@ func _poll_patch_builds() -> void:
 		# vertex count here would now report the number of *points*, which sharing has just made several times smaller.
 		body.patch_triangles = (
 			(arrays[1] as PackedInt32Array).size() / 6 if body.patch_task_wireframe
-			else (arrays[2] as PackedInt32Array).size() / 3
+			else (arrays[1] as PackedInt32Array).size() / 3
 		)
 		# The selection moved while this was building, so the answer is already out of date.
 		if body.patch_task_chunks != body.patch_chunks:

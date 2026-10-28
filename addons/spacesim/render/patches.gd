@@ -348,8 +348,10 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 	#
 	# The dedup is exact rather than approximate: adjacent leaves compute a shared midpoint with the same two
 	# inputs, and `a + b == b + a` in floating point, so the two results are the same bits and one dictionary entry.
+	# **No normals.** On a unit sphere the position IS the direction, so the surface's normal is derivable in the vertex
+	# stage from the position and the body's origin — and a normal array is half the bytes in every upload, for something
+	# the GPU can compute in three instructions.
 	var vertices := PackedVector3Array()
-	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
 	var seen := {}   # Vector3 -> vertex index; the point IS the key
 	for leaf in leaves:
@@ -360,12 +362,9 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 			if index < 0:
 				index = vertices.size()
 				vertices.append(point)
-				# On a unit sphere the position IS the normal — the same reason the level meshes carry no
-				# extra data, and why a coarse patch still shades smoothly.
-				normals.append(point)
 				seen[point] = index
 			indices.append(index)
-	return [vertices, normals, indices]
+	return [vertices, indices]
 
 
 ## **A selection as one set of arrays** — the merged vertices and normals for the whole body, and the one
@@ -395,7 +394,7 @@ class Lattice:
 static func _lattice_block(lattice: Lattice, chunk: Array) -> PackedInt32Array:
 	var arrays := chunk_arrays(chunk)
 	var chunk_vertices: PackedVector3Array = arrays[0]
-	var chunk_indices: PackedInt32Array = arrays[2]
+	var chunk_indices: PackedInt32Array = arrays[1]
 	var block := PackedInt32Array()
 	block.resize(chunk_indices.size())
 	var map := PackedInt32Array()
@@ -439,10 +438,7 @@ static func _arrays_lattice(
 	vertices.resize(points.size())
 	for index in points.size():
 		vertices[index] = points[index] * radius - origin
-	# **The points are the normals**, on a unit sphere. Copied, not handed over: the next merge appends to the
-	# lattice's array, and a published array that something else can grow underneath is the aliasing class this project
-	# has already paid for. One memcpy of the points is cheap next to getting that wrong.
-	return [vertices, points.duplicate(), indices]
+	return [vertices, indices]
 
 
 ## **The points a chunk of `CHUNK_SUBDIVISIONS` has**, for the buffer's compaction trigger: the lattice of a triangle
@@ -478,8 +474,7 @@ static func arrays_of(
 	for chunk in chunks:
 		var arrays := chunk_arrays(chunk)
 		var chunk_vertices: PackedVector3Array = arrays[0]
-		var chunk_normals: PackedVector3Array = arrays[1]
-		var chunk_indices: PackedInt32Array = arrays[2]
+		var chunk_indices: PackedInt32Array = arrays[1]
 		var map := PackedInt32Array()
 		map.resize(chunk_vertices.size())
 		for vertex in chunk_vertices.size():
@@ -488,7 +483,6 @@ static func arrays_of(
 			if index < 0:
 				index = vertices.size()
 				vertices.append(point)
-				normals.append(chunk_normals[vertex])
 				seen[point] = index
 			map[vertex] = index
 		for index in chunk_indices:
@@ -505,9 +499,9 @@ static func arrays_of(
 		for slot in map:
 			colors[slot] = tint
 	rebase(vertices, radius, origin)
-	# **Two arrays and no colour when the tint is off**, which `mesh_from` already accepts — so the tint costs nothing
-	# until it is asked for, and a mesh with no `ARRAY_COLOR` is a mesh the renderer uploads 16 bytes a vertex lighter.
-	return [vertices, normals, indices, colors] if tinted else [vertices, normals, indices]
+	# **Vertices, indices, and a colour only when the tint asked for one** — so the tint costs nothing until it is used
+	# and `mesh_from` accepts either shape.
+	return [vertices, indices, colors] if tinted else [vertices, indices]
 
 
 ## **Put the geometry in metres, measured from `origin`** — the one thing that makes a planet-sized mesh precise.
@@ -545,7 +539,7 @@ static func lines_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Ar
 	# edges as INDICES, so the two views share one vertex buffer instead of the wireframe duplicating every point six
 	# times a triangle — it was 1.07 M vertices against 90 k, and that is exactly the 11.9x the probe measured.
 	var shared := arrays_of(chunks, radius, origin)
-	var triangles: PackedInt32Array = shared[2]
+	var triangles: PackedInt32Array = shared[1]
 	var edges := PackedInt32Array()
 	edges.resize(triangles.size() * 2)
 	var at := 0
@@ -578,13 +572,12 @@ static func mesh_from(arrays: Array) -> ArrayMesh:
 	var surface := []
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
-	surface[Mesh.ARRAY_NORMAL] = arrays[1]
-	# **`[2]` is the index array**, and it is what turns the sharing into fewer uploaded bytes rather than nicer
-	# bookkeeping. A colour, when the tint asked for one, is `[3]`.
+	# **`[1]` is the index array**, and it is what turns the sharing into fewer uploaded bytes rather than nicer
+	# bookkeeping. A colour, when the tint asked for one, is `[2]`. **No normals**: see `_chunk_arrays_for`.
+	if arrays.size() > 1:
+		surface[Mesh.ARRAY_INDEX] = arrays[1]
 	if arrays.size() > 2:
-		surface[Mesh.ARRAY_INDEX] = arrays[2]
-	if arrays.size() > 3:
-		surface[Mesh.ARRAY_COLOR] = arrays[3]
+		surface[Mesh.ARRAY_COLOR] = arrays[2]
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface)
 	return mesh

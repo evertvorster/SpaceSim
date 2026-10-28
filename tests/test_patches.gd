@@ -186,7 +186,7 @@ func _test_the_mesh(h) -> void:
 	var arrays := SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin)
 	var points: PackedVector3Array = arrays[0]
 	var expected := SpacesimPatches.triangle_count(chunks)
-	var indices: PackedInt32Array = arrays[2]
+	var indices: PackedInt32Array = arrays[1]
 	# **Shared vertices, indexed triangles** — Evert, 2026-10-28: *"all the triangles are connected together with
 	# shared vertices, there can never be a gap."* So the mesh carries one vertex per POINT and the index array is
 	# what says how they join; three vertices a triangle was the duplication this removes.
@@ -261,12 +261,12 @@ func _test_the_tint_costs_nothing_until_asked(h) -> void:
 		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
 	)
 	var plain := SpacesimPatches.arrays_of(chunks)
-	h.check(plain.size() == 3,
-		"an untinted merge is vertices, normals and indices, and no colour (%d arrays)" % plain.size())
+	h.check(plain.size() == 2,
+		"an untinted merge is vertices and indices, and no colour (%d arrays)" % plain.size())
 	var tinted := SpacesimPatches.arrays_of(chunks, 1.0, Vector3.ZERO, true)
-	h.check(tinted.size() == 4 and (tinted[3] as PackedColorArray).size() == (tinted[0] as PackedVector3Array).size(),
+	h.check(tinted.size() == 3 and (tinted[2] as PackedColorArray).size() == (tinted[0] as PackedVector3Array).size(),
 		"and a tinted one carries a colour per vertex (%d colours for %d vertices)"
-			% [(tinted[3] as PackedColorArray).size(), (tinted[0] as PackedVector3Array).size()])
+			% [(tinted[2] as PackedColorArray).size(), (tinted[0] as PackedVector3Array).size()])
 
 
 ## **The incremental merge is the same mesh as a rebuild**, which is the only thing that makes a per-body lattice safe
@@ -305,7 +305,7 @@ func _test_the_lattice_merge_matches_a_rebuild(h) -> void:
 	# actually referenced, because `vertices` is built over the whole buffer and comparing against its size would be
 	# true by construction — the exact shape this project's testing rules warn about.
 	var referenced := {}
-	for index in (warm[2] as PackedInt32Array):
+	for index in (warm[1] as PackedInt32Array):
 		referenced[index] = true
 	h.check(lattice.points.size() > referenced.size(),
 		"with the discarded chunks' points still in the lattice (%d points, %d referenced)"
@@ -327,7 +327,7 @@ func _test_the_lattice_merge_matches_a_rebuild(h) -> void:
 ## so a different winding start does not read as a different triangle.
 static func _triangle_set(arrays: Array) -> Dictionary:
 	var vertices: PackedVector3Array = arrays[0]
-	var indices: PackedInt32Array = arrays[2]
+	var indices: PackedInt32Array = arrays[1]
 	var set := {}
 	for at in range(0, indices.size(), 3):
 		var points: Array = [

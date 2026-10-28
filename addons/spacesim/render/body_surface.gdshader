@@ -29,9 +29,17 @@ varying vec3 patch_tint;
 uniform float roughness_value : hint_range(0.0, 1.0) = 0.9;
 uniform float specular_value : hint_range(0.0, 1.0) = 0.2;
 
+// **The point the vertices are measured from**, in model space — the node's own origin, published with the transform.
+// The mesh carries no normal array: on a unit sphere a point's direction from the centre IS its normal, and the centre
+// is at `-patch_origin` in these coordinates, so the direction is `VERTEX + patch_origin`. That saves a normal per
+// vertex in every upload, and it cannot disagree with the geometry because it is derived from it.
+uniform vec3 patch_origin = vec3(0.0);
+
 void vertex() {
 	// The vertex colour, which is white on any mesh that supplies none.
 	patch_tint = COLOR.rgb;
+	// Normalising a 6,371 km vector is fine in float32: the *direction* only needs relative precision.
+	NORMAL = normalize(VERTEX + patch_origin);
 }
 
 
