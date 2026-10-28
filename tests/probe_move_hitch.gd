@@ -30,6 +30,10 @@ func _ready() -> void:
 	var total := 0.0
 	var worst := 0.0
 	var worst_frame := 0
+	# **How often a mesh actually lands**, counted by the object changing — the upload is the expensive main-thread
+	# step, so the count is the thing a publish policy moves.
+	var publishes := 0
+	var last_mesh: Object = null
 	for frame in FRAMES:
 		# **Along the ground**, which is the case that drops: patches cross the apparent-size threshold continuously.
 		var ground := earth.node.global_position + up * earth.radius
@@ -39,14 +43,17 @@ func _ready() -> void:
 		var started := Time.get_ticks_usec()
 		scene.update_lod(camera)
 		var update_us := Time.get_ticks_usec() - started
+		if earth.mesh.mesh != last_mesh:
+			publishes += 1
+			last_mesh = earth.mesh.mesh
 		total += update_us
 		if update_us > worst:
 			worst = update_us
 			worst_frame = frame
 		if frame % REPORT_EVERY == 0 and frame > 0:
-			print("PROBE: frame %4d  mean update_lod %6.2f ms  worst %6.2f ms (frame %d)  %d chunks  %d tri" % [
+			print("PROBE: frame %4d  mean update_lod %6.2f ms  worst %6.2f ms (frame %d)  %d publishes  %d tri" % [
 				frame, total / REPORT_EVERY / 1000.0, worst / 1000.0, worst_frame,
-				scene.chunks(), scene.triangles()
+				publishes, scene.triangles()
 			])
 			total = 0.0
 			worst = 0.0
