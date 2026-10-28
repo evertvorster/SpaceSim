@@ -117,8 +117,8 @@ float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_de
         float at_deck = length(fwidth(p)) * (deck_height / max(planet_radius, 1.0));
         field = clamp(
             field + banded_detail(
-                crossing, at_deck, deck_detail_seed, deck_detail_feature, deck_detail_strength,
-                DETAIL_RUNGS
+                crossing, at_deck, deck_detail_feature,
+                deck_detail_seed, deck_detail_strength
             ),
             0.0, 1.0
         );

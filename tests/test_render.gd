@@ -30,6 +30,7 @@ func run(h, root: Node) -> void:
 	var luna := scene.body_by_id("moon:luna")
 
 	_test_surface_is_derived(h, earth, luna)
+	_test_the_crests_carry_the_detail(h, earth)
 	_test_the_ladder_is_only_where_there_is_a_sphere(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
@@ -60,6 +61,40 @@ func run(h, root: Node) -> void:
 ## filling the frame is the only thing that reaches it. Eighteen rungs reach ~2 m on the 720p default's 512-wide
 ## map, where a 1 km descent asks for 17; the constant it replaced, eight rungs, stopped at 271 m whatever the
 ## altitude.
+## **The ground's fine structure is the field's own crests, and the noise ladder is gone.**
+##
+## The ladder was a stand-in for structure the map could not carry, and every fault it had — flat tiles, rescaling
+## noise, banding, the carpet, black pits — was a fault of a mechanism that should not have been carrying the picture.
+## `surface_relief` continues the planet's plate partition and ridged crests below the map at the field's own weights
+## instead, so a smaller part of the planet drawn finer is *more of the same terrain*.
+##
+## Two things are pinned, and both would fail silently: **that the crests are what the ground calls**, and **that every
+## `field_*` uniform the shader declares is published** — a `get_shader_parameter` on a name nobody wrote returns
+## `null`, and `float(null)` is an error thrown once per body per build, which reads as an unrelated crash.
+func _test_the_crests_carry_the_detail(h, earth: SpacesimSceneBody) -> void:
+	var code := FileAccess.get_file_as_string("res://addons/spacesim/render/body_surface.gdshader")
+	h.check(code.contains("surface_relief("),
+		"the ground continues the field's own crests below the map")
+	h.check(not code.contains("banded_detail("),
+		"and carries no noise ladder — it was a stand-in, not the texture")
+	var material := earth.mesh_material as ShaderMaterial
+	h.check(material != null, "Earth has a surface material to read")
+	if material == null:
+		return
+	var pattern := RegEx.new()
+	pattern.compile("uniform\\s+(?:float|int)\\s+(field_\\w+)")
+	var found := pattern.search_all(code)
+	var missing: Array[String] = []
+	for match in found:
+		var name := match.get_string(1)
+		if material.get_shader_parameter(name) == null:
+			missing.append(name)
+	h.check(missing.is_empty(),
+		"every field_* uniform the shader reads is published (%d of %d)" % [
+			found.size() - missing.size(), found.size()
+		] + ("" if missing.is_empty() else " — missing: " + ", ".join(missing)))
+
+
 func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemScene) -> void:
 	var earth := scene.body_by_id("planet:earth")
 	var jupiter := scene.body_by_id("planet:jupiter")
@@ -1124,7 +1159,6 @@ func _test_shader_defaults_are_the_hosts(h) -> void:
 	var surface := "res://addons/spacesim/render/body_surface.gdshader"
 	var pairs := [
 		[surface, "detail_variation", SpacesimBodyRenderer.DETAIL_VARIATION],
-		[surface, "detail_strength", SpacesimBodyRenderer.SURFACE_DETAIL_STRENGTH],
 		[surface, "detail_relief", SpacesimBodyRenderer.DETAIL_RELIEF],
 		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
 		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],

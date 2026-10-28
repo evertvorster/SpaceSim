@@ -129,23 +129,30 @@ uniform float sea_level = 0.0;
 // The field's own value times this is metres, and the metres are what the normal needs. From the plan.
 uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
+// **The field's own numbers, so the shader can continue the planet's mechanisms below the map.** These are the plan's
+// values, published from the same `SpacesimSurfaceField.plan()` the bake compiles — one field, two compilers — and
+// only the fields `surface_relief` reads are here: the plate partition's phase and belt width, the ridge spectrum,
+// the warp that makes the plate cells irregular, and the FBM's own gain and lacunarity.
+uniform float field_plate_phase = 0.0;
+uniform float field_belt_width = 0.08;
+uniform float field_ridge_frequency = 11.0;
+uniform int field_ridge_octaves = 4;
+uniform float field_ridge_strength = 0.5;
+uniform float field_gain = 0.5;
+uniform float field_lacunarity = 2.0;
+uniform float field_warp_frequency = 3.0;
+uniform int field_warp_octaves = 3;
+uniform float field_warp_strength = 0.35;
+uniform float field_warp_bounding = 0.5714;
+// How many octaves below the map the crests may be continued. A ceiling, not a count that runs: each octave fades out
+// where a pixel can no longer resolve it, so a distant body pays for two and a close one for ten.
+uniform int field_octaves = 14;
 // How much the normal is tilted by the gradient — see the header. The one number here that is a look rather
 // than a derivation, and it is a *uniform* so the host owns it. The default is the host's, for the reason
 // above: 12.0 was 2.4x what anything publishes.
 uniform float relief_exaggeration = 5.0;
 // The detail map's width, which is what turns a texel into an angle.
 uniform int map_width = 1024;
-// **The banded detail ladder's two numbers, and this is what the surface was missing.**
-//
-// `detail_feature` is **two texels of the raster in hand**, in radians of sphere-arc — where the map stops and the
-// ladder starts. `detail_strength` is how loud it is, in the field's own units.
-//
-// The old ladder was a *faithful continuation* of the field's own spectrum, so its first rung sat at
-// `bounding · gain^first_octave` = 0.2 % of the field for a 7680-wide map: drawn, and invisible, which is why a tile
-// came out as a perfectly smooth square. **This one is its own unit** — six-plus rungs normalised by their own sum —
-// so the first rung is half of it and the last is still visible. Same mechanism the cloud deck has had all along.
-uniform float detail_feature = 0.0;
-uniform float detail_strength : hint_range(0.0, 1.0) = 0.15;
 
 
 // The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
@@ -365,15 +372,29 @@ void fragment() {
 			}
 		}
 
-		// **The detail field the raster cannot hold**, from two of its texels down to two pixels — the ladder the cloud
-		// deck draws, with a rung count the pixel decides because the ground's gap between raster and pixel is much
-		// wider than a slab's.
-		if (detail_strength > 0.0 && detail_feature > 0.0) {
-			int rungs = int(ceil(log2(max(detail_feature / max(2.0 * footprint_angle, 1.0e-9), 1.0))));
-			detail += banded_detail(
-				up, footprint_angle, detail_seed, detail_feature, detail_strength, rungs
-			);
-		}
+		// **The crests, continued — the field's own mechanisms, not noise.** `surface_relief` re-evaluates the plate
+		// partition and the ridged crests for the octaves the map could not carry, at the field's own weights, so a
+		// smaller part of the planet drawn at higher resolution is *more of the same terrain*.
+		SurfacePlan relief_plan;
+		relief_plan.seed = detail_seed;
+		relief_plan.plate_phase = field_plate_phase;
+		relief_plan.belt_width = field_belt_width;
+		relief_plan.ridge_frequency = field_ridge_frequency;
+		relief_plan.ridge_octaves = field_ridge_octaves;
+		relief_plan.ridge_strength = field_ridge_strength;
+		relief_plan.gain = field_gain;
+		relief_plan.lacunarity = field_lacunarity;
+		relief_plan.warp_frequency = field_warp_frequency;
+		relief_plan.warp_octaves = field_warp_octaves;
+		relief_plan.warp_strength = field_warp_strength;
+		relief_plan.warp_bounding = field_warp_bounding;
+		detail += surface_relief(
+			up, relief_plan, field_ridge_octaves, field_octaves, footprint_angle
+		);
+		// **No noise ladder.** It was meant as the garnish, and it was not: with the crests continued below the map
+		// (`surface_relief` above), its fbm rode on real structure at a strength that turned every slope it tilted into a
+		// black pit, because its own gradient is the steepest thing in this shader. **Deleted rather than turned down** —
+		// three of its four faults existed only while it was carrying the texture, and now it is not carrying anything.
 
 		// A tangent basis on the sphere: east from the polar axis, north from the two.
 		// **`east` must be the direction `slope_east` was measured in, and it was not.** The slopes above come from
