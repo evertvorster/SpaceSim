@@ -186,6 +186,75 @@ vec2 equirect(vec3 direction) {
 	);
 }
 
+// ===== THE HEIGHT, RECONSTRUCTED RATHER THAN INTERPOLATED =========================================
+//
+// **A coastline is a LEVEL SET of the height field, so it is exactly as smooth as the reconstruction of that
+// field — and bilinear is not smooth.** Bilinear filtering is C⁰: its gradient jumps at every texel boundary, so a
+// level set is a polyline with a corner at each of them. That is the staircase Evert photographed at 4K on 2026-10-28
+// — at 212 km a tile's texel is 2.4 km against a 112 m pixel, so the steps measured one texel wide and read as a
+// grid rather than as a coast.
+//
+// **The field underneath is smooth; the faceting was the filter's.** So the fix is not detail — no octave count can
+// remove a corner — and it is not more texels either, which would only make the corners smaller. It is to
+// *reconstruct* the stored samples with a kernel that is at least C¹: Catmull-Rom, four taps an axis, 16 a pixel.
+//
+// **Why this is the right shape for the mesh too.** A displaced vertex is a height read at a point, so the surface
+// the vertices build has exactly the continuity of this reconstruction. C¹ is the property that matters: a C⁰ height
+// displaced into geometry is a terrain of flat facets with creases along the raster's own grid, which is the same
+// fault one stage further down. `Surface LOD Fixes` §9b records the artefact; this is the reconstruction it wanted.
+//
+// **It costs texture fetches and no arithmetic worth naming**, and minification is still the mip pyramid's business:
+// the taps are filtered, so a distant body reads its coarse mip and pays four times one fetch.
+vec4 catmull_rom_weights(float t) {
+	// `a = -0.5`, which is the standard Catmull-Rom tension: no overshoot beyond a texel's own swing on smooth data,
+	// and the sum is exactly 1 so a constant field reconstructs as that constant.
+	float t2 = t * t;
+	float t3 = t2 * t;
+	return vec4(
+		-0.5 * t3 + t2 - 0.5 * t,
+		1.5 * t3 - 2.5 * t2 + 1.0,
+		-1.5 * t3 + 2.0 * t2 + 0.5 * t,
+		0.5 * t3 - 0.5 * t2
+	);
+}
+
+
+// **One 2-D Catmull-Rom sample of a height raster.** `texel` is the raster's own texel in uv — `(1/w, 2/w)` for a
+// 2:1 equirect and `span/tile_texels` for a tile — because a kernel that assumed a square texel would reconstruct a
+// different surface on a 2:1 map than it does on a square tile.
+float height_smooth(sampler2D map, vec2 uv, vec2 texel) {
+	vec2 pos = uv / texel - 0.5;
+	vec2 base = floor(pos);
+	vec4 weights_x = catmull_rom_weights(pos.x - base.x);
+	vec4 weights_y = catmull_rom_weights(pos.y - base.y);
+	float total = 0.0;
+	for (int row = 0; row < 4; row++) {
+		for (int column = 0; column < 4; column++) {
+			vec2 at = (base + vec2(float(column) - 1.0, float(row) - 1.0) + 0.5) * texel;
+			total += texture(map, at).r * weights_x[column] * weights_y[row];
+		}
+	}
+	return total;
+}
+
+
+// The same reconstruction for a tile in the near field's array, where the rectangle is the tile's own uv box.
+float tile_height_smooth(sampler2DArray map, vec2 local, vec2 texel, float layer) {
+	vec2 pos = local / texel - 0.5;
+	vec2 base = floor(pos);
+	vec4 weights_x = catmull_rom_weights(pos.x - base.x);
+	vec4 weights_y = catmull_rom_weights(pos.y - base.y);
+	float total = 0.0;
+	for (int row = 0; row < 4; row++) {
+		for (int column = 0; column < 4; column++) {
+			vec2 at = (base + vec2(float(column) - 1.0, float(row) - 1.0) + 0.5) * texel;
+			total += texture(map, vec3(at, layer)).r * weights_x[column] * weights_y[row];
+		}
+	}
+	return total;
+}
+
+
 // **The point the vertices are measured from**, in model space — the node's own origin, published with the transform.
 // The mesh carries no normal array: on a unit sphere a point's direction from the centre IS its normal, and the centre
 // is at `-patch_origin` in these coordinates, so the direction is `VERTEX + patch_origin`. That saves a normal per
@@ -239,16 +308,23 @@ void fragment() {
 
 		// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
 		// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
-		float height = texture(height_map, uv).r;
 		// **The raster in hand's own texel size, in radians of sphere-arc.** The whole-body map's unless a tile covers
-		// this pixel: the near field is up to a hundred times finer than the map, and the sub-texel bound below has to
-		// be measured against whichever raster actually drew the height — a constant here would bound the wrong thing.
+		// this pixel: the near field is up to a hundred times finer than the map, and both the reconstruction and the
+		// sub-texel bound below have to be measured against whichever raster actually drew the height.
 		float raster_texel = SURFACE_TAU / float(max(map_width, 1));
+		// **Reconstructed, not interpolated** — see `height_smooth`. The map is 2:1, so its texel is `(1/w, 2/w)`.
+		vec2 map_texel_uv = vec2(1.0, 2.0) / float(max(map_width, 1));
+		float height = 0.0;
+		bool covered = false;
 
 		// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
 		// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
 		// because a pixel just inside a boundary must not jump between two rasters; with 512-texel tiles that band is
 		// ten texels, which reads as softness rather than as a seam.
+		//
+		// **The map is fetched only where it is actually drawn** — inside the cross-fade band and beyond the cap. Its
+		// reconstruction is sixteen taps, and at 212 km every pixel of the frame is inside a tile, so paying for it
+		// everywhere would be paying for a texture that is never read.
 		for (int i = 0; i < tile_count; i++) {
 			vec4 tile = tile_rect[i];
 			if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
@@ -257,9 +333,22 @@ void fragment() {
 				vec2 local = (uv - tile.xy) / max(span, vec2(1.0e-6));
 				vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
 					* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
-				height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
+				vec2 tile_texel_uv = vec2(1.0 / float(max(tile_texels, 1)));
+				float tile_height = tile_height_smooth(
+					tile_map, local, tile_texel_uv, float(tile_layer[i])
+				);
+				float fade = edge.x * edge.y;
+				if (fade > 0.999) {
+					height = tile_height;
+				} else {
+					height = mix(height_smooth(height_map, uv, map_texel_uv), tile_height, fade);
+				}
+				covered = true;
 				break;
 			}
+		}
+		if (!covered) {
+			height = height_smooth(height_map, uv, map_texel_uv);
 		}
 
 		// **The ground is drawn EVERYWHERE, including where a sea would be.** It used to be culled below `sea_level`

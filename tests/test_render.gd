@@ -88,6 +88,17 @@ func _test_the_crests_carry_the_detail(h, earth: SpacesimSceneBody) -> void:
 	)
 	h.check(bound.contains("float surface_relief("),
 		"with the crests available for the relief below the map")
+	# **The height is RECONSTRUCTED, not left to the hardware's bilinear filter.** A coastline is a level set of the
+	# height, so it is exactly as smooth as the reconstruction: bilinear is C⁰, its gradient jumps at every texel
+	# boundary, and the level set is a polyline with a corner at each one — which is the staircase Evert photographed at
+	# 4K on 2026-10-28, one texel wide and reading as a grid. **Checked as an absence**, because a raster sampled the
+	# old way is invisible: it looks like a slightly coarser coast, not like a missing function.
+	h.check(code.contains("float height_smooth(") and code.contains("float tile_height_smooth("),
+		"the height is reconstructed with a C1 kernel, for the map and for a tile")
+	h.check(not code.contains("texture(height_map, uv).r"),
+		"and no raster is point-sampled for the height any more")
+	h.check(not code.contains("texture(tile_map, vec3(local,"),
+		"nor is a tile")
 	var material := earth.mesh_material as ShaderMaterial
 	h.check(material != null, "Earth has a surface material to read")
 	if material == null:
