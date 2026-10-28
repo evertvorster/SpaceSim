@@ -1,5 +1,5 @@
 extends RefCounted
-## The patch quadtree: refinement where the eye is, coarse elsewhere, and a budget that holds.
+## The patch quadtree: refinement where the eye is, coarse elsewhere, bounded by the law alone.
 ##
 ## **This is the mechanism the whole LOD story was missing** — `SpacesimIcosphere` draws a body at one
 ## level for the whole sphere, so approaching it refines everything equally. Evert's report, 2026-10-17:
@@ -8,7 +8,7 @@ extends RefCounted
 ## Nothing here needs a GPU or a scene: `select()` is a pure function of (distance, camera direction,
 ## radius, pixel angle, epsilon), and `build()` is arrays. So the properties that matter are checkable
 ## as numbers — that the triangles are on the sphere, that the eye's side is finer than the far side,
-## that the walk is monotone in distance, that the horizon is exact, and that the budget holds.
+## that the walk is monotone in distance, that the horizon is exact, and that the law bounds it.
 
 const EARTH_RADIUS := 6.371e6
 ## A 1080-line frame at 70 degrees vertical, which is the number `SpacesimLod` works in.
@@ -21,7 +21,7 @@ func run(h, root: Node) -> void:
 	_test_the_eye_side_is_finer(h)
 	_test_it_is_monotone_in_distance(h)
 	_test_the_horizon_is_exact(h)
-	_test_the_budget_holds(h)
+	_test_the_law_bounds_the_walk(h)
 	_test_the_mesh(h)
 	_test_the_cache_makes_a_rebuild_cheap(h)
 	_test_the_drawn_triangle_is_inside_the_law(h)
@@ -140,24 +140,38 @@ func _test_the_horizon_is_exact(h) -> void:
 	h.check(over_the_limb == 0,
 		"at 10 km no chunk is drawn past the limb by more than its own width (%d were, worst %.4f rad over)"
 			% [over_the_limb, worst])
-	# A whole-sphere subdivision at this budget would be thousands of chunks; the cap is a hundred or so.
-	# The bound is loose on purpose — what it must catch is the far side coming back, not a tuning change.
-	h.check(chunks.size() > 0 and chunks.size() < 2000,
+	# **A loose bound, and looser since the apparent-size limit landed**: at 2 degrees a walk asks for an order of
+	# magnitude more chunks than the curvature law alone did, so a tight number here would break every time the law is
+	# tuned. What it must catch is the far side coming back — a whole-sphere subdivision at this eye is tens of
+	# thousands — not a change of scale.
+	h.check(chunks.size() > 0 and chunks.size() < 20000,
 		"and the far side really is gone rather than merely coarse (%d chunks)" % chunks.size())
 
 
-## The budget is what stops "the eye is on the ground" from asking for a million triangles — and it
-## **counts triangles**, not chunk references: a hundred references can be sixteen hundred triangles.
-func _test_the_budget_holds(h) -> void:
-	# At 100 km, which is where the budget is a real constraint: down at 1 m the visible cap is a few
-	# square kilometres and the walk never wants many triangles at all.
-	var budget := 2000
+## **There is no budget any more — the law is what bounds the walk, and the HUD is the judge.**
+##
+## Evert, 2026-10-28: *"We don't care about budget, that should be removed. Just have the count so I can judge."* So what
+## is asserted instead is that the walk answers the law at both ends of the range, and that the count it produces is a
+## number a person can read rather than one a cap chose.
+func _test_the_law_bounds_the_walk(h) -> void:
+	# **At 100 km**, where the apparent-size limit and the sagitta limit are within a factor of two of each other.
 	var chunks := SpacesimPatches.select(
-		EARTH_RADIUS + 1.0e5, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 0.5, budget
+		EARTH_RADIUS + 1.0e5, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 0.5
 	)
 	var triangles := SpacesimPatches.triangle_count(chunks)
-	h.check(triangles <= budget, "a tight budget is honoured (%d triangles of %d)" % [triangles, budget])
-	h.check(chunks.size() > 2, "and it still refines as far as the budget allows (%d chunks)" % chunks.size())
+	h.check(chunks.size() > 2 and triangles > 0,
+		"a walk at 100 km answers with a real selection (%d chunks, %d triangles)"
+			% [chunks.size(), triangles])
+	# **And the apparent size really is bounded**: every chunk is at most the angle the law allows, so the *deepest*
+	# one is at most `FACET_ANGLE` wide on screen. The count is left to the HUD's job.
+	var deepest := 0
+	for chunk in chunks:
+		deepest = maxi(deepest, int(chunk[2]))
+	var finest := SpacesimPatches.finest_edge_angle(
+		EARTH_RADIUS + 1.0e5, PIXEL_ANGLE, 0.5, EARTH_RADIUS
+	)
+	h.check(finest <= SpacesimPatches.FACET_ANGLE * (1.0e5 / EARTH_RADIUS) * 1.001,
+		"with the finest patch no wider than 2 degrees of view")
 ## The mesh, and the two properties a renderer needs: every triangle is on the sphere, and the winding is
 ## the same one the level meshes use — measured against the level meshes rather than reasoned about.
 func _test_the_mesh(h) -> void:

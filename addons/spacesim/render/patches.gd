@@ -56,6 +56,22 @@ extends RefCounted
 ## (a 1.3e-4 rad facet) — the budget is what actually stops it.
 const MAX_DEPTH := 20
 
+## **The apparent size a facet may be, in radians — and it is not a setting, because it is the subdivision.**
+##
+## The sagitta law (`lod.error_budget`) bounds a facet's *curvature*, which near the ground is an error the eye cannot
+## resolve: at 1 km altitude and ε 0.5 it permits a facet 5.8 km across, which is ~17,700 pixels of screen. What a person
+## sees instead is the facet's **apparent size**, so the walk also requires a facet to subtend no more than this — 2
+## degrees, which on a 1080p 70° view is about 27 pixels. Evert, 2026-10-28: *"I just want the subdivision to be based on
+## camera view angle… the visible triangles are roughly the same size, ie: heavily subdivided close to the camera so they
+## have the same apparent size as something far away."*
+##
+## **An angle and not a pixel count**, so it means the same thing on any display: a facet is 2° of view, and a denser
+## screen simply draws that facet with more pixels. **The walk takes the smaller of this and the sagitta limit**, so this
+## binds close in — its limit is linear in the distance where the sagitta's is a square root — and the sagitta still
+## bounds the silhouette from far out. That is what keeps a distant body's shape while the near ground is subdivided
+## hard enough to look like ground.
+const FACET_ANGLE := 0.03490658503988659  ## 2 degrees.
+
 ## **How many times a chunk is subdivided internally**, and the one number that trades walk cost against
 ## over-refinement. `s = 2` was measured, not chosen: the walk is then 16x smaller than the leaf walk
 ## (already 5–30x on the clock) and each further step would double the over-refinement.
@@ -64,14 +80,14 @@ const CHUNK_SUBDIVISIONS := 2
 ## Triangles in one chunk — `4^s`, and the unit the budget counts in.
 const CHUNK_TRIANGLES := 1 << (2 * CHUNK_SUBDIVISIONS)
 
-## **Chunks the cache may hold before it is dropped wholesale.** A cap rather than an LRU, because a chunk
-## is cheap to rebuild and the point of the cache is to be off the frame's critical path: `4096` chunks is
-## 65k triangles of shared geometry, and a long flight visits many.
-const CHUNK_CACHE_LIMIT := 4096
-
-## Triangles of geometry the mesh may carry — the thing that stops "the eye is on the ground" from
-## asking for a million. A chunk contributes `CHUNK_TRIANGLES`.
-const TRIANGLE_BUDGET := 60000
+## **Chunks the cache may hold before it is dropped wholesale.** A cap rather than an LRU, because a chunk is cheap
+## to rebuild and the point of the cache is to be off the frame's critical path.
+##
+## **It must hold one whole selection or it is not a cache.** At 2 degrees of apparent size a walk from 1 km asks for
+## about **ten thousand chunks**, so a 4,096-entry cap was cleared wholesale on *every* walk — the geometry rebuilt from
+## scratch each time the eye moved a tenth, which is the opposite of what the cache is for. 16,384 chunks is 262k
+## triangles of shared geometry, about 19 MB, and it covers the largest selection the law produces with headroom.
+const CHUNK_CACHE_LIMIT := 16384
 
 ## The cosines and vertices of the twenty root faces, from the icosphere's own construction — so the
 ## roots are the same triangles at the same places, and a patch cannot drift from the level meshes.
@@ -103,7 +119,7 @@ static var _chunk_cache_lock := Mutex.new()
 ## sphere, and the frame's own frustum culls the rest for free once they are drawn.
 static func select(
 	distance: float, camera_direction: Vector3, radius: float,
-	pixel_angle: float, epsilon: float, budget: int = TRIANGLE_BUDGET
+	pixel_angle: float, epsilon: float
 ) -> Array:
 	var chunks: Array = []
 	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or epsilon <= 0.0:
@@ -167,11 +183,19 @@ static func select(
 			minf((camera - b * radius).length_squared(), (camera - c * radius).length_squared())
 		)
 		var to_patch := maxf(sqrt(nearest_corner), altitude)
-		var minimum_edge_squared := loosen * _edge_limit_squared(to_patch, pixel_angle, epsilon, radius)
-		# **The budget counts TRIANGLES, not entries.** A selection is a hundred references, so comparing the
-		# entry count against a triangle budget would let a walk through at 16x its cost.
-		if centre.dot(camera_direction) < cos(minf(horizon + extent, PI)) \
-				or (chunks.size() + stack.size()) * CHUNK_TRIANGLES >= budget:
+		# **The smaller of two limits: apparent size and curvature.** A facet may not subtend more than `FACET_ANGLE`
+		# whatever its distance — that limit is linear in `d`, so it binds close in — and it may not sag more than ε
+		# pixels — that one is a square root, so it binds far out and is what holds the silhouette from orbit.
+		var apparent := FACET_ANGLE * to_patch / radius
+		var minimum_edge_squared := loosen * minf(
+			_edge_limit_squared(to_patch, pixel_angle, epsilon, radius),
+			apparent * apparent
+		)
+		# **A triangle budget is gone (2026-10-28).** It rationed the walk by a constant — the count knew nothing about
+		# what was on screen — and Evert's instruction is *"we don't care about budget, that should be removed. Just have
+		# the count so I can judge."* So the walk refines to its law and the HUD reports what that costs. What still
+		# bounds it is the law itself and `MAX_DEPTH`, which is a geometric ceiling rather than a ration.
+		if centre.dot(camera_direction) < cos(minf(horizon + extent, PI)):
 			continue
 		if int(patch[3]) >= depth_ceiling or edge_squared <= minimum_edge_squared:
 			chunks.append([int(patch[4]), String(patch[5]), int(patch[3])])
@@ -219,7 +243,11 @@ static func walk_is_due(
 static func finest_edge_angle(
 	distance: float, pixel_angle: float, epsilon: float, radius: float
 ) -> float:
-	return sqrt(_edge_limit_squared(maxf(distance - radius, ALTITUDE_FLOOR), pixel_angle, epsilon, radius))
+	var to_patch := maxf(distance - radius, ALTITUDE_FLOOR)
+	# **The same minimum the walk takes**, or the gate's own idea of the finest patch disagrees with the walk's and the
+	# eye has to move further than it should before the selection is rebuilt.
+	var apparent := FACET_ANGLE * to_patch / radius
+	return sqrt(minf(_edge_limit_squared(to_patch, pixel_angle, epsilon, radius), apparent * apparent))
 
 
 ## **The cached geometry for one chunk**: `[vertices, normals]` on the **unit sphere**, so one cached
