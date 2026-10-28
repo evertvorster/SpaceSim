@@ -1071,7 +1071,7 @@ func update_lod(camera: Camera3D, delta: float = 0.0, eye: Variant = null) -> vo
 	# an instrument's independent count then cannot disagree about a body that landed or was culled
 	# mid-frame.
 	_triangles = _count_drawn_triangles()
-	_publish_depth_tint()
+	_publish_surface_flags()
 
 
 ## **What is actually drawn this frame**, summed over the bodies: a point of light where a body is below
@@ -1099,7 +1099,7 @@ func _count_drawn_triangles() -> int:
 ## **The debug tint and the `flat` mode, published only when one of them changes.** A uniform write per body per frame
 ## would be affordable and pointless; a value cached at startup would stop the setting being hot, which is the project's
 ## trap.
-func _publish_depth_tint() -> void:
+func _publish_surface_flags() -> void:
 	var wanted := bool(SpacesimSettings.get_value("render.depth_tint"))
 	if wanted == _depth_tint and flat_shaded == _flat_shaded:
 		return
