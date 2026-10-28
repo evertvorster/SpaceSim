@@ -848,7 +848,9 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		camera.get_global_transform_interpolated().origin if not (eye is Vector3) else eye
 	)
 	# **Publish whatever landed since the last frame**, before any of it is counted: a rebuild is a mesh
-	# that appears a frame or two after it was asked for, never a stall in the frame that asked.
+	# that appears a frame or two after it was asked for, never a stall in the frame that asked. **Walks first**,
+	# so a selection that lands this frame asks its rebuild in this frame rather than the next.
+	_poll_walks()
 	_poll_patch_builds()
 	for body in bodies:
 		if body.node == null:
@@ -885,25 +887,10 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
 			pixel, epsilon, body.radius, body.patch_walk_epsilon
 		) or wireframe != body.patch_walk_wireframe or _depth_tint != body.patch_walk_tinted:
-			body.patch_chunks = SpacesimPatches.select(
-				distance, to_eye, body.radius, pixel, epsilon
-			)
-			# **A selection of nothing has a reason, and it is worth printing once.** `select()` refuses a
-			# sphere it cannot see round — the eye at or below the surface, or a pixel angle or budget of
-			# zero — and an empty answer looks exactly like a body that was never walked.
-			if body.patch_chunks.is_empty() and not body.patch_empty_reported:
-				body.patch_empty_reported = true
-				print(
-					"PATCH: %s has no patches — distance %.1f m, radius %.1f m, altitude %.1f m, "
-					% [body.name, distance, body.radius, distance - body.radius]
-					+ "pixel %.6f, epsilon %.2f" % [pixel, epsilon]
-				)
-			body.patch_walk_distance = distance
-			body.patch_walk_direction = to_eye
-			body.patch_walk_epsilon = epsilon
-			body.patch_walk_wireframe = wireframe
-			body.patch_walk_tinted = _depth_tint
-			_request_patch_build(body, wireframe)
+			# **The walk goes to a pool thread.** It measured 11-17 ms of pure recursion on the main thread at the
+			# selections a low flight asks for — a whole frame, on every tangential frame, because that is exactly
+			# when patches cross the threshold. Evert, 2026-10-28: *"flying along it there is a drop in performance."*
+			_request_walk(body, distance, to_eye, pixel, epsilon, wireframe)
 	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
 	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
 	# different scene. Drawing it with the geometry selected for the previous one is wrong however it looks,
@@ -959,6 +946,63 @@ func _publish_depth_tint() -> void:
 	# here.** Requesting a build in this function left a pool task holding the scene after teardown, which segfaults at
 	# exit (measured: 997 checks passed, then exit 139); the gate is drained by `await_patch_builds` on `tree_exiting`,
 	# so that is where a rebuild belongs.
+
+
+## **Ask for a walk, and let the pool do it.** The inputs are captured into the task's arguments rather than read off
+## the body, because a worker that reads a member the main thread reassigns is the use-after-free this project already
+## paid for. The bookkeeping is stamped *here*, when the walk actually starts, so the gate closes against the numbers
+## that walk ran with; a request arriving while one is in flight returns without stamping, and the gate asks again next
+## frame — cheaper than a queue and correct without one.
+##
+## The previous selection stays drawn until the new one lands, because `_poll_patch_builds` keeps the mesh it already
+## has. So a walk that takes a frame lags by a coarser frame, never by a hole: the LOD rule's publish-over.
+func _request_walk(
+	body: SpacesimSceneBody, distance: float, direction: Vector3, pixel: float, epsilon: float,
+	wireframe: bool
+) -> void:
+	if body.patch_walk_task != -1:
+		return
+	body.patch_walk_distance = distance
+	body.patch_walk_direction = direction
+	body.patch_walk_epsilon = epsilon
+	body.patch_walk_wireframe = wireframe
+	body.patch_walk_tinted = _depth_tint
+	body.patch_walk_task = WorkerThreadPool.add_task(
+		Callable(self, "_walk_patches").bind(
+			body, distance, direction, body.radius, pixel, epsilon
+		)
+	)
+
+
+## **Runs on a worker thread.** Pure arithmetic over immutable data — no node, no `RenderingServer`, no settings — and
+## it writes exactly one field.
+func _walk_patches(
+	body: SpacesimSceneBody, distance: float, direction: Vector3, radius: float, pixel: float,
+	epsilon: float
+) -> void:
+	body.patch_walk_chunks = SpacesimPatches.select(distance, direction, radius, pixel, epsilon)
+
+
+## **The main thread's half of a walk**, once a frame: publish the selection and ask its rebuild in the same frame.
+func _poll_walks() -> void:
+	for body in bodies:
+		if body.patch_walk_task == -1:
+			continue
+		# **Asked before waiting**, because waiting consumes the task — the same trap as the build poll below.
+		if not WorkerThreadPool.is_task_completed(body.patch_walk_task):
+			continue
+		WorkerThreadPool.wait_for_task_completion(body.patch_walk_task)
+		body.patch_walk_task = -1
+		body.patch_chunks = body.patch_walk_chunks
+		# **A selection of nothing has a reason, and it is worth printing once.** `select()` refuses a sphere it
+		# cannot see round — the eye at or below the surface, or a pixel angle or budget of zero — and an empty
+		# answer looks exactly like a body that was never walked.
+		if body.patch_chunks.is_empty() and not body.patch_empty_reported:
+			body.patch_empty_reported = true
+			print("PATCH: %s has no patches — the walk answered empty at %.1f m" % [
+				body.name, body.patch_walk_distance
+			])
+		_request_patch_build(body, body.patch_walk_wireframe)
 
 
 ## **Ask for a rebuild, without doing it here.** The merged chunk arrays are the expensive half of a
@@ -1067,10 +1111,18 @@ func await_patch_builds(rounds: int = 8) -> void:
 	for _round in rounds:
 		var waiting := false
 		for body in bodies:
+			# **Both halves**: a walk that outlives the join would publish a selection after the caller believed the
+			# scene settled, which reads as a mesh one selection behind.
+			while body.patch_walk_task != -1 \
+					and not WorkerThreadPool.is_task_completed(body.patch_walk_task):
+				OS.delay_usec(100)
+			if body.patch_walk_task != -1:
+				waiting = true
 			while body.patch_task != -1 and not WorkerThreadPool.is_task_completed(body.patch_task):
 				OS.delay_usec(100)
 			if body.patch_task != -1:
 				waiting = true
+		_poll_walks()
 		_poll_patch_builds()
 		_triangles = _count_drawn_triangles()
 		if not waiting:

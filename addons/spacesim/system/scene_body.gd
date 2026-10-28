@@ -58,6 +58,10 @@ var patch_task_origin := Vector3.ZERO
 ## **This body's vertex lattice**, kept between walks so a merge is a memcpy of index blocks rather than a rebuild.
 ## Owned here because the slots are per body; see `SpacesimPatches.Lattice`.
 var lattice := SpacesimPatches.Lattice.new()
+## **The walk in flight, and the numbers it was asked with.** The selection is the expensive half of a frame and it is
+## pure arithmetic over immutable data, so it runs on a pool thread; these three fields are the whole handshake.
+var patch_walk_task := -1
+var patch_walk_chunks: Array = []
 ## Whether the drawn arrays carry the depth tint, so a toggle re-walks and rebuilds them.
 var patch_walk_tinted := false
 ## Whether an empty selection has already been reported for this body, so the reason is printed once
