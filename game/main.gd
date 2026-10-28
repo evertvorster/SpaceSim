@@ -455,7 +455,9 @@ func _update_view(delta: float) -> void:
 	var mode := String(SpacesimSettings.get_value("render.mode"))
 	_system.wireframe = mode == "wireframe"
 	_system.surface_hidden = mode == "rendered"
-	_system.update_lod(_camera)
+	# **The ship's origin, not the camera's** — the camera's offset swings on a 32 m arm as the ship rotates, and at low
+	# altitude that re-cut the mesh every frame. The level is a property of where the observer is.
+	_system.update_lod(_camera, observer)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.

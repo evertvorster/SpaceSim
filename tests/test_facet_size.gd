@@ -48,7 +48,7 @@ func run(h, _root: Node) -> void:
 		"at 1 km the apparent-size limit subdivides hard (%d chunks, %d triangles)"
 			% [near_chunks.size(), near_chunks.size() * SpacesimPatches.CHUNK_TRIANGLES])
 	h.check(
-		near_px <= FACET_ANGLE_PX * 3.0,
+		near_px <= FACET_ANGLE_PX * 2.0,
 		"and the finest facet subtends about %d pixels, not thousands (%.1f px)" % [int(FACET_ANGLE_PX), near_px]
 	)
 
@@ -57,7 +57,7 @@ func run(h, _root: Node) -> void:
 	var far_chunks := SpacesimPatches.select(far, Vector3.UP, RADIUS, pixel, EPSILON)
 	var far_px := _finest_pixels(far_chunks, root_edge, 100000.0, pixel)
 	h.check(
-		far_px <= FACET_ANGLE_PX * 3.0,
+		far_px <= FACET_ANGLE_PX * 2.0,
 		"at 100 km the finest facet is the same apparent size (%.1f px)" % far_px
 	)
 	# **The same apparent size at both ends** is the property; the ratio says how close it holds.
@@ -77,10 +77,32 @@ func run(h, _root: Node) -> void:
 		"from 1 Gm the sagitta limit is the smaller one (%s against %s)"
 			% [str(sagitta), str(angular)])
 
+	# --- the floor: a triangle is never smaller than a metre on the ground -------------------
+	# **`MIN_FACET_METRES` is a distance, derived per body from its radius**, so the ceiling is a metre the eye can see
+	# rather than a level number — Evert, 2026-10-28: *"lets make the minimum size for a triangle 1m on the sides."*
+	var low := RADIUS + 50.0
+	var low_chunks := SpacesimPatches.select(low, Vector3.UP, RADIUS, pixel, EPSILON)
+	var deepest_low := 0
+	for chunk in low_chunks:
+		deepest_low = maxi(deepest_low, int(chunk[2]))
+	var finest_metres := RADIUS * root_edge / pow(2.0, float(deepest_low)) / 4.0
+	h.check(finest_metres >= SpacesimPatches.MIN_FACET_METRES,
+		"no triangle is smaller than the metre floor (%.2f m at depth %d)" % [finest_metres, deepest_low])
+	h.check(finest_metres < SpacesimPatches.MIN_FACET_METRES * 2.0,
+		"and the floor is where the tree stops, not two levels short (%.2f m)" % finest_metres)
+	h.check(deepest_low == SpacesimPatches.depth_ceiling_for(RADIUS),
+		"which is the ceiling the body's own radius gives (%d)" % deepest_low)
+	# **A smaller body gets its own ceiling**, because the floor is a distance: the Moon stops shallower than Earth.
+	h.check(SpacesimPatches.depth_ceiling_for(1.7374e6) < deepest_low,
+		"a moon stops at a shallower level than a planet (%d against %d)"
+			% [SpacesimPatches.depth_ceiling_for(1.7374e6), deepest_low])
+
 	# --- the law itself: a constant projected size where the screen term binds --------------
+	# **Above the altitude where the floor binds**, which for 1.6 m triangles and 2 degrees is about 46 m — below that
+	# the tree cannot go finer, so the facets grow with the screen and the flatness is honestly over.
 	var constant := true
 	var first := 0.0
-	for altitude in [10.0, 100.0, 1000.0, 10000.0]:
+	for altitude in [100.0, 1000.0, 10000.0, 100000.0]:
 		var angle := SpacesimPatches.finest_edge_angle(RADIUS + altitude, pixel, EPSILON, RADIUS)
 		var projected: float = RADIUS * angle / (altitude * pixel)
 		if first == 0.0:
@@ -90,12 +112,23 @@ func run(h, _root: Node) -> void:
 	h.check(constant,
 		"and where the screen term binds, the projected size is flat across four altitudes (%.1f px)"
 			% first)
+	# **And below the floor's altitude the facets grow, which is the floor doing its job**: at 10 m the finest
+	# triangle is the same 1.6 m, so it subtends many more pixels rather than the tree growing finer.
+	var at_ten := SpacesimPatches.finest_edge_angle(RADIUS + 10.0, pixel, EPSILON, RADIUS)
+	var ten_metres: float = RADIUS * at_ten / (10.0 * pixel)
+	h.check(ten_metres > first * 4.0,
+		"and below the floor's altitude the facets grow with the screen instead (%.0f px at 10 m, %.1f above)"
+			% [ten_metres, first])
 
 
 ## The finest facet a selection holds, in pixels — the deepest chunk's edge, projected at `ground_distance`.
+## What the finest **triangle** in the selection projects to, in pixels.
+##
+## A chunk's interior is `4^CHUNK_SUBDIVISIONS` triangles, so a triangle's edge is a quarter of the chunk's — measuring
+## the chunk instead would report four times the apparent size and make every bound here four times too loose.
 func _finest_pixels(chunks: Array, root_edge: float, ground_distance: float, pixel: float) -> float:
 	var deepest := 0
 	for chunk in chunks:
 		deepest = maxi(deepest, int(chunk[2]))
-	var edge := root_edge / pow(2.0, float(deepest))
+	var edge := root_edge / pow(2.0, float(deepest)) / 4.0
 	return RADIUS * edge / (ground_distance * pixel)

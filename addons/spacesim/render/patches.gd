@@ -49,12 +49,22 @@ extends RefCounted
 ##   sliver, and the honest fix if it ever shows is the standard *balance* rule (neighbours never differ
 ##   by more than one level, halving it again), not a wall of skirt geometry you can see in wireframe.
 
-## How deep the tree may go, before a triangle budget stops it. Each level splits a patch into four, so
-## this is the hard ceiling on the finest triangle: 2^-12 of an icosahedron face, which at Earth's radius
-## is about 5 m. The budget is what actually stops the walk.
-## 2^-20 of a face is about 2 m at Earth's radius, which is the finest a walk from 20 m altitude asks for
-## (a 1.3e-4 rad facet) — the budget is what actually stops it.
-const MAX_DEPTH := 20
+## **The smallest a triangle may be, on the ground, in metres** — the one floor on the subdivision, and the replacement
+## for a depth ceiling.
+##
+## Evert, 2026-10-28: *"lets make the minimum size for a triangle 1m on the sides."* A **distance** rather than a depth,
+## because a depth is a different distance on every body: the ceiling is derived per walk from the body's radius (see
+## `depth_ceiling_for`), so Earth stops at 1.6 m triangles and a moon stops at its own 1.6 m rather than at Earth's
+## level. Below ~46 m altitude the floor binds and facets grow with the screen again — that is the honest place for the
+## refinement to stop, and it is a metre the eye can see rather than a level number.
+const MIN_FACET_METRES := 1.0
+
+## The icosahedron's edge at unit circumradius: every patch angle below is a fraction of it.
+const ROOT_EDGE := 1.0514622242382672
+
+## **A recursion guard, not a policy.** `depth_ceiling_for` sets the real ceiling from `MIN_FACET_METRES`; this only
+## stops a pathological radius (zero, or a body smaller than its own floor) from walking forever.
+const MAX_DEPTH := 40
 
 ## **The apparent size a facet may be, in radians — and it is not a setting, because it is the subdivision.**
 ##
@@ -161,7 +171,7 @@ static func select(
 	var loosen := float(CHUNK_TRIANGLES)
 	# A chunk at depth `d` carries triangles at depth `d + s`, so the ceiling moves up by `s` to keep the
 	# finest triangle where it was.
-	var depth_ceiling := MAX_DEPTH - CHUNK_SUBDIVISIONS
+	var depth_ceiling := depth_ceiling_for(radius)
 	while not stack.is_empty():
 		var patch: Array = stack.pop_back()
 		var a: Vector3 = patch[0]
@@ -194,7 +204,7 @@ static func select(
 		# **A triangle budget is gone (2026-10-28).** It rationed the walk by a constant — the count knew nothing about
 		# what was on screen — and Evert's instruction is *"we don't care about budget, that should be removed. Just have
 		# the count so I can judge."* So the walk refines to its law and the HUD reports what that costs. What still
-		# bounds it is the law itself and `MAX_DEPTH`, which is a geometric ceiling rather than a ration.
+		# bounds it is the law itself and `MIN_FACET_METRES` — a distance on the ground, not a ration.
 		if centre.dot(camera_direction) < cos(minf(horizon + extent, PI)):
 			continue
 		if int(patch[3]) >= depth_ceiling or edge_squared <= minimum_edge_squared:
@@ -240,6 +250,21 @@ static func walk_is_due(
 
 ## **The smallest patch the eye is asking for, in radians** — the angle the walk's own law converges to.
 ## Half of it is how far the eye may swing before the chunk under it changes.
+## **The deepest a chunk may sit**, from the body's own radius: `MIN_FACET_METRES` on the ground.
+##
+## A chunk is drawn with `CHUNK_TRIANGLES` = `4^CHUNK_SUBDIVISIONS` triangles, so its own edge is `4` times a triangle's
+## there; the level whose chunk edge is `4 * MIN_FACET_METRES` metres is the last one that may exist. Earth gives 20
+## (a 6.4 m chunk edge, 1.6 m triangles), the Moon 18.
+static func depth_ceiling_for(radius: float) -> int:
+	var chunk_edge := float(1 << CHUNK_SUBDIVISIONS) * MIN_FACET_METRES
+	var ratio := ROOT_EDGE * radius / chunk_edge
+	if ratio <= 1.0:
+		return 0
+	return clampi(
+		int(floor(log(ratio) / log(2.0))), 0, MAX_DEPTH - CHUNK_SUBDIVISIONS
+	)
+
+
 static func finest_edge_angle(
 	distance: float, pixel_angle: float, epsilon: float, radius: float
 ) -> float:
@@ -247,7 +272,15 @@ static func finest_edge_angle(
 	# **The same minimum the walk takes**, or the gate's own idea of the finest patch disagrees with the walk's and the
 	# eye has to move further than it should before the selection is rebuilt.
 	var apparent := FACET_ANGLE * to_patch / radius
-	return sqrt(minf(_edge_limit_squared(to_patch, pixel_angle, epsilon, radius), apparent * apparent))
+	var law := sqrt(minf(_edge_limit_squared(to_patch, pixel_angle, epsilon, radius), apparent * apparent))
+	# **No finer than the floor allows**, or the gate keeps asking for a level that cannot exist and the eye has to move
+	# further than the picture actually changes before the selection is rebuilt. This function answers in **leaf** angles
+	# and `depth_ceiling_for` answers in **chunk** depths, which differ by `CHUNK_SUBDIVISIONS` — getting that wrong made
+	# the floor four times too coarse and it won everywhere.
+	var floor_angle := ROOT_EDGE / pow(
+		2.0, float(depth_ceiling_for(radius) + CHUNK_SUBDIVISIONS)
+	)
+	return maxf(law, floor_angle)
 
 
 ## **The cached geometry for one chunk**: `[vertices, normals]` on the **unit sphere**, so one cached

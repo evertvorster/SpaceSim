@@ -821,7 +821,13 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## screen is its own emission, over the same area, so its glare survives the handoff exactly as a
 ## planet's brightness does. See `SpacesimBodyRenderer.point_colour` for the one by-kind difference
 ## that remains, which is that a star **emits** and everything else reflects.
-func update_lod(camera: Camera3D) -> void:
+## `eye` is where the level is decided, and it defaults to the camera's own origin for a rig that has no ship.
+##
+## **It must be the OBSERVER, not the camera's offset.** The camera sits `(0, 5, 32)` in the ship's frame, so when the
+## ship rotates its origin swings on a 32 m arm — and at low altitude that is a large fraction of the altitude, so the
+## walk's gate re-opened on every rotation and the mesh was re-cut underneath a still view. Evert, 2026-10-28: *"when I
+## rotate the camera, there is some vertical jiggling of the vertexes."* The vertices never moved; the triangulation did.
+func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 	if camera == null:
 		return
 	var viewport := camera.get_viewport()
@@ -838,7 +844,9 @@ func update_lod(camera: Camera3D) -> void:
 	#
 	# Typed explicitly: `get_global_transform_interpolated()` has no inferable return type, so `:=`
 	# here is the `INFERENCE_ON_VARIANT` error, and everything derived from the result with it.
-	var observer: Vector3 = camera.get_global_transform_interpolated().origin
+	var observer: Vector3 = (
+		camera.get_global_transform_interpolated().origin if not (eye is Vector3) else eye
+	)
 	# **Publish whatever landed since the last frame**, before any of it is counted: a rebuild is a mesh
 	# that appears a frame or two after it was asked for, never a stall in the frame that asked.
 	_poll_patch_builds()
