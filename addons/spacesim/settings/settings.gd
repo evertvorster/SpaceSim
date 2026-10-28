@@ -112,6 +112,19 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
+	# silhouette and the topology with nothing over them, which is what the ground's material *is* at this base (a flat
+	# Lambertian in the body's derived albedo). `wireframe` shows the subdivision itself. **`rendered` draws nothing at
+	# all** until a body has a rendered texture — a mode that quietly fell back to flat would let the real surface become
+	# the only way to see the ground, which is how the last two months went.
+	"render.mode": {"default": "flat", "scope": Scope.PLAYER, "choices": ["wireframe", "flat", "rendered"]},
+	# **Tint each patch by its chunk's depth**, so the tree is legible at a glance: where it refines, where it stops, and
+	# whether a boundary is a step or a crack. Off by default, so `flat` stays exactly the picture it was.
+	"render.depth_tint": {"default": false, "scope": Scope.PLAYER},
+	# **EV compensation, as a switch rather than a replacement.** On is the frame's own metre (a compute pass on the
+	# rendered pixels); off disables it, so the frame is drawn at Godot's reference — 100,000 lux on a white Lambertian
+	# reads 1.0 — and a difference in the picture is a difference in the geometry, not in the exposure.
+	"render.ev_compensation": {"default": true, "scope": Scope.PLAYER},
 	# --- the exposure's ceiling. The metre drives the frame toward middle grey, and a frame of nothing
 	# but stars has almost no mean luminance to answer with, so it drives toward the *top* of the
 	# window — which is what this caps. In STOPS above the light-adapted floor, so 32 is the whole

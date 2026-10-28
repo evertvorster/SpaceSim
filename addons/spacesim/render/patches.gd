@@ -303,11 +303,25 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 static func arrays_of(chunks: Array) -> Array:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
+	# **A colour per chunk, by its depth.** The surface shader multiplies it by `tint_amount`, which is zero unless
+	# `render.depth_tint` is on — so the debug view costs the same arrays and no second material, and the tree is legible
+	# where a shader could not be read: a boundary between levels is a colour step, a crack is a colour step that is
+	# darker, and a region that stopped refining is a flat patch of one hue.
+	var colors := PackedColorArray()
 	for chunk in chunks:
 		var arrays := chunk_arrays(chunk)
 		vertices.append_array(arrays[0])
 		normals.append_array(arrays[1])
-	return [vertices, normals]
+		var tint := depth_tint(int(chunk[2]))
+		for _vertex in (arrays[0] as PackedVector3Array).size():
+			colors.append(tint)
+	return [vertices, normals, colors]
+
+
+## **The colour a chunk's level is drawn in** — a hue that turns with depth, so neighbouring levels are obviously
+## different and the whole ladder is visible in one frame. Pure, so the worker building the arrays can call it.
+static func depth_tint(depth: int) -> Color:
+	return Color.from_hsv(fposmod(float(depth) * 0.13, 1.0), 0.65, 1.0, 1.0)
 
 
 ## The same selection as line segments, for the wireframe view — one segment per triangle edge.
@@ -346,6 +360,9 @@ static func mesh_from(arrays: Array) -> ArrayMesh:
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
 	surface[Mesh.ARRAY_NORMAL] = arrays[1]
+	# **Colour only when it was built**, so a caller that supplies two arrays still gets a mesh.
+	if arrays.size() > 2:
+		surface[Mesh.ARRAY_COLOR] = arrays[2]
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface)
 	return mesh

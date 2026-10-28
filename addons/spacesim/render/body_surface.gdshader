@@ -20,11 +20,24 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 //     approximation beside it applies the same air twice, and the two cannot be tuned together.
 
 uniform vec3 base_color : source_color = vec3(0.5, 0.5, 0.5);
+// **The debug tint, as a multiplier** — `render.depth_tint` publishes 1.0 or 0.0, so the picture is unchanged when it is
+// off and the tree is legible when it is on. The colour itself is a vertex colour per patch (`SpacesimPatches.depth_tint`),
+// so this shader does not need to know what a depth is.
+uniform float tint_amount : hint_range(0.0, 1.0) = 0.0;
+
+varying vec3 patch_tint;
 uniform float roughness_value : hint_range(0.0, 1.0) = 0.9;
 uniform float specular_value : hint_range(0.0, 1.0) = 0.2;
 
+void vertex() {
+	// The vertex colour, which is white on any mesh that supplies none.
+	patch_tint = COLOR.rgb;
+}
+
+
 void fragment() {
-	ALBEDO = base_color;
+	// **One line, and it is the only place the debug tint can change the picture.**
+	ALBEDO = base_color.rgb * mix(vec3(1.0), patch_tint, tint_amount);
 	ROUGHNESS = roughness_value;
 	SPECULAR = specular_value;
 }

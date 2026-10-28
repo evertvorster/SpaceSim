@@ -209,6 +209,9 @@ func _handle_key(event: InputEventKey) -> void:
 func set_wireframe(on: bool) -> void:
 	_wireframe = on
 	_system.wireframe = on
+	# **The toggle is a mode, and the mode is the setting**, so the key, the settings screen and the HUD cannot disagree
+	# about what is being drawn. `rendered` is left alone: the key toggles between the two modes that draw something.
+	SpacesimSettings.set_value("render.mode", "wireframe" if on else "flat")
 	var hidden := 0
 	for suffix in ["Deck", "Air"]:
 		for node in find_children("*%s*" % suffix, "MeshInstance3D", true, false):
@@ -462,11 +465,20 @@ func _update_view(delta: float) -> void:
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.
+	# **The testing platform's mode, set before the walk** because `wireframe` is an input to it: the gate compares it, so
+	# a mode change must open the walk like any other change in what is needed.
+	var mode := String(SpacesimSettings.get_value("render.mode"))
+	_system.wireframe = mode == "wireframe"
+	_system.surface_hidden = mode == "rendered"
 	_system.update_lod(_camera)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
 	_exposure_pass.frame_delta = delta
+	# **EV compensation, on or off.** On is the metre's — a compute pass over the rendered pixels, so the exposure and
+	# the frame cannot disagree. Off disables the pass, so the frame is drawn at Godot's own reference: no multiplier,
+	# and a difference in the picture is a difference in the geometry rather than in the exposure.
+	_exposure_pass.enabled = bool(SpacesimSettings.get_value("render.ev_compensation"))
 	_update_markers(_camera)
 	_update_camera(_camera)
 	_hud_since += delta
@@ -620,6 +632,11 @@ func _update_hud() -> void:
 				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
 				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
+				"mode        %s%s%s" % [
+					String(SpacesimSettings.get_value("render.mode")),
+					", depth tint" if bool(SpacesimSettings.get_value("render.depth_tint")) else "",
+					", EV compensated" if bool(SpacesimSettings.get_value("render.ev_compensation")) else ", EV off",
+				],
 				"exposure    EV %.3f   mean %.6f" % [
 					_exposure_pass.last_multiplier, _exposure_pass.last_mean
 				],
@@ -629,7 +646,8 @@ func _update_hud() -> void:
 				"state       %s" % contact,
 				"target      %s" % target,
 				"",
-				"bodies      %s, %d triangles" % [bodies, _system.triangles()],
+				"bodies      %s, %d triangles, %d chunks, depth %d"
+					% [bodies, _system.triangles(), _system.chunks(), _system.deepest_level()],
 				(
 					"ship        %s at %s"
 					% [

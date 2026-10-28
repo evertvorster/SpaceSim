@@ -29,7 +29,12 @@ check() {
 }
 
 LOG="$(mktemp)"
-trap 'rm -f "$LOG"' EXIT
+# **The suite owns its settings file.** It used to read the player's, so a value trimmed in flight decided whether a test
+# passed — and the smoke load runs the GAME, which writes that file on exit, so a suite run could change the player's own
+# config. A platform test sets `render.mode`, which is exactly the kind of value that must not leak either way.
+SCRATCH_CONFIG="$(mktemp -d)"
+export XDG_CONFIG_HOME="$SCRATCH_CONFIG"
+trap 'rm -rf "$SCRATCH_CONFIG"; rm -f "$LOG"' EXIT
 
 # The suite is **streamed as well as logged**: with the output only redirected, a run that stalls looks
 # like a frozen terminal for as long as the timeout, which is exactly how a broken suite used to read.

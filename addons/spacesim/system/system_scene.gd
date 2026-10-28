@@ -50,6 +50,14 @@ var _framing: SpacesimFraming
 ## `update_lod`, which swaps the line meshes and an unshaded white material in and out. Off, and nothing
 ## changes — it is a debug view, not a mode the renderer has to reason about.
 var wireframe := false
+## **`render.mode` is `rendered`**: the ground is drawn from a rendered texture, and until a body has one it draws
+## **nothing at all**. Set from the setting each frame by the game, beside `wireframe`.
+var surface_hidden := false
+## The tree's numbers, counted off what is drawn — see [method chunks] and [method deepest_level].
+var _chunks := 0
+var _deepest := 0
+## The tint in force, so the shader parameter is written when the setting moves and not every frame.
+var _depth_tint := false
 ## The frame the last `update_lod` ran in, so a change of frame can be seen and paid for.
 var _last_frame_id := ""
 ## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
@@ -843,7 +851,9 @@ func update_lod(camera: Camera3D) -> void:
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
-			body.mesh.visible = not is_point
+			# **A `rendered` surface with no texture is drawn as nothing**, which is the honest state and the whole reason
+			# the mode exists separately from `flat`.
+			body.mesh.visible = not is_point and not surface_hidden
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
 		# not drawn by anything yet, and a deck is not a thing this tree has.
 		if body.point != null:
@@ -901,6 +911,7 @@ func update_lod(camera: Camera3D) -> void:
 	# an instrument's independent count then cannot disagree about a body that landed or was culled
 	# mid-frame.
 	_triangles = _count_drawn_triangles()
+	_publish_depth_tint()
 
 
 ## **What is actually drawn this frame**, summed over the bodies: a point of light where a body is below
@@ -908,6 +919,8 @@ func update_lod(camera: Camera3D) -> void:
 ## against it, and the picture cannot disagree.
 func _count_drawn_triangles() -> int:
 	var total := 0
+	_chunks = 0
+	_deepest = 0
 	for body in bodies:
 		if body.node == null:
 			continue
@@ -915,7 +928,25 @@ func _count_drawn_triangles() -> int:
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 		elif body.mesh != null and body.mesh.visible:
 			total += body.patch_triangles
+			# **The tree's own numbers**, counted from the selection that is drawn, so the HUD and the mesh cannot
+			# disagree about it.
+			_chunks += body.patch_chunks.size()
+			for chunk in body.patch_chunks:
+				_deepest = maxi(_deepest, int(chunk[2]))
 	return total
+
+
+## **The debug tint, published only when the setting changes.** A uniform write per body per frame would be affordable
+## and pointless; a value cached at startup would stop the setting being hot, which is the project's trap.
+func _publish_depth_tint() -> void:
+	var wanted := bool(SpacesimSettings.get_value("render.depth_tint"))
+	if wanted == _depth_tint:
+		return
+	_depth_tint = wanted
+	for body in bodies:
+		var material := body.mesh_material as ShaderMaterial
+		if material != null:
+			material.set_shader_parameter("tint_amount", 1.0 if wanted else 0.0)
 
 
 ## **Ask for a rebuild, without doing it here.** The merged chunk arrays are the expensive half of a
@@ -1124,6 +1155,15 @@ func body_luminance(body: SpacesimSceneBody, observer: Vector3, star_position: V
 
 
 ## Triangles the bodies and air shells are currently drawn with, summed over the levels in use.
+## How many chunks the bodies drawn this frame hold, and the deepest level among them — the subdivision's own numbers.
+func chunks() -> int:
+	return _chunks
+
+
+func deepest_level() -> int:
+	return _deepest
+
+
 func triangles() -> int:
 	return _triangles
 

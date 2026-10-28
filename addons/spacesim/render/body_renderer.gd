@@ -207,5 +207,9 @@ static func surface_material(body: SpacesimSceneBody) -> ShaderMaterial:
 	material.set_shader_parameter("base_color", body.color)
 	material.set_shader_parameter("roughness_value", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("specular_value", SURFACE_SPECULAR)
+	# **The debug tint starts off, published rather than left to the shader's default**: `get_shader_parameter` returns
+	# null for a parameter nobody wrote, so a material that missed its publish would report "no tint" as missing and read
+	# as an unset knob. `SpacesimSystemScene._publish_depth_tint` writes it when the setting moves.
+	material.set_shader_parameter("tint_amount", 0.0)
 	return material
 
