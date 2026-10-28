@@ -454,25 +454,26 @@ static func depth_tint(depth: int) -> Color:
 
 ## The same selection as line segments, for the wireframe view — one segment per triangle edge.
 static func lines_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Array:
-	var segments := PackedVector3Array()
-	for chunk in chunks:
-		var arrays := chunk_arrays(chunk)
-		var vertices: PackedVector3Array = arrays[0]
-		var indices: PackedInt32Array = arrays[2]
-		var index := 0
-		while index + 2 < indices.size():
-			var a := vertices[indices[index]]
-			var c := vertices[indices[index + 1]]
-			var b := vertices[indices[index + 2]]
-			segments.append(a)
-			segments.append(b)
-			segments.append(b)
-			segments.append(c)
-			segments.append(c)
-			segments.append(a)
-			index += 3
-	rebase(segments, radius, origin)
-	return [segments]
+	# **The wireframe is the same lattice seen as edges.** Reuse the flat merge and expand each triangle into its three
+	# edges as INDICES, so the two views share one vertex buffer instead of the wireframe duplicating every point six
+	# times a triangle — it was 1.07 M vertices against 90 k, and that is exactly the 11.9x the probe measured.
+	var shared := arrays_of(chunks, radius, origin)
+	var triangles: PackedInt32Array = shared[2]
+	var edges := PackedInt32Array()
+	edges.resize(triangles.size() * 2)
+	var at := 0
+	for index in range(0, triangles.size(), 3):
+		var a := triangles[index]
+		var b := triangles[index + 1]
+		var c := triangles[index + 2]
+		edges[at] = a
+		edges[at + 1] = b
+		edges[at + 2] = b
+		edges[at + 3] = c
+		edges[at + 4] = c
+		edges[at + 5] = a
+		at += 6
+	return [shared[0], edges]
 
 
 ## **One surface, so a body is one draw call however many chunks it took** — and the vertices already in metres
@@ -508,6 +509,10 @@ static func lines_mesh_from(arrays: Array) -> ArrayMesh:
 	var surface := []
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
+	# **`[1]` is the edge index array** — the shared points, expanded into segments by reference. No normals: the
+	# wireframe is drawn unshaded white, so a normal per vertex would be bytes nothing reads.
+	if arrays.size() > 1:
+		surface[Mesh.ARRAY_INDEX] = arrays[1]
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, surface)
 	return mesh

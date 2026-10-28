@@ -1045,7 +1045,7 @@ func _poll_patch_builds() -> void:
 		# **Triangles come from the index array for an indexed mesh** and from the segment count for lines — reading a
 		# vertex count here would now report the number of *points*, which sharing has just made several times smaller.
 		body.patch_triangles = (
-			arrays[0].size() / 6 if body.patch_task_wireframe
+			(arrays[1] as PackedInt32Array).size() / 6 if body.patch_task_wireframe
 			else (arrays[2] as PackedInt32Array).size() / 3
 		)
 		# The selection moved while this was building, so the answer is already out of date.

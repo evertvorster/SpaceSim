@@ -242,8 +242,16 @@ func _test_the_mesh(h) -> void:
 	var lines := SpacesimPatches.lines_mesh_from(SpacesimPatches.lines_of(chunks))
 	h.check(lines.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
 		"while the wireframe view is lines")
-	var segments: PackedVector3Array = lines.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-	h.check(segments.size() == expected * 6, "with three edges per triangle")
+	var line_arrays: Array = lines.surface_get_arrays(0)
+	var segments: PackedInt32Array = line_arrays[Mesh.ARRAY_INDEX]
+	# **Six indices a triangle, and the vertices are the shared ones** — the wireframe is the lattice seen as edges, so
+	# its vertex array must be the same size as the flat mesh's, not six a triangle.
+	h.check(segments.size() == expected * 6, "with three edges per triangle (%d indices)" % segments.size())
+	h.check(
+		(line_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() == points.size(),
+		"and sharing the flat mesh's vertices (%d, not %d)"
+			% [(line_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), expected * 6]
+	)
 ## **A rebuild is cache lookups, not geometry** — the claim chunking exists to make, stated as counts
 ## rather than as a stopwatch, because a headless rig can say that without flaking.
 func _test_the_cache_makes_a_rebuild_cheap(h) -> void:
