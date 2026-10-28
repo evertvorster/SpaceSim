@@ -75,8 +75,19 @@ func _test_the_crests_carry_the_detail(h, earth: SpacesimSceneBody) -> void:
 	var code := FileAccess.get_file_as_string("res://addons/spacesim/render/body_surface.gdshader")
 	h.check(code.contains("surface_relief("),
 		"the ground continues the field's own crests below the map")
-	h.check(not code.contains("banded_detail("),
-		"and carries no noise ladder — it was a stand-in, not the texture")
+	# **The ladder is a SHAPE here and never a texture**, and the distinction is the whole history: as a texture it
+	# carried a constant strength (`detail_strength`), which turned plains into archipelagos and its own gradient into
+	# black pits. Now its only amplitude is `hidden` — the height the raster is hiding inside one of its own texels,
+	# measured from the four relief taps — so a plain is perturbed by nothing and a coast by exactly what it hides.
+	h.check(not code.contains("detail_strength"),
+		"the ladder carries no strength of its own any more")
+	h.check(code.contains("grain * hidden"),
+		"and what it perturbs is bounded by the height the raster hides")
+	var bound := FileAccess.get_file_as_string(
+		"res://addons/spacesim/system/model/surface_field.gdshaderinc"
+	)
+	h.check(bound.contains("float surface_relief("),
+		"with the crests available for the relief below the map")
 	var material := earth.mesh_material as ShaderMaterial
 	h.check(material != null, "Earth has a surface material to read")
 	if material == null:
@@ -1162,6 +1173,7 @@ func _test_shader_defaults_are_the_hosts(h) -> void:
 		[surface, "detail_relief", SpacesimBodyRenderer.DETAIL_RELIEF],
 		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
 		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],
+		[surface, "tile_texels", SpacesimSurfaceTiles.TILE_TEXELS],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:

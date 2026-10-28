@@ -77,6 +77,8 @@ uniform sampler2DArray tile_map : filter_linear, repeat_disable, hint_default_bl
 uniform vec4 tile_rect[32];
 uniform int tile_layer[32];
 uniform int tile_count = 0;
+// Texels on a tile's side, as the bake made them — what turns a tile's uv rectangle into its own texel size.
+uniform int tile_texels = 512;
 
 // ===== THE LADDER =================================================================================
 //
@@ -226,10 +228,22 @@ void fragment() {
 	} else {
 		vec3 up = unit_position;
 		vec2 uv = equirect(up);
+		// **The angle one pixel spans, and it is the ONE currency the whole shader measures resolution in**: the
+		// star's transmission is filtered by it, the crests below the map are band-limited by it, and the sub-texel
+		// bound is measured in it.
+		// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
+		// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
+		// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
+		// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
+		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 
 		// **The one height**, at whatever resolution the map in hand has — which is the whole point: the coast and
 		// the bands sharpen as the eye approaches, and they cannot move, because `sea_level` is a value.
 		float height = texture(height_map, uv).r;
+		// **The raster in hand's own texel size, in radians of sphere-arc.** The whole-body map's unless a tile covers
+		// this pixel: the near field is up to a hundred times finer than the map, and the sub-texel bound below has to
+		// be measured against whichever raster actually drew the height — a constant here would bound the wrong thing.
+		float raster_texel = SURFACE_TAU / float(max(map_width, 1));
 
 		// **The near field: the finest tile that contains this pixel.** The rects arrive finest-first, so the first
 		// match is the finest and the loop stops there. Cross-faded to the whole-body map over 2 % of the tile's edge,
@@ -238,7 +252,9 @@ void fragment() {
 		for (int i = 0; i < tile_count; i++) {
 			vec4 tile = tile_rect[i];
 			if (uv.x >= tile.x && uv.x <= tile.z && uv.y >= tile.y && uv.y <= tile.w) {
-				vec2 local = (uv - tile.xy) / max(tile.zw - tile.xy, vec2(1.0e-6));
+				vec2 span = tile.zw - tile.xy;
+				raster_texel = SURFACE_TAU * max(span.x, span.y) / float(max(tile_texels, 1));
+				vec2 local = (uv - tile.xy) / max(span, vec2(1.0e-6));
 				vec2 edge = smoothstep(vec2(0.0), vec2(0.02), local)
 					* (1.0 - smoothstep(vec2(0.98), vec2(1.0), local));
 				height = mix(height, texture(tile_map, vec3(local, float(tile_layer[i]))).r, edge.x * edge.y);
@@ -251,8 +267,60 @@ void fragment() {
 		// There is no second layer now, so the cull is gone with it: leaving it would punch Earth's 71 % of water
 		// out of the sphere and show the far side through it.
 
-		// The colour, from the ramp the derivation built, indexed by the same height.
-		float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
+		// **The ground's own gradient, from four taps of the same map** — and it is measured here, before the colour,
+		// because the coast below is decided by how much the raster is *hiding*, not only by the height it stores.
+		// The tap distance is a multiple of one texel of *that* map, because a fixed epsilon would sample detail the
+		// map in hand does not hold and read as noise on distant ground.
+		// **Three texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
+		// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
+		// plate belt and the waterline meet — the difference swings the normal tens of degrees from pixel to
+		// pixel. A wider baseline is the cheap fix.
+		float texel = 3.0 / float(max(map_width, 1));
+		float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;
+		float toward_west = texture(height_map, uv - vec2(texel, 0.0)).r;
+		// `v` increases *southward*, so the north neighbour is the smaller `v`.
+		float toward_north = texture(height_map, uv - vec2(0.0, texel)).r;
+		float toward_south = texture(height_map, uv + vec2(0.0, texel)).r;
+
+		// **THE COAST, RESOLVED BELOW THE RASTER'S OWN TEXEL — and bounded by what the texel can hide.**
+		//
+		// A coast is a threshold on a height field, so it can only be as sharp as the field's raster: at 212 km a
+		// tile's texel is 2.4 km and the coast is a staircase of 2.4 km steps. That is the artefact photographed on
+		// 2026-10-19 and parked, because the fix that was tried then — thresholding on `height + ladder * 0.25` —
+		// turned every flat plain into an archipelago and cost 340 → 200 fps at 4K.
+		//
+		// **Both of those faults are answered by the same quantity: the height the raster is HIDING.** A texel stores
+		// one height, and the ground inside it may be anywhere within the field's own gradient across that texel —
+		// `|∇h| · texel`, measured from the four taps above, which the relief already takes. So the perturbation is
+		// sized by that and no more:
+		//
+		//     resolved = height + grain · ½·|∇h|·texel
+		//
+		// **A plain is perturbed by nothing** (its gradient is zero, so there are no islands — the constant that was
+		// the 10-19 failure is replaced by a *local* quantity, which is what the archive asked for), and a coast is
+		// perturbed by the metres its own texel is hiding, which is exactly the detail the raster could not carry.
+		// **It is a shaping of the colour's threshold and never of the normal**, so it cannot repeat the ladder's
+		// other failure either — the black pits came from a noise gradient tilting a normal, and nothing here
+		// touches `NORMAL`.
+		//
+		// **`grain` is the ladder's own normalised fbm, used as a SHAPE and not as a texture**: it is what fills the
+		// gap between the raster and the pixel, at rungs the pixel can resolve (`banded_detail` fades each one on the
+		// footprint) and starting at the raster's own two texels. The field's own continuation below the map
+		// (`surface_relief`) could not do this job: its spectrum falls at gain 0.5, so it carries about 2 cm at 30 m
+		// and would move the coast by nothing — see the note in `surface_field.gdshaderinc`.
+		float map_texel = SURFACE_TAU / float(max(map_width, 1));
+		float slope_per_radian = max(
+			abs(toward_east - toward_west), abs(toward_north - toward_south)
+		) / (6.0 * map_texel);
+		float hidden = 0.5 * slope_per_radian * raster_texel;
+		float grain = banded_detail(
+			up, footprint_angle, 2.0 * raster_texel, detail_seed, 1.0
+		);
+		float resolved = height + grain * hidden;
+
+		// The colour, from the ramp the derivation built, indexed by the **resolved** height — the map's own value
+		// plus the sub-texel content it was hiding. That is the one line that turns a 2.4 km staircase into a coast.
+		float ramp_position = clamp(resolved * 0.5 + 0.5, 0.0, 1.0);
 		ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
 		// **The light has crossed the air before it got here**, and that is per channel: blue first, then green,
 		// then red — which is what makes a ridge near the terminator orange rather than white.
@@ -283,14 +351,6 @@ void fragment() {
 		// the artefact this factor exists to kill: thin lit outlines tracing every coastline on the night side.
 		// It is applied to the LIGHT and not to the normal on purpose — the tilt is the ground.
 		//
-		// **The footprint is measured here because it is needed by both halves.** This factor is filtered by the
-		// pixel (a penumbra narrower than one is drawn as the step it averages to), and the ladder below is
-		// band-limited by it. One measurement, one currency: the angle one pixel spans.
-		// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
-		// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
-		// direction the surface recedes in, and a footprint that large fades rungs that are still resolvable
-		// across the view. The other way round is the moiré: a rung drawn where a pixel spans several features.
-		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
 		AO = star_transmission(up, body_sun, footprint_angle);
 		AO_LIGHT_AFFECT = 1.0;
 		// **A cloud's shadow multiplies the star's rather than replacing it** — a deck cannot make the sun rise.
@@ -308,20 +368,6 @@ void fragment() {
 			);
 		}
 
-		// **The relief, from four taps of the same map.** The tap distance is a multiple of one texel of *that*
-		// map, because a fixed epsilon would sample detail the map in hand does not hold and read as noise on
-		// distant ground.
-		// **Three texels, not one.** One texel is the noisiest possible baseline: adjacent texels of a smooth field
-		// differ by the sampling, and on the field's *steepest* feature — the coastal slope, which is where the
-		// plate belt and the waterline meet — the difference swings the normal tens of degrees from pixel to
-		// pixel. A wider baseline is the cheap fix; the principled one is the ladder, whose octaves are
-		// band-limited by the pixel footprint.
-		float texel = 3.0 / float(max(map_width, 1));
-		float toward_east = texture(height_map, uv + vec2(texel, 0.0)).r;
-		float toward_west = texture(height_map, uv - vec2(texel, 0.0)).r;
-		// `v` increases *southward*, so the north neighbour is the smaller `v`.
-		float toward_north = texture(height_map, uv - vec2(0.0, texel)).r;
-		float toward_south = texture(height_map, uv + vec2(0.0, texel)).r;
 
 		// Metres per texel, which is what turns a height difference into a slope. The east-west one shrinks with
 		// latitude and is floored, because the equirect map's texels collapse at the poles.

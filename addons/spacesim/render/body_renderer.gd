@@ -507,6 +507,10 @@ static func apply_surface_tiles(
 	var live := rects.size() if array != null else 0
 	if array != null and surface.get_shader_parameter("tile_map") != array:
 		surface.set_shader_parameter("tile_map", array)
+	# **How many texels a tile's side holds**, which is what turns a tile's uv rectangle into its own texel size — the
+	# quantity the sub-texel bound is measured against. Published rather than left to the shader's default: a uniform's
+	# default is the picture a missed publish draws, and this one decides how sharp a coast is.
+	surface.set_shader_parameter("tile_texels", SpacesimSurfaceTiles.TILE_TEXELS)
 	var size := SpacesimSurfaceTiles.MAX_TILES
 	var padded_rects := PackedVector4Array()
 	var padded_layers := PackedInt32Array()
