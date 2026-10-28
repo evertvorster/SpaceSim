@@ -239,8 +239,10 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 	scene.await_patch_builds()
 	var mesh := earth.mesh
 	h.check(mesh.mesh is ArrayMesh, "the body draws its own patch mesh")
-	h.check(mesh.scale.is_equal_approx(Vector3.ONE * earth.radius),
-		"scaled by its own radius, and still the unit sphere underneath")
+	# **Unscaled, because the vertices are already metres** measured from the node's own origin — a basis carrying the
+	# radius is what rounded them at 0.76 m and made the ground wave. See `SpacesimPatches.rebase`.
+	h.check(mesh.scale.is_equal_approx(Vector3.ONE),
+		"unscaled — the vertices carry the metres, and the basis stays identity")
 	h.check(not (mesh.mesh is SphereMesh), "and no lat-long sphere is left in the tree")
 
 	# **The budget in force, not the default.** `update_lod` reads `lod.error_budget`, so a scene test
@@ -618,9 +620,14 @@ static func _triangles_under_eye(body: SpacesimSceneBody, to_eye: Vector3) -> in
 	# **Non-indexed**: every triangle carries its own three vertices, so the soup is read three at a time
 	# and there is no index array to walk.
 	var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	# **The vertices are metres from the node's own origin**, not points on a unit sphere, so a direction is measured
+	# from the body's centre — which means adding the origin back before normalising. See `SpacesimPatches.rebase`.
+	var origin := body.mesh.position
 	var count := 0
 	for i in range(0, points.size() - 2, 3):
-		var centre := (points[i] + points[i + 1] + points[i + 2]).normalized()
+		var centre := (
+			(points[i] + points[i + 1] + points[i + 2]) / 3.0 + origin
+		).normalized()
 		if centre.dot(to_eye) > 0.95:
 			count += 1
 	return count

@@ -178,20 +178,29 @@ func _test_the_mesh(h) -> void:
 	var chunks := SpacesimPatches.select(
 		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
 	)
-	var arrays := SpacesimPatches.arrays_of(chunks)
+	# **Measured from the ground under the eye**, which is where the node's origin goes — see `SpacesimPatches.rebase`.
+	# The ground under the eye the walk was given, which is `Vector3.UP` here.
+	var origin := Vector3.UP * EARTH_RADIUS
+	var arrays := SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin)
 	var points: PackedVector3Array = arrays[0]
 	var expected := SpacesimPatches.triangle_count(chunks)
 	h.check(points.size() == expected * 3,
 		"one triangle per chunk triangle, unshared (%d vertices for %d triangles)"
 			% [points.size(), expected])
-	# **1e-6, not 1e-9**: an `ArrayMesh` stores vertices as 32-bit floats whatever the engine build is, so
-	# a unit vector comes back at 1 ± 3e-8. At Earth's radius that is 0.2 m — no one is going to see it,
-	# and asserting double precision here would be asserting something the renderer does not keep.
+	# **2 m of slack, not 1e-6 of a metre**: the vertices are metres now, and the buffer keeps them in 32 bits, so a
+	# point 6.4 Mm from the body's centre is exact to ~0.8 m. That is the whole reason they are measured from a local
+	# origin instead, which the next check pins.
 	var on_sphere := true
 	for point in points:
-		if absf(point.length() - 1.0) > 1.0e-6:
+		if absf((point + origin).length() - EARTH_RADIUS) > 2.0:
 			on_sphere = false
-	h.check(on_sphere, "every vertex is on the unit sphere")
+	h.check(on_sphere, "every vertex is the body's radius from its centre, measured from the origin")
+	# **And the near vertices are small**, which is the property the rebase exists for: float32 spacings are relative, so
+	# a vertex a kilometre from the origin is good to 0.06 mm where one on a radius-scaled unit sphere was good to 0.76 m.
+	var nearest := INF
+	for point in points:
+		nearest = minf(nearest, point.length())
+	h.check(nearest < 1.0e4, "with the origin inside the selection, so the near vertices are metres (%.1f m)" % nearest)
 	# **The surface carries no index array**: every triangle has its own three vertices, so an index would
 	# be the identity range — and building sixty thousand of those in GDScript is the cost chunking exists
 	# to remove. Asserted, because a renderer that changes it back would be re-adding that cost silently.

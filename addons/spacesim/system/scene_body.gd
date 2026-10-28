@@ -52,6 +52,9 @@ var patch_arrays: Array = []
 ## Triangles the mesh currently on the node holds. **Zero until the first build lands**, which is why a
 ## body draws nothing for its first frame or two rather than stalling the frame that asked for it.
 var patch_triangles := 0
+## The point the mesh's vertices are measured from, in body-space metres — captured with the build and written onto the
+## node with the mesh it belongs to. See `SpacesimPatches.rebase`.
+var patch_task_origin := Vector3.ZERO
 ## Whether an empty selection has already been reported for this body, so the reason is printed once
 ## rather than once a second for the rest of the session.
 var patch_empty_reported := false

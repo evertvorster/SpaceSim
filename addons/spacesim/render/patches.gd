@@ -361,7 +361,7 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 ## **A selection as one set of arrays** — the merged vertices and normals for the whole body, and the one
 ## expensive step in a rebuild. Pure and safe on a worker thread: it reads the chunk cache (which locks)
 ## and touches no node.
-static func arrays_of(chunks: Array) -> Array:
+static func arrays_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Array:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
 	# **A colour per chunk, by its depth.** The surface shader multiplies it by `tint_amount`, which is zero unless
@@ -376,7 +376,31 @@ static func arrays_of(chunks: Array) -> Array:
 		var tint := depth_tint(int(chunk[2]))
 		for _vertex in (arrays[0] as PackedVector3Array).size():
 			colors.append(tint)
+	rebase(vertices, radius, origin)
 	return [vertices, normals, colors]
+
+
+## **Put the geometry in metres, measured from `origin`** — the one thing that makes a planet-sized mesh precise.
+##
+## Godot's double-precision build emulates double in the **translation** of the modelview matrix and leaves the *basis*
+## single precision (`scene_forward_clustered.glsl`: *"We separate the basis from the origin because the basis is fine
+## with single point precision"*). A node **scaled by the planet's radius** therefore rounds every vertex at
+## `2^-23 * 6.371e6` = **0.76 m** in float32 — and the rounding field moves with the view, which is what a wavy
+## wireframe is. Evert, 2026-10-28: *"still some waveyness … and it changes when the camera orientation changes."*
+##
+## So the scale is applied **here, in double** (`Vector3` is float64 in this build) and the vertices are measured from
+## a local origin near the eye, which puts them back at a magnitude where float32 is sub-millimetre: at 1 km from the
+## origin the spacing is 0.06 mm. The node then carries the origin as its **position** — the part the engine emulates —
+## and its scale is 1, so the basis stays identity and nothing is rounded.
+##
+## `ponytail:` one GDScript pass over every vertex, on the merge worker. That is O(n) with a large constant
+## (~1.2 M vertices at 1 km altitude) and it is the obvious thing to vectorise or move wholesale when this gets
+## optimised — the shape it needs is exactly this: a pure function over plain arrays.
+static func rebase(vertices: PackedVector3Array, radius: float, origin: Vector3) -> void:
+	if is_equal_approx(radius, 1.0) and origin == Vector3.ZERO:
+		return
+	for index in vertices.size():
+		vertices[index] = vertices[index] * radius - origin
 
 
 ## **The colour a chunk's level is drawn in** — a hue that turns with depth, so neighbouring levels are obviously
@@ -386,7 +410,7 @@ static func depth_tint(depth: int) -> Color:
 
 
 ## The same selection as line segments, for the wireframe view — one segment per triangle edge.
-static func lines_of(chunks: Array) -> Array:
+static func lines_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Array:
 	var segments := PackedVector3Array()
 	for chunk in chunks:
 		var vertices: PackedVector3Array = chunk_arrays(chunk)[0]
@@ -402,11 +426,12 @@ static func lines_of(chunks: Array) -> Array:
 			segments.append(c)
 			segments.append(a)
 			index += 3
+	rebase(segments, radius, origin)
 	return [segments]
 
 
-## **One surface, so a body is one draw call however many chunks it took** — and every vertex on the unit
-## sphere, scaled by the node as the level meshes are.
+## **One surface, so a body is one draw call however many chunks it took** — and the vertices already in metres
+## (see `rebase`), so the node's scale is 1 and its basis cannot round them.
 ##
 ## **Non-indexed on purpose.** Every triangle already carries its own three vertices, so an index array
 ## would be the identity range — and building that for sixty thousand triangles in GDScript is the very

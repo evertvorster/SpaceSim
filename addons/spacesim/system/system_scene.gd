@@ -966,21 +966,30 @@ func _publish_depth_tint() -> void:
 func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
 	body.patch_task_chunks = body.patch_chunks
 	body.patch_task_wireframe = lines
+	# **The origin the geometry is measured from: the ground under the eye.** Captured with the request like every
+	# other input, so the arrays and the transform that pairs with them cannot come from different frames — and it is
+	# the *ground* point rather than the eye, because what must stay small is the geometry, not the observer.
+	body.patch_task_origin = body.patch_walk_direction * body.radius
 	if body.patch_task != -1:
 		# A build is already in flight. Its result will be published and then seen to be stale, which
 		# starts the next one — cheaper than a queue and correct without one.
 		return
 	body.patch_arrays = []
 	body.patch_task = WorkerThreadPool.add_task(
-		Callable(self, "_build_patch_arrays").bind(body, body.patch_chunks, lines)
+		Callable(self, "_build_patch_arrays").bind(
+			body, body.patch_chunks, lines, body.radius, body.patch_task_origin
+		)
 	)
 
 
 ## **Runs on a worker thread.** Reads the static chunk cache (which locks) and writes one field on one
 ## body; touches no node, no `RenderingServer` and no settings.
-func _build_patch_arrays(body: SpacesimSceneBody, chunks: Array, lines: bool) -> void:
+func _build_patch_arrays(
+	body: SpacesimSceneBody, chunks: Array, lines: bool, radius: float, origin: Vector3
+) -> void:
 	body.patch_arrays = (
-		SpacesimPatches.lines_of(chunks) if lines else SpacesimPatches.arrays_of(chunks)
+		SpacesimPatches.lines_of(chunks, radius, origin) if lines
+		else SpacesimPatches.arrays_of(chunks, radius, origin)
 	)
 
 
@@ -1012,6 +1021,11 @@ func _poll_patch_builds() -> void:
 			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
 			else SpacesimPatches.mesh_from(arrays)
 		)
+		# **The vertices are metres from this origin**, so the node carries the origin and drops the radius scale —
+		# and the pair is written here, beside the mesh, so the transform can never describe a different build. The
+		# scale has to be 1: a basis holding 6,371,000 is what rounded every vertex at 0.76 m (see `rebase`).
+		body.mesh.position = body.patch_task_origin
+		body.mesh.scale = Vector3.ONE
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
