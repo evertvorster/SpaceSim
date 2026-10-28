@@ -47,7 +47,7 @@ var environment: Environment
 var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
 ## The baked surface maps, one cache for the whole system.
-var _surface_maps := SpacesimSurfaceMaps.new()
+var _distributions := SpacesimSurfaceDistribution.new()
 ## **The baked cloud maps, one cache for the whole system** — keyed `(body, layer)`, so a stack is entries
 ## rather than a second cache. Unlike the surface's, this one stays open: it has no local `RenderingDevice` of
 ## its own beyond the one `SpacesimCloudGpu` opens for a bake, and a deck refines on approach like the ground.
@@ -150,8 +150,8 @@ func build(parent: Node) -> SpacesimSystemScene:
 		_build_body(body)
 	# **Every map is baked, so let go of the device.** Nothing bakes during flight by design, and a local
 	# `RenderingDevice` alive for the length of a session is both the teardown segfault and the risk
-	# `SpacesimSurfaceMaps.prepare()` exists to remove.
-	_surface_maps.close()
+	# `SpacesimSurfaceDistribution.prepare()` exists to remove.
+	_distributions.close()
 	# **Every task added must be awaited before the engine goes away**, or the exit segfaults with no
 	# output at all — the pool has to free what the task allocated. A rebuild is milliseconds, so the join
 	# is one poll long.
@@ -467,7 +467,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	system_frame.add_child(body.node)
 
 	# **The map is baked here, and here only** — `build()` runs inside `_ready`, so this is before the first frame
-	# and outside the frame loop. `SpacesimSurfaceMaps.prepare()` records what happens when it is moved into
+	# and outside the frame loop. `SpacesimSurfaceDistribution.prepare()` records what happens when it is moved into
 	# `_process`: the engine's RID pools are exhausted in a few minutes of flight, because a local
 	# `RenderingDevice`'s calls are render-thread-only and the device shares the driver with the frame's own.
 	#
@@ -476,9 +476,10 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# derived colour flat, which is what it was drawn in before.
 	var light := _light_at(body)
 	var bands: Array = []
-	var entry: SpacesimSurfaceMaps.Entry = null
-	# **A star samples no height map**, so it gets no bake: `material_for` picks the material by kind, and a star's
-	# is `body_star.gdshader`, which has no `height_map` at all — so the bake would measure a field nothing draws.
+	var entry: SpacesimSurfaceDistribution.Entry = null
+	# **A star has no field**, so it gets no measurement: `material_for` picks the material by kind, and a star's is
+	# `body_star.gdshader`, which reads no `field_*` uniform at all — so a bake would measure a planet's field for a
+	# body that draws its own photosphere.
 	# The test is on the kind because the kind is what chooses the material (`a star emits, everything else
 	# reflects`, the distinction that has been needed twice here), and naming the question is what stopped the
 	# last version of this bug (`d57eb39`).
@@ -487,8 +488,8 @@ func _build_body(body: SpacesimSceneBody) -> void:
 			body.content, _materials(), light.x, light.y
 		)
 		bands = SpacesimSurfaceModel.bands(body.content, _materials(), light.x, light.y)
-		entry = _surface_maps.prepare(body.id, body.radius)
-	var quantiles := SpacesimSurfaceMaps.linear_quantiles()
+		entry = _distributions.prepare(body.id, body.radius)
+	var quantiles := SpacesimSurfaceDistribution.linear_quantiles()
 	if entry != null and not entry.quantiles.is_empty():
 		quantiles = entry.quantiles
 	# **One material per body, and it draws the whole sphere.** There is no sea layer: a liquid is a level, and the
@@ -498,12 +499,14 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.mesh_material = SpacesimBodyRenderer.material_for(
 		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color)
 	)
-	if entry != null and entry.base != null:
-		var level := entry.value_at(body.surface_ocean_fraction)
-		var surface := body.mesh_material as ShaderMaterial
-		surface.set_shader_parameter("sea_level", level)
-		SpacesimBodyRenderer.apply_surface_maps(surface, entry.base, entry.width,
-			SpacesimSurfaceField.plan(body.id, body.radius).continent_frequency)
+	# **The sea level is `sea_level`: the datum, not a threshold** — the field value the liquid band's own area share
+	# implies, measured off this body's own distribution. Nothing culls on it; the displacement will measure
+	# `height - sea_level` from it, and a body's altitude, the framings' bands and a deck's condensation level all
+	# measure from the same sphere.
+	if entry != null and not entry.quantiles.is_empty():
+		(body.mesh_material as ShaderMaterial).set_shader_parameter(
+			"sea_level", entry.value_at(body.surface_ocean_fraction)
+		)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(
@@ -962,17 +965,13 @@ func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
 ## screen is its own emission, over the same area, so its glare survives the handoff exactly as a
 ## planet's brightness does. See `SpacesimBodyRenderer.point_colour` for the one by-kind difference
 ## that remains, which is that a star **emits** and everything else reflects.
-## `delta` is the frame's own — the only thing the surface map ladder's projection needs, and **optional**, because an
-## instrument (the profiler, a probe) may call this without a clock and should then get no speculative work rather than
-## a wrong rate.
-##
 ## `eye` is where the level is decided, and it defaults to the camera's own origin for a rig that has no ship.
 ##
 ## **It must be the OBSERVER, not the camera's offset.** The camera sits `(0, 5, 32)` in the ship's frame, so when the
 ## ship rotates its origin swings on a 32 m arm — and at low altitude that is a large fraction of the altitude, so the
 ## walk's gate re-opened on every rotation and the mesh was re-cut underneath a still view. Evert, 2026-10-28: *"when I
 ## rotate the camera, there is some vertical jiggling of the vertexes."* The vertices never moved; the triangulation did.
-func update_lod(camera: Camera3D, delta: float = 0.0, eye: Variant = null) -> void:
+func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 	if camera == null:
 		return
 	var viewport := camera.get_viewport()
@@ -983,12 +982,6 @@ func update_lod(camera: Camera3D, delta: float = 0.0, eye: Variant = null) -> vo
 	if pixel <= 0.0:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
-	# **The surface map's ceiling is derived from the resolution the scene is being rendered at**, as a fraction
-	# of it (`surface.max_base_fraction`, 0.5 = half). Read per frame rather than cached: the setting exists to
-	# be moved **while flying**, to watch the cost move with it.
-	var surface_cap := SpacesimSurfaceMaps.base_max_width(
-		Vector2i(viewport.size), float(SpacesimSettings.get_value("surface.max_base_fraction"))
-	)
 	# **The interpolated eye**, because this runs once a drawn frame and `get_global_transform()` is
 	# only accurate to the most recent physics tick. It is the same transform the camera is drawn with,
 	# so the level chosen belongs to the frame on screen — see `game/main.gd::_update_view`.
@@ -1004,7 +997,6 @@ func update_lod(camera: Camera3D, delta: float = 0.0, eye: Variant = null) -> vo
 	# the surface's, because the ground reads it, and a deck's, which lands the same way. The cloud cache has no bake
 	# pass of its own — a floor bake is synchronous and a refinement is a pool task (or a main-thread dispatch), so
 	# there is nothing to attach.
-	_surface_maps.poll()
 	_cloud_maps.poll()
 	# **And the walks next**, so a selection that lands this frame asks its rebuild in this frame rather than the next.
 	_poll_walks()
@@ -1031,10 +1023,6 @@ func update_lod(camera: Camera3D, delta: float = 0.0, eye: Variant = null) -> vo
 			continue
 		if body.mesh == null:
 			continue
-		_refine_surface_map(body, distance, pixel, surface_cap, delta)
-		_refine_surface_tiles(
-			body, distance, pixel, (observer - body.node.global_position).normalized(), surface_cap
-		)
 		_face_bodies_at_star(body, observer)
 		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
@@ -1226,15 +1214,15 @@ func _build_patch_arrays(
 ## cost a session, and it shows up as a body with no mesh rather than as a failure.
 ## The surface map cache, for the probes that drive it and for anything that wants to ask what was measured.
 ## Read-only in practice: the cache owns its entries.
-func surface_maps() -> SpacesimSurfaceMaps:
-	return _surface_maps
+func surface_distribution() -> SpacesimSurfaceDistribution:
+	return _distributions
 
 
 ## **Let go of the GPU bake's device.** A local `RenderingDevice` left alive to be destroyed at process
 ## teardown segfaults the process on exit, and the cache owns the only one the scene has. `main.gd` calls this
 ## on the way out.
 func close() -> void:
-	_surface_maps.close()
+	_distributions.close()
 	# **The deck's cache goes the same way, and for its own reason**: a refinement is a pool task (or a local
 	# device's dispatch), and the pool will not let a task outlive the engine. The bail goes up first so a 27 s
 	# bake stops at its next row rather than trading a crash for a hung exit.
@@ -1243,10 +1231,6 @@ func close() -> void:
 
 ## **Hand the surface maps a render-thread bake pass** — from `main.gd`, which owns the camera's compositor.
 ## Without one, every body keeps the map baked at scene build.
-func attach_surface_bake(bake_pass: SpacesimSurfaceBakePass) -> void:
-	_surface_maps.attach_bake(bake_pass)
-
-
 ## **The air's share of the star's light, at each material's own altitude** — once, here, because the
 ## coefficients come from the body's composition and the levels from its condensation profile, and neither
 ## changes while the game runs.
@@ -1395,63 +1379,6 @@ func _publish_deck_shadow(
 	SpacesimBodyRenderer.apply_deck_shadow(
 		body.mesh_material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness,
 		SpacesimCloudField.seed_for(body.id, deck.index), feature
-	)
-
-
-## **What a body's material should be sampling this frame** — the refining map when the eye is close enough to
-## want more than the build map has. Called from `update_lod` for every drawn body.
-func _refine_surface_map(
-	body: SpacesimSceneBody, distance: float, pixel: float, cap: int, delta: float
-) -> void:
-	if body.mesh_material == null or body.content == null:
-		return
-	if body.content.kind == SpacesimSystemBody.Kind.STAR:
-		return
-	# **Watching is per frame; deciding is not; publishing is on arrival.** The rate is maintained every frame because
-	# it is a frame quantity, and it asks for nothing. A decision — which is the only thing that can request a bake —
-	# happens when the gate opens or when a rung has landed, and publishing happens when there is something new to
-	# draw. Evert, 2026-10-19: *"watching a number increase or decrease per frame is not the same as baking."*
-	var entry := _surface_maps.map(body.id)
-	if entry == null:
-		return
-	_surface_maps.observe_eye(body.id, distance, delta)
-	if SpacesimSurfaceMaps.map_is_due(
-		entry.last_distance, entry.last_pixel, entry.last_cap, distance, pixel, cap
-	):
-		_surface_maps.note_map_eye(body.id, body.radius, distance, pixel, cap)
-	if not _surface_maps.needs_publish(body.id):
-		return
-	var chosen := _surface_maps.drawn_for(body.id)
-	if chosen.is_empty():
-		return
-	_surface_maps.mark_published(body.id)
-	SpacesimBodyRenderer.apply_surface_maps(
-		body.mesh_material, chosen["texture"], chosen["width"],
-		SpacesimSurfaceField.plan(body.id, body.radius).continent_frequency
-	)
-
-
-## **The near field: the map's tiles, refined where the eye is looking**, as the mesh is.
-##
-## Called for every drawn body, and it is **cheap when nothing has moved**: the walk's own gate answers first, and a
-## still eye costs a dictionary lookup. When the selection or a landed tile changes what a material should be told,
-## the rects are republished to **both** layers — the land culls on the tiled height and the sea draws on it, so a
-## table that reached one and not the other would put a seam along every coastline inside it.
-func _refine_surface_tiles(
-	body: SpacesimSceneBody, distance: float, pixel: float, eye_direction: Vector3, cap: int
-) -> void:
-	if body.mesh_material == null or body.content == null:
-		return
-	if body.content.kind == SpacesimSystemBody.Kind.STAR:
-		return
-	if not _surface_maps.update_tiles(
-		body.id, body.radius, distance, pixel, eye_direction, cap
-	):
-		return
-	var tiles := _surface_maps.tiles_for(body.id)
-	var array := _surface_maps.tile_array()
-	SpacesimBodyRenderer.apply_surface_tiles(
-		body.mesh_material, array, tiles["rects"], tiles["layers"]
 	)
 
 

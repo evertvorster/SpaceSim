@@ -114,7 +114,7 @@ const BELT_WIDTH := 0.08
 const RELIEF_FRACTION := 0.0014
 
 ## **There is no width constant here, and that is deliberate.** A map's widths belong to
-## `SpacesimSurfaceMaps` — the build width, the ceiling the display implies, and the rungs between them — so a
+## `SpacesimSurfaceDistribution` — the build width, the ceiling the display implies, and the rungs between them — so a
 ## second copy of those numbers in the field could only drift from the one the ladder actually bakes at. Two
 ## constants used to live here (`FLOOR_WIDTH`, `COARSE_WIDTH`) and **nothing read either**; they are gone rather
 ## than left as a skeleton that looks like a decision.
@@ -155,7 +155,7 @@ class Plan:
 ## A source string handed to `shader_compile_spirv_from_source()` gets no preprocessor, so `#include` is not
 ## available to it — the concatenation *is* the include mechanism. Two bakes compile this: the build-time one
 ## in `SpacesimSurfaceGpu` (which reads the map back so the distribution can be measured) and the render-thread
-## one in `SpacesimSurfaceBakePass`. **One assembler, so they cannot be two fields.**
+## one in `SpacesimSurfaceDistribution`. **One assembler, so they cannot be two fields.**
 static func source() -> String:
 	return (
 		"#version 450\n"

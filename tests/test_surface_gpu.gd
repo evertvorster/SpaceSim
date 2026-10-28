@@ -6,7 +6,7 @@ extends RefCounted
 ##
 ## 1. **`create_local_rendering_device()` returns `null` under `--headless`**, so the ordinary suite run never
 ##    takes this path at all. `SpacesimSurfaceGpu` is nonetheless the build-time bake in flight —
-##    `SpacesimSurfaceMaps.prepare()` calls it synchronously for every body with a surface — so a fault here
+##    `SpacesimSurfaceDistribution.prepare()` calls it synchronously for every body with a surface — so a fault here
 ##    is a fault on the first frame of the game, not in a probe.
 ## 2. **The RID count.** The allocator exhaustion that cost this project two flights was allocations never
 ##    given back, found in a pass that was reading someone else's error. The counter lives on the device

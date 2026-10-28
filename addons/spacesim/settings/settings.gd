@@ -121,16 +121,6 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
-	# --- the surface map's ceiling, **as a fraction of the resolution the scene is being rendered at.** The
-	# ceiling is always derived — there is no absolute width in the file — because it is a property of the
-	# display rather than of the body: 0.5 makes the texture half the scene's resolution, and that follows the
-	# render resolution wherever it goes. Clamped to `SpacesimSurfaceMaps.MIN_WIDTH` … `MAX_WIDTH` afterwards.
-	#
-	# **It exists to be moved while flying.** The whole-body map is a ladder — a cheap 256 bake at build,
-	# then one rung per approach step — so this number is what decides where the ladder stops, and therefore
-	# the cost of a planet at close range. Read per frame in `SpacesimSystemScene.update_lod` through
-	# `SpacesimSurfaceMaps.base_max_width`, never cached: a cached setting is a cold setting.
-	"surface.max_base_fraction": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.05, "max": 2.0},
 	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
 	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
 	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the

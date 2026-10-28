@@ -171,7 +171,7 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	# **Until a rebuild has actually landed**: the walk is a pool task, and three frames is a guess rather
 	# than a wait. The first version of this check failed intermittently for exactly that reason.
 	for frame in 30:
-		scene.update_lod(camera, 0.016)
+		scene.update_lod(camera)
 		if earth.patch_triangles > 0:
 			break
 
@@ -214,10 +214,10 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 
 	# **One switch, and it hides every deck.** Read through `get_value` every frame, so it is hot.
 	SpacesimSettings.set_value("render.cloud_decks", false)
-	scene.update_lod(camera, 0.016)
+	scene.update_lod(camera)
 	h.check(not deck.node.visible, "and the switch hides it without touching the map")
 	SpacesimSettings.set_value("render.cloud_decks", true)
-	scene.update_lod(camera, 0.016)
+	scene.update_lod(camera)
 	h.check(deck.node.visible, "and brings it back")
 	SpacesimSettings.set_value("render.cloud_decks", was_on)
 	camera.queue_free()

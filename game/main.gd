@@ -47,7 +47,6 @@ var _throttle_stop := false
 var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass
-var _surface_bake: SpacesimSurfaceBakePass
 var _atmosphere_pass: SpacesimAtmospherePass
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
@@ -103,18 +102,14 @@ func _ready() -> void:
 	# **The surface maps refine on the render thread**, through a pass of this camera's compositor: a bake is a
 	# `RenderingDevice` dispatch, and a callback *is* the render thread. After the exposure pass, because it
 	# writes no colour and must not sit between the frame and the metre.
-	_surface_bake = SpacesimSurfaceBakePass.new()
 	# **The air goes before the exposure**, so the metre measures the finished frame: the march writes the air
 	# into the colour buffer and the exposure pass reads it. A pass placed after would leave the exposure
 	# metering an intermediate frame — the same class of fault as metering the 2D layer.
 	_atmosphere_pass = SpacesimAtmospherePass.new()
 	var compositor := Compositor.new()
-	var effects: Array[CompositorEffect] = [_atmosphere_pass, _exposure_pass, _surface_bake]
+	var effects: Array[CompositorEffect] = [_atmosphere_pass, _exposure_pass]
 	compositor.compositor_effects = effects
 	_camera.compositor = compositor
-	# The system was built before this camera existed, so the bake pass is handed over now: the maps baked at
-	# build are already in place, and refinement begins with the first frame the eye asks for more.
-	_system.attach_surface_bake(_surface_bake)
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_build_hud()
@@ -529,10 +524,9 @@ func _update_view(delta: float) -> void:
 	var mode := String(SpacesimSettings.get_value("render.mode"))
 	_system.wireframe = mode == "wireframe"
 	_system.flat_shaded = mode == "flat"
-	# **The second argument is the frame's own delta**, which is what the surface map's ladder speculates on; the third is
-	# **the ship's origin, not the camera's** — the camera's offset swings on a 32 m arm as the ship rotates, and at low
+	# **The ship's origin, not the camera's** — the camera's offset swings on a 32 m arm as the ship rotates, and at low
 	# altitude that re-cut the mesh every frame. The level is a property of where the observer is.
-	_system.update_lod(_camera, delta, observer)
+	_system.update_lod(_camera, observer)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.

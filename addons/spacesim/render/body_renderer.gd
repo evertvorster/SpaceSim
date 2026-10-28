@@ -54,51 +54,6 @@ const DECK_SHADOW_FLOOR := 0.45
 ## staying correctly black. The shader also clamps the tilt at 19° for the same reason.
 const RELIEF_EXAGGERATION := 5.0
 
-## **The ladder's DEPTH — how many rungs exist, not how many run.** The shader derives the count from the pixel:
-##
-##     rungs = clamp(ceil(log2(first_feature / (2 * footprint))), 0, detail_max_rungs)
-##
-## where `first_feature` is the field's octave `first_detail_octave` — the first one the map did not carry. So a
-## distant body runs none, a ground filling the frame runs as many as it can resolve, and this constant is only the
-## ceiling on that. **Which fixes the fault it replaced**: `DETAIL_OCTAVES = 8` was a *count*, so the finest
-## rung was `feature / 2^8` whatever the pixel — 271 m on Earth at a 2,304-wide map, against the 13 m a pixel covers
-## at 10 km altitude. Detail stopped arriving and no amount of approach brought it back.
-##
-## **The depth is 18 because of a count, not a taste.** The ladder starts at two texels of the map in hand, and a
-## rung halves the feature: the rungs a view needs are `log2(feature / footprint)`. Measured on the two maps the
-## game actually uses, at the 720p centre pixel:
-##
-## | map | feature | 2,000 km up | 100 km | 10 km | 1 km |
-## |---|---|---|---|---|---|
-## | 512 (the 720p default's ceiling) | 156 km | 6 | 11 | 14 | **17** |
-## | 2,304 (a 4K render, half of it) | 34.7 km | 4 | 9 | 12 | 15 |
-##
-## So the finest a 1 km descent asks for is 17, and the ceiling sits one above it. **A deeper ceiling costs nothing**
-## — the count that runs is the pixel's, so a distant body evaluates one rung whatever this number is — which is
-## exactly why it can afford to be generous.
-const DETAIL_MAX_RUNGS := 18
-## Colour variation is deliberately small: the bands' mean is what the temperature and the light budget are
-## fitted to, and a large swing would move the drawn average away from it.
-const DETAIL_VARIATION := 0.18
-## **The relief's exaggeration**, in the sloped sense: the shader computes a real slope (metres of height per
-## metre of ground) and this scales it. It is the one look number in the relief, and 1.0 is a surface that shades
-## exactly as steep as it is.
-const DETAIL_RELIEF := 1.0
-## **The amplitude falloff of the octaves below the map**, and the one place the ladder deviates from the field's
-## own spectrum. Evert, 2026-10-19: *"the landscape looks too smooth now. We need a little graininess coming up when
-## we are close, but only a tiny amount."*
-##
-## The field falls at `gain` 0.5 per octave, which is `2^-1` — a self-affine surface whose slope is the same at
-## every scale. Real terrain is closer to `2^-0.8 = 0.574`: its *slope* grows as you look closer, which is why a
-## 30 m hill is tens of centimetres tall rather than millimetres. At a 1 km altitude the ladder reaches octave 20,
-## where 0.5 gives **8.7 mm** of relief and 0.574 gives **about 10 cm** — both tiny, but only one of them is there
-## at all.
-##
-## **The map keeps the field's own 0.5.** That spectrum is what the far view was calibrated on and what makes the
-## continents read at 20,000 km; this number only governs the octaves the bake never carried, so the change is
-## continuous in amplitude at the seam and differs only in the tail's slope. **0.574 is `2^-0.8`** and is the
-## physical value, not a taste — and it is deliberately *not* larger: the tail is grain, not hills.
-const DETAIL_TAIL_GAIN := 0.574
 
 ## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
 ## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
@@ -140,8 +95,6 @@ const DECK_SOFTNESS := 0.05
 
 ## The wireframe view's one material — see [method wireframe_material].
 static var _wireframe: StandardMaterial3D
-## The one-texel neutral height map every un-baked material starts with.
-static var _flat: ImageTexture
 static var _point_quad: QuadMesh
 ## The quad every point of light is drawn on: **one resource, shared, scaled by the node** — the same
 ## arrangement the icosphere uses, and for the same reason.
@@ -320,8 +273,8 @@ static func ramp_image(
 	var edges: Array = []
 	for band in bands:
 		edges.append([
-			SpacesimSurfaceMaps.value_at(quantiles, float(band["from"])),
-			SpacesimSurfaceMaps.value_at(quantiles, float(band["to"])),
+			SpacesimSurfaceDistribution.value_at(quantiles, float(band["from"])),
+			SpacesimSurfaceDistribution.value_at(quantiles, float(band["to"])),
 			band["color"],
 		])
 	for index in RAMP_WIDTH:
@@ -341,22 +294,6 @@ static func _band_colour(edges: Array, value: float, fallback: Color) -> Color:
 	return edges[edges.size() - 1][2]
 
 
-## A one-texel map at the neutral height, so a body with no bake yet draws its colour ramp rather than black.
-## **The shader's samplers default to black**, which for a height field means "the datum everywhere" — that
-## happens to be harmless, and a flat 0.5 makes the intent explicit rather than relying on it.
-##
-## **One image, and it takes no argument.** It used to take the height and cache the first caller's value for
-## the whole process — every caller passed 0.5, so the parameter was a promise the function did not keep.
-const FLAT_HEIGHT := 0.5
-
-static func flat_height() -> ImageTexture:
-	if _flat == null:
-		var image := Image.create_empty(1, 1, false, Image.FORMAT_RH)
-		image.set_pixel(0, 0, Color(FLAT_HEIGHT, 0.0, 0.0, 1.0))
-		_flat = ImageTexture.create_from_image(image)
-	return _flat
-
-
 ## **Does this body draw a reference sphere?** — the predicate [[SpaceSim/Levels of Detail|Levels of Detail]] §4
 ## states as a table, and the question is about *drawing a sphere*, not about having "ground": a gas giant has no
 ## surface register because its datum is a reference **pressure**, and a star's photosphere is drawn by its own
@@ -366,71 +303,23 @@ static func draws_reference_sphere(content: SpacesimSystemBody) -> bool:
 	return content != null and content.surface != null
 
 
-## **The octave of the field's own fbm that is two texels of a `width`-wide map** — where the ladder starts.
-##
-## `surface_height`'s octave `j` has `base_frequency * 2^j` on the unit sphere, so its feature is
-## `1 / (base_frequency * 2^j)` radians; two texels of the map span `2 * (TAU / width)` = `4 pi / width`. Setting
-## the two equal gives `j = log2(width / (4 pi * base_frequency))`.
-##
-## **The `4 pi` matters, and getting it wrong cost a band of nothing.** Written as `width / (2 * base_frequency)`
-## it was off by `log2(2 pi)` — 2.65 octaves — so at a 960-wide map the ladder started at octave 8 when the map
-## had stopped at 4, and octaves 5, 6 and 7 (160 km, 80 km, 40 km features) were drawn by neither the bake nor the
-## shader. That is the "leaves a band of nothing between them" failure the `apply_surface_maps` comment warns
-## about, and it read as the ground being too smooth. `tests/test_render.gd` now asserts the seam.
-##
-## Returns -1 for a body that should have no ladder at all.
-static func first_detail_octave(base_frequency: float, width: int) -> int:
-	if base_frequency <= 0.0 or width <= 0:
-		return -1
-	return int(round(log(float(width) / (4.0 * PI * base_frequency)) / log(2.0)))
-
-
-## **How deep the detail ladder may go on this body**: none at all where there is no sphere to put it on.
-##
-## A gas giant used to be handed the full eight-rung ladder for a surface that is not its visible face — noise
-## evaluated on every pixel of a body whose visible face is a deck. That is work with no need, and it is the §1.7
-## pattern: the answer to "how much detail?" being given to something that never asked the question.
-static func max_rungs_for(content: SpacesimSystemBody) -> int:
-	return DETAIL_MAX_RUNGS if draws_reference_sphere(content) else 0
-
-
 ## The surface material: **a height field, a colour ramp and a sea.**
 ##
-## Everything it is given is derived: the ramp from `SpacesimSurfaceModel.bands()` and the measured quantiles,
-## the amplitude from `SpacesimSurfaceField.plan()`, the radius from the body. **The maps and the sea level
-## arrive later**, when the first bake lands — `apply_surface_maps()` is the one place that sets them, so the
-## shader cannot be told one body's maps and another's sea.
+## Everything it is given is derived: the ramp from `SpacesimSurfaceModel.bands()` and the *measured* quantiles, and
+## the field's own plan — the shader evaluates `surface_height` itself, so there is no map to publish, no ladder to
+## keep in step and no sea level to hand over with the heights it belongs to.
 static func surface_material(
 	body: SpacesimSceneBody, ramp: ImageTexture
 ) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = SURFACE_SHADER
 	material.set_shader_parameter("colour_ramp", ramp)
-	material.set_shader_parameter("height_map", flat_height())
 	material.set_shader_parameter("planet_radius", body.radius)
 	material.set_shader_parameter(
 		"field_amplitude", SpacesimSurfaceField.plan(body.id, body.radius).amplitude
 	)
 	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
-	material.set_shader_parameter("map_width", SpacesimSurfaceMaps.BUILD_WIDTH)
-	# **The ladder's numbers, from the same plan the bake uses** — one writer, so the detail cannot be a
-	# different field from the map it extends. **The ladder is the field's own octaves**, so what it needs is not a
-	# feature size but the field's own base frequency, its seed, and which octave the map stopped at:
-	# `first_octave = log2(width / (4 pi * base_frequency))`, the octave whose feature is two texels of the brick
-	# in hand — **the 4 pi is load-bearing**: as `width / (2 * base_frequency)` it was 2.65 octaves out and left
-	# a band of nothing between the map and the ladder. `first_detail_octave` carries the reasoning.
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
-	material.set_shader_parameter("detail_seed", plan.seed)
-	material.set_shader_parameter("detail_base_frequency", plan.continent_frequency)
-	material.set_shader_parameter("detail_first_octave", first_detail_octave(
-		plan.continent_frequency, SpacesimSurfaceMaps.BUILD_WIDTH
-	))
-	material.set_shader_parameter("detail_bounding", plan.continent_bounding)
-	material.set_shader_parameter("detail_gain", plan.gain)
-	material.set_shader_parameter("detail_tail_gain", DETAIL_TAIL_GAIN)
-	material.set_shader_parameter("detail_lacunarity", plan.lacunarity)
-	material.set_shader_parameter("detail_max_rungs", max_rungs_for(body.content))
-	material.set_shader_parameter("detail_variation", DETAIL_VARIATION)
 	# **The field's own numbers, and now the WHOLE plan** — the shader evaluates the field itself, so every number the
 	# bake compiles has to reach it or the two are different fields. Only the fields `surface_height` reads are here;
 	# a number in the struct that nothing reads would be a number nothing draws.
@@ -457,7 +346,6 @@ static func surface_material(
 	material.set_shader_parameter("field_mottle_plain_gain", plan.mottle_plain_gain)
 	material.set_shader_parameter("field_gain", plan.gain)
 	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
-	material.set_shader_parameter("detail_relief", DETAIL_RELIEF)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
@@ -485,78 +373,6 @@ static func surface_material(
 ## Whether a band entry came from a liquid material — the derivation's own answer, read off the phase it carries.
 static func band_is_liquid(band: Dictionary) -> bool:
 	return int(band.get("phase", -1)) == SpacesimSurfaceModel.Phase.LIQUID
-
-
-## **Publish a bake.** The texture and the sea level are set together and from one entry, because a sea level
-## from one body and a map from another is a coastline in the wrong place that nothing would catch.
-##
-## **Only the refining map is published**, and the build bake is not: the shader thresholds and colours from
-## whatever resolution it is handed, and the build map's job is the *measurement* (the quantiles the sea level
-## and the band edges come from), which happens on the host.
-## **A test that would have caught the old shape**: the material must have no `coarse_map` parameter, because a
-## second texture in the shader is a second resolution to keep in step with the picture. **The same reasoning
-## deleted the window** — the shader now samples exactly one height map, at whatever width the ladder has reached.
-## **Publish the near field**: the tile array and the rectangles that index it.
-##
-## The array itself and the rectangles are handed over together, because a rectangle names a layer and a layer
-## without its array is an index into nothing. **Padded to the table's size** rather than truncated to the live
-## count: a fixed-size uniform array is written whole, and `tile_count` is what the shader loops over.
-static func apply_surface_tiles(
-	material: Material, array: Texture2DArrayRD,
-	rects: PackedVector4Array, layers: PackedInt32Array
-) -> void:
-	var surface := material as ShaderMaterial
-	if surface == null:
-		return
-	# **A rectangle without its array is an index into nothing**, so no array means no tiles are claimed — the
-	# shader samples the whole-body map alone until the first tile has actually landed.
-	var live := rects.size() if array != null else 0
-	if array != null and surface.get_shader_parameter("tile_map") != array:
-		surface.set_shader_parameter("tile_map", array)
-	# **How many texels a tile's side holds**, which is what turns a tile's uv rectangle into its own texel size — the
-	# quantity the sub-texel bound is measured against. Published rather than left to the shader's default: a uniform's
-	# default is the picture a missed publish draws, and this one decides how sharp a coast is.
-	surface.set_shader_parameter("tile_texels", SpacesimSurfaceTiles.TILE_TEXELS)
-	var size := SpacesimSurfaceTiles.MAX_TILES
-	var padded_rects := PackedVector4Array()
-	var padded_layers := PackedInt32Array()
-	padded_rects.resize(size)
-	padded_layers.resize(size)
-	for index in size:
-		if index < live:
-			padded_rects[index] = rects[index]
-			padded_layers[index] = layers[index]
-		else:
-			padded_rects[index] = Vector4.ZERO
-			padded_layers[index] = 0
-	surface.set_shader_parameter("tile_rect", padded_rects)
-	surface.set_shader_parameter("tile_layer", padded_layers)
-	surface.set_shader_parameter("tile_count", mini(live, size))
-
-
-static func apply_surface_maps(
-	material: Material, texture: Texture2D, width: int, base_frequency: float = 0.0
-) -> void:
-	if material == null or texture == null:
-		return
-	var surface := material as ShaderMaterial
-	if surface == null:
-		return
-	# **Identity, not a width**: two refined maps can share a width across a recede and re-approach, and a
-	# repoint is a dictionary write against a texture that is already correct.
-	if surface.get_shader_parameter("height_map") != texture:
-		surface.set_shader_parameter("height_map", texture)
-		surface.set_shader_parameter("map_width", width)
-		# **The ladder starts where the map stops**, so a refinement moves it — otherwise the detail would either
-		# duplicate what the new map shows or leave a band of nothing between them. The ladder is the field's own
-		# octaves, so what moves is *which octave* is the first one the map did not carry.
-		#
-		# **`base_frequency` arrives as an argument, not read back off the material.** Reading it back was a crash
-		# in flight: the second surface layer (the sea, which has since gone) carried no `detail_base_frequency`,
-		# so the read returned `null` and `float(null)` is *"Invalid call. Nonexistent 'float' constructor"* — once
-		# per map landing, and invisible to the suite because a headless run has no surface maps at all. A caller
-		# that passes 0.0 gets -1, which the shader's gate already treats as "no ladder".
-		surface.set_shader_parameter("detail_first_octave", first_detail_octave(base_frequency, width))
 
 
 ## **The cloud deck's material** — the far regime's cloud, from the derivation and the layer's own numbers.
@@ -611,7 +427,7 @@ static func deck_material(
 ##
 ## The threshold is the percentile the layer's coverage implies, `ramp_gain` is fitted to the map's own
 ## measured mean, and `veil` is 1 for a mapped deck. **All four arrive in one call for the same reason
-## `apply_surface_maps` does**: a threshold from one bake against a gain from another is a deck whose average
+## a single publisher does**: a threshold from one bake against a gain from another is a deck whose average
 ## reflectance is not the calibrated albedo, and nothing would catch it.
 ##
 ## `width == 0` is the *no map* case — a body the model calls `FEATURELESS`, whose honest picture is a

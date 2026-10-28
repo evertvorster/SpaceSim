@@ -31,7 +31,6 @@ func run(h, root: Node) -> void:
 
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_ground_is_the_field(h, earth)
-	_test_the_ladder_is_only_where_there_is_a_sphere(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_phase_term_is_a_disc_average(h)
@@ -103,59 +102,6 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 			found.size() - missing.size(), found.size()
 		] + ("" if missing.is_empty() else " — missing: " + ", ".join(missing)))
 
-
-func _test_the_ladder_is_only_where_there_is_a_sphere(h, scene: SpacesimSystemScene) -> void:
-	var earth := scene.body_by_id("planet:earth")
-	var jupiter := scene.body_by_id("planet:jupiter")
-	var sol := scene.body_by_id("star:sol")
-	h.check(SpacesimBodyRenderer.draws_reference_sphere(earth.content),
-		"Earth draws a reference sphere")
-	h.check(SpacesimBodyRenderer.max_rungs_for(earth.content) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
-		"so its ladder is as deep as the ceiling allows (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
-	h.check(not SpacesimBodyRenderer.draws_reference_sphere(jupiter.content),
-		"a gas giant does not — its datum is a reference pressure, not a surface")
-	h.check(SpacesimBodyRenderer.max_rungs_for(jupiter.content) == 0,
-		"so it gets no detail ladder at all")
-	h.check(not SpacesimBodyRenderer.draws_reference_sphere(sol.content),
-		"and a star does not either: its photosphere is its disc, drawn by its own shader")
-	h.check(SpacesimBodyRenderer.max_rungs_for(sol.content) == 0, "so the surface ladder is zero for it")
-	# **And the material the game actually builds carries it**, rather than the predicate being true in isolation.
-	var jupiter_material := SpacesimBodyRenderer.material_for(
-		jupiter, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), jupiter.color)
-	) as ShaderMaterial
-	h.check(int(jupiter_material.get_shader_parameter("detail_max_rungs")) == 0,
-		"and the material Jupiter is drawn with asks for none")
-	var earth_material := SpacesimBodyRenderer.material_for(
-		earth, SpacesimBodyRenderer.surface_ramp([], SpacesimSurfaceMaps.linear_quantiles(), earth.color)
-	) as ShaderMaterial
-	h.check(int(earth_material.get_shader_parameter("detail_max_rungs")) == SpacesimBodyRenderer.DETAIL_MAX_RUNGS,
-		"while Earth's asks for the full depth (%d)" % SpacesimBodyRenderer.DETAIL_MAX_RUNGS)
-
-	# **The ladder's seam: the octave it starts at must be the first one the map did not carry.** One texel of a
-	# `width`-wide map is `TAU / width` radians, and the field's octave `j` is `1 / (base * 2^j)`, so the start has
-	# to land near two texels — within half an octave of it, because an octave is an integer.
-	#
-	# Written as `width / (2 * base)` the start was 2.65 octaves too deep, and the octaves in the gap were drawn by
-	# neither the bake nor the shader, which read as ground that was too smooth. So the assertion is the seam, not
-	# the formula that computes it.
-	for width in [256, 512, 960, 2048, 4096]:
-		var octave := SpacesimBodyRenderer.first_detail_octave(2.5, width)
-		var feature := 1.0 / (2.5 * pow(2.0, float(octave)))
-		var texels := feature / (TAU / float(width))
-		h.check(texels >= 1.4 and texels <= 2.9,
-			"at %d wide the ladder starts %.2f texels out" % [width, texels])
-
-	# **A material with no ladder must not crash the map landing.** The ocean has no `detail_base_frequency` and
-	# no ladder, and reading the parameter back off the material to derive the octave returned `null` — which in
-	# GDScript is *"Invalid call. Nonexistent 'float' constructor"*, once per ocean per map, in flight only. The
-	# headless suite never saw it because a headless run has no surface maps at all, so this calls the function
-	# the way a landing does, with a material that has no ladder parameters.
-	var bare := ShaderMaterial.new()
-	SpacesimBodyRenderer.apply_surface_maps(
-		bare, ImageTexture.create_from_image(Image.create(4, 4, false, Image.FORMAT_RF)), 512
-	)
-	h.check(int(bare.get_shader_parameter("detail_first_octave")) == -1,
-		"and a material with no ladder is told to draw none, not made to throw")
 
 
 ## **The background is the real sky, and it must not become the light.**
@@ -304,15 +250,14 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	h.check(material.get_shader_parameter("base_color") == earth.color,
 		"the flat mode's colour is the body's derived albedo, not a constant")
 	h.check(material.get_shader_parameter("planet_radius") == earth.radius,
-		"the shader is told the body's radius, which is what turns a texel into a slope")
+		"the shader is told the body's radius, which is what turns the field's gradient into a slope")
 	var plan := SpacesimSurfaceField.plan(earth.content.id, earth.radius)
 	h.check_near(float(material.get_shader_parameter("field_amplitude")), plan.amplitude,
 		"and the relief amplitude the plan derives (%.0f m)" % plan.amplitude, 1.0)
-	h.check(material.get_shader_parameter("height_map") != null,
-		"with a neutral height until a bake lands")
-	# **One map, not two.** The surface shader draws from the refining map only: a second, fixed-resolution
-	# texture in it is a second resolution to keep in step with the picture, and the version that had one drew
-	# a planet at 39 km texels from low orbit.
+	# **No map at all, in either direction.** The shader's only sampler is the colour ramp, and the field is
+	# evaluated per pixel — so a `height_map` or a `coarse_map` would be a raster coming back in by the side door.
+	h.check(material.get_shader_parameter("height_map") == null,
+		"with no height map, because the shader evaluates the field itself")
 	h.check(material.get_shader_parameter("coarse_map") == null,
 		"and no second, fixed-resolution map for the colour to fall back to")
 
