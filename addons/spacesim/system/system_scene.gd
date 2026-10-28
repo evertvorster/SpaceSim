@@ -982,7 +982,11 @@ func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
 	body.patch_arrays = []
 	body.patch_task = WorkerThreadPool.add_task(
 		Callable(self, "_build_patch_arrays").bind(
-			body, body.patch_chunks, lines, body.radius, body.patch_task_origin
+			body, body.patch_chunks, lines, body.radius, body.patch_task_origin,
+			# **Captured here, not read on the worker**: the worker touches no settings, and a tint that changed while
+			# the build was in flight must not change the arrays the next publish pairs with this origin.
+			bool(SpacesimSettings.get_value("render.depth_tint")),
+			body.lattice
 		)
 	)
 
@@ -990,11 +994,12 @@ func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
 ## **Runs on a worker thread.** Reads the static chunk cache (which locks) and writes one field on one
 ## body; touches no node, no `RenderingServer` and no settings.
 func _build_patch_arrays(
-	body: SpacesimSceneBody, chunks: Array, lines: bool, radius: float, origin: Vector3
+	body: SpacesimSceneBody, chunks: Array, lines: bool, radius: float, origin: Vector3,
+	tinted: bool, lattice: SpacesimPatches.Lattice
 ) -> void:
 	body.patch_arrays = (
 		SpacesimPatches.lines_of(chunks, radius, origin) if lines
-		else SpacesimPatches.arrays_of(chunks, radius, origin)
+		else SpacesimPatches.arrays_of(chunks, radius, origin, tinted, lattice)
 	)
 
 

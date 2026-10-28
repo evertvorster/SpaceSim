@@ -374,8 +374,85 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 ## `tinted` builds the per-vertex colour the depth tint rides on. It is **off** unless `render.depth_tint` is on,
 ## because that colour is a debug view and it is not free: a GDScript append per vertex, and 16 bytes a vertex uploaded
 ## with the mesh. Evert, 2026-10-28: *"We don't need color for wireframe, its all white."*
+## **A body's lattice, kept between walks.** `points` is unit-space and append-only, `slot` maps a point to its
+## index in it, and `blocks` maps a chunk key to that chunk's indices *already in slots* — so a merge is
+## `append_array` per chunk and no per-vertex work at all, and a walk that changes a hundred chunks pays for a hundred
+## chunks instead of rebuilding eleven thousand.
+##
+## It is per body and owned by the scene, not this script: the points are shared by every body, but the *slots* are one
+## body's, and a static cache here would mix radii.
+class Lattice:
+	extends RefCounted
+	var points := PackedVector3Array()
+	var slot := {}
+	var blocks := {}
+	var merges := 0
+
+
+## **A chunk's indices in lattice slots**, built once per body and then reused. The points it needs are inserted into
+## the body's buffer if they are not there yet — which for a subdivided patch is mostly points that already exist,
+## because subdivision only ever adds the three midpoints.
+static func _lattice_block(lattice: Lattice, chunk: Array) -> PackedInt32Array:
+	var arrays := chunk_arrays(chunk)
+	var chunk_vertices: PackedVector3Array = arrays[0]
+	var chunk_indices: PackedInt32Array = arrays[2]
+	var block := PackedInt32Array()
+	block.resize(chunk_indices.size())
+	var map := PackedInt32Array()
+	map.resize(chunk_vertices.size())
+	for vertex in chunk_vertices.size():
+		var point := chunk_vertices[vertex]
+		var index: int = lattice.slot.get(point, -1)
+		if index < 0:
+			index = lattice.points.size()
+			lattice.points.append(point)
+			lattice.slot[point] = index
+		map[vertex] = index
+	for index in chunk_indices.size():
+		block[index] = map[chunk_indices[index]]
+	return block
+
+
+## **The whole selection from the lattice**: indices by concatenation, and one pass to put the points in metres.
+##
+## The buffer is append-only, so it holds points whose chunks have since been discarded — `_lattice_compact` reclaims
+## them. They cost a vertex each in the upload and are never referenced, so the buffer is allowed to run to a few times
+## the selection before it is rebuilt.
+static func _arrays_lattice(
+	lattice: Lattice, chunks: Array, radius: float, origin: Vector3
+) -> Array:
+	if lattice.points.size() > 4 * chunks.size() * POINTS_PER_CHUNK:
+		lattice.points = PackedVector3Array()
+		lattice.slot = {}
+		lattice.blocks = {}
+	lattice.merges += 1
+	var indices := PackedInt32Array()
+	for chunk in chunks:
+		var key := "%d/%s" % [int(chunk[0]), String(chunk[1])]
+		var block: PackedInt32Array = lattice.blocks.get(key, PackedInt32Array())
+		if block.is_empty():
+			block = _lattice_block(lattice, chunk)
+			lattice.blocks[key] = block
+		indices.append_array(block)
+	var points := lattice.points
+	var vertices := PackedVector3Array()
+	vertices.resize(points.size())
+	for index in points.size():
+		vertices[index] = points[index] * radius - origin
+	# **The points are the normals**, on a unit sphere. Copied, not handed over: the next merge appends to the
+	# lattice's array, and a published array that something else can grow underneath is the aliasing class this project
+	# has already paid for. One memcpy of the points is cheap next to getting that wrong.
+	return [vertices, points.duplicate(), indices]
+
+
+## **The points a chunk of `CHUNK_SUBDIVISIONS` has**, for the buffer's compaction trigger: the lattice of a triangle
+## split `s` times is `(2^s + 1)(2^s + 2) / 2` points, which is 15 at the shipped `s = 2`.
+const POINTS_PER_CHUNK := 15
+
+
 static func arrays_of(
-	chunks: Array, radius := 1.0, origin := Vector3.ZERO, tinted := false
+	chunks: Array, radius := 1.0, origin := Vector3.ZERO, tinted := false,
+	lattice: Lattice = null
 ) -> Array:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -383,6 +460,10 @@ static func arrays_of(
 	# `render.depth_tint` is on — so the debug view costs the same arrays and no second material, and the tree is legible
 	# where a shader could not be read: a boundary between levels is a colour step, a crack is a colour step that is
 	# darker, and a region that stopped refining is a flat patch of one hue.
+	# **A tinted build uses the fresh path**, because a colour belongs to a chunk's level and a shared point can sit on
+	# two chunks of different depths — a conflict a debug view can pay for by being slower.
+	if lattice != null and not tinted:
+		return _arrays_lattice(lattice, chunks, radius, origin)
 	var colors := PackedColorArray()
 	var indices := PackedInt32Array()
 	# **ONE lattice for the whole selection**, not one per chunk: a point on a chunk boundary belongs to both chunks,
@@ -414,9 +495,15 @@ static func arrays_of(
 			indices.append(map[index])
 		if not tinted:
 			continue
+		# **A colour per MERGED vertex, assigned through the map.** Appending per chunk vertex gave 84,810 colours for
+		# 45,845 vertices — an array that does not line up with what it describes, which the suite caught. And a shared
+		# point can sit on two chunks of different depths, so the tint is the last chunk's that referenced it: this is a
+		# debug view, and the honest alternative would be a second vertex per boundary point, which is what the sharing
+		# exists to remove.
+		colors.resize(vertices.size())
 		var tint := depth_tint(int(chunk[2]))
-		for _vertex in chunk_vertices.size():
-			colors.append(tint)
+		for slot in map:
+			colors[slot] = tint
 	rebase(vertices, radius, origin)
 	# **Two arrays and no colour when the tint is off**, which `mesh_from` already accepts — so the tint costs nothing
 	# until it is asked for, and a mesh with no `ARRAY_COLOR` is a mesh the renderer uploads 16 bytes a vertex lighter.

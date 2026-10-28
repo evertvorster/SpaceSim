@@ -55,6 +55,9 @@ var patch_triangles := 0
 ## The point the mesh's vertices are measured from, in body-space metres — captured with the build and written onto the
 ## node with the mesh it belongs to. See `SpacesimPatches.rebase`.
 var patch_task_origin := Vector3.ZERO
+## **This body's vertex lattice**, kept between walks so a merge is a memcpy of index blocks rather than a rebuild.
+## Owned here because the slots are per body; see `SpacesimPatches.Lattice`.
+var lattice := SpacesimPatches.Lattice.new()
 ## Whether the drawn arrays carry the depth tint, so a toggle re-walks and rebuilds them.
 var patch_walk_tinted := false
 ## Whether an empty selection has already been reported for this body, so the reason is printed once

@@ -22,6 +22,8 @@ func run(h, root: Node) -> void:
 	_test_it_is_monotone_in_distance(h)
 	_test_the_horizon_is_exact(h)
 	_test_the_law_bounds_the_walk(h)
+	_test_the_lattice_merge_matches_a_rebuild(h)
+	_test_the_tint_costs_nothing_until_asked(h)
 	_test_the_mesh(h)
 	_test_the_cache_makes_a_rebuild_cheap(h)
 	_test_the_drawn_triangle_is_inside_the_law(h)
@@ -252,6 +254,97 @@ func _test_the_mesh(h) -> void:
 		"and sharing the flat mesh's vertices (%d, not %d)"
 			% [(line_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(), expected * 6]
 	)
+## **The tint is only paid for when it is asked for** — a regression guard: the colour array was built for every
+## rebuild and never passed to `arrays_of` from the scene, so the setting could not have worked.
+func _test_the_tint_costs_nothing_until_asked(h) -> void:
+	var chunks := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	var plain := SpacesimPatches.arrays_of(chunks)
+	h.check(plain.size() == 3,
+		"an untinted merge is vertices, normals and indices, and no colour (%d arrays)" % plain.size())
+	var tinted := SpacesimPatches.arrays_of(chunks, 1.0, Vector3.ZERO, true)
+	h.check(tinted.size() == 4 and (tinted[3] as PackedColorArray).size() == (tinted[0] as PackedVector3Array).size(),
+		"and a tinted one carries a colour per vertex (%d colours for %d vertices)"
+			% [(tinted[3] as PackedColorArray).size(), (tinted[0] as PackedVector3Array).size()])
+
+
+## **The incremental merge is the same mesh as a rebuild**, which is the only thing that makes a per-body lattice safe
+## to keep between walks. Compared as a SET of triangles, because the two paths lay their vertices out in different
+## orders — the lattice keeps the order points were first seen, the fresh path the order chunks arrive.
+##
+## Small selections on purpose: this compares every triangle rather than a statistic, so it is a correctness check and
+## not a smoke test.
+func _test_the_lattice_merge_matches_a_rebuild(h) -> void:
+	var origin := Vector3.UP * EARTH_RADIUS
+	var lattice := SpacesimPatches.Lattice.new()
+	var chunks := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	var first := SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin, false, lattice)
+	h.check(_triangle_set(first) == _triangle_set(
+			SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin)),
+		"a cold lattice merge draws exactly the triangles a rebuild does (%d triangles)"
+			% (_triangle_set(first).size()))
+
+	# **Then move the eye**, so the selection changes on both sides of the walk — added chunks and discarded ones — and
+	# the lattice has to stay truthful about which slots are which.
+	var moved := (Vector3.UP * (EARTH_RADIUS + 5.0e4) + Vector3.RIGHT * 60.0e3).normalized()
+	var next := SpacesimPatches.select(
+		EARTH_RADIUS + 5.0e4, moved, EARTH_RADIUS, PIXEL_ANGLE, 2.0
+	)
+	h.check(next.size() != chunks.size() or next != chunks,
+		"the moved selection really is a different one (%d against %d chunks)"
+			% [next.size(), chunks.size()])
+	var warm := SpacesimPatches.arrays_of(next, EARTH_RADIUS, moved * EARTH_RADIUS, false, lattice)
+	h.check(_triangle_set(warm) == _triangle_set(
+			SpacesimPatches.arrays_of(next, EARTH_RADIUS, moved * EARTH_RADIUS)),
+		"and an incremental merge over a changed selection still matches a rebuild (%d triangles)"
+			% _triangle_set(warm).size())
+	# **The buffer keeps points whose chunks are gone**, which is the price of not rebuilding. Counted as slots
+	# actually referenced, because `vertices` is built over the whole buffer and comparing against its size would be
+	# true by construction — the exact shape this project's testing rules warn about.
+	var referenced := {}
+	for index in (warm[2] as PackedInt32Array):
+		referenced[index] = true
+	h.check(lattice.points.size() > referenced.size(),
+		"with the discarded chunks' points still in the lattice (%d points, %d referenced)"
+			% [lattice.points.size(), referenced.size()])
+	# **And it really was incremental**: blocks from both selections are in hand, so the second merge reused the first's
+	# work rather than rebuilding it.
+	h.check(lattice.blocks.size() > next.size(),
+		"and blocks kept from both selections, so the merge was incremental (%d blocks for %d chunks)"
+			% [lattice.blocks.size(), next.size()])
+	lattice.points = PackedVector3Array()
+	lattice.slot = {}
+	lattice.blocks = {}
+	var compacted := SpacesimPatches.arrays_of(next, EARTH_RADIUS, moved * EARTH_RADIUS, false, lattice)
+	h.check(_triangle_set(compacted) == _triangle_set(warm),
+		"and compacting it changes no triangle it draws")
+
+
+## Every triangle of a merge as (position, position, position), in a set — order-free, and rotated to a canonical start
+## so a different winding start does not read as a different triangle.
+static func _triangle_set(arrays: Array) -> Dictionary:
+	var vertices: PackedVector3Array = arrays[0]
+	var indices: PackedInt32Array = arrays[2]
+	var set := {}
+	for at in range(0, indices.size(), 3):
+		var points: Array = [
+			vertices[indices[at]], vertices[indices[at + 1]], vertices[indices[at + 2]]
+		]
+		# Start at the smallest, so the same triangle written from a different corner is one key.
+		var start := 0
+		for candidate in 3:
+			if str(points[candidate]) < str(points[start]):
+				start = candidate
+		var key := ""
+		for step in 3:
+			key += str(points[(start + step) % 3])
+		set[key] = true
+	return set
+
+
 ## **A rebuild is cache lookups, not geometry** — the claim chunking exists to make, stated as counts
 ## rather than as a stopwatch, because a headless rig can say that without flaking.
 func _test_the_cache_makes_a_rebuild_cheap(h) -> void:
