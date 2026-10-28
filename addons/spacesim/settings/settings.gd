@@ -75,17 +75,11 @@ const REGISTRY := {
 	},
 	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
 	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
-	# --- how far behind the ship its own camera sits, in metres. **The ship's placeholder hull is only
-	# visible when the near plane is inside it**, and the near plane follows the frame kind (deep space is
-	# 100 m), so this is the knob that decides whether you can see the ship you are flying at all. Read at
-	# the point of use in `main.gd`.
-	"camera.ship_distance": {"default": 32.0, "scope": Scope.PLAYER, "min": 10.0, "max": 2000.0},
-	# --- whether the player's own hull is drawn. **It was session state and it reset every run**, so the
-	# key had to be pressed again each time; Evert, 2026-10-16: *"I want the 'ship' in the game to remember
-	# its last setting."* A boolean row, which is the first one here — the bounds and the coercion leave an
-	# unknown type alone, so nothing else had to change to take it. Read at the point of use in `main.gd`,
-	# never cached in a variable, so the file stays hot.
-	"ship.visible": {"default": true, "scope": Scope.PLAYER},
+	# **`camera.ship_distance` and `ship.visible` went on 2026-10-28 with the placeholder hull.** Both existed for a box
+	# that was clipped at altitude by deep space's 100 m near plane and appeared as a plate on the ground once the plane
+	# was pulled inside it — Evert: *"There is some sort of landing pad that pops up when I am close to the surface. Strip
+	# that out, and clear out the mechanism that makes it."* The camera's offset is a constant in `player_ship.gd` now,
+	# and there is no hull for a key to toggle.
 	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_atmosphere": {
@@ -181,7 +175,6 @@ const REGISTRY := {
 	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.ship_toggle": {"default": "O", "scope": Scope.PLAYER, "validator": "key_binding"},
 	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding"},
 }
 

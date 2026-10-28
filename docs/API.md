@@ -880,8 +880,6 @@ on change (`camera.fov`, the marker pool and font size).
 | `video.window_size` | player | `Vector2i(1280, 720)` — the windowed window, remembered |
 | `mouse.sensitivity` | player | 0.0015 |
 | `camera.fov` | player | 70.0 |
-| `camera.ship_distance` | player | 32.0 — how far behind the player's ship its own camera sits, in metres. **It decides whether the hull is drawn at all**: the placeholder hull is only ~23 m in front of the camera and deep space's near plane is 100 m, so it is clipped away there. `_update_camera` brings the near plane inside the hull while the ship is shown, which is a depth-precision cost paid only then. See the ship key in § Bindings |
-| `ship.visible` | player | **true** — whether the player's own hull is drawn. **A setting rather than session state since 2026-10-16**, so the key remembers: it used to be a `var` that defaulted to true on every run and made you press the key again each time. The default is unchanged, and true is the deliberate one — the placeholder hull is lit like a plain box and its own pixels move the exposure metre. The first boolean row in the registry, and the settings screen grew a checkbox for it, because every declared setting has to have a control |
 | `camera.range_space` / `_orbital` / `_atmosphere` / `_surface` / `_interior` | player | `Vector2(100, 1e11)` and so on — **floors, not ceilings**: `_update_camera` raises the far plane to cover the sky and the system. See **The far plane** |
 | `lod.error_budget` | player | 4.0 — the geometric error a body's mesh may show at its **silhouette**, in pixels on screen. **It is no longer the only limit**: since 2026-10-28 the walk takes the smaller of this curvature bound and `SpacesimPatches.FACET_ANGLE` (2 degrees of apparent size, a constant and not a setting), because ε bounds a facet's *sagitta* — curvature — which at 1 km altitude permits a facet 5.8 km across, ~17,700 pixels of screen. The apparent-size term binds close in and this one holds the silhouette from about 1.6 Gm out. **And the triangle budget is gone**: the walk refines to the law and the HUD reports the count. Read by `SpacesimSystemScene.update_lod`, and in flight by the `[` / `]` keys. Small is finer. It is a **trim** meant to be tuned by eye and then frozen into `SpacesimLod`, the same shape as the star field's gain |
 | `markers.pool_size` | player | 12 |
@@ -905,13 +903,13 @@ settings_screen=Alt+C
 throttle_up=Shift+Equal
 throttle_stop=Backspace
 roll_left=BracketLeft
-ship_toggle=O
 ```
 
-The **ship toggle** (`bindings.ship_toggle`, `O`) draws or hides the player's own hull. It is session
-state and not a setting, so a fresh run always shows the ship. It exists because the placeholder hull is
-lit like the plain box it is, and its own pixels move the exposure metre — so the first thing to do when
-judging the scene's lighting is to take it out of the frame.
+**There is no ship key, because there is no ship hull** (2026-10-28). The placeholder was an 18 m box floating in
+front of the camera: deep space's 100 m near plane clipped it away, and `_update_camera` pulled that plane inside the
+hull once it was drawn, so it appeared as a plate on the ground on approach — Evert: *"There is some sort of landing
+pad that pops up when I am close to the surface. Strip that out, and clear out the mechanism that makes it."* The
+camera's offset is a constant in `player_ship.gd`, and `camera.ship_distance` and `ship.visible` went with it.
 
 The **wireframe toggle** (`bindings.wireframe_toggle`, `L`) draws the body meshes as wireframes and takes
 the air and the deck out of the frame. It asks a different question from the picture: what the level

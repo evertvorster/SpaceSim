@@ -62,7 +62,6 @@ atmosphere_band = Vector2(2000, 400000)
 surface_band = Vector2(100, 5000)
 atmosphere_altitude = 100000.0
 surface_altitude = 2000.0
-pad_size = 4000.0
 
 ; ---------- layers ----------
 

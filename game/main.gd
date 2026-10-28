@@ -64,13 +64,7 @@ var _look := Vector2.ZERO
 var _hud: Label
 var _fps: Label
 var _skip_next_motion := false
-## **The ship's visibility is a setting now, not session state** (`ship.visible`), and it is *not* cached
-## in a variable here — the project's rule, because a cached setting silently stops being hot. Evert,
-## 2026-10-16: *"I want the 'ship' in the game to remember its last setting, currently it resets to a
-## default."* It used to be a `var` defaulting to true on every run, so the key had to be pressed again
-## each time; and it defaulted to true deliberately, because the placeholder hull is lit like a plain box
-## and its own pixels move the exposure metre. The default is unchanged — what changed is that pressing
-## the key now persists.
+## Whether the body nodes are drawn at all — the debug key that hides them.
 var _bodies_visible := true
 ## Whether the body meshes are being drawn as wireframes — see [method set_wireframe].
 var _wireframe := false
@@ -176,10 +170,6 @@ func _handle_key(event: InputEventKey) -> void:
 		for body in _system.bodies:
 			if body.node != null:
 				body.node.visible = _bodies_visible
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.ship_toggle"))):
-		# **Write the setting and let `_apply_settings` draw it** — one writer for the hull's visibility,
-		# and it is the same path a hand-edited file or a future control would take.
-		SpacesimSettings.set_value("ship.visible", not ship_is_visible(), true)
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
 		_cycle_target()
 	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.throttle_stop"))):
@@ -320,25 +310,11 @@ func _cycle_target() -> void:
 
 ## Everything this scene takes from settings, applied now. Called at startup and again on any
 ## change, so nothing here is read once at startup and then forgotten.
-## Whether the player's hull is drawn. **One place to ask**, so the HUD, the near plane and the material
-## cannot disagree about it — and it reads the settings rather than a variable, which is what makes the
-## value hot and what makes it survive a restart.
-func ship_is_visible() -> bool:
-	return bool(SpacesimSettings.get_value("ship.visible"))
-
-
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
-	# **The one writer of the hull's visibility.** Read from the setting rather than a variable, so the file
-	# stays hot by construction.
-	var hull := _ship.get_node_or_null("Hull") if _ship != null else null
-	if hull != null:
-		(hull as MeshInstance3D).visible = ship_is_visible()
-	# The camera sits behind the hull, on the ship's own basis. Only the distance is settable; the height
-	# above the hull is part of what the ship is.
-	var offset := PlayerShip.CAMERA_OFFSET
-	offset.z = float(SpacesimSettings.get_value("camera.ship_distance"))
-	_camera.position = offset
+	# **The camera sits in the ship's frame and there is no hull** — see `PlayerShip.CAMERA_OFFSET` for why the box that
+	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting.
+	_camera.position = PlayerShip.CAMERA_OFFSET
 	# The exposure's ceiling, hot like everything else here: `exposure.range_stops` is in stops above
 	# the light-adapted floor, and 32.0 is the whole window with no cap on the derived value.
 	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
@@ -352,7 +328,7 @@ func _apply_settings() -> void:
 
 func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
-		"camera.fov", "camera.ship_distance", "ship.visible", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops":
+		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops":
 			_apply_settings()
 
 
@@ -542,14 +518,10 @@ func _update_markers(camera: Camera3D) -> void:
 func _update_camera(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
-	var near: float = range_for_frame.x
-	# **A drawn ship sets the near plane, because its hull is only ~23 m in front of the camera.** The
-	# frame's own near plane is a depth-precision knob and deep space's is 100 m, which clips the whole
-	# hull away — so showing the ship anywhere means bringing the plane inside it. The cost is paid only
-	# while the ship is shown, which is why the toggle is the thing that pays it.
-	if ship_is_visible():
-		near = minf(near, float(SpacesimSettings.get_value("camera.ship_distance")) * 0.5)
-	camera.near = near
+	# **The frame kind alone sets the near plane.** It used to be pulled inside the ship's hull while the hull was
+	# drawn, which is what made a placeholder box appear as a plate on the ground on approach; there is no hull now, so
+	# the plane is a depth-precision knob and nothing else.
+	camera.near = range_for_frame.x
 	var far: float = range_for_frame.y
 	# **Never let the far plane be smaller than what must be drawn.** For space that is the system: the
 	# space range is a player quality knob whose 1e11 m default is *less than one au*, so every body
@@ -657,15 +629,6 @@ func _update_hud() -> void:
 				"",
 				"bodies      %s, %d triangles, %d chunks, depth %d"
 					% [bodies, _system.triangles(), _system.chunks(), _system.deepest_level()],
-				(
-					"ship        %s at %s"
-					% [
-						"visible" if ship_is_visible() else "hidden",
-						SpacesimMarkers.format_distance(
-							float(SpacesimSettings.get_value("camera.ship_distance"))
-						),
-					]
-				),
 				"",
 				(
 					"%s/%s throttle    %s stop    mouse look    %s/%s roll    Esc release mouse"
@@ -689,13 +652,12 @@ func _update_hud() -> void:
 					]
 				),
 				(
-					"%s personal data    %s settings    %s cycle target    %s bodies on/off    %s ship on/off"
+					"%s personal data    %s settings    %s cycle target    %s bodies on/off"
 					% [
 						_binding("bindings.player_screen"),
 						_binding("bindings.settings_screen"),
 						_binding("bindings.cycle_target"),
 						_binding("bindings.bodies_toggle"),
-						_binding("bindings.ship_toggle"),
 					]
 				),
 			]

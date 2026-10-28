@@ -501,7 +501,6 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.add_child(body.surface)
 	frame_tree.register(body.surface)
 	place_landing_zone(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
-	_add_landing_site(body.surface)
 
 	frame_tree.add_rule(
 		TransitionRule.new(
@@ -1168,36 +1167,14 @@ func triangles() -> int:
 	return _triangles
 
 
-## Meter-scale references at the landing zone, so the scale is legible once you are down.
-func _add_landing_site(surface: SpacesimFrame) -> void:
-	var pad_size := _framing.pad_size
-
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(pad_size, pad_size)
-	var pad_material := StandardMaterial3D.new()
-	pad_material.albedo_color = Color(0.18, 0.2, 0.24)
-
-	var pad := MeshInstance3D.new()
-	pad.name = "LandingPad"
-	pad.mesh = plane
-	pad.material_override = pad_material
-	# A hair above the surface plane: the pad is coplanar with the planet's sphere otherwise,
-	# and coplanar geometry z-fights.
-	pad.position = Vector3(0.0, 0.5, 0.0)
-	surface.add_child(pad)
-
-	var marker_material := StandardMaterial3D.new()
-	marker_material.albedo_color = Color(0.85, 0.6, 0.15)
-	for i in 5:
-		var box := BoxMesh.new()
-		box.size = Vector3(20.0, 40.0, 20.0)
-		var marker := MeshInstance3D.new()
-		marker.name = "Marker%d" % i
-		marker.mesh = box
-		marker.material_override = marker_material
-		var angle := TAU * float(i) / 5.0
-		marker.position = Vector3(cos(angle) * 600.0, 20.5, sin(angle) * 600.0)
-		surface.add_child(marker)
+## **The landing site is gone (2026-10-28).** It was a dark 4 km plane called `LandingPad` with five amber
+## 20 x 40 x 20 m boxes standing round it at a 600 m radius — scale references for the landing zone. Evert, flying the
+## subdivision branch: *"there is a box that pops up on the surface of the planet once you are close enough… It has some
+## yellow pillars standing on it, all of that must go."* Nothing replaced it: it was a measurement aid from before the
+## ground subdivided, and the subdivision is now its own instrument.
+##
+## `SpacesimFraming.pad_size` went with it, and the two `.tres` lines that set it. **What stays is `place_landing_zone`**,
+## which puts the *frame* on the surface — that is coordinate machinery, not scenery.
 
 
 ## How a system frame reads: "landed on Nix", "above Nix". Empty for a frame this system does not
