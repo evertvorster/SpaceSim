@@ -276,10 +276,10 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 		if body.mesh != null and body.mesh.visible and body.mesh.mesh != null:
 			# **The patches the body is actually drawn with**, counted off its own mesh — a surface has no
 			# level any more, so this is the only honest place to read the number.
-			# **Counted off the vertices**, because the surface is non-indexed: every triangle carries its
-			# own three vertices, so `size() / 3` is the count and there is no index array to read.
+			# **Counted off the index array**, because the surface is indexed: the vertices are shared, so
+			# `size() / 3` on them would report the number of points, not of triangles.
 			var arrays: Array = (body.mesh.mesh as ArrayMesh).surface_get_arrays(0)
-			drawn += (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() / 3
+			drawn += (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
 	h.check(scene.triangles() == drawn,
 		"the reported triangle count is what is actually drawn, counted off the meshes (%d)" % drawn)
 

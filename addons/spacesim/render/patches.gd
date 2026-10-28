@@ -341,27 +341,42 @@ static func _chunk_arrays_for(chunk: Array) -> Array:
 			continue
 		for kid in _child_triangles(patch[0], patch[1], patch[2]):
 			stack.append([kid[0], kid[1], kid[2], int(patch[3]) + 1])
+	# **One vertex per POINT, and indices that share it.** Evert, 2026-10-28: *"all the triangles are connected
+	# together with shared vertices, there can never be a gap."* A soup of three vertices a triangle throws that
+	# away: it triples the vertex data, and — once the points are translated by a height — it lets the same point be
+	# displaced twice from two different triangles. Sharing makes the displacement single-valued by construction.
+	#
+	# The dedup is exact rather than approximate: adjacent leaves compute a shared midpoint with the same two
+	# inputs, and `a + b == b + a` in floating point, so the two results are the same bits and one dictionary entry.
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
-	vertices.resize(leaves.size() * 3)
-	normals.resize(leaves.size() * 3)
-	var at := 0
+	var indices := PackedInt32Array()
+	var seen := {}   # Vector3 -> vertex index; the point IS the key
 	for leaf in leaves:
 		# **Reversed**, because Godot's front face is clockwise seen from outside and the face list is the
 		# standard counter-clockwise one — the same single flip `SpacesimIcosphere._build` makes.
 		for point in [leaf[0], leaf[2], leaf[1]]:
-			vertices[at] = point
-			# On a unit sphere the position IS the normal — the same reason the level meshes carry no
-			# extra data, and why a coarse patch still shades smoothly.
-			normals[at] = point
-			at += 1
-	return [vertices, normals]
+			var index: int = seen.get(point, -1)
+			if index < 0:
+				index = vertices.size()
+				vertices.append(point)
+				# On a unit sphere the position IS the normal — the same reason the level meshes carry no
+				# extra data, and why a coarse patch still shades smoothly.
+				normals.append(point)
+				seen[point] = index
+			indices.append(index)
+	return [vertices, normals, indices]
 
 
 ## **A selection as one set of arrays** — the merged vertices and normals for the whole body, and the one
 ## expensive step in a rebuild. Pure and safe on a worker thread: it reads the chunk cache (which locks)
 ## and touches no node.
-static func arrays_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Array:
+## `tinted` builds the per-vertex colour the depth tint rides on. It is **off** unless `render.depth_tint` is on,
+## because that colour is a debug view and it is not free: a GDScript append per vertex, and 16 bytes a vertex uploaded
+## with the mesh. Evert, 2026-10-28: *"We don't need color for wireframe, its all white."*
+static func arrays_of(
+	chunks: Array, radius := 1.0, origin := Vector3.ZERO, tinted := false
+) -> Array:
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()
 	# **A colour per chunk, by its depth.** The surface shader multiplies it by `tint_amount`, which is zero unless
@@ -369,15 +384,43 @@ static func arrays_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> A
 	# where a shader could not be read: a boundary between levels is a colour step, a crack is a colour step that is
 	# darker, and a region that stopped refining is a flat patch of one hue.
 	var colors := PackedColorArray()
+	var indices := PackedInt32Array()
+	# **ONE lattice for the whole selection**, not one per chunk: a point on a chunk boundary belongs to both chunks,
+	# and sharing it is what makes it a single vertex that a height can translate once instead of once per chunk that
+	# draws it. The chunk cache stays per chunk (its geometry is local); the *sharing* happens here, where the whole
+	# selection is in view.
+	#
+	# `ponytail:` a dictionary lookup per corner, on the merge worker. It buys ~46% fewer vertices to upload and, more
+	# importantly, single-valued displacement; if that becomes the cost, the lattice is addressable by index
+	# arithmetic instead of hashed — that is the upgrade, and it wants a key of (face, level, i, j) rather than a point.
+	var seen := {}   # Vector3 -> merged vertex index
 	for chunk in chunks:
 		var arrays := chunk_arrays(chunk)
-		vertices.append_array(arrays[0])
-		normals.append_array(arrays[1])
+		var chunk_vertices: PackedVector3Array = arrays[0]
+		var chunk_normals: PackedVector3Array = arrays[1]
+		var chunk_indices: PackedInt32Array = arrays[2]
+		var map := PackedInt32Array()
+		map.resize(chunk_vertices.size())
+		for vertex in chunk_vertices.size():
+			var point := chunk_vertices[vertex]
+			var index: int = seen.get(point, -1)
+			if index < 0:
+				index = vertices.size()
+				vertices.append(point)
+				normals.append(chunk_normals[vertex])
+				seen[point] = index
+			map[vertex] = index
+		for index in chunk_indices:
+			indices.append(map[index])
+		if not tinted:
+			continue
 		var tint := depth_tint(int(chunk[2]))
-		for _vertex in (arrays[0] as PackedVector3Array).size():
+		for _vertex in chunk_vertices.size():
 			colors.append(tint)
 	rebase(vertices, radius, origin)
-	return [vertices, normals, colors]
+	# **Two arrays and no colour when the tint is off**, which `mesh_from` already accepts — so the tint costs nothing
+	# until it is asked for, and a mesh with no `ARRAY_COLOR` is a mesh the renderer uploads 16 bytes a vertex lighter.
+	return [vertices, normals, indices, colors] if tinted else [vertices, normals, indices]
 
 
 ## **Put the geometry in metres, measured from `origin`** — the one thing that makes a planet-sized mesh precise.
@@ -413,12 +456,14 @@ static func depth_tint(depth: int) -> Color:
 static func lines_of(chunks: Array, radius := 1.0, origin := Vector3.ZERO) -> Array:
 	var segments := PackedVector3Array()
 	for chunk in chunks:
-		var vertices: PackedVector3Array = chunk_arrays(chunk)[0]
+		var arrays := chunk_arrays(chunk)
+		var vertices: PackedVector3Array = arrays[0]
+		var indices: PackedInt32Array = arrays[2]
 		var index := 0
-		while index + 2 < vertices.size():
-			var a := vertices[index]
-			var c := vertices[index + 1]
-			var b := vertices[index + 2]
+		while index + 2 < indices.size():
+			var a := vertices[indices[index]]
+			var c := vertices[indices[index + 1]]
+			var b := vertices[indices[index + 2]]
 			segments.append(a)
 			segments.append(b)
 			segments.append(b)
@@ -446,9 +491,12 @@ static func mesh_from(arrays: Array) -> ArrayMesh:
 	surface.resize(Mesh.ARRAY_MAX)
 	surface[Mesh.ARRAY_VERTEX] = arrays[0]
 	surface[Mesh.ARRAY_NORMAL] = arrays[1]
-	# **Colour only when it was built**, so a caller that supplies two arrays still gets a mesh.
+	# **`[2]` is the index array**, and it is what turns the sharing into fewer uploaded bytes rather than nicer
+	# bookkeeping. A colour, when the tint asked for one, is `[3]`.
 	if arrays.size() > 2:
-		surface[Mesh.ARRAY_COLOR] = arrays[2]
+		surface[Mesh.ARRAY_INDEX] = arrays[2]
+	if arrays.size() > 3:
+		surface[Mesh.ARRAY_COLOR] = arrays[3]
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface)
 	return mesh

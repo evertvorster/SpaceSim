@@ -884,7 +884,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
 			pixel, epsilon, body.radius, body.patch_walk_epsilon
-		) or wireframe != body.patch_walk_wireframe:
+		) or wireframe != body.patch_walk_wireframe or _depth_tint != body.patch_walk_tinted:
 			body.patch_chunks = SpacesimPatches.select(
 				distance, to_eye, body.radius, pixel, epsilon
 			)
@@ -902,6 +902,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			body.patch_walk_direction = to_eye
 			body.patch_walk_epsilon = epsilon
 			body.patch_walk_wireframe = wireframe
+			body.patch_walk_tinted = _depth_tint
 			_request_patch_build(body, wireframe)
 	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
 	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
@@ -954,6 +955,10 @@ func _publish_depth_tint() -> void:
 		var material := body.mesh_material as ShaderMaterial
 		if material != null:
 			material.set_shader_parameter("tint_amount", 1.0 if wanted else 0.0)
+	# **The colour lives in the arrays now, so a toggle has to rebuild them — but through the walk gate, not from
+	# here.** Requesting a build in this function left a pool task holding the scene after teardown, which segfaults at
+	# exit (measured: 997 checks passed, then exit 139); the gate is drained by `await_patch_builds` on `tree_exiting`,
+	# so that is where a rebuild belongs.
 
 
 ## **Ask for a rebuild, without doing it here.** The merged chunk arrays are the expensive half of a
@@ -1037,9 +1042,11 @@ func _poll_patch_builds() -> void:
 			push_warning("PATCH: %s has no material to publish" % body.name)
 		elif body.mesh.material_override != wanted:
 			body.mesh.material_override = wanted
+		# **Triangles come from the index array for an indexed mesh** and from the segment count for lines — reading a
+		# vertex count here would now report the number of *points*, which sharing has just made several times smaller.
 		body.patch_triangles = (
 			arrays[0].size() / 6 if body.patch_task_wireframe
-			else arrays[0].size() / 3
+			else (arrays[2] as PackedInt32Array).size() / 3
 		)
 		# The selection moved while this was building, so the answer is already out of date.
 		if body.patch_task_chunks != body.patch_chunks:

@@ -184,9 +184,22 @@ func _test_the_mesh(h) -> void:
 	var arrays := SpacesimPatches.arrays_of(chunks, EARTH_RADIUS, origin)
 	var points: PackedVector3Array = arrays[0]
 	var expected := SpacesimPatches.triangle_count(chunks)
-	h.check(points.size() == expected * 3,
-		"one triangle per chunk triangle, unshared (%d vertices for %d triangles)"
-			% [points.size(), expected])
+	var indices: PackedInt32Array = arrays[2]
+	# **Shared vertices, indexed triangles** — Evert, 2026-10-28: *"all the triangles are connected together with
+	# shared vertices, there can never be a gap."* So the mesh carries one vertex per POINT and the index array is
+	# what says how they join; three vertices a triangle was the duplication this removes.
+	h.check(indices.size() == expected * 3,
+		"three indices a triangle (%d indices for %d triangles)" % [indices.size(), expected])
+	h.check(points.size() < expected * 3,
+		"and far fewer vertices than that, because a shared point is one vertex (%d for %d corners)"
+			% [points.size(), expected * 3])
+	# **No point twice.** The mesh is one lattice of shared points, so every vertex must be distinct — a duplicate
+	# would be the same point displaced twice the moment a height is applied.
+	var distinct := {}
+	for point in points:
+		distinct[point] = true
+	h.check(distinct.size() == points.size(),
+		"every vertex is a distinct point (%d of %d)" % [distinct.size(), points.size()])
 	# **2 m of slack, not 1e-6 of a metre**: the vertices are metres now, and the buffer keeps them in 32 bits, so a
 	# point 6.4 Mm from the body's centre is exact to ~0.8 m. That is the whole reason they are measured from a local
 	# origin instead, which the next check pins.
@@ -206,21 +219,14 @@ func _test_the_mesh(h) -> void:
 	# to remove. Asserted, because a renderer that changes it back would be re-adding that cost silently.
 	var mesh := SpacesimPatches.mesh_from(arrays)
 	var surface := mesh.surface_get_arrays(0)
-	h.check(surface[Mesh.ARRAY_INDEX] == null, "and the mesh is non-indexed, as the builder says")
+	h.check(surface[Mesh.ARRAY_INDEX] != null, "and the mesh IS indexed, which is what makes the sharing count")
 	# **The winding as an outward normal per triangle**, not a signed volume: the mesh is an open shell
 	# (the far side is culled), so the divergence sum over it is not an enclosed volume and its sign means
 	# nothing.
 	# Godot's front face is clockwise seen from outside, so the *geometric* normal of a correctly wound
 	# triangle points at the centre — which is the opposite of the intuitive test, and the reason `_build`
 	# documents its single flip. Comparing signs with a known-good mesh cannot be argued with.
-	var soup := PackedVector3Array()
-	for chunk in chunks:
-		soup.append_array(SpacesimPatches.chunk_arrays(chunk)[0])
-	var identity := PackedInt32Array()
-	identity.resize(soup.size())
-	for index in soup.size():
-		identity[index] = index
-	var patch_side := _winding_side(soup, identity)
+	var patch_side := _winding_side(points, indices, origin)
 	var level: ArrayMesh = SpacesimIcosphere.mesh_at(1)
 	var level_points: PackedVector3Array = level.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	var level_indices: PackedInt32Array = level.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
@@ -231,8 +237,8 @@ func _test_the_mesh(h) -> void:
 	# **No skirts.** Evert, 2026-10-17: *"the cracks should be so far away that they would not be visible
 	# to the camera"* — the step between neighbours is bounded by their two sagittas, each already inside
 	# ε, so a skirt is geometry on top of a problem the budget has already bounded.
-	h.check(points.size() == expected * 3,
-		"and there is no skirt geometry — three vertices a triangle, nothing else")
+	h.check(indices.size() == expected * 3,
+		"and there is no skirt geometry — three indices a triangle, nothing else")
 	var lines := SpacesimPatches.lines_mesh_from(SpacesimPatches.lines_of(chunks))
 	h.check(lines.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
 		"while the wireframe view is lines")
@@ -345,13 +351,18 @@ func _test_the_walk_is_gated(h) -> void:
 
 ## The mean of `normal · centroid` over a mesh — positive when the geometric normals point outward,
 ## negative when they point inward. One number, comparable between two meshes.
-static func _winding_side(points: PackedVector3Array, indices: PackedInt32Array) -> float:
+## **`origin` is the point the vertices are measured from** — a direction is from the body's centre, so it has to be
+## added back before normalising, or the centroid is a vector from the origin rather than from the centre and the dot
+## product comes out near zero (-0.022 against -1.000, which is what this looked like when it was wrong).
+static func _winding_side(
+	points: PackedVector3Array, indices: PackedInt32Array, origin := Vector3.ZERO
+) -> float:
 	var total := 0.0
 	for i in range(0, indices.size(), 3):
 		var a := points[indices[i]]
 		var b := points[indices[i + 1]]
 		var c := points[indices[i + 2]]
-		total += (b - a).cross(c - a).normalized().dot(((a + b + c) / 3.0).normalized())
+		total += (b - a).cross(c - a).normalized().dot(((a + b + c) / 3.0 + origin).normalized())
 	return total / maxf(1.0, float(indices.size() / 3))
 
 
