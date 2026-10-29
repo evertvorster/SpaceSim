@@ -837,7 +837,8 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		# near the horizon fell outside it. It starts at the level a small disc needs and `_update_decks` moves it.
 		var start_level := SpacesimLod.shell_level(32.0)
 		deck.node = _add_body_mesh(
-			body.node, base_radius, deck.material, "%sDeck%d" % [body.name, index], start_level
+			body.node, shell_scale(base_radius, start_level), deck.material,
+			"%sDeck%d" % [body.name, index], start_level
 		)
 		deck.mesh_level = start_level
 		body.decks.append(deck)
@@ -929,6 +930,22 @@ func update_sky(camera: Camera3D) -> void:
 ## and both jitter at planet scale. **A scaled unit mesh is a new case for that emulation**, and this
 ## project has been bitten by render modes that skip it — so it is confirmed by a render at planet
 ## scale rather than by reasoning.
+## **The scale a SHELL needs so its own facets do not dip below the radius it is meant to sit at.**
+##
+## An icosphere's triangles are **chords inside the sphere**: every vertex is on the radius, and the middle of each
+## triangle sits `R·(1 - cos(φ/2))` — the sagitta — *inward*. Scaled to a cloud deck's base radius, that puts the deck's
+## own surface **inside the planet**, and the two intersect: Evert, 2026-10-30, *"the mismatch between the cloud
+## icosphere and the surface is causing the two to intersect."* The error is not small — at an icosphere level 2 it is
+## **55 km** on Earth, and even at level 5 it is 0.86 km against a 1.4 km deck.
+##
+## So the shell is scaled up by `1 / (1 - sagitta)`, which puts each facet's **centroid** exactly on the requested
+## radius: the deck's lowest drawn surface is its base and nothing cuts into the ground. The vertices stand a sagitta
+## above it, which is invisible — nobody measures a cloud's underside against the ground — while an intersection is not.
+static func shell_scale(radius: float, level: int) -> float:
+	var sagitta := SpacesimIcosphere.relative_sagitta(level)
+	return radius / maxf(1.0 - sagitta, 1.0e-6)
+
+
 func _add_body_mesh(
 	parent: Node3D, radius: float, material: Material, mesh_name: String, level: int
 ) -> MeshInstance3D:
@@ -1210,6 +1227,12 @@ func _build_patch_arrays(
 		SpacesimPatches.lines_of(chunks, radius, origin) if lines
 		else SpacesimPatches.arrays_of(chunks, radius, origin, tinted, lattice)
 	)
+	# **The origin these arrays were measured from, written beside them.** The publish places the mesh at this and not
+	# at `patch_task_origin`, because that member is overwritten by every request: a build that lands after a later
+	# request has already moved the origin was being drawn `|new - old|` from where its vertices were measured — a
+	# whole-mesh jump, seen in flight as a regular shudder at low altitude. Evert, 2026-10-30: *"there is a regular
+	# jump for the surface, which I am assuming is the publishing of the updated vertexes after a walk."* Exactly that.
+	body.patch_arrays_origin = origin
 
 
 ## **The main thread's half**, once a frame: the arrays become a mesh, and the body starts drawing it.
@@ -1313,8 +1336,12 @@ func _update_decks(
 		if deck.mesh_level != level:
 			deck.mesh_level = level
 			deck.node.mesh = SpacesimIcosphere.mesh_at(level)
-		# Divided by the sphere's own radius, because the node's model space is a unit sphere.
-		var sphere_radius := body.radius + deck.height
+			deck.node.scale = Vector3.ONE * shell_scale(body.radius + deck.height, level)
+		# **Divided by the sphere's ACTUAL radius**, because the node's model space is a unit sphere and the node is
+		# scaled by `shell_scale()` — which is the base radius padded by the icosphere's own sagitta, not the base
+		# radius itself. Using `radius + height` here put the eye at 0.982 of a radius when it was really at 1.000,
+		# and a 2 % error in the eye's position is a 2 % error in every slant path and every thickness the deck draws.
+		var sphere_radius := deck.node.scale.x
 		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(sphere_radius, 1.0))
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
@@ -1420,13 +1447,13 @@ func _poll_patch_builds() -> void:
 		# **The vertices are metres from this origin**, so the node carries the origin and drops the radius scale —
 		# and the pair is written here, beside the mesh, so the transform can never describe a different build. The
 		# scale has to be 1: a basis holding 6,371,000 is what rounded every vertex at 0.76 m (see `rebase`).
-		body.mesh.position = body.patch_task_origin
+		body.mesh.position = body.patch_arrays_origin
 		body.mesh.scale = Vector3.ONE
 		# **The origin the vertices are measured from, for the normal.** The mesh carries no normal array: the surface's
 		# direction is `VERTEX + patch_origin`, computed in the vertex stage. Published beside the transform it belongs
 		# to, so the two cannot describe different builds.
 		(body.mesh_material as ShaderMaterial).set_shader_parameter(
-			"patch_origin", body.patch_task_origin
+			"patch_origin", body.patch_arrays_origin
 		)
 		# **A deck does not follow the ground's rebuild, and must not**: it owns a unit icosphere scaled to its base
 		# radius (see `_build_decks`), so its geometry is independent of the patch walk and covers the whole sphere.

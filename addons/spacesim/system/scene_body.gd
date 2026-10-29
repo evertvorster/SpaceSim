@@ -92,6 +92,12 @@ var patch_task_wireframe := false
 ## The arrays the task produced. **Written on the worker and read on the main thread only after
 ## `is_task_completed` says so** — the handoff that makes this safe without a lock.
 var patch_arrays: Array = []
+## **The origin the arrays in hand were measured from.** A publish must place the mesh at THIS, never at
+## `patch_task_origin` — that member is overwritten by every request, so a build that lands after a later request has
+## already moved the origin would be drawn `|new - old|` away from where its vertices were measured. That is a
+## whole-mesh jump, and Evert saw it in flight on 2026-10-30 as *"a regular jump for the surface ... the publishing of
+## the updated vertexes after a walk"*.
+var patch_arrays_origin := Vector3.ZERO
 ## Triangles the mesh currently on the node holds. **Zero until the first build lands**, which is why a
 ## body draws nothing for its first frame or two rather than stalling the frame that asked for it.
 var patch_triangles := 0
