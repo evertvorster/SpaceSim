@@ -85,7 +85,10 @@ func run(h, _root: Node) -> void:
 	var deepest_low := 0
 	for chunk in low_chunks:
 		deepest_low = maxi(deepest_low, int(chunk[2]))
-	var finest_metres := RADIUS * root_edge / pow(2.0, float(deepest_low)) / 4.0
+	var finest_metres := (
+		RADIUS * root_edge / pow(2.0, float(deepest_low))
+		/ float(1 << SpacesimPatches.CHUNK_SUBDIVISIONS)
+	)
 	h.check(finest_metres >= SpacesimPatches.MIN_FACET_METRES,
 		"no triangle is smaller than the metre floor (%.2f m at depth %d)" % [finest_metres, deepest_low])
 	h.check(finest_metres < SpacesimPatches.MIN_FACET_METRES * 2.0,
@@ -124,11 +127,12 @@ func run(h, _root: Node) -> void:
 ## The finest facet a selection holds, in pixels — the deepest chunk's edge, projected at `ground_distance`.
 ## What the finest **triangle** in the selection projects to, in pixels.
 ##
-## A chunk's interior is `4^CHUNK_SUBDIVISIONS` triangles, so a triangle's edge is a quarter of the chunk's — measuring
-## the chunk instead would report four times the apparent size and make every bound here four times too loose.
+## A chunk's interior is `4^CHUNK_SUBDIVISIONS` triangles, so a triangle's edge is `2^CHUNK_SUBDIVISIONS` times the
+## chunk's — measuring the chunk instead would overstate the apparent size by that factor and make every bound here
+## that much too loose. Derived from the constant, because it was 4 hard-coded here and that is only true at `s = 2`.
 func _finest_pixels(chunks: Array, root_edge: float, ground_distance: float, pixel: float) -> float:
 	var deepest := 0
 	for chunk in chunks:
 		deepest = maxi(deepest, int(chunk[2]))
-	var edge := root_edge / pow(2.0, float(deepest)) / 4.0
+	var edge := root_edge / pow(2.0, float(deepest)) / float(1 << SpacesimPatches.CHUNK_SUBDIVISIONS)
 	return RADIUS * edge / (ground_distance * pixel)

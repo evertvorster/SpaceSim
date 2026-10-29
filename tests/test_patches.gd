@@ -147,8 +147,13 @@ func _test_the_horizon_is_exact(h) -> void:
 	# magnitude more chunks than the curvature law alone did, so a tight number here would break every time the law is
 	# tuned. What it must catch is the far side coming back — a whole-sphere subdivision at this eye is tens of
 	# thousands — not a change of scale.
-	h.check(chunks.size() > 0 and chunks.size() < 20000,
-		"and the far side really is gone rather than merely coarse (%d chunks)" % chunks.size())
+	#
+	# **Counted in TRIANGLES, not chunks, because a chunk is `4^s` of them**: the bound used to be 20,000 chunks, which
+	# is 320,000 triangles at `s = 2`, and stating it that way means it does not move when the chunk size does.
+	var drawn := SpacesimPatches.triangle_count(chunks)
+	h.check(chunks.size() > 0 and drawn < 320000,
+		"and the far side really is gone rather than merely coarse (%d chunks, %d triangles)"
+			% [chunks.size(), drawn])
 
 
 ## **There is no budget any more — the law is what bounds the walk, and the HUD is the judge.**

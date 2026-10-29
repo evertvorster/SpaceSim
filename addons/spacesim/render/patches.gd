@@ -21,8 +21,9 @@ extends RefCounted
 ##     draw the chunk when sagitta(chunk) <= 4^s · ε · pixel · d
 ##
 ## so its own triangles land back on ε. A chunk is emitted when the *chunk* is inside that budget — and
-## the chunk is drawn regardless of what its four children wanted, which is the point: the walk is 16x
-## smaller than the leaf walk and a rebuild is cache lookups rather than geometry.
+## the chunk is drawn regardless of what its four children wanted, which at `s = 2` makes the walk 16x
+## smaller than the leaf walk and a rebuild cache lookups rather than geometry. At `s = 0` there is no
+## such trade: a chunk is a triangle, the walk is a leaf walk, and the cache is one entry per triangle.
 ##
 ## **The measured cost, at ε 4/1/0.25 and altitudes 1e8 → 10 m:** `select()` 0.73–11.0 ms before,
 ## **0.02–1.13 ms** after; a warm `build()` 0.12–3.0 ms; triangles 0.58–1.61x the old leaf count at the
@@ -100,9 +101,17 @@ const FACET_ANGLE := 0.03490658503988659  ## 2 degrees.
 const FACET_TILT_FLOOR := 0.0625
 
 ## **How many times a chunk is subdivided internally**, and the one number that trades walk cost against
-## over-refinement. `s = 2` was measured, not chosen: the walk is then 16x smaller than the leaf walk
-## (already 5–30x on the clock) and each further step would double the over-refinement.
-const CHUNK_SUBDIVISIONS := 2
+## the granularity of what arrives. The chunk is the atomic unit of change: one chunk refines into four,
+## so its edge against a drawn triangle's is `2^s` and the area that changes at once is `4^s` triangles.
+##
+## **`s = 2` was measured and `s = 0` is an experiment (2026-10-29)**, Evert's: *"lets try the smallest
+## chunk size, just to see what the effects are."* At `s = 2` the walk is 16x smaller than a leaf walk
+## (already 5–30x on the clock) and a drawn chunk is ~4 triangles wide, so the smallest thing that can
+## change on screen is a ~110 px patch; at `s = 0` a chunk IS a triangle (~27 px), the walk visits two
+## levels deeper, and there is one selection entry per drawn triangle. What this does NOT change is the
+## number of triangles drawn: a chunk is emitted at the first depth that fits, so its own triangles land
+## within a factor of two of the law whatever `s` is.
+const CHUNK_SUBDIVISIONS := 0
 
 ## Triangles in one chunk — `4^s`, and the unit the budget counts in.
 const CHUNK_TRIANGLES := 1 << (2 * CHUNK_SUBDIVISIONS)
@@ -112,9 +121,13 @@ const CHUNK_TRIANGLES := 1 << (2 * CHUNK_SUBDIVISIONS)
 ##
 ## **It must hold one whole selection or it is not a cache.** At 2 degrees of apparent size a walk from 1 km asks for
 ## about **ten thousand chunks**, so a 4,096-entry cap was cleared wholesale on *every* walk — the geometry rebuilt from
-## scratch each time the eye moved a tenth, which is the opposite of what the cache is for. 16,384 chunks is 262k
-## triangles of shared geometry, about 19 MB, and it covers the largest selection the law produces with headroom.
-const CHUNK_CACHE_LIMIT := 16384
+## scratch each time the eye moved a tenth, which is the opposite of what the cache is for.
+##
+## **The entry count scales as `4^s` and the bytes do not**: one selection is ~10,000 chunks at `s = 2` and
+## ~160,000 at `s = 0`, and it is the same triangles and therefore roughly the same geometry either way (262k
+## triangles, ~19 MB). What grows at `s = 0` is 16x the dictionary keys and 16x the little per-chunk arrays, so
+## this cap is 16x what it was — and the memory to watch in that experiment is the entry overhead, not the mesh.
+const CHUNK_CACHE_LIMIT := 262144
 
 ## The cosines and vertices of the twenty root faces, from the icosphere's own construction — so the
 ## roots are the same triangles at the same places, and a patch cannot drift from the level meshes.
@@ -470,8 +483,8 @@ static func _arrays_lattice(
 
 
 ## **The points a chunk of `CHUNK_SUBDIVISIONS` has**, for the buffer's compaction trigger: the lattice of a triangle
-## split `s` times is `(2^s + 1)(2^s + 2) / 2` points, which is 15 at the shipped `s = 2`.
-const POINTS_PER_CHUNK := 15
+## split `s` times is `(2^s + 1)(2^s + 2) / 2` points — 15 at `s = 2`, 3 at `s = 0`.
+const POINTS_PER_CHUNK := ((1 << CHUNK_SUBDIVISIONS) + 1) * ((1 << CHUNK_SUBDIVISIONS) + 2) / 2
 
 
 static func arrays_of(
