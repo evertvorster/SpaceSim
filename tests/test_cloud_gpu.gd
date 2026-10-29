@@ -47,6 +47,7 @@ func run(h, _root: Node) -> void:
 	_test_a_featureless_body_is_exact(h, gpu)
 	_test_a_baked_field_agrees(h, gpu)
 	_test_a_window_agrees(h, gpu)
+	_test_the_flow_agrees(h, gpu)
 	_test_the_fbm_normaliser(h)
 	gpu.close()
 	_test_the_cache_bakes_on_the_gpu(h)
@@ -121,6 +122,53 @@ func _test_a_window_agrees(h, gpu: SpacesimCloudGpu) -> void:
 	for index in cpu.size():
 		worst = maxi(worst, absi(int(gpu_image.get_data()[index]) - int(cpu[index])))
 	h.check(worst <= TOLERANCE, "and lands on the same window (worst %d level(s))" % worst)
+
+
+## **The FLOW map against the CPU's advection** — the half of the field that is baked and *sampled*, so it is the half
+## where a transcription could drift unnoticed.
+##
+## `bake_flow()` writes the carried direction at each texel; `SpacesimCloudField.advect()` computes the same thing in
+## GDScript, exactly. What is asserted is the **angle** between them, because a direction's error is an angle and
+## nothing else — and the tolerance is the half-float one, since the map is `rgba16f` (10 bits of mantissa, ~0.06°).
+##
+## **The second check matters as much as the first**: a map that returned its input direction would pass nothing here —
+## but only if the stack were empty, and the stack is not. So the twist is measured too, and a flow map that had
+## somehow baked the *identity* would fail on it rather than sail through the comparison.
+func _test_the_flow_agrees(h, gpu: SpacesimCloudGpu) -> void:
+	var morphology := _morphology(SpacesimCloudModel.Banding.SHREDDED, 0.104)
+	var width := 64
+	var height := 32
+	var image := gpu.bake_flow(999, morphology, width, height)
+	h.check(image != null, "the flow bakes on the GPU (%s)" % gpu.error())
+	if image == null:
+		return
+	var planned := SpacesimCloudField.plan(999, morphology)
+	var worst := 0.0
+	var twist := 0.0
+	for row in height:
+		var v := (float(row) + 0.5) / float(height)
+		var latitude := PI * 0.5 - v * PI
+		for column in width:
+			var u := (float(column) + 0.5) / float(width)
+			var longitude := (u - 0.5) * TAU
+			var direction := Vector3(
+				cos(latitude) * cos(longitude), sin(latitude), cos(latitude) * sin(longitude)
+			)
+			var exact := SpacesimCloudField.advect(direction, planned.stack)
+			var pixel := image.get_pixel(column, row)
+			var carried := Vector3(pixel.r, pixel.g, pixel.b)
+			worst = maxf(worst, rad_to_deg(exact.angle_to(carried.normalized())))
+			twist = maxf(twist, rad_to_deg(direction.angle_to(exact)))
+	h.check(worst < 0.25,
+		"and its direction matches the CPU advection (worst %.3f deg over %d texels)" % [
+			worst, width * height
+		])
+	# **The measured twist is well under a degree**, and that is the field being described rather than a defect: the
+	# stack's job is to *deform* the sampling domain, and a fraction of a degree is a large fraction of an eddy's
+	# 3.6° feature. So the check is "not the identity", with the number printed — a hard threshold here would be a
+	# claim about the look that this test has no business making.
+	h.check(twist > 0.1,
+		"and the stack turns it by %.2f deg at most, so an identity map could not pass" % twist)
 
 
 ## `fractal_bounding()` is FastNoiseLite's `CalculateFractalBounding()`: `1 / (1 + g + g² + …)`. It is

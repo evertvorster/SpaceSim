@@ -132,15 +132,20 @@ vec3 cloud_advect(vec3 unit, int count) {
 // `SpacesimCloudField.eddy_at()`: the noise at a unit direction, 0 to 1 with its mean at a half, squeezed
 // in the equatorial components so the features are stretched **east-west**. Dividing `y` instead made
 // vertical fibre, which is the opposite of what a zonal jet does.
-float cloud_eddy_at(vec3 unit, float feature, CloudNoise noise) {
+//
+// **`footprint` is the angle one pixel spans, and `0.0` means no limit** — which is what a bake passes, because a bake's
+// own raster is its resolution. A *drawing* caller passes its pixel and gets the eddies faded where they are finer than
+// it can resolve; that is the band limit every mechanism here obeys, and it is what makes the field affordable to
+// evaluate per pixel instead of caching it in a map.
+float cloud_eddy_at(vec3 unit, float feature, CloudNoise noise, float footprint) {
 	if (feature <= 0.0) {
 		return 0.5;
 	}
 	vec3 stretched = normalize(vec3(
 		unit.x / CLOUD_EDDY_STRETCH, unit.y, unit.z / CLOUD_EDDY_STRETCH));
-	return (fnl_fbm3(
+	return (fnl_fbm3_banded(
 		stretched / feature, noise.seed, noise.frequency, noise.octaves,
-		noise.gain, noise.lacunarity, noise.bounding
+		noise.gain, noise.lacunarity, noise.bounding, footprint
 	) + 1.0) * 0.5;
 }
 
@@ -164,20 +169,49 @@ float cloud_soft_ceiling(float value) {
 // sampled at the **still** direction, which is what lets detail sit still while the shapes swirl.
 //
 // `has_fine` is the C++'s `fine != null`: a caller with one generator gets no high half, not a quiet one.
-float cloud_intensity_at(
-	vec3 direction, CloudField field, CloudNoise coarse, bool has_coarse, CloudNoise fine, bool has_fine,
-	int count
+float cloud_intensity_from(
+	vec3 unit, vec3 carried, CloudField field, CloudNoise coarse, bool has_coarse, CloudNoise fine,
+	bool has_fine, float footprint
 ) {
-	vec3 unit = normalize(direction);
-	vec3 carried = cloud_advect(unit, count);
 	float envelope = field.mix_value + (1.0 - field.mix_value) * cloud_bands_at(
 		carried, field.cells, field.ratio, field.phase, field.meander);
 	if (!has_coarse || field.mix_value <= 0.0) {
 		return envelope;
 	}
-	float eddy = cloud_eddy_at(carried, field.feature, coarse);
+	float eddy = cloud_eddy_at(carried, field.feature, coarse, footprint);
 	if (has_fine) {
-		eddy = clamp(eddy + (cloud_eddy_at(unit, field.feature, fine) - 0.5) * CLOUD_FINE_SHARE, 0.0, 1.0);
+		eddy = clamp(
+			eddy + (cloud_eddy_at(unit, field.feature, fine, footprint) - 0.5) * CLOUD_FINE_SHARE,
+			0.0, 1.0
+		);
 	}
 	return cloud_soft_ceiling(envelope * (1.0 - field.mix_value + field.mix_value * eddy * 2.0));
 }
+
+
+float cloud_intensity_at(
+	vec3 direction, CloudField field, CloudNoise coarse, bool has_coarse, CloudNoise fine, bool has_fine,
+	int count
+) {
+	// The exact path: compute the flow here. This is what a bake uses, and it is the reference the cached flow is
+	// checked against — `tests/test_cloud_gpu.gd` compares the two texel for texel.
+	return cloud_intensity_from(
+		normalize(direction), cloud_advect(normalize(direction), count),
+		field, coarse, has_coarse, fine, has_fine, 0.0
+	);
+}
+
+
+// **The same field, with the flow SUPPLIED** — the carried direction, already advected.
+//
+// This is the split that makes the field affordable per pixel, and it is a split by *scale*, not an approximation:
+//
+// - **the flow is smooth.** Its finest structure is the smallest vortex's reach — about 9° of arc — so it does not
+//   need the pixel, and it does not depend on the layer's coverage, albedo or optical depth. Baked once per body it is
+//   a 512-texel map that is never refined, which is why the deck can stop carrying a coverage map that refines.
+// - **the texture needs the pixel.** The bands are closed form and the eddies are noise; both are what change when the
+//   eye comes close, and both are band-limited by `footprint`.
+//
+// **`footprint` is the drawing caller's pixel angle, and `0.0` means no limit.** A bake passes 0 so the statistics it
+// measures are the field's own — the percentiles the colour and the opacity are fitted to must not depend on what some
+// frame happened to resolve.

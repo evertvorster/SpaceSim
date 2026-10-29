@@ -54,6 +54,86 @@ const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
 ## **No `#[compute]` marker.** That is Godot's *file* convention — `RDShaderFile` strips it before glslang
 ## sees the source — and a string handed to `shader_compile_spirv_from_source()` gets no such treatment:
 ## glslang fails with *"2: '#': invalid directive"* and `#version` has to be the first thing in the string.
+## **The FLOW kernel: the advected direction, baked once per body.**
+##
+## The field's expensive half is `cloud_advect` — a loop over the whole vortex stack, ~96 iterations before a single
+## noise sample. In a compute kernel that loop costs *bandwidth* (a buffer read per vortex per texel, which is why the
+## kernel stages the stack into `shared` memory); in a fragment shader it would cost 96 iterations on **every pixel of
+## the deck**, whether the deck fills the screen or covers twenty. So it is baked instead: **the flow is smooth** —
+## its finest structure is the smallest vortex's reach, about 9° of arc on Earth — and it does not depend on the
+## layer's coverage, albedo or optical depth. One map per body, at a texel ~25 samples per vortex, and **it is never
+## refined**, because nothing about it changes as the eye approaches.
+##
+## Then the shader fetches the carried direction (one tap) and evaluates only what genuinely needs the pixel: the bands
+## (closed form) and the two eddies, band-limited by the footprint. That is about ten noise evaluations against the
+## ground field's twenty.
+##
+## **One implementation of the advection, two compilers**: this kernel and `SpacesimCloudField.advect()` are the pair
+## `tests/test_cloud_gpu.gd` compares, and the field include is shared with the shader that *consumes* this map — so a
+## change to the vortex law cannot agree with itself in two places.
+const FLOW_KERNEL := """
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba16f, set = 0, binding = 0) uniform image2D out_flow;
+
+layout(set = 0, binding = 1, std430) readonly buffer VortexStack {
+	vec4 centres[CLOUD_VORTEX_MAX];
+	vec4 twists[CLOUD_VORTEX_MAX];
+} vortices;
+
+layout(push_constant, std430) uniform Params {
+	ivec2 size;
+	vec2 uv_origin;
+	vec2 uv_size;
+	float mix_value;
+	float cells;
+	float ratio;
+	float feature;
+	float phase;
+	float meander;
+	int coarse_seed;
+	float coarse_frequency;
+	int fine_seed;
+	float fine_frequency;
+	int octaves;
+	float gain;
+	float lacunarity;
+	float bounding;
+	int vortex_count;
+	int uniform_field;
+	int has_coarse;
+	int has_fine;
+} params;
+
+const float PI = 3.141592653589793;
+const float TAU = 6.283185307179586;
+
+void main() {
+	// The stack into workgroup memory, before any early return: every texel needs all of it, and the barrier must be
+	// reached by every thread in the group (see `KERNEL`).
+	for (int index = int(gl_LocalInvocationIndex); index < params.vortex_count;
+			index += int(gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z)) {
+		cloud_centres[index] = vortices.centres[index];
+		cloud_twists[index] = vortices.twists[index];
+	}
+	barrier();
+
+	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+	if (pos.x >= params.size.x || pos.y >= params.size.y) {
+		return;
+	}
+	float u = params.uv_origin.x + (float(pos.x) + 0.5) / float(params.size.x) * params.uv_size.x;
+	float v = params.uv_origin.y + (float(pos.y) + 0.5) / float(params.size.y) * params.uv_size.y;
+	float latitude = PI * 0.5 - v * PI;
+	float longitude = (u - 0.5) * TAU;
+	vec3 direction = vec3(
+		cos(latitude) * cos(longitude), sin(latitude), cos(latitude) * sin(longitude)
+	);
+	imageStore(out_flow, pos, vec4(cloud_advect(normalize(direction), params.vortex_count), 1.0));
+}
+
+"""
+
 const KERNEL := """
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -176,6 +256,9 @@ var _device: RenderingDevice
 var _rids_live := 0
 var _shader: RID
 var _pipeline: RID
+## The flow kernel: the same field and stack, writing the carried direction instead of the coverage.
+var _flow_shader: RID
+var _flow_pipeline: RID
 var _error := ""
 var _tried := false
 ## Where the last bake's time went, in microseconds, for the probe and for whoever asks next whether the
@@ -221,11 +304,41 @@ func open() -> bool:
 		device.free()
 		return false
 	_rids_live += 1
+	# **The flow kernel, from the same include.** Its own pipeline because its output is a `vec4` direction in
+	# `rgba16f` rather than a single `r8` value — the flow needs three channels and better than 8-bit precision
+	# (`10` bits of mantissa is about 0.06° of direction, which is far below a vortex's reach).
+	var flow_source := RDShaderSource.new()
+	flow_source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
+	flow_source.source_compute = _flow_source()
+	var flow_spirv := device.shader_compile_spirv_from_source(flow_source)
+	var flow_message := flow_spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
+	if not flow_message.is_empty():
+		_error = "the flow shader did not compile: " + flow_message
+		device.free()
+		return false
+	_flow_shader = device.shader_create_from_spirv(flow_spirv)
+	if not _flow_shader.is_valid():
+		_error = "shader_create_from_spirv() gave an invalid flow RID"
+		device.free()
+		return false
+	_rids_live += 1
+	_flow_pipeline = device.compute_pipeline_create(_flow_shader)
+	if not _flow_pipeline.is_valid():
+		_error = "compute_pipeline_create() gave an invalid flow RID"
+		device.free()
+		return false
+	_rids_live += 1
 	_device = device
 	return true
 
 
 func close() -> void:
+	if _device != null and _flow_pipeline.is_valid():
+		_device.free_rid(_flow_pipeline)
+		_rids_live -= 1
+	if _device != null and _flow_shader.is_valid():
+		_device.free_rid(_flow_shader)
+		_rids_live -= 1
 	if _device != null and _pipeline.is_valid():
 		_device.free_rid(_pipeline)
 		_rids_live -= 1
@@ -261,6 +374,91 @@ func live_rids() -> int:
 ## the GPU is a bake that runs on the CPU.
 func error() -> String:
 	return _error
+
+
+## **Bake the FLOW: the advected direction over the whole sphere, once per body.**
+##
+## Seen from the shader, this is `cloud_advect(unit, stack)` sampled from a texture — smooth, so bilinear is the right
+## filter and no mip pyramid is needed (minifying a *smooth* field cannot alias). **It is never refined**: nothing in
+## it changes as the eye approaches, which is the whole reason the expensive half is safe to bake and the cheap half is
+## not.
+##
+## `width` should keep a texel well inside the smallest vortex's reach — `SpacesimCloudMaps.FLOW_WIDTH` (1024) is
+## ~25 samples across a 9° reach on Earth, and the test compares this against `SpacesimCloudField.advect()` texel for
+## texel so the number is not a guess.
+func bake_flow(
+	seed: int, morphology: SpacesimCloudModel.Morphology, width: int, height: int,
+	uv_origin: Vector2 = Vector2(0.0, 0.0), uv_size: Vector2 = Vector2(1.0, 1.0)
+) -> Image:
+	if not open():
+		return null
+	var planned := SpacesimCloudField.plan(seed, morphology)
+	if planned.stack.centres.size() > SpacesimCloudField.VORTEX_BUDGET:
+		_error = "the eddy stack has %d vortices against a shader budget of %d" % [
+			planned.stack.centres.size(), SpacesimCloudField.VORTEX_BUDGET
+		]
+		return null
+	var format := RDTextureFormat.new()
+	format.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	format.width = width
+	format.height = height
+	format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	format.usage_bits = (
+		RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	)
+	var texture := _device.texture_create(format, RDTextureView.new())
+	if not texture.is_valid():
+		_error = "texture_create() gave an invalid RID"
+		return null
+	_rids_live += 1
+
+	var vortex_bytes := _vortex_bytes(planned.stack)
+	var buffer := _device.storage_buffer_create(vortex_bytes.size(), vortex_bytes)
+	_rids_live += 1
+
+	var image_uniform := RDUniform.new()
+	image_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	image_uniform.binding = 0
+	image_uniform.add_id(texture)
+	var buffer_uniform := RDUniform.new()
+	buffer_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+	buffer_uniform.binding = 1
+	buffer_uniform.add_id(buffer)
+	var uniform_set := _device.uniform_set_create([image_uniform, buffer_uniform], _flow_shader, 0)
+	_rids_live += 1
+	if not uniform_set.is_valid():
+		_error = "uniform_set_create() gave an invalid flow RID"
+		_device.free_rid(texture)
+		_device.free_rid(buffer)
+		_rids_live -= 2
+		return null
+
+	# The flow kernel reads only `size`, the window and the vortex count; the rest of the push block is the field's and
+	# is unused here. One `_params()` so the two kernels cannot describe different windows.
+	var params := _params(width, height, planned, uv_origin, uv_size)
+	var list := _device.compute_list_begin()
+	_device.compute_list_bind_compute_pipeline(list, _flow_pipeline)
+	_device.compute_list_bind_uniform_set(list, uniform_set, 0)
+	_device.compute_list_set_push_constant(list, params, params.size())
+	_device.compute_list_dispatch(list, ceili(width / 8.0), ceili(height / 8.0), 1)
+	_device.compute_list_end()
+	_device.submit()
+	_device.sync()
+	var data := _device.texture_get_data(texture, 0)
+	_device.free_rid(uniform_set)
+	_device.free_rid(buffer)
+	_device.free_rid(texture)
+	_rids_live -= 3
+	if data.is_empty():
+		_error = "texture_get_data() returned nothing for the flow"
+		return null
+	var image := Image.create_from_data(
+		width, height, false, Image.FORMAT_RGBAH, data
+	)
+	if image == null:
+		_error = "the flow read-back would not build an image"
+	return image
 
 
 ## **One layer's coverage map, from the GPU.** The same arguments as [method SpacesimCloudField.bake] and
@@ -361,6 +559,16 @@ func _source() -> String:
 		+ FileAccess.get_file_as_string(NOISE_PATH)
 		+ FileAccess.get_file_as_string(FIELD_PATH)
 		+ KERNEL
+	)
+
+
+## The same field and the same noise in front of the flow kernel — one assembler per output, one field.
+func _flow_source() -> String:
+	return (
+		"#version 450\n"
+		+ FileAccess.get_file_as_string(NOISE_PATH)
+		+ FileAccess.get_file_as_string(FIELD_PATH)
+		+ FLOW_KERNEL
 	)
 
 
