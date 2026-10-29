@@ -104,14 +104,17 @@ const FACET_TILT_FLOOR := 0.0625
 ## the granularity of what arrives. The chunk is the atomic unit of change: one chunk refines into four,
 ## so its edge against a drawn triangle's is `2^s` and the area that changes at once is `4^s` triangles.
 ##
-## **`s = 2` was measured and `s = 0` is an experiment (2026-10-29)**, Evert's: *"lets try the smallest
-## chunk size, just to see what the effects are."* At `s = 2` the walk is 16x smaller than a leaf walk
-## (already 5–30x on the clock) and a drawn chunk is ~4 triangles wide, so the smallest thing that can
-## change on screen is a ~110 px patch; at `s = 0` a chunk IS a triangle (~27 px), the walk visits two
-## levels deeper, and there is one selection entry per drawn triangle. What this does NOT change is the
-## number of triangles drawn: a chunk is emitted at the first depth that fits, so its own triangles land
-## within a factor of two of the law whatever `s` is.
-const CHUNK_SUBDIVISIONS := 0
+## **The two sizes have both been flown (2026-10-29), and the comparison is the point of the constant.**
+## At `s = 0` a chunk IS a triangle (~27 px of the view rather than ~110 px), and Evert's verdict was
+## *"The arrivals is much smaller"* — the granularity is real and it works. What it also cost was the
+## walk visiting two levels deeper and 16x the selection entries, which is why the gate had to stay at a
+## hundredth rather than per-frame. **`s = 2` is back for the A/B**: the walk is 16x smaller than a leaf
+## walk (already 5–30x on the clock), a rebuild is cache lookups, and the arrival granularity is bought
+## back with the gate's rate instead.
+##
+## **What `s` does not change is the number of triangles drawn**: a chunk is emitted at the first depth
+## that fits, so its own triangles land within a factor of two of the law whatever `s` is.
+const CHUNK_SUBDIVISIONS := 2
 
 ## Triangles in one chunk — `4^s`, and the unit the budget counts in.
 const CHUNK_TRIANGLES := 1 << (2 * CHUNK_SUBDIVISIONS)
@@ -125,9 +128,9 @@ const CHUNK_TRIANGLES := 1 << (2 * CHUNK_SUBDIVISIONS)
 ##
 ## **The entry count scales as `4^s` and the bytes do not**: one selection is ~10,000 chunks at `s = 2` and
 ## ~160,000 at `s = 0`, and it is the same triangles and therefore roughly the same geometry either way (262k
-## triangles, ~19 MB). What grows at `s = 0` is 16x the dictionary keys and 16x the little per-chunk arrays, so
-## this cap is 16x what it was — and the memory to watch in that experiment is the entry overhead, not the mesh.
-const CHUNK_CACHE_LIMIT := 262144
+## triangles, ~19 MB). So the cap has to be raised 16x with the chunk size, and the thing that grows at `s = 0`
+## is the entry overhead, not the mesh.
+const CHUNK_CACHE_LIMIT := 16384
 
 ## The cosines and vertices of the twenty root faces, from the icosphere's own construction — so the
 ## roots are the same triangles at the same places, and a patch cannot drift from the level meshes.
