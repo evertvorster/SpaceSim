@@ -1389,7 +1389,8 @@ func _publish_deck_shadow(
 	# **No seed and no feature any more**: they existed for the shadow's own noise ladder, which is deleted — the
 	# shadow now thresholds the same map the deck draws, so it cannot be a different cloud from the one overhead.
 	SpacesimBodyRenderer.apply_deck_shadow(
-		body.mesh_material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness
+		body.mesh_material, texture, width, threshold, deck.shadow_tau,
+		deck.height + deck.thickness
 	)
 
 

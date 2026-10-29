@@ -35,6 +35,9 @@ render_mode blend_mix, cull_disabled, depth_draw_always, specular_disabled;
 // `repeat_enable` on `u` is deliberate: at `u = 1.0` exactly, which the seam produces, a clamped sampler
 // would pick the wrong edge.
 uniform sampler2D cover : filter_linear_mipmap, repeat_enable;
+// **The map's width**, which is what turns its uv rectangle into its own texel size — the quantity the reconstruction
+// is measured in. Published with the map, so a refinement moves both together.
+uniform int cover_width = 512;
 
 // Where the layer's coverage puts the threshold, as a percentile of the map — from
 // `SpacesimCloudMaps.threshold_for()`, so the drawn coverage is the one that was asked for.
@@ -140,6 +143,9 @@ uniform float planet_radius = 1.0;
 // own altitude rather than at the ground's — a deck at 1.4 km stays lit 1.2° after the ground beside it has
 // gone dark, and the transmittance is what decides how red it is while it does.
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
+// **The coverage, reconstructed rather than interpolated** — shared with the ground shadow, so the shadow is the
+// image of the same cloud.
+#include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
 
 // Model space, the offset from the body's centre — which for a unit sphere IS its direction. Captured in
 // `vertex()` because **`VERTEX` inside `fragment()` is in VIEW space**.
@@ -181,7 +187,9 @@ void fragment() {
 	// be drawn as the step it averages to, not sampled. On the unit sphere it is an angle, which is the unit that
 	// wants, and it is the unit the map's own texel is measured in when the coverage edge is reconstructed.
 	float deck_footprint = length(fwidth(local_position));
-	float field = texture(cover, cloud_map_uv(p)).r;
+	// **Reconstructed, not interpolated** — see `cloud_coverage.gdshaderinc`. The map is 2:1, so its texel is `(1/w, 2/w)`.
+	vec2 cover_texel = vec2(1.0, 2.0) / float(max(cover_width, 1));
+	float field = cloud_coverage(cover, cloud_map_uv(p), cover_texel);
 	// **No noise ladder**, for the reason the ground lost its own: the ladder was not the texture, it was a stand-in
 	// for structure the field already has. A rung at 2-4 px added to a coverage field is the steepest thing here, and
 	// it is where the banding and the extra noise came from.

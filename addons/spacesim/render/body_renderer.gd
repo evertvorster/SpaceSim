@@ -440,6 +440,8 @@ static func apply_cloud_map(
 		return
 	if texture != null and deck.get_shader_parameter("cover") != texture:
 		deck.set_shader_parameter("cover", texture)
+	# **The width with the map**, because the reconstruction needs the map's own texel — and a refinement moves both.
+	deck.set_shader_parameter("cover_width", width)
 	deck.set_shader_parameter("threshold", threshold)
 	deck.set_shader_parameter("ramp_gain", ramp_gain)
 	deck.set_shader_parameter("veil", veil)
@@ -476,13 +478,16 @@ static func face_deck(material: Material, eye_offset: Vector3) -> void:
 ## bright as the cloud's albedo would make it, which is what "the multiply-scattered light" means without a
 ## multiple-scattering model this project does not have.
 static func apply_deck_shadow(
-	material: Material, texture: Texture2D, threshold: float, tau: float, height: float
+	material: Material, texture: Texture2D, width: int, threshold: float, tau: float, height: float
 ) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null or tau <= 0.0 or height <= 0.0:
 		return
 	if texture != null and surface.get_shader_parameter("deck_cover") != texture:
 		surface.set_shader_parameter("deck_cover", texture)
+	# **The width comes with the map**, so the shadow reconstructs the coverage exactly as the deck does: two different
+	# reconstructions of one field are two slightly different clouds, and the shadow must be the image of the cloud.
+	surface.set_shader_parameter("deck_cover_width", width)
 	surface.set_shader_parameter("deck_threshold", threshold)
 	surface.set_shader_parameter("deck_tau", tau)
 	surface.set_shader_parameter("deck_height", height)

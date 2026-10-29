@@ -24,6 +24,9 @@
 // separates the two, and a `light()` override is the last resort.
 
 uniform sampler2D deck_cover : filter_linear_mipmap, repeat_enable, hint_default_black;
+// **The map's width**, so the shadow reconstructs the coverage exactly as the deck does — a shadow is the *image* of
+// the cloud that casts it, and two different reconstructions of one field are two slightly different clouds.
+uniform int deck_cover_width = 512;
 // The percentile the deck's own coverage implies — the same number the deck draws with, so the shadow is
 // where the cloud is and not where the field merely has a value.
 uniform float deck_threshold : hint_range(0.0, 1.0) = 1.0;
@@ -87,6 +90,8 @@ vec2 deck_shadow_uv(vec3 direction) {
 // Returns **-1** when the ray leaves below the local horizontal — nothing crosses the slab — and each caller
 // decides what that means: no light to shadow, or nothing to attenuate on the way out.
 //
+// **The coverage is reconstructed, not interpolated** — the same kernel the deck uses, included by the caller.
+//
 // `with_detail` is false for the eye's ray. The ladder is the *sub-texel* structure and it costs six noise
 // evaluations; a beam's attenuation is decided by the coarse field, and the surface shaders already run a
 // ladder of their own. The shadow keeps it, because there the ladder is what makes the shadow's edge belong to
@@ -105,7 +110,8 @@ float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_de
         float arc = (deck_height * (across_length / mu)) / max(planet_radius, 1.0);
         crossing = normalize(p + (across / across_length) * arc);
     }
-    float field = texture(deck_cover, deck_shadow_uv(crossing)).r;
+    vec2 cover_texel = vec2(1.0, 2.0) / float(max(deck_cover_width, 1));
+    float field = cloud_coverage(deck_cover, deck_shadow_uv(crossing), cover_texel);
     // **No noise ladder here either**, and for a stronger reason than on the deck: a shadow is the *image* of the cloud
     // that casts it, so the two must sample the same thing. With the deck drawing its map alone, a shadow that added
     // ladder noise would be a different cloud from the one overhead — which is the fault this include was written to

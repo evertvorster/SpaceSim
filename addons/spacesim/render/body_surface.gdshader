@@ -11,6 +11,7 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // `body_sun` and the include below reads it — a shader compiles top to bottom.
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 // **The deck above, as a shadow.** One law, shared with the sea, so the two cannot disagree.
+#include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
 // **The ground: the field itself, in a fragment shader, with no raster anywhere.**

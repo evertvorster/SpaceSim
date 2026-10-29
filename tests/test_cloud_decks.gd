@@ -272,7 +272,8 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	# which is the only thing drawn below it.
 	var cover := SpacesimBodyRenderer.white_texel()
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, cover, 0.843, deck.shadow_tau, deck.height + deck.thickness
+		earth.mesh_material, cover, deck.published_width, 0.843, deck.shadow_tau,
+		deck.height + deck.thickness
 	)
 	for pair in [[land, "land"]]:
 		var material: ShaderMaterial = pair[0]
@@ -300,12 +301,39 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	refined.fill(Color(0.5, 0.5, 0.5, 1.0))
 	var refined_texture := ImageTexture.create_from_image(refined)
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, refined_texture, 0.7, deck.shadow_tau, deck.height + deck.thickness
+		earth.mesh_material, refined_texture, 8, 0.7, deck.shadow_tau,
+		deck.height + deck.thickness
 	)
 	h.check(land.get_shader_parameter("deck_cover") == refined_texture,
 		"and a refined map replaces the shadow's copy of it")
 	h.check_near(float(land.get_shader_parameter("deck_threshold")), 0.7,
 		"with the percentile of the map it arrived with", 1.0e-9)
+	# **And the width with it**, because the coverage is RECONSTRUCTED rather than sampled bilinearly: a shadow that
+	# assumed a different texel size would reconstruct a slightly different field, and "the shadow is the image of the
+	# cloud that casts it" would stop being true by a texel's worth of gradient.
+	h.check(int(land.get_shader_parameter("deck_cover_width")) == 8,
+		"and the map's own width, which is what the reconstruction is measured in")
+	h.check(int(deck.material.get_shader_parameter("cover_width")) == deck.published_width,
+		"as the deck is told the width of the map it draws")
+	# **The coverage is RECONSTRUCTED, not left to the hardware's bilinear filter** — and both consumers must use the
+	# same kernel: a cloud's edge is a level set of this field, so it is exactly as smooth as the reconstruction, and
+	# bilinear is C⁰ with a corner at every texel boundary. The land learned this as the coastline staircase; the deck's
+	# `covered = smoothstep(threshold ± softness, field)` is the same quantity. **Checked as an absence**, because a
+	# bilinear tap is invisible — it looks like a slightly softer edge, not like a missing function.
+	for path in [
+		"res://addons/spacesim/render/body_deck.gdshader",
+		"res://addons/spacesim/render/deck_shadow.gdshaderinc",
+	]:
+		var code := FileAccess.get_file_as_string(path)
+		var named := String(path).get_file()
+		h.check(code.contains("cloud_coverage("), "%s reconstructs the coverage" % named)
+		h.check(not code.contains("texture(cover, cloud_map_uv(") and not code.contains("texture(deck_cover, deck_shadow_uv("),
+			"%s and does not point-sample it" % named)
+	h.check(FileAccess.get_file_as_string(
+		"res://addons/spacesim/render/cloud_coverage.gdshaderinc"
+	).contains("float cloud_coverage(sampler2D map, vec2 uv, vec2 texel)"),
+		"from one shared kernel, so the shadow cannot be a different cloud from the deck")
+
 	# **The shadow and the deck now sample one thing — the map — because neither has a ladder.** The check that
 	# matters is therefore that they read the *same map*, which is asserted above; a seed comparison would be
 	# comparing two uniforms that no longer exist.
