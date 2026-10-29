@@ -27,6 +27,7 @@ func run(h, root: Node) -> void:
 	_test_the_mesh(h)
 	_test_the_cache_makes_a_rebuild_cheap(h)
 	_test_the_drawn_triangle_is_inside_the_law(h)
+	_test_the_limb_is_not_subdivided_as_though_it_faced_the_eye(h)
 	_test_the_walk_is_gated(h)
 
 
@@ -476,3 +477,67 @@ static func _solid_angle(a: Vector3, b: Vector3, c: Vector3) -> float:
 	var product := tan(half_sum * 0.5) * tan((half_sum - side_a) * 0.5) \
 		* tan((half_sum - side_b) * 0.5) * tan((half_sum - side_c) * 0.5)
 	return 4.0 * atan(sqrt(maxf(product, 0.0)))
+
+
+## **A facet seen edge-on must not be subdivided as though it faced the eye.** The apparent-size limit holds the
+## *projected* area, and that falls as the cosine of the tilt, so a chunk at the limb may be larger than an
+## unprojected size test would ever allow. Asserted against that unprojected limit, so it **fails on the code that
+## had only the size test**: there, no chunk could exceed `CHUNK_TRIANGLES` times the unprojected allowance.
+##
+## **From ORBIT, and that is the only place it can matter**: at 20 km up the horizon is 4.5 degrees from the
+## sub-point, so every visible patch has a tilt above 0.997 and the cosine changes nothing — the regime is the far
+## one, where the visible cap spans 67 degrees of tilt (measured: the chunk count from 10,000 km falls 446 -> 308).
+func _test_the_limb_is_not_subdivided_as_though_it_faced_the_eye(h) -> void:
+	# **Both regimes, because the two are different**: from orbit the disc's rim spans a wide range of tilt, and up
+	# close the horizon does too — but through the true tilt (patch to eye), which at 20 km is 0.0001 at the horizon
+	# however flat `centre · up` looks.
+	for altitude: float in [2.0e4, 1.0e7]:
+		var distance := EARTH_RADIUS + altitude
+		var chunks := SpacesimPatches.select(distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0)
+		var camera := Vector3.UP * distance
+		var altitude_floor := distance - EARTH_RADIUS
+		var beyond := 0
+		var shallow := 0
+		for chunk in chunks:
+			var arrays := SpacesimPatches.chunk_arrays(chunk)
+			var points: PackedVector3Array = arrays[0]
+			var indices: PackedInt32Array = arrays[1]
+			if points.is_empty() or indices.is_empty():
+				continue
+			var centre := Vector3.ZERO
+			for point in points:
+				centre += point
+			centre = centre.normalized()
+			# **The tilt the walk uses**: from the patch to the EYE. `centre · up` is the same number only from
+			# orbit, and using it here is what made the first version of this test find nothing at 20 km.
+			if absf(centre.dot((camera - centre * EARTH_RADIUS).normalized())) > 0.45:
+				continue
+			shallow += 1
+			var edge_squared := 0.0
+			for i in range(0, indices.size(), 3):
+				var a: Vector3 = points[indices[i]]
+				var b: Vector3 = points[indices[i + 1]]
+				var c: Vector3 = points[indices[i + 2]]
+				edge_squared = maxf(edge_squared, maxf(
+					a.distance_squared_to(b),
+					maxf(b.distance_squared_to(c), c.distance_squared_to(a))
+				))
+			if edge_squared <= 0.0:
+				continue
+			# The same floor the walk uses, from the chunk's own nearest corner.
+			var nearest := INF
+			for point in points:
+				nearest = minf(nearest, (camera - point * EARTH_RADIUS).length_squared())
+			var to_patch := maxf(sqrt(nearest), altitude_floor)
+			# **The unprojected allowance for a TRIANGLE**, which is the unloosened limit: the walk loosens by
+			# `CHUNK_TRIANGLES` because a chunk carries `4^s` finer triangles, so a chunk edge against the
+			# loosened limit is the same statement as a triangle edge against the limit itself.
+			var unprojected := SpacesimPatches.FACET_ANGLE * SpacesimPatches.FACET_ANGLE \
+				* (to_patch / EARTH_RADIUS) * (to_patch / EARTH_RADIUS)
+			if edge_squared > unprojected * 1.5:
+				beyond += 1
+		h.check(shallow > 0,
+			"at %.0f m there are chunks seen at a shallow angle to measure (%d)" % [altitude, shallow])
+		h.check(beyond > 0,
+			"and at %.0f m some are larger than an unprojected size test allows (%d of %d, beyond 1.5x)"
+				% [altitude, beyond, shallow])

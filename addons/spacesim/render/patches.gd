@@ -82,6 +82,23 @@ const MAX_DEPTH := 40
 ## hard enough to look like ground.
 const FACET_ANGLE := 0.03490658503988659  ## 2 degrees.
 
+## **How much foreshortening may relax the apparent-size limit**, as the cosine at which the relaxation stops.
+##
+## A surface element's *projected* area falls as `cos θ` — the tilt between its normal and the line to the eye — so
+## a facet seen edge-on covers only `cos θ` of the pixels its angular size suggests. Subdividing for size alone
+## therefore over-tessellates the whole limb ring, which is where most of the visible patches are: they are drawn at
+## sub-pixel width and refined as though they faced the eye. Evert, 2026-10-29: *"we are subdividing triangles that
+## are tilted almost flat to the viewer."*
+##
+## So the limit holds the **projected area** constant instead of the unprojected size: `edge² × cos θ <= k` means
+## `edge²` may grow as `1 / cos θ`. **The floor is the policy**, not arithmetic: past it a facet is edge-on enough
+## that the silhouette is all it still contributes, and the sagitta term — which is not foreshortened, because an
+## outline is exactly what a chord cuts — is the thing that must carry it. Capped at 1/16 in area, i.e. 4× in edge
+## or two subdivisions, and checked at the horizon, where it bites hardest: from 20 km up that allows 0.63° of facet
+## there against the sagitta's 1.16°, so the apparent term is still the binding one and the silhouette it leaves is
+## 0.15 of a pixel. Past that the floor takes over and the sagitta is what holds the outline.
+const FACET_TILT_FLOOR := 0.0625
+
 ## **How many times a chunk is subdivided internally**, and the one number that trades walk cost against
 ## over-refinement. `s = 2` was measured, not chosen: the walk is then 16x smaller than the leaf walk
 ## (already 5–30x on the clock) and each further step would double the over-refinement.
@@ -193,13 +210,24 @@ static func select(
 			minf((camera - b * radius).length_squared(), (camera - c * radius).length_squared())
 		)
 		var to_patch := maxf(sqrt(nearest_corner), altitude)
-		# **The smaller of two limits: apparent size and curvature.** A facet may not subtend more than `FACET_ANGLE`
-		# whatever its distance — that limit is linear in `d`, so it binds close in — and it may not sag more than ε
-		# pixels — that one is a square root, so it binds far out and is what holds the silhouette from orbit.
-		var apparent := FACET_ANGLE * to_patch / radius
+		# **The smaller of two limits: projected area and curvature.** A facet may not cover more than `FACET_ANGLE`
+		# of the view *after foreshortening* — that limit is linear in `d`, so it binds close in — and it may not sag
+		# more than ε pixels — that one is a square root, so it binds far out and is what holds the silhouette from
+		# orbit.
+		#
+		# **The tilt is measured from the PATCH to the EYE, and that is not `centre · camera_direction`.** The two
+		# agree only in the far limit: from 20 km up, the patch at the horizon has `centre · up` = **0.997** while its
+		# true tilt is **0.0001** — measured — because the eye direction from the body's centre is the vertical, not
+		# the line the surface is seen along. Using the body-centre form is inert exactly where the horizon is most
+		# edge-on, which is the case this term exists for.
+		#
+		# Compared SQUARED throughout, so holding the projected area constant (`edge² × cos θ`) costs one normalize
+		# and no square root.
+		var tilt := maxf(absf(centre.dot((camera - centre * radius).normalized())), FACET_TILT_FLOOR)
+		var apparent_squared := FACET_ANGLE * FACET_ANGLE * (to_patch / radius) * (to_patch / radius) / tilt
 		var minimum_edge_squared := loosen * minf(
 			_edge_limit_squared(to_patch, pixel_angle, epsilon, radius),
-			apparent * apparent
+			apparent_squared
 		)
 		# **A triangle budget is gone (2026-10-28).** It rationed the walk by a constant — the count knew nothing about
 		# what was on screen — and Evert's instruction is *"we don't care about budget, that should be removed. Just have
