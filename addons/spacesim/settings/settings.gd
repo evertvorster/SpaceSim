@@ -91,11 +91,12 @@ const REGISTRY := {
 	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
 	# nothing.
 	#
-	# **Off by default since the subdivision landed (2026-10-28).** A deck is the body's own patch mesh scaled to its
-	# base radius, and its shader takes that node's model space to be a UNIT sphere (`local_position = VERTEX`, then
-	# `normalize`). The lattice carries vertices in metres from a near-eye origin now, so the deck's model space has to
-	# be re-derived before it can draw: left on, it would multiply metres by the planet radius. The clouds rung owns
-	# that adaptation.
+	# **A deck owns a unit icosphere scaled to its base radius**, so its model space is a unit sphere — which is what
+	# `body_deck.gdshader` assumes — and its geometry is independent of the ground's patch walk. (It drew on the
+	# ground's own mesh until 2026-10-28, which broke when that lattice started carrying metres, and which also meant
+	# a deck only ever covered the cap the walk covered.) **Off by default because the clouds rung owns the tuning**,
+	# not because it does not draw: the layer's light (`§D6`), multiple decks (`§D9`) and the near regime are still
+	# open. Turn it on to see where the deck's look stands.
 	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)

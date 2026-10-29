@@ -24,6 +24,7 @@ const CENTRE_PIXEL_ANGLE := 1.2966806e-3 ## Radians subtended by the centre pixe
 
 
 func run(h, root: Node) -> void:
+	_test_the_shell_level(h)
 	print("  lod")
 	_test_the_law(h)
 	_test_the_scene_applies_it(h, root)
@@ -511,3 +512,34 @@ static func _triangles_under_eye(body: SpacesimSceneBody, to_eye: Vector3) -> in
 		if centre.dot(to_eye) > 0.95:
 			count += 1
 	return count
+
+
+## **A shell's level, from the same measured law a body's disc uses** — `TRIANGLES_PER_SCREEN_RADIUS` triangles per
+## pixel of screen radius. It exists because a deck is geometry whose only job is its silhouette: everything else about
+## it is shading, so its sphere has to be round on screen and no finer. Monotone, floored at 2 (a deck is never a blob)
+## and capped at `MAX_LEVEL`, because `SpacesimIcosphere` caches one mesh per level and a level is a pointer swap.
+func _test_the_shell_level(h) -> void:
+	h.check(SpacesimLod.shell_level(0.0) == 2, "a one-pixel shell is still two levels")
+	h.check(SpacesimLod.shell_level(2.0) == 2, "and so is a tiny disc")
+	var small := SpacesimLod.shell_level(20.0)
+	var large := SpacesimLod.shell_level(900.0)
+	h.check(large > small, "a deck filling the screen gets a finer sphere (%d vs %d)" % [large, small])
+	h.check(SpacesimLod.shell_level(1.0e9) == SpacesimLod.MAX_LEVEL,
+		"and nothing exceeds the ceiling (%d)" % SpacesimLod.MAX_LEVEL)
+	var previous := 0
+	var monotone := true
+	for pixels in [1.0, 10.0, 50.0, 100.0, 400.0, 1200.0, 4000.0]:
+		var level := SpacesimLod.shell_level(pixels)
+		if level < previous:
+			monotone = false
+		previous = level
+	h.check(monotone, "the level never falls as the disc grows")
+	# **The smallest level the law's triangles fit in**, which is the whole content of the law — a check that only
+	# asserted "bigger" would pass for a level one too high and quietly cost 4x the triangles.
+	for pixels in [20.0, 200.0, 900.0]:
+		var level := SpacesimLod.shell_level(pixels)
+		var wanted: float = SpacesimLod.TRIANGLES_PER_SCREEN_RADIUS * pixels
+		h.check(float(SpacesimLod.triangles_at(level)) >= wanted or level == SpacesimLod.MAX_LEVEL,
+			"level %d covers the %.0f triangles a %.0f-pixel disc wants" % [level, wanted, pixels])
+		h.check(level == 2 or float(SpacesimLod.triangles_at(level - 1)) < wanted,
+			"and the level below does not, so %d is the smallest" % level)

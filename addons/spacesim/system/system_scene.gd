@@ -831,10 +831,15 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		# from underneath it is the difference between the cloud's real underside and a mirrored sheet at the top
 		# of the tallest column.
 		var base_radius := body.radius + deck.height
+		# **A sphere of its own, not the ground's lattice.** The lattice carries metres from a near-eye origin and
+		# this shader's model space is a unit sphere, so the ground's mesh would be multiplied by the planet's radius;
+		# and a deck drawn on the ground's mesh only ever covers the cap the patch walk covers, which is why a cloud
+		# near the horizon fell outside it. It starts at the level a small disc needs and `_update_decks` moves it.
+		var start_level := SpacesimLod.shell_level(32.0)
 		deck.node = _add_body_mesh(
-			body.node, base_radius, deck.material, "%sDeck%d" % [body.name, index], 0
+			body.node, base_radius, deck.material, "%sDeck%d" % [body.name, index], start_level
 		)
-		deck.node.mesh = null
+		deck.mesh_level = start_level
 		body.decks.append(deck)
 
 
@@ -1024,7 +1029,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		if body.mesh == null:
 			continue
 		_face_bodies_at_star(body, observer)
-		_update_decks(body, observer, distance)
+		_update_decks(body, observer, distance, screen)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1287,7 +1292,9 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3) -> void:
 ##
 ## **The eye is handed over in the deck's model space**, divided by the top radius here, in double precision:
 ## a deck node's model space is a unit sphere, so nothing astronomical ever reaches a `float`.
-func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) -> void:
+func _update_decks(
+	body: SpacesimSceneBody, observer: Vector3, distance: float, screen_radius: float
+) -> void:
 	if body.decks.is_empty():
 		return
 	# **Read through `get_value` so the switch stays hot.** One switch for this mechanism, and it reads no
@@ -1296,9 +1303,16 @@ func _update_decks(body: SpacesimSceneBody, observer: Vector3, distance: float) 
 		for deck in body.decks:
 			deck.node.visible = false
 		return
+	# **The shell's level, from what its silhouette needs** — the same measured law a body's disc uses, so a deck
+	# filling the screen gets a finer sphere than one at twenty pixels, and `SpacesimIcosphere` hands back the same
+	# mesh object per level, so a change is a pointer assignment rather than a build.
+	var level := SpacesimLod.shell_level(screen_radius)
 	var to_eye := observer - body.node.global_position
 	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
+		if deck.mesh_level != level:
+			deck.mesh_level = level
+			deck.node.mesh = SpacesimIcosphere.mesh_at(level)
 		# Divided by the sphere's own radius, because the node's model space is a unit sphere.
 		var sphere_radius := body.radius + deck.height
 		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(sphere_radius, 1.0))
@@ -1416,10 +1430,8 @@ func _poll_patch_builds() -> void:
 		(body.mesh_material as ShaderMaterial).set_shader_parameter(
 			"patch_origin", body.patch_task_origin
 		)
-		# **No deck follows the ground any more.** A deck is the body's own mesh scaled to its base radius, and its
-		# shader reads that node's model space as a UNIT sphere — the lattice is metres now, so a deck needs its own
-		# derivation rather than a shared transform. `render.cloud_decks` is off by default because of exactly this;
-		# the clouds rung owns the adaptation.
+		# **A deck does not follow the ground's rebuild, and must not**: it owns a unit icosphere scaled to its base
+		# radius (see `_build_decks`), so its geometry is independent of the patch walk and covers the whole sphere.
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.

@@ -177,12 +177,15 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.node.visible, "the deck is visible once the frame has walked it")
-	# **A deck is drawn on the body's own mesh, and it is NOT handed it yet.** The lattice carries vertices in metres
-	# from a near-eye origin, and the deck's shader reads its node's model space as a unit sphere, so sharing the mesh
-	# would multiply metres by the planet radius. `render.cloud_decks` defaults off for exactly this reason and the
-	# clouds rung owns the adaptation — so what is asserted is the state that keeps the trap visible.
-	h.check(deck.node.mesh == null,
-		"and it is NOT given the metres-based lattice, which its model space cannot read")
+	# **A deck owns a UNIT icosphere scaled to its base radius**, and never the ground's lattice: that lattice carries
+	# metres from a near-eye origin while the deck's shader reads its node's model space as a unit sphere, so sharing
+	# it would multiply metres by the planet radius — which is exactly why the deck drew nothing from 2026-10-28 until
+	# this check existed. Its sphere also covers the whole body, where the ground's mesh covers only the walked cap.
+	h.check(deck.node.mesh != null, "and it has a sphere of its own to draw")
+	h.check(deck.node.mesh != earth.mesh.mesh,
+		"which is not the ground's lattice, whose model space is metres")
+	h.check(is_equal_approx(deck.node.scale.x, earth.radius + deck.height),
+		"scaled to the slab's own base radius (%.0f m)" % (earth.radius + deck.height))
 	h.check(deck.published_width > 0, "with a map the size law asked for (%d wide)" % deck.published_width)
 	# **The one number that decides whether the deck is DRAWN.** `alpha = covered * veil * (1 - transmit)` with
 	# `transmit = 1/(1 + tau_full * thickness / mu)`, so `tau_full = 0` is a completely invisible deck — which is

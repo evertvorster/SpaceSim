@@ -67,6 +67,9 @@ class Deck:
 	## The width of the map the material is currently sampling, so a publish happens when one lands rather
 	## than every frame. `-1` is *nothing published yet*, which is not the same as width 0 (*no map*).
 	var published_width := -1
+	## The icosphere level the node's own mesh is at — `-1` until the first frame picks one. A deck is a shell, so
+	## its sphere is sized by what its silhouette needs, not by the ground's patch walk.
+	var mesh_level := -1
 ## The **point of light** this body becomes once it is too small to be a disc: a camera-facing quad,
 ## sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as
 ## geometry. Set by `SpacesimSystemScene.update_lod`.

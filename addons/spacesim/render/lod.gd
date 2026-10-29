@@ -105,6 +105,30 @@ static func screen_radius_pixels(angular_radius: float, pixel_angle: float) -> f
 	return tan(clampf(angular_radius, 0.0, PI * 0.5)) / pixel_angle
 
 
+## **The icosphere level a SHELL needs** — a deck's sphere, or any surface whose geometry only has to carry its
+## silhouette, because everything else about it is shading.
+##
+## A deck was drawn on the body's own patch mesh (`update_lod` handed it `body.mesh.mesh`), and that is why it had to
+## go on 2026-10-28: the patch tree's lattice carries **metres from a near-eye origin**, while `body_deck.gdshader`
+## reads its node's model space as a **unit sphere** (`local_position = VERTEX`, then `normalize`) — and the scale
+## that would have squared the difference is the planet's radius. So a shell gets its own unit icosphere, scaled to
+## its base radius, and the model space is a unit sphere again with no shader change at all.
+##
+## **A sphere of its own is also what the deck needed for two other reasons**, recorded on 2026-10-21: a deck drawn on
+## the ground's mesh inherits the ground's LOD coverage, so it only covers the cap the patch walk covers — a cloud
+## near the horizon falls outside it, and a distant cloud vanishes as you enter the layer.
+##
+## **The level comes from the same measured law as a body's disc**: `TRIANGLES_PER_SCREEN_RADIUS` triangles per pixel
+## of screen radius, so a shell filling the screen is level 5 and a 20-pixel one is level 2. It moves with the eye and
+## never past `MAX_LEVEL`, and `SpacesimIcosphere` caches one mesh per level, so a change is a pointer assignment.
+static func shell_level(screen_radius_pixels: float) -> int:
+	var wanted := TRIANGLES_PER_SCREEN_RADIUS * maxf(screen_radius_pixels, 1.0)
+	for level in range(2, MAX_LEVEL + 1):
+		if float(triangles_at(level)) >= wanted:
+			return level
+	return MAX_LEVEL
+
+
 static func triangles_at(level: int) -> int:
 	return ICO_BASE_TRIANGLES << (2 * clampi(level, 0, MAX_LEVEL))
 
