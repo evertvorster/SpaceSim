@@ -26,8 +26,41 @@
 
 const float CLOUD_PI = 3.141592653589793;
 const float CLOUD_TAU = 6.283185307179586;
-// `SpacesimCloudField.EDDY_STRETCH`
-const float CLOUD_EDDY_STRETCH = 3.0;
+// `SpacesimCloudField.EDDY_STRETCH` — **1.0, isotropic, and it was 3.0.**
+//
+// A factor of three squeezes this domain east-west and therefore *manufactures* filaments: that is cirrus, and it was
+// the wrong mechanism for a moisture layer. Evert, 2026-10-29: *"the shader should look more like cumulus, and less
+// like cirrus type clouds, since we are doing the moisture layer now, and might make an ice type layer for the cirrus
+// clouds later."* A cumulus clump is round; cirrus returns as an ice layer's own stretch and soft edge, not as a
+// compromise here.
+const float CLOUD_EDDY_STRETCH = 1.0;
+// `SpacesimCloudField.SHEAR` — **the differential rotation, in radians of longitude at its strongest.**
+//
+// The mechanism the vortex stack was standing in for, and it is nearly free: a zonal wind profile displaces longitude by
+// an amount that depends on latitude, so a band is dragged against its neighbour and its parcels smear *along* it. That
+// is what makes a belt read as a belt, and it is what a 3:1 texture stretch was faking badly — the stretch made every
+// parcel a filament everywhere, while shear makes the elongation a property of *where the parcel is*.
+const float CLOUD_SHEAR = 0.35;
+// `SpacesimCloudField.CURL_STRENGTH`, `CURL_SCALE`, `CURL_STRETCH`, `CURL_EPSILON` — **the local swirl, as curl noise.**
+//
+// The curl of a scalar field in the tangent plane, which is **divergence-free**: material is carried rather than created
+// or destroyed, and that is the property that makes it read as flow instead of as a warp. It costs three noise samples
+// (one value and two forward differences polarisations) rather than 96 vortices.
+const float CLOUD_CURL_STRENGTH = 0.03;
+const float CLOUD_CURL_SCALE = 2.0;
+const float CLOUD_CURL_STRETCH = 1.6;
+// **The difference step, as a FRACTION OF THE FEATURE.** A fixed step was the bug: 0.02 rad against a parcel-scale
+// noise (feature 0.06, sampled at `1/feature` ≈ 16 rad⁻¹) moves the sample a *third of a feature*, so the "gradient"
+// was a noise difference rather than a derivative — an unbounded number that displaced the sample by tens of degrees.
+// A forward difference is only a derivative while `step × frequency ≪ 1`, and that is a statement about the feature.
+const float CLOUD_CURL_STEP = 0.05;
+
+// `SpacesimCloudField.CUMULUS_EDGE` — **how sharp a clump's edge is**, as a fraction of the field's range.
+//
+// This is residence time: a cell that rains out in an hour has a crisp boundary and ice that persists for a day is
+// smeared. The model does not carry residence time, so this is the constant that stands in for it, and it is named
+// here so the next reader knows what it is waiting for.
+const float CLOUD_CUMULUS_EDGE = 0.12;
 // `SpacesimCloudField.MEANDER_SECOND`, `MEANDER_SECOND_SHARE`
 const float CLOUD_MEANDER_SECOND = 0.618;
 const float CLOUD_MEANDER_SECOND_SHARE = 0.6;
@@ -150,6 +183,69 @@ float cloud_eddy_at(vec3 unit, float feature, CloudNoise noise, float footprint)
 }
 
 
+// **Differential rotation**: longitude displaced by a latitude-dependent angle, so bands drag against each other.
+//
+// The form uses the band wave itself — `sin(cells · lat)` is one turn per circulation cell, which is the shape a zonal
+// wind profile has (eastward in a zone, reversing between) — so the shear is strongest where the bands meet and zero at
+// a band's centre. **The bands stay where they are; their contents are dragged along them.** That is the difference
+// between this and a texture stretch: the stretch is uniform, this is a property of latitude.
+vec3 cloud_sheared(vec3 unit, float cells, float phase) {
+	if (CLOUD_SHEAR == 0.0) {
+		return unit;
+	}
+	float latitude = asin(clamp(unit.y, -1.0, 1.0));
+	float longitude = atan(unit.z, unit.x) + CLOUD_SHEAR * sin(cells * latitude * CLOUD_PI + phase);
+	float ring = sqrt(max(1.0 - unit.y * unit.y, 0.0));
+	return vec3(ring * cos(longitude), unit.y, ring * sin(longitude));
+}
+
+
+// The scalar the curl is taken of: the same generator, at `CURL_SCALE` times the parcel frequency, mildly anisotropic
+// so the swirl is longer east-west than north-south — a zonal flow, not an isotropic fizz.
+float cloud_swirl_at(vec3 unit, float feature, CloudNoise noise, float footprint) {
+	vec3 stretched = normalize(vec3(
+		unit.x / CLOUD_CURL_STRETCH, unit.y, unit.z / CLOUD_CURL_STRETCH));
+	// **The swirl lives at the parcel scale**, so its frequency is the parcel's — `1/feature`, times the one look
+	// constant that makes the swirl slightly larger than a parcel. `noise.seed + 4001` is this body's generator at a
+	// second seed, which is what `SpacesimCloudField.swirl_for()` builds on the CPU side.
+	float scale = CLOUD_CURL_SCALE / max(feature, 1.0e-4);
+	return fnl_fbm3_banded(
+		stretched * scale, noise.seed + 4001, 1.0, noise.octaves,
+		noise.gain, noise.lacunarity, noise.bounding, footprint
+	);
+}
+
+
+// **Curl noise**: the curl of a scalar field in the tangent plane — **divergence-free**, so it carries material instead
+// of creating or destroying it, which is why it reads as flow rather than as a warp. Forward differences, so three
+// samples of one generator rather than an analytic derivative the noise does not carry.
+vec3 cloud_swirled(vec3 unit, float feature, CloudNoise noise, float footprint) {
+	if (feature <= 0.0) {
+		return unit;
+	}
+	vec3 polar = abs(unit.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	vec3 east = normalize(cross(unit, polar));
+	vec3 north = cross(east, unit);
+	float step = max(feature * CLOUD_CURL_STEP, 1.0e-5);
+	float value_here = cloud_swirl_at(unit, feature, noise, footprint);
+	float value_east = cloud_swirl_at(normalize(unit + east * step), feature, noise, footprint);
+	float value_north = cloud_swirl_at(normalize(unit + north * step), feature, noise, footprint);
+	vec3 gradient = (
+		east * (value_east - value_here) + north * (value_north - value_here)
+	) / step;
+	// Rotating the gradient a quarter turn in the tangent plane IS the curl of a 2-D scalar.
+	//
+	// **The displacement is bounded by `CLOUD_CURL_STRENGTH`** through `x / (1 + |x|)`: the gradient's magnitude is
+	// `1/feature` — sixteen per radian on Earth — so scaling it directly would move the sample by half a radian. The
+	// saturation keeps most of the *variation* (a strong curl still moves further than a weak one) while making the
+	// number in the constant mean what it says: radians.
+	vec3 swirl = cross(unit, gradient);
+	return normalize(unit + CLOUD_CURL_STRENGTH * (swirl / (1.0 + length(swirl))));
+}
+
+
+
+
 // `SpacesimCloudField._soft_ceiling()`: below the knee nothing changes; above it the excess is mapped
 // asymptotically into the rest of the range, so the top stays ordered instead of piling onto one value.
 // A hard clamp was tried and broke the percentile threshold; normalising by `1 + mix` was tried and broke
@@ -178,14 +274,39 @@ float cloud_intensity_from(
 	if (!has_coarse || field.mix_value <= 0.0) {
 		return envelope;
 	}
-	float eddy = cloud_eddy_at(carried, field.feature, coarse, footprint);
+	// **The flow first, then the parcels.** Shear is the large scale (a band drags its own contents), the curl is the
+	// local swirl, and the clump is what both are applied to. The fine half stays at the *still* direction, as it always
+	// has: detail that swirls with the coarse field was the baroque filigree `Cloud Layers` §10 warned about.
+	vec3 sheared = cloud_sheared(carried, field.cells, field.phase);
+	vec3 shaped = cloud_swirled(sheared, field.feature, coarse, footprint);
+	float clump = cloud_eddy_at(shaped, field.feature, coarse, footprint);
 	if (has_fine) {
-		eddy = clamp(
-			eddy + (cloud_eddy_at(unit, field.feature, fine, footprint) - 0.5) * CLOUD_FINE_SHARE,
+		clump = clamp(
+			clump + (cloud_eddy_at(unit, field.feature, fine, footprint) - 0.5) * CLOUD_FINE_SHARE,
 			0.0, 1.0
 		);
 	}
-	return cloud_soft_ceiling(envelope * (1.0 - field.mix_value + field.mix_value * eddy * 2.0));
+	// **THE CLUMP CARVES THE PARCELS; THE ENVELOPE SETS HOW THICK EACH ONE IS.**
+	//
+	// Cumulus is air lifting in parcels, so the *parcel* has to be a crisp-edged thing and the moisture has to be the
+	// depth of it. Two lines, in that order:
+	//
+	// 1. **the clump is thresholded at its own middle**, with `CLOUD_CUMULUS_EDGE` as the width — that is the crisp
+	//    edge, and residence time is what would set it;
+	// 2. **the envelope multiplies it**, so a belt is a thick parcel and a lane is a thin one. That is what makes
+	//    belts visible as belts: same parcels, different depths.
+	//
+	// **The first version of this law thresholded at `1 - envelope`, and the probe caught it in one run.** For Earth the
+	// floor is high, so the envelope is ~0.9 everywhere, `1 - envelope` is ~0.1, and against a bell-shaped clump
+	// almost the entire distribution sat above it: p10 came out at **0.851** and the variogram at **0.0005** — a field
+	// with no contrast at all, which reads as a flat veil. **A threshold that is meant to be a coverage has to be a
+	// QUANTILE, not a level**, and the quantile is already the deck's business: `threshold_for()` picks it from the
+	// measured distribution so the drawn coverage is the authored one. So the field's job is the *pattern* — crisp
+	// parcels, graded by moisture — and the calibration's job is how much of the sky they cover.
+	float parcel = smoothstep(
+		0.5 - CLOUD_CUMULUS_EDGE, 0.5 + CLOUD_CUMULUS_EDGE, clump
+	);
+	return cloud_soft_ceiling(parcel * envelope);
 }
 
 

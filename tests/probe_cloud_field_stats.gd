@@ -47,8 +47,9 @@ const CASES := [
 
 func _init() -> void:
 	print("STATS cloud field, %dx%d, by verdict" % [WIDTH, HEIGHT])
-	print("%-11s %6s  %6s %6s %6s %6s  %8s %7s  %7s" % [
-		"verdict", "cover", "p10", "p50", "p90", "max", "variog16", "slope", "anis"
+	print("%-11s %6s  %6s %6s %6s %6s  %8s %7s  %7s  %7s %6s" % [
+		"verdict", "cover", "p10", "p50", "p90", "max", "variog16", "slope", "anis",
+		"exceed", "bimod"
 	])
 	for case in CASES:
 		_report(String(case[0]), _morphology(int(case[1]), float(case[2])))
@@ -74,7 +75,23 @@ func _report(name: String, morphology: SpacesimCloudModel.Morphology) -> void:
 		if value >= threshold:
 			covered += 1
 	var quantiles := SpacesimSurfaceDistribution.quantiles_of(image)
-	print("%-11s %6.3f  %.3f  %.3f  %.3f  %.3f  %8.5f %7.3f  %7.3f" % [
+	# **The two numbers a change to the COMBINATION law moves**, kept beside the shape statistics because the
+	# calibration depends on them: the ramp's gain is `(albedo/palette)/mean_exceedance`, so a field whose mean
+	# collapses cannot reach its albedo — that is the note in `intensity_at`, and it has bitten once.
+	var exceed := 0.0
+	var exceed_count := 0
+	var near_clear := 0
+	var near_thick := 0
+	for value in values:
+		if value >= threshold:
+			exceed += (value - threshold) / maxf(1.0 - threshold, 1.0e-4)
+			exceed_count += 1
+		if value < threshold * 0.25:
+			near_clear += 1
+		elif value > threshold + (1.0 - threshold) * 0.75:
+			near_thick += 1
+	var bimodal := float(near_clear + near_thick) / float(values.size())
+	print("%-11s %6.3f  %.3f  %.3f  %.3f  %.3f  %8.5f %7.3f  %7.3f  %7.3f %6.3f" % [
 		name,
 		float(covered) / float(values.size()),
 		SpacesimSurfaceDistribution.value_at(quantiles, 0.1),
@@ -84,6 +101,8 @@ func _report(name: String, morphology: SpacesimCloudModel.Morphology) -> void:
 		_variogram(values, 16),
 		_variogram_slope(values),
 		_anisotropy(values),
+		exceed / float(maxi(exceed_count, 1)),
+		bimodal,
 	])
 
 
