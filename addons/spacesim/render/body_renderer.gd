@@ -502,7 +502,7 @@ static func apply_deck_shadow(
 ## own shadow would use cannot disagree. Its width also decides what a pixel can resolve: a penumbra narrower
 ## than one pixel is filtered to the step it averages to (`star_transmission.gdshaderinc`).
 static func face_surface_star(
-	material: Material, sun_model: Vector3, star_angle: float, eye_local: Vector3
+	material: Material, sun_model: Vector3, star_angle: float, eye_local: Vector3, pixel_angle: float
 ) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null:
@@ -513,6 +513,10 @@ static func face_surface_star(
 	# few radii away, so the viewing angle varies across a disc, unlike the star's. It is the third number a
 	# surface's light needs and the one `deck_specular_share` uses.
 	surface.set_shader_parameter("body_eye_local", eye_local)
+	# **The pixel's own angular size**, which the surface converts into a footprint per fragment — `p / cos tilt`
+	# rather than a derivative of the mesh, so the detail ladder does not move when the patching does. A deck declares
+	# no such uniform and ignores it.
+	surface.set_shader_parameter("pixel_angle", pixel_angle)
 
 
 ## **The air's own share of the star's light, at a material's altitude** — published once, at scene build,

@@ -1045,7 +1045,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_face_bodies_at_star(body, observer)
+		_face_bodies_at_star(body, observer, pixel)
 		_update_decks(body, observer, distance, screen)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
@@ -1291,7 +1291,7 @@ func _publish_air(body: SpacesimSceneBody) -> void:
 ##
 ## `star_angle` is `asin(R_star / d)` off `SpacesimLod.angular_radius`, the same call the light's own
 ## `light_angular_distance` makes, so a body's penumbra and its light's softness are one number.
-func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3) -> void:
+func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angle: float) -> void:
 	var star_body := star()
 	var sun := Vector3.UP
 	var star_angle := 0.0
@@ -1308,7 +1308,7 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3) -> void:
 	# deck's own material is handed as `eye_local`.
 	var eye_local := (observer - body.node.global_position) / maxf(body.radius, 1.0)
 	for material in materials:
-		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle, eye_local)
+		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle, eye_local, pixel_angle)
 
 
 ## **A deck, per frame, per layer**: the eye in the deck's own frame, and the map it should be sampling.

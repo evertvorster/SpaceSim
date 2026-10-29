@@ -79,6 +79,14 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 		"the height is the field, evaluated at the resolution the pixel can resolve")
 	h.check(code.contains("SurfacePlan surface_plan()"),
 		"from the plan the host publishes, one place")
+	# **The footprint must not come from the mesh.** `dFdx(up)` measures it only as faithfully as the triangulation
+	# does, so re-selecting the patches moved it at a fixed pixel — and with it the octave count, the height, the
+	# colour ramp's index and the relief normal. That is a texture that moves while the geometry does not, which is
+	# what the ground did when flown towards. It is `pixel_angle / cos tilt` now, from the view alone.
+	h.check(code.contains("pixel_angle / max(dot(up, eye_direction)"),
+		"the footprint is analytic: the pixel's angle over the view cosine")
+	h.check(not code.contains("length(dFdx(up))"),
+		"and never a derivative of the mesh, which changes when the patching does")
 	# **Absences, each one a mechanism that existed only to work around a raster.**
 	for gone in [
 		"height_map", "tile_map", "tile_count", "height_smooth(", "banded_detail(",
@@ -1114,6 +1122,9 @@ func _test_shader_defaults_are_the_hosts(h) -> void:
 	var pairs := [
 		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
 		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],
+		# The fallback when a publish is missed: a 1080-line 70-degree frame's centre pixel, the same unit
+		# `SpacesimLod.pixel_angle` works in — not zero, which would ask for unbounded detail.
+		[surface, "pixel_angle", SpacesimLod.pixel_angle(70.0, 1080.0)],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:

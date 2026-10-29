@@ -103,6 +103,12 @@ uniform float sea_level = 0.0;
 // The field's own value times this is metres, and the metres are what the normal needs. From the plan.
 uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
+// **The angle one pixel of the render target spans at the centre of the frame** — `SpacesimLod.pixel_angle`, the
+// same number the patch walk is given, published per frame because it follows the fov and the render resolution.
+//
+// **The default is an honest 1080-line 70-degree frame**, not zero: a material that missed its publish then draws
+// detail at a plausible resolution rather than an unbounded amount of it.
+uniform float pixel_angle = 0.0012966806;
 // How much the normal is tilted by the gradient — see the header. The one number here that is a look rather
 // than a derivation, and it is a *uniform* so the host owns it. The default is the host's, for the reason
 // above: 12.0 was 2.4x what anything publishes.
@@ -209,13 +215,22 @@ void fragment() {
 		SPECULAR = land_specular;
 	} else {
 		vec3 up = unit_position;
-		// **The angle one pixel spans, and it is the ONE currency resolution is measured in here**: the field's own
-		// octaves are faded by it, and the star's transmission is filtered by it.
-		// **The LONGEST of the two screen derivatives, not the sum of them.** `fwidth` adds the magnitudes per
-		// component, which at a grazing angle — the whole far half of a planet's surface — is dominated by the
-		// direction the surface recedes in, and a footprint that large fades octaves that are still resolvable
-		// across the view. The other way round is the moiré: an octave drawn where a pixel spans several features.
-		float footprint_angle = max(length(dFdx(up)), length(dFdy(up)));
+		// **The angle one pixel spans on THIS surface, and it is the ONE currency resolution is measured in here**: the
+		// field's own octaves are faded by it, and the star's transmission is filtered by it.
+		//
+		//     footprint = pixel_angle / cos(tilt),   tilt from the surface point to the EYE
+		//
+		// **Not taken from `dFdx(up)`**, which measures the same quantity but only as faithfully as the mesh does: a
+		// derivative of an interpolated varying depends on the TRIANGULATION, so re-selecting the patches changes it
+		// at a fixed pixel — and with it the octave count, the height, the colour ramp's index and the relief normal.
+		// That is a texture that moves while the geometry does not, which is what the ground was doing when flown
+		// towards. `body_eye_local` is the eye in the body's own frame, so this is one normalize and one dot, and it
+		// is the same foreshortening the patch walk's apparent-size limit now holds constant.
+		//
+		// **The floor is the silhouette's**: at the limb a pixel covers thousands of times the surface it does under
+		// the eye, and the honest answer there is a coarse footprint — but not an unbounded one.
+		vec3 eye_direction = normalize(body_eye_local - up);
+		float footprint_angle = pixel_angle / max(dot(up, eye_direction), 0.02);
 
 		// ===== THE GROUND, AS ITS OWN FUNCTION ====================================================
 		//
