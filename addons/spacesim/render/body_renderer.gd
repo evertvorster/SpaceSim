@@ -341,6 +341,10 @@ static func surface_material(
 	material.set_shader_parameter("field_gain", plan.gain)
 	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
 	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
+	# **The subdivision's own angular limit, handed to the vertex stage** — a vertex has no derivatives, so the field is
+	# asked at the rate the TRIANGLES can carry rather than the pixel's, and that rate is the walk's own constant. One
+	# publish, because it is a constant of the engine rather than of the body.
+	material.set_shader_parameter("facet_angle", SpacesimPatches.FACET_ANGLE)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
 	material.set_shader_parameter("base_color", body.color)

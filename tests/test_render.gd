@@ -87,6 +87,15 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 		"the footprint is analytic: the pixel's angle over the view cosine")
 	h.check(not code.contains("length(dFdx(up))"),
 		"and never a derivative of the mesh, which changes when the patching does")
+	# **The vertex displacement, pinned as a FORM** — its behaviour is a flight, because headless Godot compiles no
+	# shader and draws nothing, so all a headless check can catch is the line going missing or losing its gate. Two
+	# things about it are requirements rather than style: the offset is `(height - sea_level)`, because a bare height
+	# stands the land above the sphere every other measurement uses, and it is RADIAL, so a shared point cannot be
+	# displaced two ways by two triangles.
+	h.check(code.contains("VERTEX += unit_position * (height - sea_level) * field_amplitude"),
+		"the ground's height moves the vertex, radially, measured from the datum")
+	h.check(code.contains("if (surface_displaced > 0.5)"),
+		"and only when the displacement is switched on")
 	# **Absences, each one a mechanism that existed only to work around a raster.**
 	for gone in [
 		"height_map", "tile_map", "tile_count", "height_smooth(", "banded_detail(",
@@ -1125,6 +1134,10 @@ func _test_shader_defaults_are_the_hosts(h) -> void:
 		# The fallback when a publish is missed: a 1080-line 70-degree frame's centre pixel, the same unit
 		# `SpacesimLod.pixel_angle` works in — not zero, which would ask for unbounded detail.
 		[surface, "pixel_angle", SpacesimLod.pixel_angle(70.0, 1080.0)],
+		# **The vertex stage's footprint**, and the same rule at a different consumer: a vertex has no derivatives, so
+		# the field is asked at the subdivision's own angle. Not zero — `surface_height` reads zero as *no limit*, and
+		# a missed publish would then ask every vertex for the whole spectrum.
+		[surface, "facet_angle", SpacesimPatches.FACET_ANGLE],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:

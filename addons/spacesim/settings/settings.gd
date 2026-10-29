@@ -122,6 +122,13 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	# **The ground's shape in its vertices, rather than in the shading.** Off is the sphere with the relief faked by a
+	# tilted normal; on moves every drawn vertex radially by `(height - sea_level)` metres, so the silhouette is the
+	# terrain's and a mountain occludes what is behind it. Evert, 2026-10-29: *"I want the vertexes to physically move
+	# with the heightmap."* and *"the vertexes has to move, no more vertexes should be created."*
+	#
+	# **It creates no vertices and refines nothing** — the same triangles, moved. Nothing in the walk reads it.
+	"render.surface_displacement": {"default": false, "scope": Scope.PLAYER},
 	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
 	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
 	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the

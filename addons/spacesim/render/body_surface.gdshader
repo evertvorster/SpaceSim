@@ -42,12 +42,16 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // **The one sampler left is a colour table**: 256 texels of band colour, indexed by the field's value. There is no
 // height texture in this shader at all.
 //
-// ---------------------------------------------------------------- THE RELIEF IS A SHADING TRICK
+// ---------------------------------------------------------------- THE RELIEF IS A SHADING TRICK, UNLESS IT IS NOT
 //
 // A real planet's relief is 0.14 % of its radius, so its true slopes are a fraction of a degree and the shading they
 // produce is invisible at any distance. `relief_exaggeration` is the named concession: the normal is tilted by the
-// field's own gradient times it. **The silhouette does not change** — that is the mesh's business, and displacement is
-// its own rung; when the vertices carry the relief, the exaggeration goes to 1.0, the surface shading as steep as it is.
+// field's own gradient times it. **While the mesh is a sphere that is the only relief there can be** — the silhouette
+// does not change, the light is told about a hill that is not in the geometry.
+//
+// **`surface_displaced` replaces the concession with the real thing**: the vertices move (see `vertex()`), the
+// silhouette is the terrain's, and the exaggeration drops to 1.0 because with the shape present a tilted normal on top
+// of it counts the mountain twice. Evert, 2026-10-29: *"I want the vertexes to physically move with the heightmap."*
 //
 // The colour ramp: **1-D, indexed by field value over [-1, 1]**, built from the derived bands and the
 // measured quantiles. Clamped, because a value past either end is a coast or a peak and not a wrap.
@@ -96,9 +100,8 @@ uniform float relief_max_tilt = 0.6;
 // **Nothing culls on it any more.** It used to be the threshold that split the planet into two layers, the land and
 // the sea layer drew the complement; both went on 2026-10-28 because a liquid is a level and a second field of
 // coplanar triangles is not how one is drawn on a lattice that carries metres. **It stays because it is the DATUM**,
-// and the next thing this shader does is displace the surface by `height - sea_level`: with a bare `height` the land
-// would stand up to 1.56 km above the sphere that the ship's altitude, the framings' bands and a deck's condensation
-// level all still measure from.
+// and `vertex()` displaces the surface by `height - sea_level`: with a bare `height` the land would stand up to 1.56 km
+// above the sphere that the ship's altitude, the framings' bands and a deck's condensation level all still measure from.
 uniform float sea_level = 0.0;
 // The field's own value times this is metres, and the metres are what the normal needs. From the plan.
 uniform float field_amplitude = 1.0;
@@ -112,7 +115,28 @@ uniform float pixel_angle = 0.0012966806;
 // How much the normal is tilted by the gradient — see the header. The one number here that is a look rather
 // than a derivation, and it is a *uniform* so the host owns it. The default is the host's, for the reason
 // above: 12.0 was 2.4x what anything publishes.
+//
+// **It goes to 1.0 when the vertices carry the relief** (`surface_displaced`): at 5.0 the mountain would be counted
+// twice — once by the geometry and once by the tilt — and it reads as crumpled paper. The host publishes the pair
+// together, so the two cannot disagree.
 uniform float relief_exaggeration = 5.0;
+
+// **The ground's shape in its VERTICES, rather than in its shading.** `0` is the sphere with the relief faked by
+// the tilt above; `1` moves every drawn vertex radially by `(height - sea_level) * field_amplitude` metres, so the
+// silhouette is the terrain's, a mountain occludes what is behind it, and the ground stops being a ball.
+//
+// **Evert, 2026-10-29: *"I want the vertexes to physically move with the heightmap."*** The heightmap here is not a
+// texture — it is `surface_height`, the same function the fragment evaluates, asked at the rate the geometry can
+// carry. Published from `render.surface_displacement`, and read hot, because the walk's terrain budget turns on
+// with it.
+uniform float surface_displaced : hint_range(0.0, 1.0) = 0.0;
+
+// **The angular size one drawn triangle spans on the sphere** — `SpacesimPatches.FACET_ANGLE`, the subdivision's own
+// constant, published so the vertex stage can ask the field for exactly the detail its triangles can carry and no
+// more. A vertex stage has no derivatives, so this is the geometry's sampling rate handed over rather than measured;
+// hand it the pixel's instead and the mesh carries detail its triangles cannot represent, which shimmers as the LOD
+// moves. The default is the same 2 degrees, so a material that missed its publish draws a plausible ground.
+uniform float facet_angle = 0.03490658503988659;
 
 
 // The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
@@ -202,6 +226,24 @@ void vertex() {
 	// **The direction, from the lattice's own origin.** Normalising a 6,371 km vector is fine in float32: the
 	// *direction* only needs relative precision.
 	unit_position = normalize(VERTEX + patch_origin);
+	// **The ground's height, in the vertex's position.** Every drawn vertex moves radially by
+	// `(height - sea_level) * field_amplitude` metres — see `surface_displaced`. Three things about the sampling:
+	//
+	// - **`facet_angle` scaled by the distance is the geometry's own sampling rate**, `FACET_ANGLE * d / R`, which is
+	//   the same quantity the walk bounded this triangle by. It is a footprint in radians of sphere-arc, because that
+	//   is what `surface_height` fades its octaves by.
+	// - **`body_eye_local` is in body RADII**, which is why it is multiplied here: the distance is needed in metres to
+	//   compare with the vertex's own position, which is metres from `patch_origin`.
+	// - **The offset is radial and measured from the datum**, because `sea_level` is what the ship's altitude, the
+	//   framings' bands and a deck's condensation level all measure from. A bare `height` would stand the land up to
+	//   1.56 km above that sphere (a flown fault, 2026-10-27).
+	if (surface_displaced > 0.5) {
+		vec3 from_centre = VERTEX + patch_origin;
+		float to_vertex = length(body_eye_local * planet_radius - from_centre);
+		float facet = facet_angle * to_vertex / max(planet_radius, 1.0);
+		float height = surface_height(unit_position, surface_plan(), facet);
+		VERTEX += unit_position * (height - sea_level) * field_amplitude;
+	}
 }
 
 
