@@ -147,13 +147,100 @@ static func quantise(width: int) -> int:
 	return clampi(size, FLOOR_WIDTH, MAX_WIDTH)
 
 
-## **The level a layer's coverage implies, as a percentile of the map's own field.**
+## **Every number a landed map needs, from ONE subsampled histogram.**
 ##
-## A threshold admits the fraction of the field *above* it, which equals the requested coverage only if
-## the distribution is known — so the distribution is read off the map being used, in 256 bins, and the
-## coverage is what the threshold then *achieves*. **One histogram walk, exact to a byte**: the tail is
-## accumulated from the top until it reaches the requested count, so there is nothing to iterate. Measured
-## against itself: asking for 25/50/75 % gives 25.3/50.2/75.0.
+## The four measurements a refinement used to take were four full passes over the image — `threshold_for`'s histogram,
+## `mean_exceedance`, `mean_opacity` and `quantiles_of` — and three of them were GDScript loops over every texel, with
+## `mean_opacity` calling `two_flux()` **once per texel**. Measured on this machine, `4096x2048`:
+##
+##     threshold 154 ms   exceedance 248 ms   opacity 658 ms   quantiles 13 ms   TOTAL 1072 ms
+##
+## **A full second of main-thread stall per landed refinement**, which is what Evert saw as *"a significant drop in
+## frame rates"* while a deck baked — the GPU dispatch was never the problem (`spacesim` records 47 ms for an 8192 map).
+##
+## All four numbers are properties of the *distribution*, and a distribution needs a sample, not every texel. So this
+## builds one 256-bin histogram with a **regular stride** (unbiased for a distribution, and the same argument
+## `quantiles_of` has always made) and derives the rest from 256 bins instead of from eight million texels. It is also
+## the place the four are computed together, which is what makes it impossible for a threshold and the mean fitted to it
+## to come from two different images.
+static func measure(
+	image: Image, coverage: float, depth: float = 0.0
+) -> Dictionary:
+	var result := {"threshold": 1.0, "exceedance": 1.0, "opacity": 1.0}
+	if image == null:
+		return result
+	var width := image.get_width()
+	var height := image.get_height()
+	if width <= 0 or height <= 0:
+		return result
+	var total_texels := width * height
+	if total_texels <= 0:
+		return result
+	# The stride that brings the sample under the budget — the same one `SpacesimSurfaceDistribution.quantiles_of`
+	# takes, and for the same reason: `get_pixel()` is a GDScript call, so the cost must not follow the map's size.
+	var step := 1
+	while (width / step) * (height / step) > SpacesimSurfaceDistribution.QUANTILE_BUDGET:
+		step *= 2
+	var bins := PackedInt32Array()
+	bins.resize(256)
+	bins.fill(0)
+	var sampled := 0
+	for row in range(0, height, step):
+		for column in range(0, width, step):
+			var byte := image.get_pixel(column, row).r8
+			bins[byte] += 1
+			sampled += 1
+	if sampled == 0:
+		return result
+
+	# ---- the threshold: the level whose upper tail is the requested coverage ----
+	var wanted := clampf(coverage, 0.0, 1.0)
+	var threshold := 1.0
+	if wanted > 0.0 and wanted < 1.0:
+		var tail := 0
+		for level in range(255, -1, -1):
+			tail += bins[level]
+			if float(tail) >= wanted * float(sampled):
+				threshold = float(level) / 255.0
+				break
+	elif wanted >= 1.0:
+		threshold = 0.0
+
+	# ---- the exceedance and the opacity: both are sums over the SAME upper tail ----
+	var level := int(clampf(threshold, 0.0, 1.0) * 255.0)
+	var span := 255.0 - float(level)
+	if span <= 0.0:
+		result["threshold"] = threshold
+		return result
+	var tail_count := 0
+	var exceed_sum := 0.0
+	for bin in range(level, 256):
+		var count := bins[bin]
+		if count == 0:
+			continue
+		tail_count += count
+		exceed_sum += float(count) * ((float(bin) - float(level)) / span)
+	result["threshold"] = threshold
+	if tail_count == 0:
+		return result
+	var exceedance := exceed_sum / float(tail_count)
+	result["exceedance"] = exceedance
+	# **The depth the opacity is measured at is the layer's own, or the one its mean implies** — `column_depth()`, the
+	# same equivalence the shadow uses. So this second walk needs the exceedance, and it is another 256 bins rather
+	# than another eight million texels: `two_flux` is evaluated once per *bin*, not once per texel.
+	var effective := column_depth(exceedance, depth)
+	var opacity_sum := 0.0
+	for bin in range(level, 256):
+		var count := bins[bin]
+		if count == 0:
+			continue
+		opacity_sum += float(count) * SpacesimCloudBand.two_flux(
+			effective * ((float(bin) - float(level)) / span)
+		).x
+	result["opacity"] = opacity_sum / float(tail_count)
+	return result
+
+
 static func threshold_for(image: Image, coverage: float) -> float:
 	if image == null:
 		return 1.0
@@ -422,12 +509,13 @@ func _bake_floor(
 	entry.morphology = morphology
 	entry.width = FLOOR_WIDTH
 	entry.texel = (TAU * radius) / float(FLOOR_WIDTH)
-	entry.threshold = threshold_for(image, coverage)
-	entry.ramp_mean = mean_exceedance(image, entry.threshold)
+	var measured := measure(image, coverage, depth)
+	entry.threshold = measured["threshold"]
+	entry.ramp_mean = measured["exceedance"]
 	# **The optical depth is derived here, from this image**, when the layer states none: `-ln(1 - ramp_mean)` is
 	# the depth whose transmittance is the mean thickness, which is the equivalence the shadow already uses. So the
 	# mean the gain is fitted to is `mean(R(tau))` for every layer, ramp or tau, and one map cannot carry two laws.
-	entry.opacity_mean = mean_opacity(image, entry.threshold, column_depth(entry.ramp_mean, depth))
+	entry.opacity_mean = measured["opacity"]
 	entry.texture = _map_texture(image)
 
 
@@ -509,11 +597,12 @@ func _start_refinement(
 func _measure(entry: Entry, coverage: float, depth: float) -> void:
 	if entry.image == null:
 		return
-	entry.threshold = threshold_for(entry.image, coverage)
-	entry.ramp_mean = mean_exceedance(entry.image, entry.threshold)
-	entry.opacity_mean = mean_opacity(
-		entry.image, entry.threshold, column_depth(entry.ramp_mean, depth)
-	)
+	# **One measurement, from one histogram** — the threshold, the mean exceedance the ramp gain is fitted to, and the
+	# opacity, all derived from the same sample so they cannot describe two different images.
+	var measured := measure(entry.image, coverage, depth)
+	entry.threshold = measured["threshold"]
+	entry.ramp_mean = measured["exceedance"]
+	entry.opacity_mean = measured["opacity"]
 
 
 func _bake_refinement(

@@ -16,6 +16,7 @@ const CLOSE := 1.0e6
 
 func run(h, root: Node) -> void:
 	print("  cloud maps")
+	_test_one_measurement(h)
 	var sol: SpacesimSolarSystem = load(SOL_PATH)
 	h.check(sol != null, "Sol loads")
 	if sol == null:
@@ -287,3 +288,38 @@ func _test_a_window_maps_to_the_same_field(h) -> void:
 		"a window is the same field over a rectangle (%d of %d texels agree)" % [same, 32 * 16])
 
 
+## **One histogram, and the same three numbers the three full passes gave.**
+##
+## A landed refinement used to measure its map four times — a histogram for the threshold, one pass each for the mean
+## exceedance and the mean opacity (the latter calling `two_flux` **per texel**), and a subsampled percentile table
+## nothing read. Measured at `4096x2048` that was **1042 ms of main-thread stall**, which is what Evert saw as a frame
+## rate drop while a deck baked. It is now one *subsampled* histogram, and the numbers must not move because the cost
+## did: this test is the guard on that.
+func _test_one_measurement(h) -> void:
+	# A distribution with a known shape: a linear ramp, so a threshold and the mean above it are arithmetic rather than
+	# a property of any particular body.
+	var width := 256
+	var height := 128
+	var data := PackedByteArray()
+	data.resize(width * height)
+	for index in data.size():
+		data[index] = index % 256
+	var image := Image.create_from_data(width, height, false, Image.FORMAT_L8, data)
+	var measured := SpacesimCloudMaps.measure(image, 0.5, 1000.0)
+	var threshold: float = measured["threshold"]
+	var exceedance: float = measured["exceedance"]
+	var opacity: float = measured["opacity"]
+	# The three passes it replaces, computed the old way on the same image.
+	h.check_near(threshold, SpacesimCloudMaps.threshold_for(image, 0.5),
+		"the one measurement's threshold is the histogram walk's (%.4f against %.4f)" % [
+			threshold, SpacesimCloudMaps.threshold_for(image, 0.5)
+		], 0.02)
+	h.check_near(exceedance, SpacesimCloudMaps.mean_exceedance(image, threshold),
+		"its exceedance is the per-texel pass's (%.4f against %.4f)" % [
+			exceedance, SpacesimCloudMaps.mean_exceedance(image, threshold)
+		], 0.02)
+	h.check_near(opacity, SpacesimCloudMaps.mean_opacity(
+		image, threshold, SpacesimCloudMaps.column_depth(exceedance, 1000.0)
+	), "and its opacity is the per-texel pass's (%.4f)" % opacity, 0.02)
+	h.check(SpacesimCloudMaps.measure(null, 0.5, 0.0)["threshold"] == 1.0,
+		"a map that does not exist measures as full coverage, not as a crash")
