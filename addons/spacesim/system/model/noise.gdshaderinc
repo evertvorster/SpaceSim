@@ -247,7 +247,7 @@ float fnl_os2s3(int seed, vec3 p) {
 // **Faded and not skipped**, because a fade is continuous and a skip is a step: the octave count changes with distance
 // on every frame of an approach, and a sum whose terms appeared and vanished would make the ground pop as it refined.
 // Full while a pixel holds four samples per feature, gone by two — the sampling limit, and the same law
-// `banded_detail` (the deck's ladder) uses the same law.
+// `surface_height` is the one consumer left: the ground's per-pixel field.
 //
 // **The feature starts at `1/frequency`** because `p` is a direction: octave `i` samples the generator at
 // `direction * frequency * lacunarity^i`, so its feature is `1/(frequency * lacunarity^i)` radians across the sphere.

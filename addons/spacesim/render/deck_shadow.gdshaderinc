@@ -62,11 +62,7 @@ uniform float deck_shadow_floor : hint_range(0.0, 1.0) = 1.0;
 // cloud is whispy, because the whispy detail below the map's texel is this ladder — six octaves of the same
 // generator, evaluated per pixel. Evert, 2026-10-20: *"the detail ladder makes the texture — why can't we use
 // the texture, which is the output of the detail ladder?"*
-uniform int deck_detail_seed = 0;
-uniform float deck_detail_feature = 0.0;
-uniform float deck_detail_strength : hint_range(0.0, 0.5) = 0.0;
 
-#include "res://addons/spacesim/render/detail_ladder.gdshaderinc"
 
 
 bool deck_shadow_present() {
@@ -110,19 +106,10 @@ float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_de
         crossing = normalize(p + (across / across_length) * arc);
     }
     float field = texture(deck_cover, deck_shadow_uv(crossing)).r;
-    // **And the structure the map is too coarse to hold**, from the same ladder the cloud draws with. The
-    // footprint is this pixel's angle **at the deck** — `fwidth` is measured at the eye, and the ladder's
-    // feature sizes are arcs on the sphere, so the distance to the shell in radii is the conversion.
-    if (with_detail && deck_detail_strength > 0.0 && deck_detail_feature > 0.0) {
-        float at_deck = length(fwidth(p)) * (deck_height / max(planet_radius, 1.0));
-        field = clamp(
-            field + banded_detail(
-                crossing, at_deck, deck_detail_feature,
-                deck_detail_seed, deck_detail_strength
-            ),
-            0.0, 1.0
-        );
-    }
+    // **No noise ladder here either**, and for a stronger reason than on the deck: a shadow is the *image* of the cloud
+    // that casts it, so the two must sample the same thing. With the deck drawing its map alone, a shadow that added
+    // ladder noise would be a different cloud from the one overhead — which is the fault this include was written to
+    // prevent in the first place.
     float thickness = clamp(
         (field - deck_threshold) / max(1.0 - deck_threshold, 1.0e-4), 0.0, 1.0
     );

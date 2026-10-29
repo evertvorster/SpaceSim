@@ -152,7 +152,6 @@ func _hide_ship() -> void:
 ## was deleted, and described a shader that was not there. The uniform list is what makes the name real.
 const DECK_REPORTED := [
 	"cover", "threshold", "veil", "ramp_gain", "tau_full",
-	"detail_strength", "detail_feature", "detail_seed",
 ]
 
 
@@ -190,11 +189,7 @@ func _report_decks() -> void:
 				float(material.get_shader_parameter("threshold")),
 				float(material.get_shader_parameter("veil")),
 				float(material.get_shader_parameter("ramp_gain")),
-				float(material.get_shader_parameter("tau_full"))]
-			+ "detail=%.2f of rung %.3f, seed %d" % [
-				float(material.get_shader_parameter("detail_strength")),
-				float(material.get_shader_parameter("detail_feature")),
-				int(material.get_shader_parameter("detail_seed"))])
+				float(material.get_shader_parameter("tau_full"))])
 	print("SHOT: %d deck(s) in the tree" % decks)
 
 

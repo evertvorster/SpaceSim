@@ -1376,9 +1376,9 @@ func _shadowing_deck(body: SpacesimSceneBody) -> SpacesimSceneBody.Deck:
 	return lowest
 
 
-## **One shadow, from the deck nearest the ground**, and it goes to the land and the sea together — a shadow
-## that reached one and not the other would put a line down every coastline, the same failure the sea level
-## already taught.
+## **One shadow, from the deck nearest the ground** — and it goes to the one material the ground draws with. It
+## used to reach the land and the sea separately, which is what the "both layers or the coast comes apart" rule was
+## about; there is one layer now.
 ##
 ## The lever arm is the deck's **top** above the surface: a shadow's offset is `height · tan(zenith)`, and
 ## using the base would put every shadow a slab's thickness too close to its cloud.
@@ -1386,13 +1386,10 @@ func _publish_deck_shadow(
 	body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck, texture: Texture2D, threshold: float,
 	width: int
 ) -> void:
-	# **The deck's own ladder numbers, passed rather than read back off its material** — `detail_feature` is
-	# two texels of the map in hand, so a refinement moves it, and the shadow has to move with it or it would
-	# be a different cloud from the one casting it.
-	var feature := TAU * 2.0 / float(width) if width > 0 else 0.0
+	# **No seed and no feature any more**: they existed for the shadow's own noise ladder, which is deleted — the
+	# shadow now thresholds the same map the deck draws, so it cannot be a different cloud from the one overhead.
 	SpacesimBodyRenderer.apply_deck_shadow(
-		body.mesh_material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness,
-		SpacesimCloudField.seed_for(body.id, deck.index), feature
+		body.mesh_material, texture, threshold, deck.shadow_tau, deck.height + deck.thickness
 	)
 
 
