@@ -133,20 +133,25 @@ const CHUNK_CACHE_LIMIT := 262144
 ## roots are the same triangles at the same places, and a patch cannot drift from the level meshes.
 const ROOT_FACES := SpacesimIcosphere.FACES
 
-## `log(1.01)`: the dead band on the walk gate, and **the rate the ground refines at.** At cruise the ship closes
-## a distance by 1% every 0.1 s (`TRAVERSE_SECONDS` is 10), so this is a walk ten times a second and a refinement
-## increment ten times smaller than a tenth's.
+## `log(1.001)`: **below what a frame can distinguish**, so in practice a walk every frame.
 ##
-## **It was `log(1.1)` — a tenth — and a tenth is exactly once a second, which is what Evert saw.** 2026-10-29,
-## with one triangle a chunk: *"I still only get an update about once a second, and that is exactly when I see the
-## small jump in positions of the vertexes."* The comment that stood here claimed a change smaller than a tenth
-## "cannot move a chunk boundary, because the selection is quantised by the tree" — **false**: every triangle has
-## its own distance and tilt, so its crossing point is its own, and a tenth moves a great many of them at once.
+## **The history, because the number has moved twice and the reason matters.** It was `log(1.1)` — a tenth —
+## and at cruise a tenth of a distance is 0.95 s, which is the once-a-second refinement Evert saw as a jump,
+## 2026-10-29: *"I still only get an update about once a second, and that is exactly when I see the small jump
+## in positions of the vertexes."* `log(1.01)` — ten a second — made it read as motion: *"Much better."* Now it
+## is as small as it can usefully be.
 ##
-## Ten a second is the experiment that tells a RATE problem from a STEP problem: if the jump reads as motion at
-## this rate, the sampler was the fault and nothing else is needed; if it still pops, the step is the fault and
-## the answer is a morph, not a smaller dead band.
-const LOG_GATE := 0.009950330853168092
+## **The gate survives at all for two reasons, and neither is correctness.** One walk and one build are in
+## flight per body and a request arriving while one is in flight is dropped, so geometry can only arrive at
+## the rate `walk + merge + publish` completes — this band is no longer the limiter, the pipeline is. And a
+## stationary ship must not re-walk for float noise in a transform it did not move, which is what the non-zero
+## floor is for.
+##
+## **What a per-frame gate exposes:** every walk re-derives the whole selection and every merge re-merges it, so
+## the cost is proportional to the SELECTION and not to what changed — ~32 thousand entries per update at one
+## triangle a chunk, for a change of a few hundred triangles. If that hitches, the answer is an incremental
+## merge, not a wider band.
+const LOG_GATE := 0.0009995003330834232
 
 ## The floor on the eye's altitude, the same one the walk's own distance floor uses — so a descent to the
 ## ground cannot make the ratio infinite.
@@ -282,8 +287,9 @@ static func walk_is_due(
 		return true
 	if not is_equal_approx(epsilon, last_epsilon):
 		return true
-	# **The dead band, and what it costs to close it** — see `LOG_GATE`. At cruise this is ten walks a
-	# second; the walk is on a pool thread and the previous selection stays drawn, so the frame pays nothing.
+	# **The band, and what it costs to close it** — see `LOG_GATE`. This is below anything a frame can show, so
+	# the walk runs every frame the eye moves at all; it is on a pool thread and the previous selection stays
+	# drawn, so the frame pays nothing for it.
 	if absf(log(distance / last_distance)) > LOG_GATE:
 		return true
 	# **And the ALTITUDE separately, which is not the same quantity and cannot be inferred from the
