@@ -84,11 +84,9 @@ var patch_walk_wireframe := false
 ## **The selection the walk last produced**, as `[face, path, depth]` chunk references — a hundred entries
 ## where it used to be thirty thousand triangles.
 var patch_chunks: Array = []
-## **The rebuild in flight**, as a `WorkerThreadPool` task id, or -1. `patch_task_chunks` is what it was
-## asked to build, so a newer selection is not lost while it runs.
+## **The rebuild in flight**, as a `WorkerThreadPool` task id, or -1. What it was asked to build travels
+## with its output (`patch_arrays_chunks`), not here — see below.
 var patch_task := -1
-var patch_task_chunks: Array = []
-var patch_task_wireframe := false
 ## The arrays the task produced. **Written on the worker and read on the main thread only after
 ## `is_task_completed` says so** — the handoff that makes this safe without a lock.
 var patch_arrays: Array = []
@@ -98,11 +96,23 @@ var patch_arrays: Array = []
 ## whole-mesh jump, and Evert saw it in flight on 2026-10-30 as *"a regular jump for the surface ... the publishing of
 ## the updated vertexes after a walk"*.
 var patch_arrays_origin := Vector3.ZERO
+## **The selection those arrays were built for, and whether they are lines.** The other two things the publish
+## needs, written on the worker beside the arrays for exactly the reason above: the request members are
+## overwritten by the next request *before* its in-flight guard returns, so reading them at publish names
+## whatever was asked for last, not what landed.
+##
+## **(V)** The wireframe half published a LINES mesh built from solid arrays; the selection half made the
+## staleness check compare the newest request with itself, so a stale build was judged fresh and never
+## re-requested until the next walk fired.
+var patch_arrays_chunks: Array = []
+var patch_arrays_wireframe := false
 ## Triangles the mesh currently on the node holds. **Zero until the first build lands**, which is why a
 ## body draws nothing for its first frame or two rather than stalling the frame that asked for it.
 var patch_triangles := 0
-## The point the mesh's vertices are measured from, in body-space metres — captured with the build and written onto the
-## node with the mesh it belongs to. See `SpacesimPatches.rebase`.
+## The point the mesh's vertices are measured from, in body-space metres — this build's **bind argument** to the
+## worker, and nothing else. **The publish must never read it**: it is overwritten by every request, so it names
+## the latest request rather than the build that landed. The publish uses `patch_arrays_origin`. See
+## `SpacesimPatches.rebase`.
 var patch_task_origin := Vector3.ZERO
 ## **This body's vertex lattice**, kept between walks so a merge is a memcpy of index blocks rather than a rebuild.
 ## Owned here because the slots are per body; see `SpacesimPatches.Lattice`.

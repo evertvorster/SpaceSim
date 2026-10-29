@@ -1195,11 +1195,13 @@ func _poll_walks() -> void:
 ## **`patch_triangles` is not written until the arrays land**: the count on the body describes the mesh
 ## that is actually there, never the one that was asked for.
 func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
-	body.patch_task_chunks = body.patch_chunks
-	body.patch_task_wireframe = lines
-	# **The origin the geometry is measured from: the ground under the eye.** Captured with the request like every
-	# other input, so the arrays and the transform that pairs with them cannot come from different frames — and it is
-	# the *ground* point rather than the eye, because what must stay small is the geometry, not the observer.
+	# **The origin the geometry is measured from: the ground under the eye.** It is the *ground* point rather than the
+	# eye, because what must stay small is the geometry, not the observer.
+	#
+	# **Nothing else is remembered here, and that is the fix.** Every other input this call hands the worker is an
+	# argument, and the publish reads what the build *produced* (`patch_arrays_*`). The two request members written
+	# here used to answer for a build they did not describe, because this function overwrites them **before** the
+	# in-flight guard returns — so a deferred request clobbered the build it deferred behind.
 	body.patch_task_origin = body.patch_walk_direction * body.radius
 	if body.patch_task != -1:
 		# A build is already in flight. Its result will be published and then seen to be stale, which
@@ -1233,6 +1235,12 @@ func _build_patch_arrays(
 	# whole-mesh jump, seen in flight as a regular shudder at low altitude. Evert, 2026-10-30: *"there is a regular
 	# jump for the surface, which I am assuming is the publishing of the updated vertexes after a walk."* Exactly that.
 	body.patch_arrays_origin = origin
+	# **The rest of what the publish must know about THESE arrays**, for the same reason as the origin above: the
+	# request members are overwritten by the next request even when it is deferred, so a build landing after one was
+	# drawn as a LINES mesh from solid arrays, given the wrong material, its triangle count divided by six instead of
+	# three, and judged against a selection it was never built for.
+	body.patch_arrays_chunks = chunks
+	body.patch_arrays_wireframe = lines
 
 
 ## **The main thread's half**, once a frame: the arrays become a mesh, and the body starts drawing it.
@@ -1431,6 +1439,10 @@ func _poll_patch_builds() -> void:
 		body.patch_task = -1
 		var arrays := body.patch_arrays
 		body.patch_arrays = []
+		# **Read from the arrays' own record, never from the request members** — see `_build_patch_arrays`. This is
+		# the whole fix: a publish describes the build that produced it.
+		var lines := body.patch_arrays_wireframe
+		var published := body.patch_arrays_chunks
 		# **An empty selection is a real answer** — the eye inside the body, or a sphere whose whole surface
 		# is over its own horizon — and it is not a reason to throw the geometry away. `add_surface_from_arrays`
 		# refuses an empty surface (the rendering server logs `array_len == 0` every frame it is asked), so an
@@ -1441,7 +1453,7 @@ func _poll_patch_builds() -> void:
 		if arrays.is_empty() or (arrays[0] as PackedVector3Array).is_empty():
 			continue
 		body.mesh.mesh = (
-			SpacesimPatches.lines_mesh_from(arrays) if body.patch_task_wireframe
+			SpacesimPatches.lines_mesh_from(arrays) if lines
 			else SpacesimPatches.mesh_from(arrays)
 		)
 		# **The vertices are metres from this origin**, so the node carries the origin and drops the radius scale —
@@ -1461,7 +1473,7 @@ func _poll_patch_builds() -> void:
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
 		var wanted := (
-			SpacesimBodyRenderer.wireframe_material() if body.patch_task_wireframe
+			SpacesimBodyRenderer.wireframe_material() if lines
 			else body.mesh_material
 		)
 		if wanted == null:
@@ -1471,11 +1483,11 @@ func _poll_patch_builds() -> void:
 		# **Triangles come from the index array for an indexed mesh** and from the segment count for lines — reading a
 		# vertex count here would now report the number of *points*, which sharing has just made several times smaller.
 		body.patch_triangles = (
-			(arrays[1] as PackedInt32Array).size() / 6 if body.patch_task_wireframe
+			(arrays[1] as PackedInt32Array).size() / 6 if lines
 			else (arrays[1] as PackedInt32Array).size() / 3
 		)
 		# The selection moved while this was building, so the answer is already out of date.
-		if body.patch_task_chunks != body.patch_chunks:
+		if published != body.patch_chunks:
 			_request_patch_build(body, body.patch_walk_wireframe)
 
 

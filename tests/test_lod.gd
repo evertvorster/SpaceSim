@@ -373,11 +373,77 @@ func _test_the_scene_applies_it(h, root: Node) -> void:
 			"and a star's point is the same either way, matching its own unshaded disc", 1.0e-6)
 		camera.attributes = null
 
+	# **The publish describes the build that produced it** — the last thing this suite asserts about the tree,
+	# because it is about the handoff rather than the law.
+	_test_a_publish_describes_its_own_build(h, scene, camera, earth, pixel)
+
 	scene.container.free()
 	camera.queue_free()
 
 
 ## Put the camera at the distance where a body's silhouette is `screen_radius` pixels across.
+## **A publish must describe the build that produced it, not the latest request.**
+##
+## `_request_patch_build` overwrites its request members **before** it returns early on an in-flight build, so a
+## deferred request must never be read back by the publish of the build it deferred behind. Everything the publish
+## needs — the origin, the selection, whether the arrays are lines — therefore travels WITH the arrays, written on
+## the worker beside them.
+##
+## **(V)** The fault this pins, flown 2026-10-30: *"a regular jump for the surface … the publishing of the updated
+## vertexes after a walk."* The origin half was fixed then; this covers the other two, and it fails on the old code
+## twice over — the deferred request's `wireframe = true` was read at publish, so a LINES mesh was built from solid
+## arrays, and the staleness check compared the newest request with itself, so a stale build was judged fresh.
+func _test_a_publish_describes_its_own_build(
+	h, scene: SpacesimSystemScene, camera: Camera3D, earth: SpacesimSceneBody, pixel: float
+) -> void:
+	if earth == null or earth.mesh == null:
+		h.check(false, "a body with a mesh to publish onto")
+		return
+	# A body big on screen, so it is drawn with a mesh at all.
+	_place_at_screen_radius(camera, earth, Vector3(1.0, 0.0, 0.0), 200.0, pixel)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	if earth.mesh == null or earth.mesh.mesh == null:
+		h.check(false, "the body is drawn with a patch mesh")
+		return
+	# What the current selection is drawn with, before any of this. The coarser selection below must replace it.
+	var finer := earth.patch_triangles
+
+	# The first build: SOLID, for the selection current now.
+	scene._request_patch_build(earth, false)
+	# **A newer selection arrives while it is in flight**, and then a second request asking for LINES. The request
+	# returns early and — on the old code — overwrote the members the publish would read.
+	var coarse: Array = earth.patch_chunks.duplicate()
+	coarse.resize(maxi(coarse.size() - 1, 1))
+	earth.patch_chunks = coarse
+	scene._request_patch_build(earth, true)
+	# Settle on the BUILD handshake alone, **without `await_patch_builds`**: that also runs the walk, whose fresh
+	# selection would replace `coarse` and make this test not test anything (measured — it passed on the mutant
+	# because a walk had re-selected the ground underneath it).
+	for _round in 8:
+		while earth.patch_task != -1 \
+				and not WorkerThreadPool.is_task_completed(earth.patch_task):
+			OS.delay_usec(200)
+		scene._poll_patch_builds()
+		if earth.patch_task == -1 and earth.patch_arrays_chunks == earth.patch_chunks:
+			break
+
+	h.check(not earth.patch_arrays_wireframe,
+		"the publish kept the first build's wireframe, not the deferred request's")
+	# **The mesh, not the record**: a record is what the fix moved, so asserting on it alone is circular — the
+	# mutant writes the current selection into it and satisfies the comparison. The drawn count is the honest
+	# witness, and it is pinned EXACTLY: one chunk fewer is `CHUNK_TRIANGLES` fewer, and a `< ` would be satisfied by
+	# the mutant's LINES mesh, which reports half of the same index array (`/6` instead of `/3`) — measured, and it
+	# fooled the first version of this check.
+	h.check(earth.patch_triangles == finer - SpacesimPatches.CHUNK_TRIANGLES,
+		"and the stale build was seen as stale: the coarser selection replaced the finer mesh (%d -> %d, wanted %d)"
+			% [finer, earth.patch_triangles, finer - SpacesimPatches.CHUNK_TRIANGLES])
+	# The picture, not only the fields: a LINES mesh built from solid arrays is the visible half of the fault.
+	var surface := (earth.mesh.mesh as ArrayMesh).surface_get_primitive_type(0)
+	h.check(surface == Mesh.PRIMITIVE_TRIANGLES,
+		"and a solid build published a triangle mesh, not lines")
+
+
 func _place_at_screen_radius(
 	camera: Camera3D, body: SpacesimSceneBody, direction: Vector3, screen_radius: float, pixel: float
 ) -> void:
