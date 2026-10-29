@@ -424,21 +424,21 @@ func _test_the_walk_is_gated(h) -> void:
 	# test of the dead band. Near the ground the two quantities part company, and that is the case below.
 	var far_out := EARTH_RADIUS * 30.0
 	h.check(not SpacesimPatches.walk_is_due(
-		far_out, up, far_out * 1.00005, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
-		"a 0.005% change is inside the dead band")
+		far_out, up, far_out * 1.005, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a half-percent change is inside the dead band")
 	h.check(SpacesimPatches.walk_is_due(
-		distance, up, distance * 1.002, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
-		"a fifth of a percent is not")
-	# **The descent, and it is the trap this gate exists to not repeat.** The scenario has to keep the DISTANCE
-	# change inside the band while the ALTITUDE changes by an order of magnitude, or the distance term answers and
-	# the altitude term is never exercised — so its start altitude is chosen from the band: at 0.1% that is under
-	# ~6.4 km. From 5 km to 300 m is 0.07% of the distance and 17x of the altitude, which is what the law floors
-	# on. A gate that only looked at the distance said "nothing has moved" through the whole descent, and the mesh
+		distance, up, distance * 1.02, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a 2% one is not")
+	# **The descent, and it is the trap this gate exists to not repeat.** From 60 km to 300 m is 0.94% of
+	# the *distance* — inside the dead band — and 200x of the *altitude*, which is what the law floors on. A
+	# gate that only looked at the distance said "nothing has moved" through the whole descent, and the mesh
 	# stayed stale: "it subdivides for a little bit, and then no further."
-	var high := EARTH_RADIUS + 5.0e3
+	# **The start altitude is chosen for the dead band**: a 1% gate cannot fire on the distance below ~64 km, so
+	# the scenario has to begin under that or the distance term answers and the altitude term is never exercised.
+	var high := EARTH_RADIUS + 6.0e4
 	var low := EARTH_RADIUS + 300.0
 	h.check(absf(log(high / low)) < SpacesimPatches.LOG_GATE,
-		"the distance from 5 km to 300 m is inside the dead band, so a distance gate sees nothing")
+		"the distance from 60 km to 300 m is inside the dead band, so a distance gate sees nothing")
 	h.check(SpacesimPatches.walk_is_due(
 		high, up, low, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
 		"and the walk is due anyway, because the altitude has changed by orders of magnitude")
