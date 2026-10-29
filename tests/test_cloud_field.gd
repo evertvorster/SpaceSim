@@ -118,15 +118,14 @@ func _test_the_bands_are_bands(h, jupiter: SpacesimCloudModel.Morphology, earth:
 	h.check(jupiter_ratio > earth_ratio,
 		"Jupiter's bands dominate its weather more than Earth's do (%.3f against %.3f)"
 			% [jupiter_ratio, earth_ratio])
-	# **The absolute guard is now a guard against a FLAT field, and the relative check above is the one that carries
-	# the meaning.** This metric is latitude structure over within-row variation, and its subject has changed twice: the
-	# meander (2026-10-17) puts longitude structure in the denominator, and the cumulus parcels (2026-10-29) put
-	# *isotropic* structure there by design — the clumps are round on purpose, so within-row variation is now the larger
-	# term everywhere and a banded body's ratio sits below one. What still holds, and is what the check above asserts, is
-	# the ORDERING: Jupiter's bands dominate its weather three times as much as Earth's do. Measured 2026-10-29:
-	# Jupiter 0.472, Earth 0.152.
-	h.check(jupiter_ratio > 0.4 and jupiter_ratio < 1.0,
-		"and measurably: a banded body's latitude structure is %.2f of its within-row variation, against a flat field's 1.0" % jupiter_ratio)
+	# **The threshold is 2.5 rather than 4.0, and the reason is that the metric's subject changed.** It
+	# measures latitude structure against within-row variation, and since 2026-10-17 the field meanders with
+	# longitude — which is *not* noise, but lands in the denominator all the same. The 4.0 was calibrated
+	# against a straight-band field. The RELATIVE check above is the one that carries the meaning (Jupiter
+	# is still clearly more banded than Earth); this one is a guard against the field becoming pure noise,
+	# so it is set to catch that and not to pin today's number.
+	h.check(jupiter_ratio > 2.5,
+		"and strongly: a banded body's latitude structure outweighs its noise %.1f to one" % jupiter_ratio)
 
 	# The number of bands is the derived cell count, so it is worth counting rather than assuming.
 	# **Each cell gives a rising branch AND a sinking one**, so the profile changes direction about

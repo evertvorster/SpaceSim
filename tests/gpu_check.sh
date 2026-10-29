@@ -54,7 +54,7 @@ fi
 
 # And the suite must actually have run: a filter that matches nothing reports `0 checks, 0 failed`, which
 # is the success message of a run that tested nothing at all.
-if ! grep -q "worst percentile" "$LOG"; then
+if ! grep -q "texels differ" "$LOG"; then
 	echo "FAILED: the comparison did not run (was the suite selected? SPACESIM_TESTS=\"$SPACESIM_TESTS\") — the log is below"
 	cat "$LOG"
 	exit 1

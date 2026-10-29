@@ -50,28 +50,7 @@ const MIXING_NONE := 0.0 ## both `FEATURELESS` and `UNKNOWN`: a uniform field
 ## cylinder parameterisation — `(cos lon, sin lon, latitude)` — pinwheels at the poles, because the
 ## longitude circulates through a full turn over a vanishing distance. Squeezing latitude in the
 ## *direction* instead keeps the sampling continuous everywhere, since the direction is.
-const EDDY_STRETCH := 1.0
-
-## **How sharp a clump's edge is**, as a fraction of the field's range — the mirrored `CLOUD_CUMULUS_EDGE`.
-##
-## This is residence time standing in: a cell that rains out in an hour has a crisp boundary, ice that persists for a
-## day is smeared. The model does not carry residence time, so this is the constant that waits for it.
-const CUMULUS_EDGE := 0.12
-
-## **The differential rotation**, in radians of longitude at its strongest — the mirrored `CLOUD_SHEAR`.
-##
-## The mechanism the vortex stack stood in for, and nearly free: longitude displaced by a latitude-dependent angle, so a
-## band drags against its neighbour and its parcels smear *along* it. That is what makes a belt read as a belt, and it is
-## what a uniform texture stretch fakes badly — shear makes the elongation a property of *where* the parcel is.
-const SHEAR := 0.35
-## **The local swirl**, as curl noise — the mirrored `CLOUD_CURL_*`. Divergence-free, so it carries material rather than
-## creating it, which is why it reads as flow. Three noise samples, not 96 vortices.
-const CURL_STRENGTH := 0.03
-const CURL_SCALE := 2.0
-const CURL_STRETCH := 1.6
-## **The difference step, as a fraction of the feature** — a forward difference is a derivative only while
-## `step × frequency ≪ 1`, and that is a statement about the feature, not a number to pick.
-const CURL_STEP := 0.05
+const EDDY_STRETCH := 3.0
 
 ## The feature size used when the body has no eddy scale to give — no `N`, no `f`, or no air. One
 ## circulation cell, since without a deformation radius the finest structure the flow offers is a band.
@@ -334,56 +313,6 @@ static func advect(unit: Vector3, stack: Vortices) -> Vector3:
 	return (unit + twist).normalized()
 
 
-## **Differential rotation**: longitude displaced by a latitude-dependent angle, so bands drag against each other.
-##
-## `sin(cells · lat)` is one turn per circulation cell, which is the shape a zonal wind profile has — eastward in a zone,
-## reversing between — so the shear is strongest where the bands meet and zero at a band's centre. The bands stay where
-## they are; their contents are dragged along them.
-static func sheared(unit: Vector3, cells: float, phase: float) -> Vector3:
-	if is_zero_approx(SHEAR):
-		return unit
-	var latitude := asin(clampf(unit.y, -1.0, 1.0))
-	var longitude := atan2(unit.z, unit.x) + SHEAR * sin(cells * latitude * PI + phase)
-	var ring := sqrt(maxf(1.0 - unit.y * unit.y, 0.0))
-	return Vector3(ring * cos(longitude), unit.y, ring * sin(longitude))
-
-
-## **Curl noise**: the curl of a scalar field in the tangent plane — divergence-free, so it carries material instead of
-## creating or destroying it. Forward differences, so three samples of one generator rather than an analytic derivative
-## the noise does not carry.
-static func swirled(unit: Vector3, feature: float, swirl: FastNoiseLite) -> Vector3:
-	if feature <= 0.0 or swirl == null:
-		return unit
-	var polar := Vector3.UP if absf(unit.y) < 0.99 else Vector3.RIGHT
-	var east := unit.cross(polar).normalized()
-	var north := east.cross(unit)
-	var step := maxf(feature * CURL_STEP, 1.0e-5)
-	var here := _swirl_at(unit, feature, swirl)
-	var along_east := _swirl_at((unit + east * step).normalized(), feature, swirl)
-	var along_north := _swirl_at((unit + north * step).normalized(), feature, swirl)
-	var gradient := (
-		east * (along_east - here) + north * (along_north - here)
-	) / step
-	# **Bounded by `CURL_STRENGTH`** — the gradient's magnitude is `1/feature`, so the raw curl would move the sample
-	# by half a radian. `x/(1+|x|)` keeps the variation and makes the constant mean radians.
-	var curl := unit.cross(gradient)
-	return (unit + CURL_STRENGTH * (curl / (1.0 + curl.length()))).normalized()
-
-
-## The scalar the curl is taken of: this body's generator at a **second seed, at the parcel scale** — the mirrored
-## `cloud_swirl_at()`, and `swirl_for()` is what builds the generator with the matching seed.
-static func _swirl_at(unit: Vector3, feature: float, swirl: FastNoiseLite) -> float:
-	if swirl == null:
-		return 0.0
-	var stretched := Vector3(
-		unit.x / CURL_STRETCH, unit.y, unit.z / CURL_STRETCH
-	).normalized()
-	var scale := CURL_SCALE / maxf(feature, 1.0e-4)
-	return swirl.get_noise_3d(
-		stretched.x * scale, stretched.y * scale, stretched.z * scale
-	)
-
-
 ## **One pixel's value, with everything applied in the order the physics puts it.**
 ##
 ## 1. the sample is carried by the eddies ([method advect]);
@@ -403,7 +332,7 @@ static func intensity_at(
 	direction: Vector3,
 	mix: float, cells: float, ratio: float, feature: float,
 	noise: FastNoiseLite, stack: Vortices, phase: float,
-	fine: FastNoiseLite = null, swirl: FastNoiseLite = null
+	fine: FastNoiseLite = null
 ) -> float:
 	var unit := direction.normalized()
 	var sample := advect(unit, stack)
@@ -412,21 +341,20 @@ static func intensity_at(
 	var envelope := mix + (1.0 - mix) * bands_at(sample, cells, ratio, phase)
 	# **The eddies read the carried sample; the detail reads the still one.** `fine` may be null, in which
 	# case there is no high half to add — which is what a caller that only has one generator gets.
-	# **The flow first, then the parcels**: shear is the large scale, the curl is the local swirl, and the clump is what
-	# both are applied to. The fine half stays at the still direction — detail that swirls with the coarse field was the
-	# baroque filigree `Cloud Layers` §10 warned about.
-	var shaped := swirled(sheared(sample, cells, phase), feature, swirl)
-	var coarse := eddy_at(shaped, feature, noise)
+	var coarse := eddy_at(sample, feature, noise)
 	var eddy := coarse
 	if fine != null:
 		eddy = clampf(coarse + (eddy_at(unit, feature, fine) - 0.5) * FINE_SHARE, 0.0, 1.0)
 	if mix <= 0.0 or noise == null:
 		return envelope
-	# **The clump carves the parcels; the envelope sets how thick each one is** — see the GLSL twin for the reasoning
-	# and for the fault the first version of this law had (thresholding at `1 - envelope` flattens a high-floor body's
-	# field entirely: a coverage threshold must be a QUANTILE, and the quantile is the deck's `threshold_for()`).
-	var parcel := smoothstep(0.5 - CUMULUS_EDGE, 0.5 + CUMULUS_EDGE, eddy)
-	return _soft_ceiling(parcel * envelope)
+	# **Normalising this by `1 + mix` was tried and reverted: it broke the light budget.** Bounding the
+	# modulation keeps the field out of the top byte and fixes the percentile ties, but it also compresses
+	# the field toward its threshold — Earth's mean exceedance fell from ~0.7 to **0.177**, and since the
+	# ramp's gain is `(albedo/palette)/mean` it then needed a gain of 2.75, clamped to 1, leaving the deck's
+	# drawn average at **0.152 against its calibrated 0.419**. A field whose mean exceedance is that low
+	# cannot reach its albedo without exceeding white somewhere, which is exactly what the clamp forbids.
+	# So the mean has to stay where the calibration expects it, and the *clamp* is the honest behaviour.
+	return _soft_ceiling(envelope * (1.0 - mix + mix * eddy * 2.0))
 
 
 ## **A soft ceiling instead of a hard clamp.**
@@ -473,22 +401,6 @@ static func noise_for(seed: int) -> FastNoiseLite:
 	# One unit of noise space is one eddy; the *caller* decides how much of it a direction spans, so the
 	# frequency stays at 1 and the size lives in `eddy_at`. Two places to set the same scale is one too
 	# many.
-	noise.frequency = 1.0
-	noise.fractal_octaves = COARSE_OCTAVES
-	noise.fractal_gain = NOISE_GAIN
-	noise.fractal_lacunarity = 2.0
-	return noise
-
-
-## **The generator the curl is taken of** — this body's noise at a second seed, so the swirl is decorrelated from the
-## parcels it carries instead of being a second look at the same field.
-##
-## Mirrors the shader's `noise.seed + 4001` and its `CURL_SCALE / feature` frequency, which is why the frequency here
-## stays 1 and the scale is applied at the sample.
-static func swirl_for(seed: int) -> FastNoiseLite:
-	var noise := FastNoiseLite.new()
-	noise.noise_type = NOISE_TYPE
-	noise.seed = seed + 4001
 	noise.frequency = 1.0
 	noise.fractal_octaves = COARSE_OCTAVES
 	noise.fractal_gain = NOISE_GAIN
@@ -589,8 +501,6 @@ class Plan:
 	var noise: FastNoiseLite = null
 	## The high half, sampled unwarped. Null exactly when `noise` is.
 	var fine: FastNoiseLite = null
-	## The curl's generator — the same noise at a second seed, so the swirl is decorrelated from the parcels.
-	var swirl: FastNoiseLite = null
 
 
 ## The plan for one bake: the four derived numbers, the meander phase, the eddy spectrum and the two
@@ -609,7 +519,6 @@ static func plan(seed: int, morphology: SpacesimCloudModel.Morphology) -> Plan:
 	if not result.uniform and result.mix > 0.0:
 		result.noise = noise_for(seed)
 		result.fine = fine_for(seed)
-		result.swirl = swirl_for(seed)
 	# The meander's phase comes from the seed, so two bodies — and two layers of one body — wander
 	# differently while each stays reproducible.
 	result.phase = meander_phase(seed)
@@ -666,7 +575,6 @@ static func bake(
 	var stack := baked.stack
 	var noise := baked.noise
 	var fine := baked.fine
-	var swirl := baked.swirl
 
 	for row in h:
 		# The checkpoint, once a row: a bake that is no longer wanted returns nothing rather than a
@@ -693,7 +601,7 @@ static func bake(
 				cos_latitude * cos(longitude), sin_latitude, cos_latitude * sin(longitude)
 			)
 			var value := 1.0 if uniform else intensity_at(
-				direction, mix, cells, ratio, feature, noise, stack, phase, fine, swirl
+				direction, mix, cells, ratio, feature, noise, stack, phase, fine
 			)
 			bytes[row * w + column] = int(clampf(value, 0.0, 1.0) * 255.0)
 	return Image.create_from_data(w, h, false, Image.FORMAT_L8, bytes)
