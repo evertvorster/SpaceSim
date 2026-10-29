@@ -133,9 +133,20 @@ const CHUNK_CACHE_LIMIT := 262144
 ## roots are the same triangles at the same places, and a patch cannot drift from the level meshes.
 const ROOT_FACES := SpacesimIcosphere.FACES
 
-## `log(1.1)`: a tenth, as the loose end the plan measured. A change smaller than this cannot move a chunk
-## boundary, because the selection is quantised by the tree.
-const LOG_TENTH := 0.09531017980432486
+## `log(1.01)`: the dead band on the walk gate, and **the rate the ground refines at.** At cruise the ship closes
+## a distance by 1% every 0.1 s (`TRAVERSE_SECONDS` is 10), so this is a walk ten times a second and a refinement
+## increment ten times smaller than a tenth's.
+##
+## **It was `log(1.1)` — a tenth — and a tenth is exactly once a second, which is what Evert saw.** 2026-10-29,
+## with one triangle a chunk: *"I still only get an update about once a second, and that is exactly when I see the
+## small jump in positions of the vertexes."* The comment that stood here claimed a change smaller than a tenth
+## "cannot move a chunk boundary, because the selection is quantised by the tree" — **false**: every triangle has
+## its own distance and tilt, so its crossing point is its own, and a tenth moves a great many of them at once.
+##
+## Ten a second is the experiment that tells a RATE problem from a STEP problem: if the jump reads as motion at
+## this rate, the sampler was the fault and nothing else is needed; if it still pops, the step is the fault and
+## the answer is a morph, not a smaller dead band.
+const LOG_GATE := 0.009950330853168092
 
 ## The floor on the eye's altitude, the same one the walk's own distance floor uses — so a descent to the
 ## ground cannot make the ratio infinite.
@@ -260,7 +271,7 @@ static func select(
 ##
 ## The answer is a pure function of three things: the distance, the eye's direction, and ε (plus the
 ## wireframe flag, which changes the mesh rather than the selection). So it needs recomputing when the
-## distance has moved by a tenth, or when the eye has swung by half the finest patch it is asking for —
+## distance has moved by `LOG_GATE`, or when the eye has swung by half the finest patch it is asking for —
 ## and `finest_edge_angle` is that patch, from the walk's own law.
 static func walk_is_due(
 	last_distance: float, last_direction: Vector3,
@@ -271,9 +282,9 @@ static func walk_is_due(
 		return true
 	if not is_equal_approx(epsilon, last_epsilon):
 		return true
-	# A tenth is the loose end the plan measured: the selection is quantised by the tree, so a change
-	# smaller than this cannot move a chunk boundary.
-	if absf(log(distance / last_distance)) > LOG_TENTH:
+	# **The dead band, and what it costs to close it** — see `LOG_GATE`. At cruise this is ten walks a
+	# second; the walk is on a pool thread and the previous selection stays drawn, so the frame pays nothing.
+	if absf(log(distance / last_distance)) > LOG_GATE:
 		return true
 	# **And the ALTITUDE separately, which is not the same quantity and cannot be inferred from the
 	# distance.** Near the ground `log(d / R)` is flat — a 2.5% change in distance is a 500x change in
@@ -282,7 +293,7 @@ static func walk_is_due(
 	# bucketed on `log(d/R)`; this is the same mistake one layer up, and it is why both are tested.
 	var last_altitude := maxf(last_distance - radius, ALTITUDE_FLOOR)
 	var altitude := maxf(distance - radius, ALTITUDE_FLOOR)
-	if absf(log(altitude / last_altitude)) > LOG_TENTH:
+	if absf(log(altitude / last_altitude)) > LOG_GATE:
 		return true
 	return last_direction.angle_to(direction) > 0.5 * finest_edge_angle(
 		distance, pixel_angle, epsilon, radius

@@ -421,22 +421,24 @@ func _test_the_walk_is_gated(h) -> void:
 		distance, up, distance, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
 		"and an unmoved eye asks for nothing")
 	# **At a distance where the distance *is* the altitude** — far out, `d - R ≈ d` — so this is really a
-	# test of the tenth. Near the ground the two quantities part company, and that is the case below.
+	# test of the dead band. Near the ground the two quantities part company, and that is the case below.
 	var far_out := EARTH_RADIUS * 30.0
 	h.check(not SpacesimPatches.walk_is_due(
-		far_out, up, far_out * 1.05, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
-		"a 5% change is inside the quantisation of the tree")
+		far_out, up, far_out * 1.005, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a half-percent change is inside the dead band")
 	h.check(SpacesimPatches.walk_is_due(
-		distance, up, distance * 1.2, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
-		"a 20% one is not")
-	# **The descent, and it is the trap this gate exists to not repeat.** From 164 km to 300 m is 2.5% of
-	# the *distance* — inside any distance gate — and 500x of the *altitude*, which is what the law floors
-	# on. A gate that only looked at the distance said "nothing has moved" through the whole descent, and
-	# the mesh stayed stale: "it subdivides for a little bit, and then no further."
-	var high := EARTH_RADIUS + 1.64e5
+		distance, up, distance * 1.02, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
+		"a 2% one is not")
+	# **The descent, and it is the trap this gate exists to not repeat.** From 60 km to 300 m is 0.94% of
+	# the *distance* — inside the dead band — and 200x of the *altitude*, which is what the law floors on. A
+	# gate that only looked at the distance said "nothing has moved" through the whole descent, and the mesh
+	# stayed stale: "it subdivides for a little bit, and then no further."
+	# **The start altitude is chosen for the dead band**: a 1% gate cannot fire on the distance below ~64 km, so
+	# the scenario has to begin under that or the distance term answers and the altitude term is never exercised.
+	var high := EARTH_RADIUS + 6.0e4
 	var low := EARTH_RADIUS + 300.0
-	h.check(absf(log(high / low)) < SpacesimPatches.LOG_TENTH,
-		"the distance from 164 km to 300 m is under a tenth, so a distance gate sees nothing")
+	h.check(absf(log(high / low)) < SpacesimPatches.LOG_GATE,
+		"the distance from 60 km to 300 m is inside the dead band, so a distance gate sees nothing")
 	h.check(SpacesimPatches.walk_is_due(
 		high, up, low, up, PIXEL_ANGLE, epsilon, EARTH_RADIUS, epsilon),
 		"and the walk is due anyway, because the altitude has changed by orders of magnitude")
