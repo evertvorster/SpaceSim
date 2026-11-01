@@ -112,6 +112,14 @@ uniform vec3 eye_local = vec3(0.0, 0.0, 2.0);
 // the archive's air include recorded. It is what places a cloud's own horizon (`star_transmission`) and the
 // air column above it.
 uniform float planet_radius = 1.0;
+// **The origin the vertices are measured from**, which is what turns `VERTEX` into a direction: the mesh is the
+// GROUND's lattice, in metres from a near-eye point, so `VERTEX + patch_origin` is this fragment's offset from the
+// body's centre. Published with the transform it belongs to, so the two cannot describe different builds.
+//
+// **At zero the two agree**, which is the honest default: a missed publish then draws a deck whose directions are its
+// own model-space positions — wrong by the origin, and visible rather than silent, because a deck that sampled the
+// wrong directions would show the map sliding as it is rebuilt.
+uniform vec3 patch_origin = vec3(0.0);
 
 // ===== THE DETAIL BELOW THE MAP =====================================================
 //
@@ -147,8 +155,13 @@ uniform float planet_radius = 1.0;
 // image of the same cloud.
 #include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
 
-// Model space, the offset from the body's centre — which for a unit sphere IS its direction. Captured in
-// `vertex()` because **`VERTEX` inside `fragment()` is in VIEW space**.
+// **The offset from the body's centre, in PLANET RADII** — captured in `vertex()` because **`VERTEX` inside
+// `fragment()` is in VIEW space**.
+//
+// **In radii rather than metres, and that is the precision.** The mesh is the ground's lattice, in metres from a
+// near-eye origin, so a model position reaches 10^7 and a `float` varying resolves it at ~1 m — which is the size of a
+// pixel up close, exactly where a footprint is measured. Divided by the radius it is a unit-magnitude vector at the
+// surface, as the old unit sphere was: the varying keeps its resolution, and `fwidth` of it is already an angle.
 varying vec3 local_position;
 
 
@@ -158,11 +171,14 @@ vec2 cloud_map_uv(vec3 p) {
 
 
 void vertex() {
-	local_position = VERTEX;
+	local_position = (VERTEX + patch_origin) / max(planet_radius, 1.0);
 }
 
 
 void fragment() {
+	// **The direction, from the ground's own lattice origin.** The mesh is the surface's, in metres, so `VERTEX` alone
+	// is an offset from a near-eye point rather than a direction — `patch_origin` is what turns it back into one, and
+	// the `vertex()` stage is where that has to happen. Normalising a vector of length ~1 is exact.
 	vec3 p = normalize(local_position);
 	// **Inside the deck's sphere** — the only boundary this surface has, since the node is scaled to its BASE.
 	float eye_radius = length(eye_local);
@@ -184,8 +200,9 @@ void fragment() {
 	// two decorrelated samplings into a featureless wash — visible as the smooth mid-slab frame). Both are in
 	// the history if the mapping ever needs to be revisited; neither is here.
 	// **One measurement of what a pixel spans**, used by the star's own occlusion: a star narrower than a pixel must
-	// be drawn as the step it averages to, not sampled. On the unit sphere it is an angle, which is the unit that
-	// wants, and it is the unit the map's own texel is measured in when the coverage edge is reconstructed.
+	// be drawn as the step it averages to, not sampled. The varying is in planet radii, so this is already the angle
+	// the star include compares against — and the unit the map's own texel is measured in when the coverage edge is
+	// reconstructed.
 	float deck_footprint = length(fwidth(local_position));
 	// **Reconstructed, not interpolated** — see `cloud_coverage.gdshaderinc`. The map is 2:1, so its texel is `(1/w, 2/w)`.
 	vec2 cover_texel = vec2(1.0, 2.0) / float(max(cover_width, 1));

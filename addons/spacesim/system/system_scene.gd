@@ -512,10 +512,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
-	body.mesh = _add_body_mesh(
-		body.node, body.radius, body.mesh_material, "%sSurface" % body.name, 0
-	)
-	body.mesh.mesh = null
+	body.mesh = _add_body_mesh(body.node, body.mesh_material, "%sSurface" % body.name)
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
@@ -718,8 +715,12 @@ func near_deck(body: SpacesimSceneBody, observer: Vector3) -> Dictionary:
 		# matrix — which is how it came to sample somewhere other than where the camera was: random fog in clear
 		# air, and none where there was cloud. Computed here, the maths is double, it is one line to test, and the
 		# shader only normalises it.
+		# **From the BODY's centre, not this node's position.** The node's origin is a point on the near ground at the
+		# deck's own radius, and the offset from it passes through zero at that radius — so a direction taken from it
+		# flips sign at the base it is meant to describe. The fog only normalises this, so the body-relative offset is
+		# both the correct quantity and the smaller one.
 		"eye_model": (deck.node.global_transform.basis.inverse()
-			* (observer - deck.node.global_position)),
+			* (observer - body.node.global_position)),
 		# What the march needs to choose a mip: texels around the equator.
 		"width": deck.published_width,
 	}
@@ -827,23 +828,17 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 			deck.shadow_tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
 		deck.morphology = morphology
 		deck.material = SpacesimBodyRenderer.deck_material(body, level, deck.palette, index)
-		# **The node is the body's own unit sphere scaled to the slab's BASE** (2026-10-21) — *a condensation
-		# level is a level*, so every column starts at the same altitude and the base is the one surface a single
-		# sphere can honestly be. The tops vary by column, which is what the map's luminance-as-height encodes and
-		# what no one sphere can hold. From altitude the radius difference is 1.6 km in 6,374 — invisible — and
-		# from underneath it is the difference between the cloud's real underside and a mirrored sheet at the top
-		# of the tallest column.
-		var base_radius := body.radius + deck.height
-		# **A sphere of its own, not the ground's lattice.** The lattice carries metres from a near-eye origin and
-		# this shader's model space is a unit sphere, so the ground's mesh would be multiplied by the planet's radius;
-		# and a deck drawn on the ground's mesh only ever covers the cap the patch walk covers, which is why a cloud
-		# near the horizon fell outside it. It starts at the level a small disc needs and `_update_decks` moves it.
-		var start_level := SpacesimLod.shell_level(32.0)
+		# **An empty node, because the geometry comes from the GROUND's walk.** A deck is the same triangles as the
+		# surface under it, translated to this level's radius — see `_build_patch_arrays`. It has no sphere of its
+		# own any more, and with none to pad there is no sagitta to reconcile: the walk refines until a facet's
+		# sagitta is under the error budget in pixels, so a deck built on those triangles cannot dip into the ground.
+		#
+		# Evert, 2026-11-01: *"We need to use that for the basis of each deck... EVERYTHING that is on the planet that
+		# the user can see."* The 2026-10-30 flight had the two intersecting, which is what `shell_scale` was padding
+		# for; the fixed arrangement has one mesh to be right about instead of two to reconcile.
 		deck.node = _add_body_mesh(
-			body.node, shell_scale(base_radius, start_level), deck.material,
-			"%sDeck%d" % [body.name, index], start_level
+			body.node, deck.material, "%sDeck%d" % [body.name, index]
 		)
-		deck.mesh_level = start_level
 		body.decks.append(deck)
 
 
@@ -922,40 +917,18 @@ func update_sky(camera: Camera3D) -> void:
 		SpacesimExposure.set_ambient_illuminance(environment, star_sky.illuminance(depth))
 
 
-## A body's geometry: a shared unit icosphere, scaled by the body's radius.
+## **The node a body's geometry lives on** — an empty `MeshInstance3D` carrying a material, and nothing else.
 ##
-## **Levels are built once at unit radius and shared by every body**, which is the whole point of the
-## primitive: a level change is a pointer assignment, where `SphereMesh` re-tessellated on every
-## property change — and re-tessellating per body per crossing is what made adaptive detail look
-## unaffordable. The radius goes on the node's scale, so the mesh resources stay shared.
-##
-## No triplanar or `world_vertex_coords`: neither gets the double-precision vertex transform emulation,
-## and both jitter at planet scale. **A scaled unit mesh is a new case for that emulation**, and this
-## project has been bitten by render modes that skip it — so it is confirmed by a render at planet
-## scale rather than by reasoning.
-## **The scale a SHELL needs so its own facets do not dip below the radius it is meant to sit at.**
-##
-## An icosphere's triangles are **chords inside the sphere**: every vertex is on the radius, and the middle of each
-## triangle sits `R·(1 - cos(φ/2))` — the sagitta — *inward*. Scaled to a cloud deck's base radius, that puts the deck's
-## own surface **inside the planet**, and the two intersect: Evert, 2026-10-30, *"the mismatch between the cloud
-## icosphere and the surface is causing the two to intersect."* The error is not small — at an icosphere level 2 it is
-## **55 km** on Earth, and even at level 5 it is 0.86 km against a 1.4 km deck.
-##
-## So the shell is scaled up by `1 / (1 - sagitta)`, which puts each facet's **centroid** exactly on the requested
-## radius: the deck's lowest drawn surface is its base and nothing cuts into the ground. The vertices stand a sagitta
-## above it, which is invisible — nobody measures a cloud's underside against the ground — while an intersection is not.
-static func shell_scale(radius: float, level: int) -> float:
-	var sagitta := SpacesimIcosphere.relative_sagitta(level)
-	return radius / maxf(1.0 - sagitta, 1.0e-6)
-
-
+## **No mesh and no radius, on purpose.** The geometry arrives from the patch walk (`_poll_patch_builds`), where it is
+## **metres measured from a near-eye origin**: the origin goes on the node's POSITION and its scale stays 1, because a
+## basis holding a planetary radius is what rounded every vertex at 0.76 m and made the surface wave (see
+## `SpacesimPatches.rebase`). Both consumers — a body's surface and each of its cloud decks — are the same lattice
+## translated, so neither has a mesh of its own to hand in here.
 func _add_body_mesh(
-	parent: Node3D, radius: float, material: Material, mesh_name: String, level: int
+	parent: Node3D, material: Material, mesh_name: String
 ) -> MeshInstance3D:
 	var mesh := MeshInstance3D.new()
 	mesh.name = mesh_name
-	mesh.mesh = SpacesimIcosphere.mesh_at(level)
-	mesh.scale = Vector3.ONE * radius
 	mesh.material_override = material
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mesh)
@@ -1049,7 +1022,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		if body.mesh == null:
 			continue
 		_face_bodies_at_star(body, observer, pixel)
-		_update_decks(body, observer, distance, screen)
+		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
 		# what one level per body is. `SpacesimPatches` refines where the eye is and culls over the limb,
@@ -1232,6 +1205,13 @@ func _request_patch_build(body: SpacesimSceneBody, lines: bool) -> void:
 
 ## **Runs on a worker thread.** Reads the static chunk cache (which locks) and writes one field on one
 ## body; touches no node, no `RenderingServer` and no settings.
+##
+## **A deck's geometry is built HERE too, from the same selection and the same lattice** — that is what makes a deck
+## and the surface under it one tessellation rather than two. Evert, 2026-11-01: *"We need to use that for the basis
+## of each deck, the surface and the ocean... EVERYTHING that is on the planet that the user can see."* Only the
+## radius differs: a condensation level is a level, so a deck is the same points scaled to `radius + height`, with no
+## terrain — and the radius is all the separation there is, so a deck cannot disagree with the ground about which
+## triangles exist.
 func _build_patch_arrays(
 	body: SpacesimSceneBody, chunks: Array, lines: bool, radius: float, origin: Vector3,
 	tinted: bool, lattice: SpacesimPatches.Lattice
@@ -1240,6 +1220,17 @@ func _build_patch_arrays(
 		SpacesimPatches.lines_of(chunks, radius, origin) if lines
 		else SpacesimPatches.arrays_of(chunks, radius, origin, tinted, lattice)
 	)
+	# **Each deck's points, scaled to its own level.** The origin is derived from the argument this build was given
+	# rather than read off the body, so it cannot describe a different build than the arrays it travels with — the
+	# near-eye direction at this level's radius, which is the ground's origin times `(radius + height) / radius`.
+	#
+	# **Not in a wireframe view**, where every deck is hidden anyway (the wireframe is about the ground's triangles,
+	# which a deck would cover) — so the mode that exists to show the subdivision does not pay for merges nobody sees.
+	if not lines:
+		for deck in body.decks:
+			var level_radius: float = radius + deck.height
+			deck.origin = origin * (level_radius / maxf(radius, 1.0))
+			deck.arrays = SpacesimPatches.arrays_of(chunks, level_radius, deck.origin, false, lattice)
 	# **The origin these arrays were measured from, written beside them.** The publish places the mesh at this and not
 	# at `patch_task_origin`, because that member is overwritten by every request: a build that lands after a later
 	# request has already moved the origin was being drawn `|new - old|` from where its vertices were measured — a
@@ -1335,7 +1326,7 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angl
 ## **The eye is handed over in the deck's model space**, divided by the top radius here, in double precision:
 ## a deck node's model space is a unit sphere, so nothing astronomical ever reaches a `float`.
 func _update_decks(
-	body: SpacesimSceneBody, observer: Vector3, distance: float, screen_radius: float
+	body: SpacesimSceneBody, observer: Vector3, distance: float
 ) -> void:
 	if body.decks.is_empty():
 		return
@@ -1345,23 +1336,16 @@ func _update_decks(
 		for deck in body.decks:
 			deck.node.visible = false
 		return
-	# **The shell's level, from what its silhouette needs** — the same measured law a body's disc uses, so a deck
-	# filling the screen gets a finer sphere than one at twenty pixels, and `SpacesimIcosphere` hands back the same
-	# mesh object per level, so a change is a pointer assignment rather than a build.
-	var level := SpacesimLod.shell_level(screen_radius)
+	# **No level to pick any more**: the deck's sphere IS the ground's mesh, so it is refined by the same walk that
+	# refines the surface under it, and there is no second tessellation to size (see `_build_decks`).
 	var to_eye := observer - body.node.global_position
 	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
-		if deck.mesh_level != level:
-			deck.mesh_level = level
-			deck.node.mesh = SpacesimIcosphere.mesh_at(level)
-			deck.node.scale = Vector3.ONE * shell_scale(body.radius + deck.height, level)
-		# **Divided by the sphere's ACTUAL radius**, because the node's model space is a unit sphere and the node is
-		# scaled by `shell_scale()` — which is the base radius padded by the icosphere's own sagitta, not the base
-		# radius itself. Using `radius + height` here put the eye at 0.982 of a radius when it was really at 1.000,
-		# and a 2 % error in the eye's position is a 2 % error in every slant path and every thickness the deck draws.
-		var sphere_radius := deck.node.scale.x
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(sphere_radius, 1.0))
+		# **Divided by the radius the deck's OWN points sit at**, because `eye_local` is compared against
+		# `length(p)` where `p` is a direction: `eye_radius < 1` is the test for being inside the deck's sphere. That
+		# radius is now exactly `radius + height` — the walk's own subdivision is under the error budget in pixels,
+		# so there is no sagitta to pad and no `shell_scale` to undo.
+		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(body.radius + deck.height, 1.0))
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
@@ -1478,8 +1462,21 @@ func _poll_patch_builds() -> void:
 		(body.mesh_material as ShaderMaterial).set_shader_parameter(
 			"patch_origin", body.patch_arrays_origin
 		)
-		# **A deck does not follow the ground's rebuild, and must not**: it owns a unit icosphere scaled to its base
-		# radius (see `_build_decks`), so its geometry is independent of the patch walk and covers the whole sphere.
+		# **A deck is the SAME lattice, translated to its level** — so it publishes here, beside the ground, from the
+		# arrays the same worker task built out of the same selection. Its node has scale 1 and the origin on its
+		# position for the reason the ground's does (see `rebase`), and `patch_origin` goes on its material for the
+		# reason the ground's does too: the deck shader's direction is `VERTEX + patch_origin`.
+		#
+		# **An empty build publishes nothing and the old mesh stays**, exactly as for the ground: a deck one selection
+		# stale is worth more than a frame with the clouds gone.
+		for deck in body.decks:
+			deck.node.mesh = SpacesimPatches.mesh_from(deck.arrays)
+			deck.arrays = []
+			if deck.node.mesh == null:
+				continue
+			deck.node.position = deck.origin
+			deck.node.scale = Vector3.ONE
+			(deck.material as ShaderMaterial).set_shader_parameter("patch_origin", deck.origin)
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.

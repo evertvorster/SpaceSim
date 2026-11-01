@@ -40,8 +40,9 @@ func run(h, root: Node) -> void:
 	scene.container.free()
 
 
-## **Earth authors one deck, in the flat shorthand** — no species named, no stack. It gets one node, placed
-## on the level the model places its water vapour, and the node's scale is the slab's top.
+## **Earth authors one deck, in the flat shorthand** — no species named, no stack. It gets one node, placed on the
+## level the model derives for its water vapour. **The geometry is not here**: a deck's points are the ground's, built
+## by the walk, so they are asserted in `_test_the_deck_goes_live` where a build has actually landed.
 func _test_a_single_deck(h, scene: SpacesimSystemScene) -> void:
 	var earth := scene.body_by_id("planet:earth")
 	h.check(earth != null and earth.decks.size() == 1,
@@ -51,29 +52,22 @@ func _test_a_single_deck(h, scene: SpacesimSystemScene) -> void:
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.level.species == "water_vapour",
 		"and it is its water vapour, at %.0f m" % deck.height)
-	# **The BASE, since 2026-10-21** — a condensation level is a level, so the one sphere a deck can honestly be
-	# is the one every column starts at. The tops vary by column and the map's luminance-as-height is what holds
-	# that variation; no single sphere can.
-	# **The base is where the drawn surface sits, and a facet is a chord INSIDE the sphere** — so the scale carries the
-	# sagitta (see `shell_scale`): the facet centroids land on the base, and the vertices stand a sagitta above it.
+	# **A condensation level is a level**, so the deck's points are the ground's scaled to `radius + height` about the
+	# body's centre — no terrain, and no second tessellation. Asserted as arithmetic on the published arrays, which is
+	# the whole claim: `p*(r+h) - o_d == (p*r - o_g) * (r+h)/r` when `o_d = o_g*(r+h)/r`, so the two vertex arrays differ
+	# by exactly one scale factor and nothing else.
 	var base_radius := earth.radius + deck.height
-	h.check_near(deck.node.scale.x * (1.0 - SpacesimIcosphere.relative_sagitta(deck.mesh_level)),
-		base_radius, "the drawn surface sits on the slab's BASE: radius + height", 1.0)
+	h.check_near(deck.node.scale.x, 1.0,
+		"the node's scale is 1, because the points are already in metres", 1.0e-9)
 	h.check(deck.node.get_parent() == earth.node,
 		"and it is a child of the body, so it inherits the body's place in the frame tree")
 	h.check(deck.material != null and deck.material.shader != null,
 		"with a shader material, which is what carries the map")
-	# **The deck is ONE sphere at its top radius**, and that is all the geometry the shader knows: it samples the
-	# map on that sphere at every altitude (2026-10-21), so the base is a shading fact rather than a surface and
-	# there is no base/top ratio to publish.
-	# **The BASE, since 2026-10-21.** It used to be the slab's top, and the comment here used to say the base was
-	# "a shading fact rather than a surface" — which the 2026-10-21 flight reversed: a condensation level IS a
-	# level, so the base is the one surface every column shares.
-	h.check_near(deck.node.scale.x * (1.0 - SpacesimIcosphere.relative_sagitta(deck.mesh_level)),
-		base_radius, "and that sphere's own surface is the slab's base", 1.0)
 	h.check(deck.material.get_shader_parameter("base_ratio") == null,
-		"with no base/top ratio, because one sphere is both")
+		"with no base/top ratio, because the base is the only sphere there is")
 	h.check(deck.thickness > 0.0, "with the derived thickness behind it (%.0f m)" % deck.thickness)
+	h.check_near(base_radius, earth.radius + deck.level.height,
+		"and its geometry sits on the level the model derived for it", 1.0e-6)
 
 
 ## **The two-deck bodies are the ones that can tell a loop from a field.** Jupiter authors ammonia above
@@ -91,9 +85,9 @@ func _test_a_stack(h, scene: SpacesimSystemScene) -> void:
 		h.check(upper.level.species != lower.level.species,
 			"%s's two decks are two condensables, not the same one twice (%s, %s)" % [
 				id, upper.level.species, lower.level.species])
-		h.check(upper.node.scale.x > lower.node.scale.x,
-			"and the ammonia deck is the higher of the two (%.0f against %.0f m above the centre)" % [
-				upper.node.scale.x, lower.node.scale.x])
+		h.check(upper.level.height > lower.level.height,
+			"and the ammonia deck is the higher of the two (%.0f against %.0f m above the datum)" % [
+				upper.level.height, lower.level.height])
 		# **Different weather, not the same cloud twice**: the field's seed is keyed by the layer, so a stack
 		# is two maps rather than one map at two heights. **Asked of the field, not of a shader uniform** — the
 		# seed's home is `SpacesimCloudField.seed_for`, and the deck no longer carries a copy of it since the
@@ -181,26 +175,40 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.node.visible, "the deck is visible once the frame has walked it")
-	# **A deck owns a UNIT icosphere scaled to its base radius**, and never the ground's lattice: that lattice carries
-	# metres from a near-eye origin while the deck's shader reads its node's model space as a unit sphere, so sharing
-	# it would multiply metres by the planet radius — which is exactly why the deck drew nothing from 2026-10-28 until
-	# this check existed. Its sphere also covers the whole body, where the ground's mesh covers only the walked cap.
-	h.check(deck.node.mesh != null, "and it has a sphere of its own to draw")
+	# **The deck draws the GROUND's mesh, translated to its level** — one tessellation, so a refinement lands in both
+	# and there is no second sphere with a second sagitta to reconcile. Evert, 2026-11-01: *"We need to use that for
+	# the basis of each deck... EVERYTHING that is on the planet that the user can see."*
+	h.check(deck.node.mesh != null, "and it has a mesh to draw")
 	h.check(deck.node.mesh != earth.mesh.mesh,
-		"which is not the ground's lattice, whose model space is metres")
-	# **The scale accounts for the sphere's own SAGITTA**, or the deck's surface dips inside the planet and the two
-	# intersect. A facet is a chord *inside* the sphere, so the middle of each triangle sits `R·(1 - cos(φ/2))` inward —
-	# 55 km on Earth at level 2, and 0.86 km at level 5 against a 1.4 km deck. The scale puts each facet's CENTROID on
-	# the base radius, so the lowest surface the deck draws is its base.
+		"its own ArrayMesh, because a level is not the terrain")
+	# **The same triangles, which is the claim that matters.** The index arrays are content-equal, so the deck and the
+	# surface under it cannot disagree about which triangles exist — the fault a second tessellation produces at the
+	# limb, and the reason the two used to intersect.
+	var deck_indices: PackedInt32Array = deck.node.mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	var ground_indices: PackedInt32Array = earth.mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	h.check(deck_indices == ground_indices,
+		"the same index array as the ground, so it is one tessellation (%d triangles)" % (deck_indices.size() / 3))
 	var base_radius := earth.radius + deck.height
-	var sagitta := SpacesimIcosphere.relative_sagitta(deck.mesh_level)
-	var centroid := deck.node.scale.x * (1.0 - sagitta)
-	h.check(absf(centroid - base_radius) <= base_radius * 1.0e-5,
-		"scaled so its own facets' centroids land on the base radius (%.1f m against %.1f m at level %d)" % [
-			centroid, base_radius, deck.mesh_level
+	var factor := base_radius / earth.radius
+	var own: PackedVector3Array = deck.node.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var ground: PackedVector3Array = earth.mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	h.check(own.size() == ground.size() and not own.is_empty(),
+		"the deck has the same number of points as the ground (%d)" % own.size())
+	var worst := 0.0
+	for index in mini(own.size(), ground.size()):
+		worst = maxf(worst, (own[index] - ground[index] * factor).length())
+	# **One part in a million, not a metre figure**: this reads the arrays back off the RenderingServer, so the
+	# comparison is at the precision the vertex buffer stores — and a centimetre at planet scale is *below* it, which
+	# is why the first version of this check failed at 0.55 m. A wrong scale factor (1,449 m on Earth) still fails
+	# this by four orders of magnitude, so the tolerance is not hiding the thing it is testing.
+	h.check(worst / base_radius < 1.0e-6,
+		# **`%s`, not `%e`** — GDScript's formatter has no `%e`, and it fails at runtime rather than at parse time.
+		"each of them the ground's own point scaled to this level (%.4f m, %s of a radius)" % [
+			worst, worst / base_radius
 		])
-	h.check(deck.node.scale.x > base_radius,
-		"which means the sphere is drawn larger than the radius it sits at (%.1f m)" % deck.node.scale.x)
+	h.check_near((deck.node.position as Vector3).length(), base_radius,
+		"with its origin a point on that level's sphere", 1.0)
+	h.check_near(deck.node.scale.x, 1.0, "with no scale on the node to undo it", 1.0e-9)
 	h.check(deck.published_width > 0, "with a map the size law asked for (%d wide)" % deck.published_width)
 	# **The one number that decides whether the deck is DRAWN.** `alpha = covered * veil * (1 - transmit)` with
 	# `transmit = 1/(1 + tau_full * thickness / mu)`, so `tau_full = 0` is a completely invisible deck — which is
@@ -371,17 +379,16 @@ func _test_the_cameras_own_column(h, scene: SpacesimSystemScene) -> void:
 	var top := earth.radius + deck.height + deck.thickness
 	var centre := earth.node.global_position
 
-	# Straight over the sub-camera point at three altitudes: the model-space position must have length
-	# eye_radius / top_radius, and its direction must be the camera's own.
+	# Straight over the sub-camera point: the published position is the camera's offset from the BODY's centre, in
+	# metres, whose direction is the camera's own column. **Not an offset from the deck node's position** — that is now
+	# a point on the near ground at the deck's radius, and the offset from it passes through zero exactly at the base
+	# (so its direction would flip sign there, which is what the fog's lookup would then sample).
 	var sub_camera := centre + Vector3.UP * (earth.radius + 2000.0)
 	var data := scene.near_deck(earth, sub_camera)
 	h.check(not data.is_empty(), "the deck publishes the fog's lookup")
 	var eye_model: Vector3 = data["eye_model"]
-	# **The sphere's own radius is the node's scale**, not `radius + height`: the node carries the sagitta padding so
-	# its drawn surface sits on the base (see `shell_scale`), and `eye_model` is divided by the basis — so this is the
-	# number the shader actually sees.
-	h.check_near(eye_model.length(), (earth.radius + 2000.0) / deck.node.scale.x,
-		"and it is the camera's radius in the sphere's own radii", 1.0e-6)
+	h.check_near(eye_model.length(), earth.radius + 2000.0,
+		"and it is the camera's offset from the body's centre, in metres", 1.0)
 	h.check(eye_model.normalized().dot(Vector3.UP) > 0.9999,
 		"pointing at the camera's own column: straight up over the sub-camera point")
 
