@@ -93,6 +93,9 @@ uniform float rough_wave : hint_range(0.0, 20.0) = 7.0;
 // "mostly calm" means as a number.
 uniform float patch_calm : hint_range(0.0, 1.0) = 0.55;
 uniform float patch_rough : hint_range(0.01, 1.0) = 0.85;
+// The capillary chop's own amplitude, in metres. Small, fixed, and unrelated to the swell — that is the point: it is
+// what the sea does when it is otherwise calm, and it is what turns a mirror into a glitter path.
+uniform float ripple_scale : hint_range(0.0, 0.2) = 0.05;
 // The steepest a wave may lean, as a slope — about 19 degrees, the same ceiling the ground's relief uses.
 const float MAP_TILT_LIMIT = 0.35;
 
@@ -164,6 +167,18 @@ void fragment() {
 	// `dh/dx` in metres of height per metre across, which times the swell's amplitude is the slope.
 	vec3 gradient = t1 * ((h1 - h2) / (2.0 * step_m)) + t2 * ((h3 - h4) / (2.0 * step_m));
 	vec3 lean = gradient * swell;
+	// **CAPILLARY RIPPLES: the steep little facets that make a sun path wide.** A 0.5 m swell over a 60 m wavelength is
+	// a slope of ~0.008 — flat water, and flat water reflects the sun as a MIRROR: one narrow streak. Evert,
+	// 2026-11-02: *"I expected a wider range of glinting near the horizon."* What widens it in reality is the
+	// centimetre-scale chop, whose slopes are steep however calm the swell is. Its own noise, its own short
+	// wavelength, and an amplitude that does not follow the swell at all.
+	float ripple_wavelength = 3.0;
+	float ripple_frequency = 1.0 / ripple_wavelength;
+	float r1 = fnl_fbm3_banded(p + t1 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
+	float r2 = fnl_fbm3_banded(p - t1 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
+	float r3 = fnl_fbm3_banded(p + t2 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
+	float r4 = fnl_fbm3_banded(p - t2 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
+	lean += (t1 * ((r1 - r2) / (2.0 * step_m)) + t2 * ((r3 - r4) / (2.0 * step_m))) * ripple_scale;
 	float fade = 1.0;
 	if (length(lean) > MAP_TILT_LIMIT) {
 		lean *= MAP_TILT_LIMIT / length(lean);
@@ -186,7 +201,16 @@ void fragment() {
 	// rather than translate the camera"* — and it also darkened the whole sea, because a body-space vector read as a
 	// view-space one faces away from the sun most of the time. The transform is what makes it a normal again.
 	NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(normal, 0.0)).xyz);
-	ROUGHNESS = mix(0.02, ocean_roughness, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
+	// **What the pixel cannot resolve does not disappear — it widens the lobe.** A distant sea has the same slope
+	// variance as a near one, but sampled coarser; the honest cheap version is a rougher specular where the footprint
+	// exceeds the ripple wavelength, so the sun's image spreads into a path instead of a point. This is what makes the
+	// glint read as a *range* near the horizon.
+	float unresolved = clamp(pixel_metres / max(ripple_wavelength * 20.0, 1.0), 0.0, 1.0);
+	ROUGHNESS = mix(
+		mix(0.02, ocean_roughness, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0)),
+		max(ocean_roughness, 0.45),
+		unresolved
+	);
 	SPECULAR = ocean_specular;
 	// **Fresnel, in the shader because there is no sky probe to reflect yet.** Grazing view -> the sky, straight down
 	// -> the water's own dark colour: `pow(1 - cos, 5)` is the dielectric's own law, and it is what makes a sea read
