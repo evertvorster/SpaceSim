@@ -99,11 +99,12 @@ void fragment() {
 	// coastline the ground's own vertices were translated to. One field, one answer.
 	SurfacePlan plan = surface_plan();
 	float ground = surface_height(up, plan, footprint_angle);
-	if (ground > sea_level) {
-		// Land: the ground layer draws it, and there is nothing here.
-		discard;
-	}
-	float depth = (sea_level - ground) * max(field_amplitude, 1.0e-6);
+	// **No discard: the coastline IS the intersection, and the depth test makes it.** The land is opaque and drawn
+	// first, the water is transparent and drawn after, so where the ground stands above sea level the water fragment
+	// is behind it and Godot's depth test rejects it — no rule of ours needed. Evert, 2026-11-01: *"why is
+	// coastlines handled seperately? They should just be where the water and land intersect?"* He is right, and
+	// `discard` here would be a second mechanism deciding what the depth test already decides.
+	float depth = max((sea_level - ground) * max(field_amplitude, 1.0e-6), 0.0);
 
 	// ===== THE SURFACE ===================================================================
 	//
