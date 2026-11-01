@@ -33,8 +33,10 @@ extends CompositorEffect
 ## ## The rules this file has to obey, all of them learned in this project
 ##
 ## - It runs at `POST_TRANSPARENT` and **before** the exposure pass, so the meter measures the final frame.
-## - The ground is the **analytic** planet hit, not the depth buffer: exact for the body's own surface, and
-##   the occluders it misses are metres from the camera where the air contributes ~3e-4 of the sky.
+## - The ground is the **frame's depth buffer**, unprojected — not the analytic sphere. See the ground clip in
+##   `march` for why that became necessary on 2026-11-01 and for the one discrimination it needs: the cloud writes
+##   depth too, so its own analytic crossing is what tells a translucent deck from opaque terrain. The sphere is
+##   still the fallback when no depth texture is available.
 ## - The colour texture is a storage image written **in place**: one dispatch, no copy, no read-back.
 ## - The shader is compiled from a **source string**, so `#version` is the first line and there is no
 ##   `#[compute]` marker — that is Godot's file convention and glslang rejects it in a string.
@@ -72,6 +74,12 @@ var _params: RID
 ## real one, not a null RID. This is the same class of trap as the per-frame uniform set: an invalid id in a
 ## set fails the whole dispatch, and the failure looks like "the pass drew nothing".
 var _sampler: RID
+## **A sampler for the DEPTH buffer**, which is not filterable: nearest/nearest and no repeat, or the
+## device rejects the set.
+var _depth_sampler: RID
+## **The fallback depth**: one texel of 0.0, which reverse-Z means FAR. Used when a frame has no depth
+## texture — a fallback of 1.0 would read as the near plane and clip every ray at the eye.
+var _far_depth: RID
 var _white: ImageTexture
 ## The deck's map for this frame, or null when the near regime is not live — the callback turns it into a
 ## uniform id and falls back to `_white` so the set is always complete.
@@ -91,6 +99,7 @@ var fog_gain := 2.0
 ##   32..35  deck radiance (xyz)
 ##   36..47  view -> deck model space, as three vec4 columns
 ##   48..51  the camera in the deck's model space — what the fog samples by
+##   52..67  the inverse projection — depth to a view-space distance (see the march's ground clip)
 ##
 ## **The deck is ONE layer, the top one, and that is a named limit rather than an oversight.** The near
 ## regime is only live inside or just under the top deck, where a lower deck is seen through the gaps of the
@@ -98,7 +107,7 @@ var fog_gain := 2.0
 ## Until then a body with two decks (Jupiter, Saturn) draws its near regime as its top deck alone, and the
 ## shell still draws both from above.
 var _values := PackedFloat32Array()
-const PARAM_FLOATS := 52
+const PARAM_FLOATS := 68
 
 
 func _init() -> void:
@@ -124,7 +133,7 @@ func _notification(what: int) -> void:
 		)
 	var rd := RenderingServer.get_rendering_device()
 	if rd != null:
-		for rid in [_pipeline, _shader, _params, _sampler]:
+		for rid in [_pipeline, _shader, _params, _sampler, _depth_sampler, _far_depth]:
 			if (rid as RID).is_valid():
 				rd.free_rid(rid)
 
@@ -175,6 +184,28 @@ func prepare(
 	# The frame block is finished in the callback, where the render target's size is known; the vertical
 	# half-angle and the on/off are per-frame facts here.
 	_values[22] = tan(deg_to_rad(camera.fov * 0.5))
+	# **The inverse projection, so a DEPTH can become a distance.** The march has to stop at the real surface
+	# (`see the ground clip in `march`), and the only route in is the frame's depth buffer. Rather than re-derive
+	# Godot's reverse-Z convention inside a compute shader, unproject: `inv_proj * (ndc.xy, depth, 1)` gives the
+	# surface's VIEW-space position, and the eye is the origin there, so its length is the distance along the ray.
+	# Convention-free by construction — whatever the projection did, this undoes.
+	var inverse: Projection = camera.get_camera_projection().inverse()
+	_values[52] = inverse.x.x
+	_values[53] = inverse.x.y
+	_values[54] = inverse.x.z
+	_values[55] = inverse.x.w
+	_values[56] = inverse.y.x
+	_values[57] = inverse.y.y
+	_values[58] = inverse.y.z
+	_values[59] = inverse.y.w
+	_values[60] = inverse.z.x
+	_values[61] = inverse.z.y
+	_values[62] = inverse.z.z
+	_values[63] = inverse.z.w
+	_values[64] = inverse.w.x
+	_values[65] = inverse.w.y
+	_values[66] = inverse.w.z
+	_values[67] = inverse.w.w
 	_values[23] = 0.0 if atmosphere_radius <= planet_radius else clampf(blend, 0.0, 1.0)
 	# No air means no march: the shader exits on the blend test before anything else is read.
 	_values[24] = planet_radius
@@ -258,9 +289,16 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	if _frames == 0:
 		# The numbers the handover depends on, printed once — a pass that quietly hands nothing over looks
 		# exactly like a shader that is right, and this is the cheapest way not to be fooled.
-		print("ATMO: size=%s radii=(%.0f, %.0f, %.0f) blend=%.1f deck_weight=%.2f deck_ext=%.5f"
-			% [size, _values[24], _values[25], _values[26], _values[23], _values[27], _values[29]])
-	var set := _uniform_set(rd, [color, _params])
+		# **Whether the ground clip got a depth texture at all** — the one thing that can silently make this pass
+		# draw air through terrain again, and it cannot be seen in a picture (a pass with no depth looks like a pass
+		# that is working). The fallback is a far texel, so the failure mode is "the old behaviour" rather than black.
+		var depth_res: RID = buffers.get_depth_texture(false)
+		print("ATMO: size=%s radii=(%.0f, %.0f, %.0f) blend=%.1f deck_weight=%.2f deck_ext=%.5f depth=%s"
+			% [size, _values[24], _values[25], _values[26], _values[23], _values[27], _values[29],
+				"yes" if depth_res.is_valid() else "NO — the march cannot see the ground"])
+	# **The frame's depth texture**, which is where the real surface is. `msaa = false` because the pass reads the
+	# resolved frame.
+	var set := _uniform_set(rd, [color, _params, buffers.get_depth_texture(false)])
 	if not set.is_valid():
 		_status = "the uniform set could not be built"
 		return
@@ -312,6 +350,16 @@ func _uniform_set(rd: RenderingDevice, resources: Array) -> RID:
 		(_deck_texture if _deck_texture != null else _white).get_rid()
 	))
 	uniforms.append(cover_uniform)
+	# **The frame's depth, for the march's ground clip.** Binding 3, sampler first and texture second, and the
+	# fallback is a real texel rather than a null RID for the reason the cover binding records above: an invalid
+	# id fails the whole set, which presents as a pass that drew nothing.
+	var depth_uniform := RDUniform.new()
+	depth_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+	depth_uniform.binding = 3
+	depth_uniform.add_id(_depth_sampler)
+	var depth: RID = resources[2] if resources.size() > 2 else RID()
+	depth_uniform.add_id(depth if depth.is_valid() else _far_depth)
+	uniforms.append(depth_uniform)
 	return rd.uniform_set_create(uniforms, _shader, 0)
 
 
@@ -332,6 +380,30 @@ func _build(rd: RenderingDevice) -> void:
 	state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
 	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	_sampler = rd.sampler_create(state)
+	# **Depths are not filterable**, so this sampler is nearest/nearest with no repeat — a linear one fails the
+	# uniform set rather than reading something approximate.
+	var depth_state := RDSamplerState.new()
+	depth_state.min_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+	depth_state.mag_filter = RenderingDevice.SAMPLER_FILTER_NEAREST
+	depth_state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	depth_state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
+	_depth_sampler = rd.sampler_create(depth_state)
+	# **One texel of 0.0 — which reverse-Z reads as FAR.** The fallback matters more than it looks: a frame with
+	# no depth texture must not clip the air at all, and a fallback of 1.0 would read as the NEAR plane and clip
+	# every ray at the eye, which is a black sky rather than an obvious error.
+	var far_format := RDTextureFormat.new()
+	far_format.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
+	far_format.width = 1
+	far_format.height = 1
+	far_format.depth = 1
+	far_format.array_layers = 1
+	far_format.mipmaps = 1
+	far_format.texture_type = RenderingDevice.TEXTURE_TYPE_2D
+	far_format.usage_bits = (
+		RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+	)
+	_far_depth = rd.texture_create(far_format, RDTextureView.new(), [PackedByteArray([0, 0, 0, 0])])
 	var white := Image.create(1, 1, false, Image.FORMAT_L8)
 	white.fill(Color.WHITE)
 	_white = ImageTexture.create_from_image(white)
@@ -387,10 +459,14 @@ layout(std430, set = 0, binding = 1) buffer Params {
 	vec4 deck_radiance;   // rgb the fog's colour (the deck's drawn brightness); w the fog's gain
 	mat3 to_model;        // view space -> the deck's own model space, column-major
 	vec4 eye_model;       // xyz the camera in the deck's model space; w the map's width in texels
+	mat4 inverse_projection;  // depth -> a view-space position, so a distance (see the ground clip)
 } params;
 // **The deck's baked map, sampled the way the mesh samples it.** Binding 2 is always present; a frame with
 // no deck carries `radii.w = 0` and never reads it.
 layout(set = 0, binding = 2) uniform sampler2D cover;
+// **The frame's depth** — where the real surface is, which the analytic sphere below is not. Sampled, not read
+// as an image: a depth attachment is not a storage image, and P1 measured that sampling is the only route in.
+layout(set = 0, binding = 3) uniform sampler2D depth_buffer;
 
 const int I_STEPS = 16;
 const int J_STEPS = 8;
@@ -557,16 +633,51 @@ void main() {
 	}
 
 
-	// **The ground comes from the analytic sphere test below, not from the depth buffer.** For the body's own
-	// surface that is exact, and the only other thing that could occlude the air is an object a few metres
-	// from the camera, where the column in front of it contributes ~3e-4 of the sky. A depth texture would
-	// buy that and cost a projection-convention dependency inside the march; it is the first thing to add if
-	// a foreground object ever reads wrong.
 	float start = max(span.x, 0.0);
 	float end = span.y;
+	// **The DATUM sphere** — the level every altitude in this engine measures from, and NOT where the ground is any
+	// more. It is still the right answer for a body whose surface has not been translated, and it is the fallback
+	// when no depth is available.
 	vec2 planet_span = ray_sphere(eye, ray, params.radii.x);
 	if (planet_span.x <= planet_span.y && planet_span.x > 0.0) {
 		end = min(end, planet_span.x);
+	}
+
+	// ===== THE REAL SURFACE, FROM THE FRAME'S DEPTH ============================================
+	//
+	// **The air must stop where the ground does, and since 2026-11-01 the ground is geometry.** A ridge stands up to
+	// 1.6 km above the datum, so along a grazing ray the real surface is NEARER than the sphere above and this march
+	// was integrating air *through the mountain* — which reads as haze drawn over distant hills. Evert, 2026-11-01:
+	// *"mountains in the distance should not have the atmosphere behind them be drawn over them."*
+	//
+	// **The route in is the depth buffer, sampled** (a depth attachment is not a storage image). The distance comes
+	// from unprojecting rather than from a reverse-Z formula: `inv_proj * (ndc.xy, depth, 1)` is the surface's view
+	// position, and the eye is the view origin, so its length is the distance along the ray. A cleared pixel is
+	// `0.0` — reverse-Z FAR — so empty sky clips nothing.
+	//
+	// **THE CLOUD WRITES DEPTH TOO, and that is what broke both earlier attempts at this.** Clipping blindly at the
+	// depth buffer deletes the air behind every cloud. What makes the two distinguishable is that the deck's shell is
+	// at an ANALYTIC radius: its distance along this ray is `ray_sphere` at the base, so a sampled depth within half
+	// the slab's own thickness of that is the cloud and must not clip. Anything else nearer than the sphere is
+	// opaque ground.
+	vec2 pixel_uv = (vec2(gl_GlobalInvocationID.xy) + 0.5) / max(params.frame.xy, vec2(1.0));
+	float scene_depth = texture(depth_buffer, pixel_uv).r;
+	if (scene_depth > 0.0) {
+		vec4 unprojected = params.inverse_projection * vec4(pixel_uv * 2.0 - 1.0, scene_depth, 1.0);
+		float surface_distance = length(unprojected.xyz / max(abs(unprojected.w), 1.0e-9));
+		float cloud_distance = 1.0e30;
+		if (params.deck.x > 0.0) {
+			vec2 cloud_span = ray_sphere(eye, ray, params.deck.x);
+			if (cloud_span.x > 0.0 && cloud_span.x <= cloud_span.y) {
+				cloud_distance = cloud_span.x;
+			}
+		}
+		// The slab's own thickness is the tolerance: the shell is drawn at its base, and the mesh's own sagitta is
+		// far inside it. A floor of two metres keeps a body with no deck from comparing against nothing.
+		float is_cloud = abs(surface_distance - cloud_distance) < max(params.deck.w * 0.5, 2.0) ? 1.0 : 0.0;
+		if (is_cloud < 0.5 && surface_distance > 0.0 && surface_distance < end) {
+			end = surface_distance;
+		}
 	}
 
 	if (end <= start) {
