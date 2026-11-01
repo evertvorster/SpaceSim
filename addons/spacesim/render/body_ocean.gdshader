@@ -42,9 +42,20 @@ uniform float field_amplitude = 1.0;
 
 // **The liquid's own numbers**, from `SpacesimSurfaceModel.band_color` and `band_shading`, with the colour's
 // luminance set to its albedo the way every surface band is drawn.
-uniform vec3 ocean_color = vec3(0.02, 0.06, 0.12);
-uniform float ocean_roughness : hint_range(0.0, 1.0) = 0.05;
-uniform float ocean_specular : hint_range(0.0, 1.0) = 0.65;
+// **THE COLOUR IS A DEPTH RAMP, not one albedo.** This is the shape the sea had when it was a separate layer
+// (`2721c2b`), and it is the shape that worked: Evert, 2026-11-02: *"the shader that we used to have as a part of the
+// land surface a long time ago... was not too bad. Have a look at the shape of that was."*
+//
+// The reasoning in that file is worth keeping verbatim: *"the ocean might be transparent, but it has a super-high
+// absorption, so realistically we won't see anything below a couple of metres... drawing it as colour gets the picture
+// without a single transparent pixel."* One flat albedo of 0.06 is what made this sea black — a real shallow sea is
+// BRIGHT, because what you see is the bottom a metre down.
+uniform vec3 shallow_color = vec3(0.2, 0.5, 0.5);
+uniform vec3 deep_color = vec3(0.02, 0.06, 0.15);
+uniform float shallow_metres : hint_range(0.1, 50.0) = 5.0;
+uniform float deep_metres : hint_range(10.0, 10000.0) = 3000.0;
+uniform float ocean_roughness : hint_range(0.0, 1.0) = 0.14;
+uniform float ocean_specular : hint_range(0.0, 1.0) = 0.45;
 
 // **THE SKY THE SEA REFLECTS, because a sea is mostly a mirror and not a paint.** Evert, 2026-11-01: *"the water
 // looked too dark, I did not get any reflections of the sun on it."*
@@ -149,8 +160,14 @@ void fragment() {
 	vec3 normal = normalize(up - lean * fade);
 
 	// ===== THE COLOUR, AND HOW MUCH OF THE FLOOR SHOWS ==================================
+	// **The shallow/deep ramp, in metres** — the same two ends the old layer used.
+	float fill = smoothstep(shallow_metres, deep_metres, depth);
+	vec3 water = mix(shallow_color, deep_color, fill);
+	// **A little transparent, and only where it is really shallow** (Evert, 2026-11-01) — the ramp does most of the
+	// work, so the alpha is a small concession on top rather than the mechanism: nearly opaque a couple of metres
+	// down, and never clear enough to lose the water's own surface at the edge.
 	float alpha = mix(shore_alpha, 1.0, smoothstep(0.0, shallow_depth, depth));
-	ALBEDO = ocean_color;
+	ALBEDO = water;
 	ALPHA = alpha;
 	NORMAL = normal;
 	ROUGHNESS = mix(0.02, ocean_roughness, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
