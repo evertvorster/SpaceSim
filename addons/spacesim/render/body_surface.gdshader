@@ -306,6 +306,21 @@ void fragment() {
 		// used to fake by leaning the normal at the field's own gradient is now in the vertex POSITIONS, translated on
 		// the CPU, so the light here falls on the slope that was actually drawn.
 		//
+		// **THE FIELD'S SLOPE AS A NORMAL WAS TRIED, FLOWN AND REVERTED** (2026-11-01, `fab2dbd` -> `15df4d8`). It is
+		// the obvious idea — the analytic normal of the surface the mesh samples, continuous where the mesh is not — and
+		// it failed for two reasons that are both IN THE FIELD, not in the solve, so a better solve will not rescue it:
+		//
+		// 1. **The octave count steps with the pixel footprint**, so the height's derivative jumps in *rings* around the
+		//    sub-camera point and the shading steps with it. Flown as "little black triangles in rings".
+		// 2. **`max(height - sea_level, 0)` is C0 but not C1** — a liquid is a LEVEL, so the field has a kink at exactly
+		//    the coastline, the sharpest thing on the whole surface. The slope there is enormous, the normal tips past
+		//    vertical, and the coast draws as a black ring.
+		//
+		// **And it did not make the ground look smoother at any altitude**, which is the finding that matters more: the
+		// harshness was never the shading. A facet's edge is visible because of its SILHOUETTE and its neighbours, and no
+		// normal can hide that. If the ground needs to look smoother it needs smaller facets — `lod.error_budget` — not a
+		// cleverer normal.
+		//
 		// Deleted with it (2026-11-01): the 2x2 tangent-basis solve on `dFdx`/`dFdy` of the height, the
 		// `field_amplitude / planet_radius` slope conversion, `relief_exaggeration` and its `relief_max_tilt` clamp.
 		// All four existed only to make a smooth sphere read as three-dimensional, and a mountain counted twice is a
