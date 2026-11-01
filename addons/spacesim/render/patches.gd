@@ -44,11 +44,14 @@ extends RefCounted
 ## - **The only decision is "small enough"**, plus the visibility test below. There is no frustum culling
 ##   of patches outside the field of view yet: the horizon test removes the far side of the body, which is
 ##   most of it, and the rest of the frame's worth is not worth the bookkeeping until something measures it.
-## - **No skirts, and no stitching.** A patch beside a shallower neighbour leaves a T-junction, and the
-##   gap it opens is at most the sum of the two neighbours' sagittas — **each of which the walk has
-##   already bounded by ε**. So the step is ≤ 2ε pixels by construction: at ε = 1 that is a 2-pixel
-##   sliver, and the honest fix if it ever shows is the standard *balance* rule (neighbours never differ
-##   by more than one level, halving it again), not a wall of skirt geometry you can see in wireframe.
+## - **No skirts, and the T-junction IS stitched** (2026-11-01). A patch beside a shallower neighbour
+##   leaves a T-junction, and while the mesh was a sphere the gap it opened was at most the sum of the two
+##   neighbours' sagittas — each already bounded by ε, so ≤ 2ε pixels **by construction**. That is a *sphere*
+##   argument and it expired when the vertices started carrying terrain: the crack is then the terrain the coarse
+##   triangle flattened, hundreds of metres, and it flew as black seams on 2026-10-29. `stitch()` closes it by
+##   splitting the coarse edge through the fine side's own vertex: pure topology, no new points, +27.7 % triangles
+##   at 1 km and +2.0 % at 50 km, on the merge worker. **Skirts stay out** — they hide the slit instead of closing
+##   it, and they are visible in wireframe, which is where the ground is judged.
 
 ## **The smallest a triangle may be, on the ground, in metres** — the one floor on the subdivision, and the replacement
 ## for a depth ceiling.
