@@ -93,6 +93,8 @@ uniform float rough_wave : hint_range(0.0, 20.0) = 7.0;
 // "mostly calm" means as a number.
 uniform float patch_calm : hint_range(0.0, 1.0) = 0.55;
 uniform float patch_rough : hint_range(0.01, 1.0) = 0.85;
+// The steepest a wave may lean, as a slope — about 19 degrees, the same ceiling the ground's relief uses.
+const float MAP_TILT_LIMIT = 0.35;
 
 varying vec3 unit_position;
 
@@ -137,31 +139,35 @@ void fragment() {
 	// `amplitude x wavenumber`, which is what makes a 7 m swell read as rough rather than as a 7 m hill.
 	float patch = sea_patch(up);
 	float swell = mix(calm_wave, rough_wave, smoothstep(patch_calm, patch_rough, patch));
-	// Three directions, metres on the sphere's surface, so a wavelength is a wavelength rather than an angle.
-	vec3 p = up * planet_radius;
-	float slope = 0.0;
-	vec3 lean = vec3(0.0);
-	// Long swell first (its wavelength scales with the amplitude a real sea has), then the short chop on top.
-	float w1 = mix(60.0, 220.0, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
-	for (int i = 0; i < 3; i++) {
-		vec3 dir = normalize(vec3(float(i) * 2.3 + 0.7, 1.0 - float(i) * 0.4, 3.1 - float(i) * 1.1));
-		float wavenumber = TAU / mix(w1, w1 * 0.35, float(i) * 0.5);
-		float phase = dot(p, dir) * wavenumber + float(i) * 2.0;
-		// The slope a sine of amplitude `swell` contributes: `swell * wavenumber * cos(...)`. Divided by the number of
-		// waves so three of them do not add up to three times the amplitude.
-		float amount = swell * wavenumber * cos(phase) / 3.0;
-		lean += dir * amount;
-		slope += abs(amount);
-	}
-	// **Band-limited by the pixel**, so a distant sea is a smooth sheet rather than a moire of chop — but the
-	// footprint has to be the one ON THE WATER, which is the DISTANCE to it times the pixel's angle. Measuring it as
-	// `angle x planet_radius` gives 0.001 x 6,371 km — about 6 km a pixel — which is true of nothing and killed every
-	// wave at every altitude. Evert, 2026-11-02: *"the ocean still looks a bit too smooth where I was."*
+	// **The swell's shape is the field's own noise, not crossed sines.** Evert, 2026-11-02: *"the swell noise is
+	// very regular, it needs to be much more random."* Three sines at fixed directions produce a lattice — visible as
+	// a repeating web rather than as sea. The gradient of an fbm has no such structure, and `fnl_fbm3_banded` takes the
+	// pixel's own footprint in metres, so it fades the octaves the screen cannot resolve instead of being faded by a
+	// constant somewhere downstream.
+	// **The pixel's footprint ON THE WATER** — the distance to it times the pixel's angle. Not `angle x planet_radius`,
+	// which is the size of a pixel on a surface 6,371 km away and matches nothing.
 	float eye_altitude_m = max((length(body_eye_local) - 1.0) * planet_radius, 0.0);
 	float pixel_metres = max((eye_altitude_m + depth) * footprint_angle, 0.05);
-	// Faded where the wavelength approaches TWO pixels — Nyquist, not a look knob. Anything earlier threw away detail
-	// the screen could still show.
-	float fade = 1.0 - smoothstep(0.35, 1.0, pixel_metres / max(w1, 1.0));
+	vec3 p = up * planet_radius;
+	// Two directions in the surface's tangent plane, to take the gradient along.
+	vec3 t1 = normalize(cross(up, abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+	vec3 t2 = cross(up, t1);
+	// The step is a pixel on the water, so the difference quotient measures the slope the screen can see.
+	float step_m = max(pixel_metres, 1.0);
+	float wavelength = mix(60.0, 220.0, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
+	float frequency = 1.0 / wavelength;
+	int seed = 7301;
+	float h1 = fnl_fbm3_banded(p + t1 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
+	float h2 = fnl_fbm3_banded(p - t1 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
+	float h3 = fnl_fbm3_banded(p + t2 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
+	float h4 = fnl_fbm3_banded(p - t2 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
+	// `dh/dx` in metres of height per metre across, which times the swell's amplitude is the slope.
+	vec3 gradient = t1 * ((h1 - h2) / (2.0 * step_m)) + t2 * ((h3 - h4) / (2.0 * step_m));
+	vec3 lean = gradient * swell;
+	float fade = 1.0;
+	if (length(lean) > MAP_TILT_LIMIT) {
+		lean *= MAP_TILT_LIMIT / length(lean);
+	}
 	vec3 normal = normalize(up - lean * fade);   // body space — see where it is written below
 
 	// ===== THE COLOUR, AND HOW MUCH OF THE FLOOR SHOWS ==================================
