@@ -113,6 +113,43 @@ func run(h, root: Node) -> void:
 		h.check(not wire_deck.node.visible, "while `render.cloud_decks` off hides it and leaves the ground's lines")
 	SpacesimSettings.set_value("render.cloud_decks", decks_were)
 
+	# --- the three things a wireframe draws, each switchable on its own ---------------------------
+	# **The SUBDIVISION, the SURFACE and the DECKS are three consumers of one tessellation**: the datum lattice at
+	# `radius` with nothing translated, that lattice as the ground sits, and a copy per deck at its level. The view
+	# exists to show them apart, so each gets a switch. Evert, 2026-11-01: *"The surface should be a copy of the sphere,
+	# like the decks are, and then the mesh must be translated. So, I should be able to see all three, and turn them on
+	# and off individually in wireframe mode."*
+	scene.update_lod(camera)
+	var division: MeshInstance3D = earth.sphere
+	h.check(division != null and division.visible,
+		"the datum lattice is drawn in a wireframe view")
+	h.check(
+		(division.mesh as ArrayMesh).surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
+		"as edges, the same subdivision as the surface")
+	# **The same points, from the same walk**: today the surface carries no translation, so the two line meshes describe
+	# the identical lattice — which is the assertion that they are one tessellation rather than two that agree.
+	h.check(
+		(division.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array)
+			== (earth.mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array),
+		"with the same vertices as the surface's wireframe while nothing is translated")
+	SpacesimSettings.set_value("render.wireframe_sphere", false)
+	scene.update_lod(camera)
+	h.check(not division.visible, "and its own switch hides it")
+	SpacesimSettings.set_value("render.wireframe_sphere", true)
+	SpacesimSettings.set_value("render.wireframe_surface", false)
+	scene.update_lod(camera)
+	h.check(division.visible and not earth.mesh.visible,
+		"so the subdivision can be seen without the surface over it")
+	SpacesimSettings.set_value("render.wireframe_surface", true)
+	scene.update_lod(camera)
+	h.check(division.visible and earth.mesh.visible, "and both back together")
+	# **The sphere is a wireframe's subject only.** In `flat` it would be a ball drawn over the ground.
+	SpacesimSettings.set_value(MODE_KEY, "flat")
+	scene.wireframe = false
+	scene.flat_shaded = true
+	scene.update_lod(camera)
+	h.check(not division.visible, "and it is not drawn outside a wireframe")
+
 	# --- `rendered` is the real surface, on the same mesh and the same material ------------------
 	SpacesimSettings.set_value(MODE_KEY, "rendered")
 	scene.wireframe = false

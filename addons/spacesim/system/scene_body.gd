@@ -27,6 +27,14 @@ var mesh: MeshInstance3D
 ## The material `mesh` is drawn with when it is **not** a wireframe, kept so the debug view can restore it.
 ## Set when the body is built; `update_lod` swaps a wireframe material over it and puts this one back.
 var mesh_material: Material
+## **The datum lattice, drawn as its own wireframe** — the same chunks and the same points the surface uses, with
+## nothing translated. It exists so the wireframe view can show the SUBDIVISION beside the things built on it: the
+## sphere, the surface translated off it, and each deck translated to its level are three consumers of one tessellation,
+## and the point of the view is to see all three. `render.wireframe_sphere` owns it, and it is never drawn outside a
+## wireframe — in every other mode the surface is the visible thing and a ball under it would only hide it.
+var sphere: MeshInstance3D
+## The lines the worker built for it: empty until a build lands, and cleared when they are published.
+var sphere_arrays: Array = []
 ## **The cloud stack**: one deck per layer the model places a level for, highest first, each a node on the
 ## body's own patch mesh at its own derived radius. Empty for a body with no air, no authored deck, or no
 ## condensable that forms a level — which is most of them.

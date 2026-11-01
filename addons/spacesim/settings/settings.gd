@@ -122,6 +122,15 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	# **The wireframe view's two divisions of itself**, so the three things drawn there can be told apart or isolated.
+	# The SUBDIVISION is the datum lattice — the same chunks and the same points, with nothing translated — and it is
+	# only ever drawn in a wireframe. The SURFACE is that lattice as the ground actually sits (translated, once the
+	# heights are in the mesh). Evert, 2026-11-01: *"We have the subdivided sphere displayed, and the subdivided cloud
+	# decks. The surface should be a copy of the sphere, like the decks are, and then the mesh must be translated. So, I
+	# should be able to see all three, and turn them on and off individually in wireframe mode."* The decks' switch is
+	# `render.cloud_decks`, which already owns them in every mode.
+	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER},
+	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER},
 	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
 	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
 	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the

@@ -510,6 +510,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(body.node, body.mesh_material, "%sSurface" % body.name)
+	# **The datum lattice's own node**, wearing the wireframe material for its whole life: it is a debug view and never
+	# anything else (see `sphere`). Built with no mesh, like the surface, and published by the same poll from the same
+	# walk — so the three consumers cannot end up on different tessellations.
+	body.sphere = _add_body_mesh(
+		body.node, SpacesimBodyRenderer.wireframe_material(), "%sSphere" % body.name
+	)
 	body.point = _add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
@@ -1003,12 +1009,16 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		var energy := SpacesimLod.angular_radius(body.radius, distance)
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
+		# **Four things a body may draw, and each has its own switch**: the surface, the datum lattice it is built on, each
+		# cloud deck (its switch is `_update_decks`'s, one function down, because it owns the maps too), and the point of
+		# light. **The sphere is a wireframe's subject only** — outside one the surface is the visible thing and a ball
+		# under it would only hide it.
+		var wire_sphere := bool(SpacesimSettings.get_value("render.wireframe_sphere"))
+		var wire_surface := bool(SpacesimSettings.get_value("render.wireframe_surface"))
 		if body.mesh != null:
-			body.mesh.visible = not is_point
-		# **A wireframe view is a wireframe for EVERYTHING**, deck included: a deck drawn as shaded cloud over the
-		# ground's lines would cover the triangles under test, but a deck drawn as edges is the same subdivision at a
-		# second radius. Whether a deck is drawn at all is `render.cloud_decks`, which `_update_decks` answers one
-		# function down — so an eye that wants only the surfaces turns the decks off and keeps the view.
+			body.mesh.visible = not is_point and (not wireframe or wire_surface)
+		if body.sphere != null:
+			body.sphere.visible = not is_point and wireframe and wire_sphere
 		for deck in body.decks:
 			deck.node.visible = not is_point
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
@@ -1228,6 +1238,10 @@ func _build_patch_arrays(
 			SpacesimPatches.lines_of(chunks, level_radius, deck.origin) if lines
 			else SpacesimPatches.arrays_of(chunks, level_radius, deck.origin, false, lattice)
 		)
+	# **And the datum lattice's own lines**, at `radius` with nothing translated — the same points, so the view can show
+	# the subdivision itself beside what is built on it. Only a wireframe asks for it; in any other mode the node is
+	# hidden (`update_lod`), so building it would be a merge nobody sees.
+	body.sphere_arrays = SpacesimPatches.lines_of(chunks, radius, origin) if lines else []
 	# **The origin these arrays were measured from, written beside them.** The publish places the mesh at this and not
 	# at `patch_task_origin`, because that member is overwritten by every request: a build that lands after a later
 	# request has already moved the origin was being drawn `|new - old|` from where its vertices were measured — a
@@ -1488,6 +1502,15 @@ func _poll_patch_builds() -> void:
 			)
 			if deck.node.material_override != deck_wanted:
 				deck.node.material_override = deck_wanted
+		# **The datum lattice's lines**, published beside the rest from the same walk — same points, same origin, nothing
+		# translated. Unlike a deck this is never "kept from the last build": a stale sphere would be a different
+		# subdivision from the surface beside it, which is the one thing the view exists to disprove.
+		if body.sphere != null:
+			body.sphere.mesh = SpacesimPatches.lines_mesh_from(body.sphere_arrays)
+			body.sphere_arrays = []
+			if body.sphere.mesh != null:
+				body.sphere.position = body.patch_arrays_origin
+				body.sphere.scale = Vector3.ONE
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
