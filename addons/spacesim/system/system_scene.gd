@@ -1226,43 +1226,42 @@ func _build_patch_arrays(
 	body: SpacesimSceneBody, chunks: Array, lines: bool, radius: float, origin: Vector3,
 	tinted: bool, lattice: SpacesimPatches.Lattice
 ) -> void:
-	body.patch_arrays = (
+	# **ONE mesh comes out of a walk, and every consumer is a COPY of it.** That is the whole rule.
+	#
+	# Evert, 2026-11-01: *"The mesh that has been created by the walks shall be copied, and each vertex translated.
+	# _nothing else_ No new vertexes.... When looked at from above, there should be three meshes, only differing in what
+	# height each vertex is."*
+	#
+	# So there is exactly one call to `lines_of`/`arrays_of` here, and the three (or 1 + N) meshes are that same array
+	# with one operation applied per copy: the datum sphere moved by nothing, the surface moved along each vertex's own
+	# direction by its height, each deck scaled to its level. Same points, same order, same index array — a difference
+	# between them is a difference in height and can be nothing else. Two `lines_of()` calls with the same arguments are
+	# deterministic and did agree, but they were two merges and two chances to disagree, and the claim the view exists
+	# to make is that the surface IS the subdivision.
+	var base: Array = (
 		SpacesimPatches.lines_of(chunks, radius, origin) if lines
 		else SpacesimPatches.arrays_of(chunks, radius, origin, tinted, lattice)
 	)
-	# **The datum lattice's lines, and the surface's wireframe is a COPY of them** — one walk, one merge, two arrays.
-	#
-	# Evert, 2026-11-01: *"just take a damn copy of the sphere one."* Two `lines_of()` calls with the same arguments
-	# are deterministic and did agree, but they are two merges and two chances to disagree, and the whole claim of the
-	# wireframe view is that the surface IS the subdivision. A copy makes that true by construction, and it halves the
-	# merge this mode pays for.
-	#
-	# **Deep, not shallow**, so the translation below cannot write through to the sphere's points: a `PackedVector3Array`
-	# is copy-on-write and would have survived anyway, but "it happens to be safe" is not the guarantee being offered.
 	if lines:
-		body.sphere_arrays = body.patch_arrays
-		body.patch_arrays = body.sphere_arrays.duplicate(true)
+		# **The datum lattice, untouched** — and the surface's copy of it, which `_translate_surface` moves. **Deep**,
+		# so the translation cannot write through: a `PackedVector3Array` is copy-on-write and would have survived
+		# anyway, but "it happens to be safe" is not the guarantee being offered.
+		body.sphere_arrays = base
+		body.patch_arrays = base.duplicate(true)
 	else:
+		# Outside a wireframe the sphere is not drawn, so there is nothing to copy it for — and the surface keeps the
+		# array itself.
 		body.sphere_arrays = []
-	# **Each deck's points, scaled to its own level.** The origin is derived from the argument this build was given
-	# rather than read off the body, so it cannot describe a different build than the arrays it travels with — the
-	# near-eye direction at this level's radius, which is the ground's origin times `(radius + height) / radius`.
-	#
-	# **In the WIREFRAME view the deck is lines too**, which is why the view's `lines` flag reaches this loop rather
-	# than the deck being skipped: a deck drawn as shaded cloud over the ground's lines would cover the triangles the
-	# view exists to show, but a deck drawn as EDGES shows the same subdivision at a second radius — which is the
-	# check that it really is one mesh. Evert, 2026-11-01: *"if cloud decks are on, and I switch to wireframe mode, I
-	# want to see the decks."*
+		body.patch_arrays = base
+	# **Each deck is the same mesh, scaled to its level.** A vertex is metres from a near-eye origin, so moving the whole
+	# mesh from `radius` to `radius + height` is one multiply, and the origin goes the same way: exactly what a copy with
+	# every vertex at a different radius means. The alternative — asking the walk again at the deck's radius — built a
+	# second array from the same chunks, which is the fault this file is being corrected for.
 	for deck in body.decks:
-		var level_radius: float = radius + deck.height
-		deck.origin = origin * (level_radius / maxf(radius, 1.0))
+		var ratio: float = (radius + deck.height) / maxf(radius, 1.0)
+		deck.origin = origin * ratio
 		deck.arrays_lines = lines
-		deck.arrays = (
-			SpacesimPatches.lines_of(chunks, level_radius, deck.origin) if lines
-			else SpacesimPatches.arrays_of(chunks, level_radius, deck.origin, false, lattice)
-		)
-	# **And the datum lattice's own lines**, at `radius` with nothing translated — the same points, so the view can show
-	# the subdivision itself beside what is built on it. Set above, as the surface's own copy of it; nothing to build.
+		deck.arrays = _scaled_copy(base, ratio)
 	# **The origin these arrays were measured from, written beside them.** The publish places the mesh at this and not
 	# at `patch_task_origin`, because that member is overwritten by every request: a build that lands after a later
 	# request has already moved the origin was being drawn `|new - old|` from where its vertices were measured — a
@@ -1275,6 +1274,18 @@ func _build_patch_arrays(
 	# three, and judged against a selection it was never built for.
 	body.patch_arrays_chunks = chunks
 	body.patch_arrays_wireframe = lines
+
+
+## **A copy of a mesh with every vertex at a different radius** — the one operation a deck is. The index array (and a
+## colour, when the tint asked for one) is carried across untouched, because the deck is the *same* triangles; only
+## where each point sits changes.
+func _scaled_copy(arrays: Array, factor: float) -> Array:
+	var copy := arrays.duplicate(true)
+	var vertices: PackedVector3Array = copy[0]
+	for index in vertices.size():
+		vertices[index] *= factor
+	copy[0] = vertices
+	return copy
 
 
 ## **The main thread's half**, once a frame: the arrays become a mesh, and the body starts drawing it.

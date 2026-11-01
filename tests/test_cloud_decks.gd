@@ -188,6 +188,13 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	var ground_indices: PackedInt32Array = earth.mesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
 	h.check(deck_indices == ground_indices,
 		"the same index array as the ground, so it is one tessellation (%d triangles)" % (deck_indices.size() / 3))
+	# **And the same POINTS, in the same order** — the deck is a copy of the walk's mesh with one multiply on each
+	# vertex, not a second build from the same chunks. Evert, 2026-11-01: *"The mesh that has been created by the walks
+	# shall be copied, and each vertex translated. _nothing else_ No new vertexes."* A count that matched while the
+	# order did not would still be two meshes that only look alike.
+	h.check(deck.node.mesh.surface_get_array_len(0) == earth.mesh.mesh.surface_get_array_len(0),
+		"with the same number of vertices as the ground (%d), because it IS them"
+			% deck.node.mesh.surface_get_array_len(0))
 	var base_radius := earth.radius + deck.height
 	var factor := base_radius / earth.radius
 	var own: PackedVector3Array = deck.node.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
