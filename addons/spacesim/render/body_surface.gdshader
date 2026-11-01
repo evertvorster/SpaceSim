@@ -128,6 +128,10 @@ const float MAP_MAX_TILT = 0.35;
 // here rather than uploaded (a normal per vertex in every upload was 12.9-13.5 ms of `mesh_from` on the device).
 // Captured in `vertex()` because `VERTEX` inside `fragment()` is in VIEW space.
 varying vec3 unit_position;
+// **This vertex's height above the datum, in metres**, taken in `vertex()` where `VERTEX` is in MODEL space. It has to
+// be a varying: in `fragment()` `VERTEX` is in view space, so a radius measured there is a distance from the camera,
+// not from the body's centre — which is how the first version of the shadow's base cull ended up doing nothing.
+varying float surface_altitude;
 
 // The mapping, and it must be the exact inverse of the bake's — `u` around the equator, `v` north-at-the-top.
 // A mismatch here does not look like an error, it looks like bad geography.
@@ -196,6 +200,7 @@ void vertex() {
 	// **The direction, from the lattice's own origin.** Normalising a 6,371 km vector is fine in float32: the
 	// *direction* only needs relative precision.
 	unit_position = normalize(VERTEX + patch_origin);
+	surface_altitude = length(VERTEX + patch_origin) - planet_radius;
 	// **The normal IS the direction, because the mesh carries no normal array.** On a sphere the position is the
 	// direction, so this is exact for the geometry that is drawn — and it has to be set here, because `NORMAL` inside
 	// `fragment()` is in VIEW space and read-only. **The relief is not added to it**: a vertex's height is in its
@@ -286,11 +291,9 @@ void fragment() {
 		AO_LIGHT_AFFECT = 1.0;
 		// **A cloud's shadow multiplies the star's rather than replacing it** — a deck cannot make the sun rise.
 		// **This point's own height above the datum**, which is what tells the shadow whether this ground is under
-		// the cloud or standing up through it. `VERTEX + patch_origin` is the position relative to the body's
-		// centre — the lattice is metres from a near-eye origin, and the origin is published beside it.
-		float ground_altitude = length(VERTEX + patch_origin) - planet_radius;
+		// the cloud or standing up through it. Interpolated from the vertex stage — see the varying's note.
 		if (deck_shadow_present()) {
-			AO *= deck_shadow_factor(up, planet_radius, ground_altitude);
+			AO *= deck_shadow_factor(up, planet_radius, surface_altitude);
 		}
 		SPECULAR = land_specular;
 		// **A specular highlight is a BEAM, and the composite's `1 - alpha` is the deck's DIFFUSE transmittance.**
