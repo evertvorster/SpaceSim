@@ -17,6 +17,7 @@ extends RefCounted
 const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdshader")
 const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
+const OCEAN_SHADER := preload("res://addons/spacesim/render/body_ocean.gdshader")
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
 ## emitted at**, so the two cannot disagree.
@@ -514,6 +515,25 @@ static func apply_air(material: Material, air: Dictionary, altitude: float) -> v
 	surface.set_shader_parameter("air_mie", float(air.get("mie", 0.0)))
 	surface.set_shader_parameter("air_mie_height", float(air.get("mie_scale_height", 0.0)))
 	surface.set_shader_parameter("air_altitude", altitude)
+
+
+## **The sea's material, from the liquid's own `SpacesimSpecies`.**
+##
+## Nothing Earth-specific is written here: the colour, roughness and specular are the same `band_color()` and
+## `band_shading()` every surface band takes, so water is glossy and methane is whatever its own material says.
+## Evert, 2026-11-01: *"material and reflectivity needs to be proper for earth and different planets."*
+##
+## The datum is not a parameter: the sea's surface is the sphere the ground is *displaced from*, so the ocean's node
+## wears the ground's own mesh at ratio 1.0 and `sea_level` (the field value) is all the shader needs to know where
+## the waterline falls.
+static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = OCEAN_SHADER
+	material.set_shader_parameter("ocean_color", SpacesimSurfaceModel.band_color(liquid))
+	var shading := SpacesimSurfaceModel.band_shading(liquid)
+	material.set_shader_parameter("ocean_roughness", shading.x)
+	material.set_shader_parameter("ocean_specular", shading.y)
+	return material
 
 
 ## **The reflectance a deck is drawn at**, so that its *average* is the calibrated albedo while its thick tops

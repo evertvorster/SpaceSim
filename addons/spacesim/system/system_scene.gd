@@ -519,6 +519,18 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(body.node, body.mesh_material, "%sSurface" % body.name)
+	# **The sea, when this body has a liquid on it.** Evert, 2026-11-01: *"lets do the ocean. We can use the sphere
+	# that we subdivide so we know we are lined up on the triangle faces."* Its node wears the GROUND's array at ratio
+	# 1.0 — the sea's surface is the sphere the land is displaced FROM, so the two are the same triangles by
+	# construction and cannot fight about where the waterline is. Which parts are water is decided per pixel in the
+	# shader, from the same field the land uses.
+	var liquid := _liquid_material(body, light.x, light.y)
+	if liquid != null:
+		body.ocean_material = SpacesimBodyRenderer.ocean_material(liquid)
+		body.ocean_material.set_shader_parameter("sea_level", body.sea_level)
+		body.ocean_material.set_shader_parameter("planet_radius", body.radius)
+		body.ocean_material.set_shader_parameter("field_amplitude", body.surface_plan.amplitude)
+		body.ocean = _add_body_mesh(body.node, body.ocean_material, "%sOcean" % body.name)
 	# **The datum lattice's own node**, wearing the wireframe material for its whole life: it is a debug view and never
 	# anything else (see `sphere`). Built with no mesh, like the surface, and published by the same poll from the same
 	# walk — so the three consumers cannot end up on different tessellations.
@@ -1044,6 +1056,8 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			body.mesh.visible = not is_point and (not wireframe or wire_surface)
 		if body.sphere != null:
 			body.sphere.visible = not is_point and wireframe and wire_sphere
+		if body.ocean != null:
+			body.ocean.visible = not is_point
 		for deck in body.decks:
 			deck.node.visible = not is_point
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
@@ -1273,6 +1287,11 @@ func _build_patch_arrays(
 	# mesh from `radius` to `radius + height` is one multiply, and the origin goes the same way: exactly what a copy with
 	# every vertex at a different radius means. The alternative — asking the walk again at the deck's radius — built a
 	# second array from the same chunks, which is the fault this file is being corrected for.
+	# **The sea is the ground's own array**, not a scaled copy: its surface is the datum exactly, so there is nothing
+	# to scale and nothing that can drift by a rounding.
+	if body.ocean != null:
+		body.ocean_arrays = base.duplicate(true)
+		body.ocean_arrays_origin = origin
 	for deck in body.decks:
 		var ratio: float = (radius + deck.height) / maxf(radius, 1.0)
 		deck.origin = origin * ratio
@@ -1342,8 +1361,32 @@ func close() -> void:
 ## the ground for a point above it, so a cloud at 1.4 km is still lit after the ground beside it has gone
 ## dark, and is dim and orange while it is. Publishing zero to every layer would put a cloud's sunset at the
 ## same instant as the ground's and take the geometry out of it.
+## **The body's liquid, if it has one** — the material the sea is made of. `phase_of` is the derivation's own
+## answer about the phase at this body's temperature and pressure, so Earth's water and Titan's methane are found by
+## the same question rather than by a name.
+func _liquid_material(body: SpacesimSceneBody, luminosity: float, distance: float) -> SpacesimSpecies:
+	if body == null or body.content == null or body.content.surface == null:
+		return null
+	var table := _materials()
+	var temperature := SpacesimAtmosphereModel.reference_temperature(
+		body.content, table, luminosity, distance
+	)
+	var pressure := 0.0
+	if body.content.atmosphere != null:
+		pressure = body.content.atmosphere.surface_pressure
+	for key in body.content.surface.coverage:
+		var material: SpacesimSpecies = table.by_name(String(key))
+		if material == null:
+			continue
+		if SpacesimSurfaceModel.phase_of(material, temperature, pressure) == SpacesimSurfaceModel.Phase.LIQUID:
+			return material
+	return null
+
+
 func _publish_air(body: SpacesimSceneBody) -> void:
 	SpacesimBodyRenderer.apply_air(body.mesh_material, body.air, 0.0)
+	if body.ocean_material != null:
+		SpacesimBodyRenderer.apply_air(body.ocean_material, body.air, 0.0)
 	for deck in body.decks:
 		SpacesimBodyRenderer.apply_air(deck.material, body.air, deck.height)
 
@@ -1367,6 +1410,8 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angl
 		sun = to_star.normalized()
 		star_angle = SpacesimLod.angular_radius(star_body.radius, to_star.length())
 	var materials := [body.mesh_material]
+	if body.ocean_material != null:
+		materials.append(body.ocean_material)
 	# **A deck is lit by the same star**, and its own shader does its own air and occlusion maths, so it needs
 	# the direction and the width as well as the ground does.
 	for deck in body.decks:
@@ -1560,6 +1605,16 @@ func _poll_patch_builds() -> void:
 			)
 			if deck.node.material_override != deck_wanted:
 				deck.node.material_override = deck_wanted
+		# **The sea**, from the same walk and the same array: it is the ground's own points at ratio 1.0.
+		if body.ocean != null:
+			body.ocean.mesh = SpacesimPatches.mesh_from(body.ocean_arrays)
+			body.ocean_arrays = []
+			if body.ocean.mesh != null:
+				body.ocean.position = body.ocean_arrays_origin
+				body.ocean.scale = Vector3.ONE
+				(body.ocean_material as ShaderMaterial).set_shader_parameter(
+					"patch_origin", body.ocean_arrays_origin
+				)
 		# **The datum lattice's lines**, published beside the rest from the same walk — same points, same origin, nothing
 		# translated. Unlike a deck this is never "kept from the last build": a stale sphere would be a different
 		# subdivision from the surface beside it, which is the one thing the view exists to disprove.

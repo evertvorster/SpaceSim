@@ -77,8 +77,16 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 	var code := FileAccess.get_file_as_string("res://addons/spacesim/render/body_surface.gdshader")
 	h.check(code.contains("surface_height(up, plan, footprint_angle)"),
 		"the height is the field, evaluated at the resolution the pixel can resolve")
-	h.check(code.contains("SurfacePlan surface_plan()"),
-		"from the plan the host publishes, one place")
+	# **The plan lives in the FIELD's include, since 2026-11-01** — the ocean evaluates the same field to find the
+	# waterline, so a copy of the parameters in a second shader is the drift this project keeps paying for. One home,
+	# included by both.
+	var field := FileAccess.get_file_as_string(
+		"res://addons/spacesim/system/model/surface_field.gdshaderinc"
+	)
+	h.check(field.contains("SurfacePlan surface_plan()"),
+		"from the plan the host publishes, one place — in the field's own include")
+	h.check(code.contains("surface_field.gdshaderinc"),
+		"which the land includes rather than restating")
 	# **The footprint must not come from the mesh.** `dFdx(up)` measures it only as faithfully as the triangulation
 	# does, so re-selecting the patches moved it at a fixed pixel — and with it the octave count, the height, the
 	# colour ramp's index and the relief normal. That is a texture that moves while the geometry does not, which is

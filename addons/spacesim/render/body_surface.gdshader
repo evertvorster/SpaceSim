@@ -69,28 +69,6 @@ uniform sampler2D colour_ramp : filter_linear, repeat_disable, hint_default_blac
 // them into the struct `surface_field.gdshaderinc` expects. `tests/test_render.gd` fails if one the shader declares
 // is not published, because an unpublished uniform is silently the shader's own default and that default is a
 // different planet.
-uniform int field_seed = 0;
-uniform float field_continent_frequency = 2.0;
-uniform int field_continent_octaves = 5;
-uniform float field_continent_share = 0.35;
-uniform float field_continent_bounding = 1.0;
-uniform float field_ridge_frequency = 11.0;
-uniform int field_ridge_octaves = 4;
-uniform float field_ridge_strength = 0.5;
-uniform float field_warp_frequency = 3.0;
-uniform int field_warp_octaves = 3;
-uniform float field_warp_strength = 0.35;
-uniform float field_warp_bounding = 0.5714;
-uniform float field_region_frequency = 1.5;
-uniform int field_region_octaves = 3;
-uniform float field_region_share = 0.4;
-uniform float field_region_bounding = 1.0;
-uniform float field_plate_bias_share = 0.5;
-uniform float field_belt_width = 0.08;
-uniform float field_plate_phase = 0.0;
-uniform float field_mottle_plain_gain = 0.25;
-uniform float field_gain = 0.5;
-uniform float field_lacunarity = 2.0;
 
 // **Where the sea would be**, in field units — `value_at(ocean_fraction)` off the measured quantiles.
 //
@@ -170,32 +148,6 @@ vec2 equirect(vec3 direction) {
 
 // **The field's plan, assembled from the uniforms above.** One place, so every reader of the field — the height now,
 // and the displacement later — sees the same numbers the bake compiles.
-SurfacePlan surface_plan() {
-	SurfacePlan plan;
-	plan.seed = field_seed;
-	plan.continent_frequency = field_continent_frequency;
-	plan.continent_octaves = field_continent_octaves;
-	plan.continent_share = field_continent_share;
-	plan.continent_bounding = field_continent_bounding;
-	plan.ridge_frequency = field_ridge_frequency;
-	plan.ridge_octaves = field_ridge_octaves;
-	plan.ridge_strength = field_ridge_strength;
-	plan.warp_frequency = field_warp_frequency;
-	plan.warp_octaves = field_warp_octaves;
-	plan.warp_strength = field_warp_strength;
-	plan.warp_bounding = field_warp_bounding;
-	plan.region_frequency = field_region_frequency;
-	plan.region_octaves = field_region_octaves;
-	plan.region_share = field_region_share;
-	plan.region_bounding = field_region_bounding;
-	plan.plate_bias_share = field_plate_bias_share;
-	plan.belt_width = field_belt_width;
-	plan.plate_phase = field_plate_phase;
-	plan.mottle_plain_gain = field_mottle_plain_gain;
-	plan.gain = field_gain;
-	plan.lacunarity = field_lacunarity;
-	return plan;
-}
 
 
 // **The point the vertices are measured from**, in model space — the node's own origin, published with the transform.

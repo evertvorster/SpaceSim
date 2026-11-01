@@ -42,6 +42,13 @@ var sphere_arrays: Array = []
 ## translation means the shader and the mesh cannot be given two different datums.
 var surface_plan: SpacesimSurfaceField.Plan
 var sea_level := 0.0
+## **The sea**, when the body has a liquid on it: a node wearing the GROUND's own mesh at ratio 1.0, because the sea's
+## surface IS the sphere the ground is displaced from. Empty arrays mean the walk has not published yet.
+var ocean: MeshInstance3D
+var ocean_material: ShaderMaterial
+var ocean_arrays: Array = []
+var ocean_arrays_origin := Vector3.ZERO
+
 ## **The cloud stack**: one deck per layer the model places a level for, highest first, each a node on the
 ## body's own patch mesh at its own derived radius. Empty for a body with no air, no authored deck, or no
 ## condensable that forms a level — which is most of them.
