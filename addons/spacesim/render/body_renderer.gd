@@ -315,6 +315,9 @@ static func surface_material(
 	material.set_shader_parameter("field_mottle_plain_gain", plan.mottle_plain_gain)
 	material.set_shader_parameter("field_gain", plan.gain)
 	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
+	# **The vertical scale, for the normal's slope** — the same number `SpacesimSystemScene.offset_vertices` multiplies
+	# the geometry by, from the same plan, so the drawn height and the shaded slope cannot disagree.
+	material.set_shader_parameter("field_amplitude", plan.amplitude)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
 	material.set_shader_parameter("base_color", body.color)
