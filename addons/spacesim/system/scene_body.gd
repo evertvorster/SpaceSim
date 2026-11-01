@@ -71,6 +71,9 @@ class Deck:
 	## ground's arrays and published beside its transform, so a deck and the surface under it are always the same
 	## tessellation of the same points — the whole point of the shared lattice. Empty until the first build lands.
 	var arrays: Array = []
+	## Whether `arrays` is EDGES rather than triangles — the wireframe view draws a deck as lines too, so a deck's
+	## geometry is whatever the *view* asked for, exactly as the ground's is.
+	var arrays_lines := false
 	## The origin those points are measured from: the near-eye point at *this* level's radius. Metres, like the
 	## ground's, so the node's scale stays 1 and its basis cannot round a planet-sized coordinate.
 	var origin := Vector3.ZERO

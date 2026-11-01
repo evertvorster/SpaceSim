@@ -84,6 +84,35 @@ func run(h, root: Node) -> void:
 	h.check(earth.mesh.material_override == SpacesimBodyRenderer.wireframe_material(),
 		"as unshaded lines — white everywhere by construction, which the viewport's own wireframe is not")
 
+	# --- and the DECKS are wireframes too, because they are the same mesh --------------------------
+	# **A wireframe is a wireframe for everything it draws.** A deck as shaded cloud would cover the triangles this
+	# view exists to show, but a deck as EDGES shows the same subdivision at a second radius — which is the visible
+	# proof that it is one tessellation. **Whether a deck is drawn at all stays `render.cloud_decks`**: an eye that
+	# wants only the surfaces turns the decks off and keeps the view. Evert, 2026-11-01: *"if cloud decks are on,
+	# and I switch to wireframe mode, I want to see the decks. I can turn them off separately if I want to see just
+	# the surfaces."*
+	var decks_were := bool(SpacesimSettings.get_value("render.cloud_decks"))
+	SpacesimSettings.set_value("render.cloud_decks", true)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	scene.update_lod(camera)
+	h.check(not earth.decks.is_empty(), "Earth has a deck to draw (%d)" % earth.decks.size())
+	if not earth.decks.is_empty():
+		var wire_deck: SpacesimSceneBody.Deck = earth.decks[0]
+		h.check(wire_deck.node.visible, "and in the wireframe view the deck is drawn rather than hidden")
+		h.check(wire_deck.node.material_override == SpacesimBodyRenderer.wireframe_material(),
+			"in the same unshaded line material the ground wears")
+		h.check(
+			(wire_deck.node.mesh as ArrayMesh).surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
+			"as EDGES, not triangles — the same subdivision, seen at a second radius")
+		h.check_near((wire_deck.node.position as Vector3).length(), earth.radius + wire_deck.height,
+			"sitting on its own condensation level (%.0f m)" % wire_deck.height, 1.0)
+		# **And the switch still owns it on its own**, so the view can be the surfaces alone.
+		SpacesimSettings.set_value("render.cloud_decks", false)
+		scene.update_lod(camera)
+		h.check(not wire_deck.node.visible, "while `render.cloud_decks` off hides it and leaves the ground's lines")
+	SpacesimSettings.set_value("render.cloud_decks", decks_were)
+
 	# --- `rendered` is the real surface, on the same mesh and the same material ------------------
 	SpacesimSettings.set_value(MODE_KEY, "rendered")
 	scene.wireframe = false

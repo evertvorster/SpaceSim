@@ -1008,10 +1008,12 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		if body.mesh != null:
 			body.mesh.visible = not is_point
-		# **A wireframe view is about triangles**, and a cloud deck would cover the ones under test. The deck's own
-		# switch is `_update_decks`'s, one function down; this line is about the view.
+		# **A wireframe view is a wireframe for EVERYTHING**, deck included: a deck drawn as shaded cloud over the
+		# ground's lines would cover the triangles under test, but a deck drawn as edges is the same subdivision at a
+		# second radius. Whether a deck is drawn at all is `render.cloud_decks`, which `_update_decks` answers one
+		# function down — so an eye that wants only the surfaces turns the decks off and keeps the view.
 		for deck in body.decks:
-			deck.node.visible = not is_point and not wireframe
+			deck.node.visible = not is_point
 		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
 		# not drawn by anything yet, and a deck is not a thing this tree has.
 		if body.point != null:
@@ -1224,13 +1226,19 @@ func _build_patch_arrays(
 	# rather than read off the body, so it cannot describe a different build than the arrays it travels with — the
 	# near-eye direction at this level's radius, which is the ground's origin times `(radius + height) / radius`.
 	#
-	# **Not in a wireframe view**, where every deck is hidden anyway (the wireframe is about the ground's triangles,
-	# which a deck would cover) — so the mode that exists to show the subdivision does not pay for merges nobody sees.
-	if not lines:
-		for deck in body.decks:
-			var level_radius: float = radius + deck.height
-			deck.origin = origin * (level_radius / maxf(radius, 1.0))
-			deck.arrays = SpacesimPatches.arrays_of(chunks, level_radius, deck.origin, false, lattice)
+	# **In the WIREFRAME view the deck is lines too**, which is why the view's `lines` flag reaches this loop rather
+	# than the deck being skipped: a deck drawn as shaded cloud over the ground's lines would cover the triangles the
+	# view exists to show, but a deck drawn as EDGES shows the same subdivision at a second radius — which is the
+	# check that it really is one mesh. Evert, 2026-11-01: *"if cloud decks are on, and I switch to wireframe mode, I
+	# want to see the decks."*
+	for deck in body.decks:
+		var level_radius: float = radius + deck.height
+		deck.origin = origin * (level_radius / maxf(radius, 1.0))
+		deck.arrays_lines = lines
+		deck.arrays = (
+			SpacesimPatches.lines_of(chunks, level_radius, deck.origin) if lines
+			else SpacesimPatches.arrays_of(chunks, level_radius, deck.origin, false, lattice)
+		)
 	# **The origin these arrays were measured from, written beside them.** The publish places the mesh at this and not
 	# at `patch_task_origin`, because that member is overwritten by every request: a build that lands after a later
 	# request has already moved the origin was being drawn `|new - old|` from where its vertices were measured — a
@@ -1470,13 +1478,27 @@ func _poll_patch_builds() -> void:
 		# **An empty build publishes nothing and the old mesh stays**, exactly as for the ground: a deck one selection
 		# stale is worth more than a frame with the clouds gone.
 		for deck in body.decks:
-			deck.node.mesh = SpacesimPatches.mesh_from(deck.arrays)
+			deck.node.mesh = (
+				SpacesimPatches.lines_mesh_from(deck.arrays) if deck.arrays_lines
+				else SpacesimPatches.mesh_from(deck.arrays)
+			)
+			var deck_lines := deck.arrays_lines
 			deck.arrays = []
 			if deck.node.mesh == null:
 				continue
 			deck.node.position = deck.origin
 			deck.node.scale = Vector3.ONE
 			(deck.material as ShaderMaterial).set_shader_parameter("patch_origin", deck.origin)
+			# **The material follows the VIEW, and the switch does not touch it**: in a wireframe the deck wears the
+			# same unshaded line material the ground does, and otherwise the cloud's own. Published only when it is
+			# different and never as null — an empty `material_override` falls back to the engine's unshaded default,
+			# which reads as "the deck lost its shading".
+			var deck_wanted := (
+				SpacesimBodyRenderer.wireframe_material() if deck_lines
+				else deck.material
+			)
+			if deck.node.material_override != deck_wanted:
+				deck.node.material_override = deck_wanted
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
