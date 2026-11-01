@@ -101,3 +101,41 @@ func _test_plan(h) -> void:
 		"while the bake keeps its storage image and its 8x8 image launch")
 	h.check(heights_source.contains("local_size_x = 64, local_size_y = 1"),
 		"and the heights kernel is a flat 64-wide launch over a buffer, one dimension")
+
+	# ===== THE TRANSLATION'S ARITHMETIC =========================================================
+	#
+	# **What a vertex does when the geometry carries the terrain**, tested without a rendering device: the field's
+	# heights are the dispatch's, but the offset applied to a point is plain arithmetic and it is where a wrong datum
+	# or a wrong axis would show. Two requirements, and both have flown as faults before: the move is RADIAL, and it
+	# measures from the sea level, so a point at the datum does not move.
+	var points := PackedVector3Array()
+	var directions := PackedVector3Array()
+	for index in 4:
+		var unit := Vector3(0.0, 1.0, 0.0) if index == 0 else Vector3(
+			1.0, 0.0, 0.0
+		).rotated(Vector3.UP, TAU * float(index) / 3.0).normalized()
+		directions.append(unit)
+		points.append(unit * 6.371e6)
+	var heights := PackedFloat32Array([0.825, 0.825, -1.0, 1.0])
+	var sea := 0.825
+	var amplitude := 8919.0
+	var before := points.duplicate()
+	SpacesimSystemScene.offset_vertices(points, directions, heights, sea, amplitude)
+	# **A centimetre, not a micron**: the heights are a `PackedFloat32Array` — the kernel writes floats — so 0.825
+	# arrives as 0.82499998 and an 8.9 km amplitude turns that into 1e-4 m. The law is exact; the input is float32.
+	h.check_near(points[0].length(), 6.371e6,
+		"a vertex whose height IS the sea level does not move at all — the coast is exact by construction", 0.01)
+	h.check(points[0].is_equal_approx(before[0]),
+		"which is the datum doing its job, not an accident of the numbers")
+	h.check_near(points[1].distance_to(before[1]), 0.0,
+		"and neither does a second one at the same height", 0.01)
+	# **Radial**: the offset is along the direction and nothing else, so a point's angle is unchanged and its radius
+	# alone moves. A lateral component would shear the mesh and move a shared point's neighbours with it.
+	h.check_near(points[2].normalized().dot(directions[2]), 1.0,
+		"a sunken point stays on its own radial line", 1.0e-9)
+	h.check_near(points[2].length(), 6.371e6 + (-1.0 - sea) * amplitude,
+		"and moves inward by exactly (height - sea) x amplitude (%.0f m)" % ((-1.0 - sea) * amplitude), 0.01)
+	h.check_near(points[3].length(), 6.371e6 + (1.0 - sea) * amplitude,
+		"as a raised one moves outward by the same law (%.0f m)" % ((1.0 - sea) * amplitude), 0.01)
+	h.check(points[3].length() > 6.371e6 and points[2].length() < 6.371e6,
+		"so land stands above the datum and a basin sits below it")

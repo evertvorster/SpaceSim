@@ -1230,6 +1230,20 @@ func _build_patch_arrays(
 		SpacesimPatches.lines_of(chunks, radius, origin) if lines
 		else SpacesimPatches.arrays_of(chunks, radius, origin, tinted, lattice)
 	)
+	# **The datum lattice's lines, and the surface's wireframe is a COPY of them** — one walk, one merge, two arrays.
+	#
+	# Evert, 2026-11-01: *"just take a damn copy of the sphere one."* Two `lines_of()` calls with the same arguments
+	# are deterministic and did agree, but they are two merges and two chances to disagree, and the whole claim of the
+	# wireframe view is that the surface IS the subdivision. A copy makes that true by construction, and it halves the
+	# merge this mode pays for.
+	#
+	# **Deep, not shallow**, so the translation below cannot write through to the sphere's points: a `PackedVector3Array`
+	# is copy-on-write and would have survived anyway, but "it happens to be safe" is not the guarantee being offered.
+	if lines:
+		body.sphere_arrays = body.patch_arrays
+		body.patch_arrays = body.sphere_arrays.duplicate(true)
+	else:
+		body.sphere_arrays = []
 	# **Each deck's points, scaled to its own level.** The origin is derived from the argument this build was given
 	# rather than read off the body, so it cannot describe a different build than the arrays it travels with — the
 	# near-eye direction at this level's radius, which is the ground's origin times `(radius + height) / radius`.
@@ -1248,9 +1262,7 @@ func _build_patch_arrays(
 			else SpacesimPatches.arrays_of(chunks, level_radius, deck.origin, false, lattice)
 		)
 	# **And the datum lattice's own lines**, at `radius` with nothing translated — the same points, so the view can show
-	# the subdivision itself beside what is built on it. Only a wireframe asks for it; in any other mode the node is
-	# hidden (`update_lod`), so building it would be a merge nobody sees.
-	body.sphere_arrays = SpacesimPatches.lines_of(chunks, radius, origin) if lines else []
+	# the subdivision itself beside what is built on it. Set above, as the surface's own copy of it; nothing to build.
 	# **The origin these arrays were measured from, written beside them.** The publish places the mesh at this and not
 	# at `patch_task_origin`, because that member is overwritten by every request: a build that lands after a later
 	# request has already moved the origin was being drawn `|new - old|` from where its vertices were measured — a
@@ -1590,10 +1602,23 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 	var heights := _surface_heights(body, directions)
 	if heights.size() != directions.size():
 		return
-	var amplitude := body.surface_plan.amplitude
-	for index in vertices.size():
-		vertices[index] += directions[index] * (heights[index] - body.sea_level) * amplitude
+	offset_vertices(vertices, directions, heights, body.sea_level, body.surface_plan.amplitude)
 	arrays[0] = vertices
+
+
+## **Move each vertex along its own direction by `(height - sea_level) * amplitude`** — the dialectic arithmetic, on its
+## own so it can be tested without a rendering device.
+##
+## **Pure, and it writes in place.** Two things the test pins: the offset is RADIAL (a shared point cannot be moved two
+## ways by two triangles, because there is one point and one direction), and it is measured **from the datum**, so a
+## vertex whose height is the sea level does not move at all — which is what keeps the coast exact and keeps the ship's
+## altitude, the framings' bands and a deck's condensation level measuring from the sphere they always did.
+static func offset_vertices(
+	vertices: PackedVector3Array, directions: PackedVector3Array, heights: PackedFloat32Array,
+	sea_level: float, amplitude: float
+) -> void:
+	for index in vertices.size():
+		vertices[index] += directions[index] * (heights[index] - sea_level) * amplitude
 
 
 ## **The field's heights at a list of directions**, on the scene's own device.
