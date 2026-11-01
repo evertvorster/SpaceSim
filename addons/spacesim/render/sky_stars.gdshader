@@ -72,6 +72,35 @@ uniform vec2  u_tan_half = vec2(0.5, 0.5);   // tan(half fov) per axis
 // There is deliberately no viewport-size uniform. The pixel's own size is MEASURED below, from the
 // screen-space derivatives of the ray, so there is no number for the host to get wrong — see `sky()`.
 
+// ===== THE AIR BESIDE THE STARS ==================================================
+//
+// **The sky slot draws the FAR half of the atmosphere — everything beyond the nearest
+// drawn surface — and the pre-existing atmosphere pass draws the NEAR half.** That split
+// is what makes the medium behave the same from inside and from outside: a sky shader is
+// drawn *behind* all geometry, so a cloud on a mesh composites over it correctly, which a
+// post-transparent pass cannot do (it paints the whole column over the finished frame, so
+// from inside a deck the sky ends up in front of the cloud).
+//
+// **One shader, not two**: a `Sky` holds exactly one material, so the stars and the air
+// share this one. The stars are attenuated by the air they are seen through, which they
+// should have been all along.
+//
+// Off by default (`u_air_on = 0`), so a host that has not published anything gets the star
+// sky exactly as it was.
+uniform float u_air_on = 0.0;
+uniform vec3  u_air_rayleigh = vec3(0.0);
+uniform float u_air_rayleigh_h = 8500.0;
+uniform vec3  u_air_absorption = vec3(0.0);
+uniform float u_air_mie = 0.0;
+uniform float u_air_mie_h = 1200.0;
+uniform float u_air_mie_g = 0.758;
+uniform float u_air_sun_intensity = 0.0;
+uniform float u_planet_radius = 6371000.0;
+uniform float u_atmosphere_radius = 6471000.0;
+uniform vec3  u_eye_local = vec3(0.0, 0.0, 6371000.0);
+uniform vec3  u_sun_local = vec3(0.0, 1.0, 0.0);
+uniform mat3  u_to_local = mat3(1.0);
+
 // ===== PHYSICS ==================================================================
 // Measured, not chosen: a V=0 star delivers this much at the observer (Schlyter).
 const float LUX_PER_MAG0 = 2.54e-6;
@@ -137,6 +166,89 @@ vec3 star_tint(float bv) {
 	return c / max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-30);
 }
 
+
+// **The far air: Rayleigh and Mie from the eye to the top of the atmosphere.** The near half —
+// the air in front of the nearest drawn surface — is the pass's, and this must not draw it, or
+// the two would double. Bounds are the atmosphere's own shell, clipped at the planet.
+vec3 air_sky(vec3 dir, out vec3 transmittance) {
+	const int I_STEPS = 16;
+	const int J_STEPS = 8;
+	const float PI_F = 3.14159265358979;
+	transmittance = vec3(1.0);
+
+	vec3 eye = u_eye_local;
+	float b = dot(dir, eye);
+	float c = dot(eye, eye) - u_atmosphere_radius * u_atmosphere_radius;
+	float disc = b * b - c;
+	if (disc < 0.0) {
+		return vec3(0.0);
+	}
+	float root = sqrt(disc);
+	float t0 = max(-b - root, 0.0);
+	float t1 = -b + root;
+	// The ground ends it: below the surface there is nothing to integrate.
+	float pdisc = b * b - (dot(eye, eye) - u_planet_radius * u_planet_radius);
+	if (pdisc >= 0.0) {
+		float phit = -b - sqrt(pdisc);
+		if (phit > 0.0) {
+			t1 = min(t1, phit);
+		}
+	}
+	float span = t1 - t0;
+	if (span <= 0.0) {
+		return vec3(0.0);
+	}
+
+	float mu = dot(dir, u_sun_local);
+	float mumu = mu * mu;
+	float g = u_air_mie_g;
+	float gg = g * g;
+	float phase_r = 3.0 / (16.0 * PI_F) * (1.0 + mumu);
+	float phase_m = 3.0 / (8.0 * PI_F) * ((1.0 - gg) * (mumu + 1.0))
+		/ (pow(1.0 + gg - 2.0 * mu * g, 1.5) * (2.0 + gg));
+
+	vec3 sum_r = vec3(0.0);
+	vec3 sum_m = vec3(0.0);
+	float depth_r = 0.0;
+	float depth_m = 0.0;
+	for (int i = 0; i < I_STEPS; i++) {
+		float f0 = float(i) / float(I_STEPS);
+		float f1 = float(i + 1) / float(I_STEPS);
+		float a0 = t0 + span * f0 * f0;
+		float a1 = t0 + span * f1 * f1;
+		float step_size = a1 - a0;
+		if (step_size <= 0.0) {
+			continue;
+		}
+		vec3 position = eye + dir * (a0 + step_size * 0.5);
+		float height = max(length(position) - u_planet_radius, 0.0);
+		float dr = exp(-height / max(u_air_rayleigh_h, 1.0));
+		float dm = exp(-height / max(u_air_mie_h, 1.0));
+		depth_r += dr * step_size;
+		depth_m += dm * step_size;
+		// The sun's path from this sample, coarsely.
+		float sb = dot(u_sun_local, position);
+		float sc = dot(position, position) - u_atmosphere_radius * u_atmosphere_radius;
+		float sd = sb * sb - sc;
+		float sun_step = sd > 0.0 ? (-sb + sqrt(sd)) / float(J_STEPS) : 0.0;
+		float sun_r = 0.0;
+		float sun_m = 0.0;
+		float walked = 0.0;
+		for (int j = 0; j < J_STEPS; j++) {
+			float h = max(length(position + u_sun_local * (walked + sun_step * 0.5))
+				- u_planet_radius, 0.0);
+			sun_r += exp(-h / max(u_air_rayleigh_h, 1.0)) * sun_step;
+			sun_m += exp(-h / max(u_air_mie_h, 1.0)) * sun_step;
+			walked += sun_step;
+		}
+		vec3 attenuation = exp(-(u_air_mie * (depth_m + sun_m)
+			+ (u_air_rayleigh + u_air_absorption) * (depth_r + sun_r)));
+		sum_r += dr * step_size * attenuation;
+		sum_m += dm * step_size * attenuation;
+	}
+	transmittance = exp(-(u_air_mie * depth_m + (u_air_rayleigh + u_air_absorption) * depth_r));
+	return (phase_r * u_air_rayleigh * sum_r + phase_m * u_air_mie * sum_m) * u_air_sun_intensity;
+}
 
 void sky() {
 	vec3 d = normalize(EYEDIR);
@@ -214,5 +326,13 @@ void sky() {
 		}
 	}
 
-	COLOR = acc * u_gain / UNIT_LUX_PER_SR;
+	// **The air, and the stars seen through it.** `air_sky` returns the in-scatter along the
+	// ray in the frame's own currency (the same `sun_intensity` scale the pass uses), and the
+	// transmittance both media share.
+	vec3 air_transmittance = vec3(1.0);
+	vec3 air_in_scatter = vec3(0.0);
+	if (u_air_on > 0.5) {
+		air_in_scatter = air_sky(u_to_local * EYEDIR, air_transmittance);
+	}
+	COLOR = (acc / UNIT_LUX_PER_SR) * air_transmittance + air_in_scatter;
 }
