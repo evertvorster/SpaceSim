@@ -144,3 +144,13 @@ func run(h, root: Node) -> void:
 	# `XDG_CONFIG_HOME`), but a rig run outside it must not inherit a debug mode.
 	SpacesimSettings.set_value(TINT_KEY, false)
 	SpacesimSettings.set_value(MODE_KEY, "flat")
+	# **Free the scene HERE, as every other suite does.** `SpacesimSystemScene.new()` wires `tree_exiting` to
+	# `await_patch_builds` and `close()`, and that is the only supported teardown: it joins the pool task the tint above
+	# just requested, and frees the bake device. **This suite did not free its container**, so the scene was torn down
+	# by `get_tree().quit()` with a `WorkerThreadPool` task still running — the task outlives the tree, and the engine
+	# dies at exit with signal 11 *after* `N checks, 0 failed` has printed, which `run.sh` reports as "the test suite
+	# exited 139".
+	#
+	# **Not a join written here**: `await_patch_builds` is a bounded `while`-poll rather than an `await`, so calling it
+	# by hand is the shape that sits until `run.sh`'s timeout, and the drain on `tree_exiting` is already the join.
+	scene.container.free()
