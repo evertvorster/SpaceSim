@@ -112,6 +112,15 @@ uniform float pixel_angle = 0.0012966806;
 // The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
 // vegetation and ice.
 uniform float land_roughness : hint_range(0.0, 1.0) = 0.9;
+
+// **A very slight grain, only where the eye is close enough to see the surface rather than the field.** Evert,
+// 2026-11-01: *"some very slight noise when I am very near the texture, it looks a bit too clean."*
+//
+// It is a dither and not a detail term: the field's own octaves fade by the ANGULAR footprint, which does not shrink
+// as the camera descends — so up close the ground is as smooth as it is from orbit, and the last thing with any
+// variation in it was deleted with the raster. This puts a fraction of a percent back, keyed on the ground's own
+// direction at a frequency no eye will read as terrain, and it fades out by 300 m so it can never become texture.
+uniform float ground_grain : hint_range(0.0, 0.2) = 0.05;
 uniform float land_specular : hint_range(0.0, 1.0) = 0.15;
 
 const float SURFACE_PI = 3.141592653589793;
@@ -126,7 +135,8 @@ const float MAP_MAX_TILT = 0.35;
 // **How hard the light is told about hills the geometry does not carry.** Evert, 2026-11-01: *"I liked that shading
 // trick, we can put some of that back in."* With a displaced mesh the shape is real, so this is no longer standing in
 // for absent geometry — it is an *exaggeration* of the shape that is there, and it has to stay small enough that the
-// mountain is not counted twice. 2.0 leans the normal by at most `atan(2 x MAP_MAX_TILT)` ~ 35 degrees.
+// mountain is not counted twice. **1.0 since 2026-11-01**: at 2.0 Evert flew it and asked for *"about half"* — it
+// leans the normal by at most `atan(MAP_MAX_TILT)` ~ 19 degrees.
 //
 // **Two things the first version did that this one must not**, both recorded where it was deleted:
 //
@@ -137,7 +147,7 @@ const float MAP_MAX_TILT = 0.35;
 // 2. it tilted by `max(height - sea_level, 0)`, which is C0 but not C1 — the slope at a coastline is enormous, the
 //    normal tips past vertical, and the shore drew as a black ring. The field itself is smooth, so the tilt uses the
 //    field and the coastline has no kink to fall into.
-uniform float relief_exaggeration : hint_range(0.0, 6.0) = 2.0;
+uniform float relief_exaggeration : hint_range(0.0, 6.0) = 1.0;
 
 // Model space, and **on this lattice it is METRES, not a unit sphere**: a vertex is measured from an origin near the
 // eye, so a point's direction from the body's centre is `VERTEX + patch_origin` — which is why the normal is derived
@@ -304,6 +314,16 @@ void fragment() {
 		// The colour, from the ramp the derivation built, indexed by the field's own value.
 		float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);
 		ALBEDO = texture(colour_ramp, vec2(ramp_position, 0.5)).rgb;
+
+		// **The grain, faded in by how close the eye is.** The altitude is the camera's, in metres — the fragment's
+		// own direction is a unit vector, so its distance from the eye is the eye's radius less one, times the
+		// planet's. Keyed on `FRAGCOORD` so it is a per-pixel dither rather than a feature that would crawl.
+		float eye_altitude_m = (length(body_eye_local) - 1.0) * planet_radius;
+		float grain_fade = 1.0 - smoothstep(50.0, 300.0, eye_altitude_m);
+		if (ground_grain > 0.0 && grain_fade > 0.001) {
+			float grain_noise = fract(52.9829189 * fract(0.06711056 * FRAGCOORD.x + 0.00583715 * FRAGCOORD.y));
+			ALBEDO *= 1.0 + ground_grain * grain_fade * (grain_noise - 0.5);
+		}
 		// **The light has crossed the air before it got here**, and that is per channel: blue first, then green,
 		// then red — which is what makes a ridge near the terminator orange rather than white.
 		//
