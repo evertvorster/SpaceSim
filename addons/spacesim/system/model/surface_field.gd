@@ -150,18 +150,37 @@ class Plan:
 	var amplitude := 0.0
 
 
-## **The compute source, assembled once for every caller**: `#version`, the noise, the field, the kernel.
+## **The compute source, assembled once for every caller**: `#version`, the noise, the field, the plan's block, the
+## kernel.
 ##
 ## A source string handed to `shader_compile_spirv_from_source()` gets no preprocessor, so `#include` is not
-## available to it — the concatenation *is* the include mechanism. Two bakes compile this: the build-time one
-## in `SpacesimSurfaceGpu` (which reads the map back so the distribution can be measured) and the render-thread
-## one in `SpacesimSurfaceDistribution`. **One assembler, so they cannot be two fields.**
+## available to it — the concatenation *is* the include mechanism, which is why the plan's block is a file placed
+## here rather than a `#include` inside the kernel.
+##
+## Two bakes compile this: the build-time one in `SpacesimSurfaceGpu` (which reads the map back so the distribution
+## can be measured) and the render-thread one in `SpacesimSurfaceDistribution`. **One assembler, so they cannot be two
+## fields.**
 static func source() -> String:
+	return _assemble(KERNEL_PATH)
+
+
+## **The same field, asked at a list of directions rather than rasterised** — the geometry's height source.
+##
+## Same noise, same field, same plan block as [method source]; only the kernel differs, because this one reads a
+## buffer of directions and writes a buffer of heights. That is the whole reason a *texture* is not needed: the mesh
+## has explicit directions, and this answers them exactly instead of quantising them onto a grid and interpolating
+## back off.
+static func source_for_heights() -> String:
+	return _assemble(HEIGHTS_KERNEL_PATH)
+
+
+static func _assemble(kernel_path: String) -> String:
 	return (
 		"#version 450\n"
 		+ FileAccess.get_file_as_string(NOISE_PATH)
 		+ FileAccess.get_file_as_string(FIELD_PATH)
-		+ FileAccess.get_file_as_string(KERNEL_PATH)
+		+ FileAccess.get_file_as_string(PARAMS_PATH)
+		+ FileAccess.get_file_as_string(kernel_path)
 	)
 
 
@@ -213,7 +232,12 @@ static func push_constants(
 
 const NOISE_PATH := "res://addons/spacesim/system/model/noise.gdshaderinc"
 const FIELD_PATH := "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+## **The plan's push-constant block and the `SurfacePlan` assembly**, placed before either kernel — the file the two
+## kernels share so the numbers cannot differ between a bake and a heights dispatch.
+const PARAMS_PATH := "res://addons/spacesim/system/model/surface_params.gdshaderinc"
 const KERNEL_PATH := "res://addons/spacesim/system/model/surface_kernel.gdshaderinc"
+## **The heights kernel**: directions in, heights out. The geometry's source, and the reason no raster exists.
+const HEIGHTS_KERNEL_PATH := "res://addons/spacesim/system/model/surface_heights_kernel.gdshaderinc"
 ## 112: `ivec2`, two `vec2`, then twenty-two 4-byte fields. Exact, not padded — see [method push_constants].
 const PUSH_CONSTANT_BYTES := 112
 

@@ -35,6 +35,13 @@ var mesh_material: Material
 var sphere: MeshInstance3D
 ## The lines the worker built for it: empty until a build lands, and cleared when they are published.
 var sphere_arrays: Array = []
+## **The body's surface field plan, derived once**, and the datum a translated vertex measures from.
+##
+## Both exist because the geometry needs what the shader already had: `plan.amplitude` is how many metres a field unit
+## is, and `sea_level` is the level the land stands from. Keeping them on the body rather than re-deriving them at the
+## translation means the shader and the mesh cannot be given two different datums.
+var surface_plan: SpacesimSurfaceField.Plan
+var sea_level := 0.0
 ## **The cloud stack**: one deck per layer the model places a level for, highest first, each a node on the
 ## body's own patch mesh at its own derived radius. Empty for a body with no air, no authored deck, or no
 ## condensable that forms a level — which is most of them.

@@ -48,6 +48,11 @@ var star_sky: SpacesimStarSky
 var _framing: SpacesimFraming
 ## The baked surface maps, one cache for the whole system.
 var _distributions := SpacesimSurfaceDistribution.new()
+## **The scene's own device for the field's heights**, opened on the first rebuild that needs it and closed by
+## [method close]. Separate from `_distributions`' bake device because their lifetimes differ: a bake happens once per
+## body at build and that device is closed straight after, where a translation happens on every walk for the whole
+## session. One device must not be freed while the other still wants it.
+var _heights_gpu: SpacesimSurfaceGpu
 ## **The baked cloud maps, one cache for the whole system** — keyed `(body, layer)`, so a stack is entries
 ## rather than a second cache. Unlike the surface's, this one stays open: it has no local `RenderingDevice` of
 ## its own beyond the one `SpacesimCloudGpu` opens for a bake, and a deck refines on approach like the ground.
@@ -500,13 +505,17 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		body, SpacesimBodyRenderer.surface_ramp(bands, quantiles, body.color)
 	)
 	# **The sea level is `sea_level`: the datum, not a threshold** — the field value the liquid band's own area share
-	# implies, measured off this body's own distribution. Nothing culls on it; the displacement will measure
+	# implies, measured off this body's own distribution. Nothing culls on it; a translated vertex measures
 	# `height - sea_level` from it, and a body's altitude, the framings' bands and a deck's condensation level all
 	# measure from the same sphere.
+	#
+	# **Kept on the body as well as on the material**, because two consumers need the same number now: the shader colours
+	# the coast from it and the translation stands the land up from it. A second reading would be a second chance for
+	# them to disagree, and the fault when they do is a coastline that fights itself.
+	body.surface_plan = SpacesimSurfaceField.plan(body.id, body.radius)
 	if entry != null and not entry.quantiles.is_empty():
-		(body.mesh_material as ShaderMaterial).set_shader_parameter(
-			"sea_level", entry.value_at(body.surface_ocean_fraction)
-		)
+		body.sea_level = entry.value_at(body.surface_ocean_fraction)
+	(body.mesh_material as ShaderMaterial).set_shader_parameter("sea_level", body.sea_level)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
 	body.mesh = _add_body_mesh(body.node, body.mesh_material, "%sSurface" % body.name)
@@ -1272,6 +1281,12 @@ func surface_distribution() -> SpacesimSurfaceDistribution:
 ## on the way out.
 func close() -> void:
 	_distributions.close()
+	# **The heights device goes with everything else.** A local `RenderingDevice` left alive for the process to destroy
+	# at teardown segfaults on exit (exit 139), and this one lives the whole session — so it is the one most likely to
+	# be left behind.
+	if _heights_gpu != null:
+		_heights_gpu.close()
+		_heights_gpu = null
 	# **The deck's cache goes the same way, and for its own reason**: a refinement is a pool task (or a local
 	# device's dispatch), and the pool will not let a task outlive the engine. The bail goes up first so a 27 s
 	# bake stops at its next row rather than trading a crash for a hung exit.
@@ -1458,6 +1473,10 @@ func _poll_patch_builds() -> void:
 			continue
 		if arrays.is_empty() or (arrays[0] as PackedVector3Array).is_empty():
 			continue
+		# **The vertices carry the terrain, here, before the mesh exists.** The height comes from the field, asked at
+		# these very directions on the device — see `_translate_surface`. It is the LAST thing done to the arrays,
+		# so the mesh, the AABB and the depth buffer all see the surface that was drawn.
+		_translate_surface(body, arrays)
 		body.mesh.mesh = (
 			SpacesimPatches.lines_mesh_from(arrays) if lines
 			else SpacesimPatches.mesh_from(arrays)
@@ -1531,6 +1550,60 @@ func _poll_patch_builds() -> void:
 		# The selection moved while this was building, so the answer is already out of date.
 		if published != body.patch_chunks:
 			_request_patch_build(body, body.patch_walk_wireframe)
+
+
+## **The surface's vertices carry the terrain**, before the mesh is built from them.
+##
+## **A point's height is the field at its own direction, and it is asked on the device** — the same GLSL the draw
+## shader and the bake run, at exactly the directions this mesh holds. That is the answer to "where does a texture
+## come from": no texture. A map would quantise 37,500 explicit directions onto a grid and interpolate them back off,
+## with a texel floor and seams the mesh does not have; at 1 km altitude a global map fine enough for the mesh is
+## 10^12 texels, which is the arithmetic that retired the raster on 2026-10-28.
+##
+## **Radial and measured from the datum**: `(height - sea_level) * amplitude` metres along the direction, so the coast is
+## exact by construction — a vertex at sea level does not move — and the ship's altitude, the framings' bands and a
+## deck's condensation level keep measuring from the sphere they always did. A bare `height` stood the land up to
+## 1.56 km above that sphere, which was a flown fault on 2026-10-27.
+##
+## **The surface only.** A deck is a LEVEL and the sphere is the datum, so neither may be translated; the caller passes
+## the surface's arrays and nothing else.
+##
+## **Called on the main thread, deliberately**: a local `RenderingDevice`'s calls are render-thread-only, so the dispatch
+## cannot ride on the build's worker. It costs one pass over the vertices on the frames a build lands — walk-gated, so
+## not a per-frame cost — and the vertex loop is the same shape `rebase` already pays for.
+func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
+	if not bool(SpacesimSettings.get_value("render.surface_translation")):
+		return
+	if body.surface_plan == null:
+		return
+	var vertices: PackedVector3Array = arrays[0]
+	if vertices.is_empty():
+		return
+	var origin := body.patch_arrays_origin
+	# **The direction is recovered from the vertex**, which is what the shader does too: a vertex is metres from the
+	# lattice's own origin, so adding the origin back gives the offset from the body's centre. Normalising a 6,371 km
+	# vector in a double build is exact enough for a direction, and it keeps this function free of lattice bookkeeping.
+	var directions := PackedVector3Array()
+	directions.resize(vertices.size())
+	for index in vertices.size():
+		directions[index] = (vertices[index] + origin).normalized()
+	var heights := _surface_heights(body, directions)
+	if heights.size() != directions.size():
+		return
+	var amplitude := body.surface_plan.amplitude
+	for index in vertices.size():
+		vertices[index] += directions[index] * (heights[index] - body.sea_level) * amplitude
+	arrays[0] = vertices
+
+
+## **The field's heights at a list of directions**, on the scene's own device.
+##
+## One device for the session, opened on first use and closed by [method close] — the same discipline the bake cache
+## follows, and for the same reason: a local `RenderingDevice` that outlives its work segfaults the process at exit.
+func _surface_heights(body: SpacesimSceneBody, directions: PackedVector3Array) -> PackedFloat32Array:
+	if _heights_gpu == null:
+		_heights_gpu = SpacesimSurfaceGpu.new()
+	return _heights_gpu.heights(body.surface_plan, directions)
 
 
 ## **Join every rebuild in flight**, for a rig that has to know the mesh exists before it looks.

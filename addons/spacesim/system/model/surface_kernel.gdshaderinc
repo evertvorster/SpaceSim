@@ -13,37 +13,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(r16f, set = 0, binding = 0) uniform image2D out_map;
 
-layout(push_constant, std430) uniform Params {
-	ivec2 size;
-	// **The window**: a sub-rectangle of the same equirect space, so one field can be rasterised over the whole
-	// sphere or over the cap the eye can actually see. `(0, 0, 1, 1)` is the whole map, which is what the
-	// build-time bake asks for — **the window LAYERS on the base map, it never replaces it**, which is the fault
-	// the cloud version had.
-	vec2 uv_origin;
-	vec2 uv_size;
-	int seed;
-	float continent_frequency;
-	int continent_octaves;
-	float ridge_frequency;
-	int ridge_octaves;
-	float warp_frequency;
-	int warp_octaves;
-	float warp_strength;
-	float ridge_strength;
-	float continent_share;
-	float plate_bias_share;
-	float belt_width;
-	float plate_phase;
-	float gain;
-	float lacunarity;
-	float continent_bounding;
-	float warp_bounding;
-	float region_frequency;
-	int region_octaves;
-	float region_share;
-	float region_bounding;
-	float mottle_plain_gain;
-} params;
+// **The plan's block and its assembly** live in `surface_params.gdshaderinc`, which the ASSEMBLER places immediately
+// before this file (`SpacesimSurfaceField.source()`) — **not a `#include`**, because a source string handed to
+// `shader_compile_spirv_from_source()` gets no preprocessor: the concatenation is the include mechanism. The same
+// file is placed before `surface_heights_kernel.gdshaderinc`, so the two kernels read one block.
 
 const float SURFACE_PI = 3.141592653589793;
 const float SURFACE_TAU = 6.283185307179586;
@@ -65,29 +38,9 @@ void main() {
 	vec3 direction = vec3(
 		cos_latitude * cos(longitude), sin(latitude), cos_latitude * sin(longitude));
 
-	SurfacePlan plan;
-	plan.seed = params.seed;
-	plan.continent_frequency = params.continent_frequency;
-	plan.continent_octaves = params.continent_octaves;
-	plan.ridge_frequency = params.ridge_frequency;
-	plan.ridge_octaves = params.ridge_octaves;
-	plan.warp_frequency = params.warp_frequency;
-	plan.warp_octaves = params.warp_octaves;
-	plan.warp_strength = params.warp_strength;
-	plan.ridge_strength = params.ridge_strength;
-	plan.continent_share = params.continent_share;
-	plan.plate_bias_share = params.plate_bias_share;
-	plan.belt_width = params.belt_width;
-	plan.plate_phase = params.plate_phase;
-	plan.gain = params.gain;
-	plan.lacunarity = params.lacunarity;
-	plan.continent_bounding = params.continent_bounding;
-	plan.warp_bounding = params.warp_bounding;
-	plan.region_frequency = params.region_frequency;
-	plan.region_octaves = params.region_octaves;
-	plan.region_share = params.region_share;
-	plan.region_bounding = params.region_bounding;
-	plan.mottle_plain_gain = params.mottle_plain_gain;
+	// **The plan, from the shared block** — see `surface_params.gdshaderinc`. Twenty-two assignments used to live
+	// here and in the heights kernel would have been a second copy of them.
+	SurfacePlan plan = surface_plan_params();
 
 	imageStore(out_map, pos, vec4(surface_height(direction, plan, 0.0), 0.0, 0.0, 1.0));
 }

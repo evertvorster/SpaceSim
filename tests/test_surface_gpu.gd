@@ -64,6 +64,54 @@ func run(h, _root: Node) -> void:
 	h.check(gpu.live_rids() == 2,
 		"a bake gives back everything it created — only the shader and pipeline remain (%d live)"
 			% gpu.live_rids())
+
+	# ===== THE HEIGHTS, AND THAT THEY ARE THE SAME FIELD ======================================
+	#
+	# **This is the geometry's height source** (`render.surface_translation`): the field asked at a list of directions
+	# rather than rasterised. Two things have to hold — that it answers at all, and that its answer is the field the
+	# bake and the draw shader see. The second is checked by RECONSTRUCTING the direction of a baked texel's centre,
+	# exactly as the kernel does, and comparing that texel's value with the height asked at that direction: if the two
+	# kernels read different plans, or the plan's block drifted, this is what catches it.
+	var directions := PackedVector3Array()
+	var sampled: Array[Vector3] = []
+	var texels: Array[Vector2i] = []
+	for y in [3, HEIGHT / 4, HEIGHT / 2, (3 * HEIGHT) / 4, HEIGHT - 4]:
+		for x in [2, WIDTH / 4, WIDTH / 2, (3 * WIDTH) / 4, WIDTH - 3]:
+			texels.append(Vector2i(x, y))
+	for texel in texels:
+		var u := (float(texel.x) + 0.5) / float(WIDTH)
+		var v := (float(texel.y) + 0.5) / float(HEIGHT)
+		var latitude := PI * 0.5 - v * PI
+		var longitude := (u - 0.5) * TAU
+		var cos_latitude := cos(latitude)
+		directions.append(Vector3(
+			cos_latitude * cos(longitude), sin(latitude), cos_latitude * sin(longitude)
+		))
+		sampled.append(directions[directions.size() - 1])
+	var heights := gpu.heights(plan, directions)
+	h.check(heights.size() == directions.size(),
+		"the field answers at each direction it was asked (%d of %d)" % [heights.size(), directions.size()])
+	if heights.size() == directions.size():
+		var worst := 0.0
+		var moving := 0.0
+		for index in heights.size():
+			var baked := image.get_pixel(texels[index].x, texels[index].y).r
+			worst = maxf(worst, absf(heights[index] - baked))
+			moving = maxf(moving, absf(heights[index]))
+		# **Half a thousandth, not zero**: the map is `R16F`, so a baked texel is quantised at ~1e-3 of a value about 1.
+		# A wrong plan would be orders of magnitude worse than that, not a little worse.
+		h.check(worst < 2.0e-3,
+			"and it is the field the bake drew, texel for texel (worst %.5f over %d samples)" % [worst, texels.size()])
+		h.check(moving > 0.05, "with a field in it rather than zeros (largest magnitude %.3f)" % moving)
+	h.check(gpu.heights(plan, PackedVector3Array()).is_empty(),
+		"and asking for nothing costs nothing, rather than an error")
+	h.check(gpu.live_rids() == 4,
+		"the heights kernel holds its own shader and pipeline and nothing else (%d live)"
+			% gpu.live_rids())
+	var again := gpu.heights(plan, directions)
+	h.check(again.size() == heights.size() and gpu.live_rids() == 4,
+		"and a second call creates nothing and leaks nothing (%d live)" % gpu.live_rids())
+
 	gpu.close()
 	h.check(gpu.live_rids() == 0,
 		"and closing the device leaves nothing live (%d)" % gpu.live_rids())

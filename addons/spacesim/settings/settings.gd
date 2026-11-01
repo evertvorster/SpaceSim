@@ -131,6 +131,14 @@ const REGISTRY := {
 	# `render.cloud_decks`, which already owns them in every mode.
 	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER},
 	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER},
+	# **The vertices carry the terrain.** On, the surface's points move radially by `(height - sea_level) * amplitude`
+	# — the field asked at each point's own direction on the device (`SpacesimSurfaceGpu.heights`), so there is no
+	# raster and no second implementation of the field. **Off by default while it is proven**: it is one switch so both
+	# pictures can be flown in one session. Evert, 2026-11-01, on where the heights come from: *"Lets try 1."* — the
+	# dispatch, not a texture.
+	#
+	# **It creates no vertices and refines nothing**, and the walk's answer does not depend on it.
+	"render.surface_translation": {"default": false, "scope": Scope.PLAYER},
 	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
 	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
 	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the

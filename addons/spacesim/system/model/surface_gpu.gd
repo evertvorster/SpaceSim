@@ -43,6 +43,10 @@ var _device: RenderingDevice
 var _rids_live := 0
 var _shader: RID
 var _pipeline: RID
+## **The heights pipeline**, compiled from the same field with a different kernel — see [method heights]. Separate
+## shader and pipeline because a compute source is one program, and this one reads a buffer rather than an image.
+var _heights_shader: RID
+var _heights_pipeline: RID
 var _error := ""
 var _tried := false
 ## Where the last bake's time went, in microseconds: `create`, `dispatch`, `readback`. Split before anything
@@ -96,6 +100,12 @@ func open() -> bool:
 ## process teardown **segfaults on exit** (measured 2026-10-17 on the cloud port: exit 139 with no output,
 ## from a probe that had done its work and printed the result). It is an `Object`, so `free()` works.
 func close() -> void:
+	if _device != null and _heights_pipeline.is_valid():
+		_device.free_rid(_heights_pipeline)
+		_rids_live -= 1
+	if _device != null and _heights_shader.is_valid():
+		_device.free_rid(_heights_shader)
+		_rids_live -= 1
 	if _device != null and _pipeline.is_valid():
 		_device.free_rid(_pipeline)
 		_rids_live -= 1
@@ -110,6 +120,8 @@ func close() -> void:
 		)
 	_pipeline = RID()
 	_shader = RID()
+	_heights_pipeline = RID()
+	_heights_shader = RID()
 	if _device != null:
 		_device.free()
 		_device = null
@@ -119,6 +131,96 @@ func close() -> void:
 ## Why [method open] did not work, or an empty string.
 func error() -> String:
 	return _error
+
+
+## **The field's height at each of a list of DIRECTIONS**, on the device that already bakes it.
+##
+## **This is what a vertex is translated by, and it is why there is no raster.** A map answers "the height near
+## (u, v)" on a lattice a mesh has no use for: at 1 km altitude a facet is ~35 m across, so a global map fine enough
+## to carry the mesh is 10^12 texels. The lattice already holds the directions it needs, so they are asked exactly —
+## `surface_height` from the same GLSL the draw shader and the bake run, at `footprint = 0`, which `surface_height`
+## reads as *no limit*: a point's height is a pure function of its direction and never changes when the LOD does.
+##
+## **The calls are render-thread-only** — a local `RenderingDevice` from a `WorkerThreadPool` task does nothing and
+## reports an error per call — so this is called from the main thread, between a build landing and its publish.
+##
+## Returns an empty array when there is no device (headless) or the kernel would not compile; [method error] then says
+## why. The value is the FIELD's, in field units about ±1, not metres and not sea-levelled — the caller scales it.
+func heights(plan_data: SpacesimSurfaceField.Plan, directions: PackedVector3Array) -> PackedFloat32Array:
+	if directions.is_empty() or not _open_heights():
+		return PackedFloat32Array()
+	var count := directions.size()
+	# **Padded to the workgroup**, so the kernel needs no bound and no number in the plan's block. The tail is
+	# discarded on read-back.
+	var padded := ceili(count / 64.0) * 64
+	# `vec4` per direction: std430 gives a `vec3` a 16-byte stride anyway, and saying it explicitly keeps the buffer
+	# the shape the kernel declares.
+	var input := PackedFloat32Array()
+	input.resize(padded * 4)
+	for index in count:
+		var unit := directions[index]
+		input[index * 4] = unit.x
+		input[index * 4 + 1] = unit.y
+		input[index * 4 + 2] = unit.z
+
+	var marker := Time.get_ticks_usec()
+	var in_buffer := _device.storage_buffer_create(input.to_byte_array().size(), input.to_byte_array())
+	var out_buffer := _device.storage_buffer_create(padded * 4)
+	if not in_buffer.is_valid() or not out_buffer.is_valid():
+		_error = "storage_buffer_create() gave an invalid RID"
+		if in_buffer.is_valid():
+			_device.free_rid(in_buffer)
+		if out_buffer.is_valid():
+			_device.free_rid(out_buffer)
+		return PackedFloat32Array()
+	_rids_live += 2
+	last_microseconds["create"] = Time.get_ticks_usec() - marker
+
+	var sets := []
+	for binding in 2:
+		var uniform := RDUniform.new()
+		uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+		uniform.binding = binding
+		uniform.add_id(in_buffer if binding == 0 else out_buffer)
+		sets.append(uniform)
+	var uniform_set := _device.uniform_set_create(sets, _heights_shader, 0)
+	if not uniform_set.is_valid():
+		_error = "uniform_set_create() gave an invalid RID"
+		_device.free_rid(in_buffer)
+		_device.free_rid(out_buffer)
+		_rids_live -= 2
+		return PackedFloat32Array()
+	_rids_live += 1
+
+	# **The plan's block, at the size it declares** — 112 bytes, and the driver rejects anything else. `size` and the
+	# two `vec2`s are the bake's; a heights dispatch passes zeros and never reads them.
+	var params := SpacesimSurfaceField.push_constants(plan_data, 0, 0)
+	var list := _device.compute_list_begin()
+	_device.compute_list_bind_compute_pipeline(list, _heights_pipeline)
+	_device.compute_list_bind_uniform_set(list, uniform_set, 0)
+	_device.compute_list_set_push_constant(list, params, params.size())
+	_device.compute_list_dispatch(list, padded / 64, 1, 1)
+	_device.compute_list_end()
+
+	marker = Time.get_ticks_usec()
+	_device.submit()
+	_device.sync()
+	last_microseconds["dispatch"] = Time.get_ticks_usec() - marker
+	marker = Time.get_ticks_usec()
+	var data := _device.buffer_get_data(out_buffer)
+	last_microseconds["readback"] = Time.get_ticks_usec() - marker
+
+	_device.free_rid(uniform_set)
+	_device.free_rid(in_buffer)
+	_device.free_rid(out_buffer)
+	_rids_live -= 3
+
+	if data.size() != padded * 4:
+		_error = "read back %d bytes for %d heights" % [data.size(), padded]
+		return PackedFloat32Array()
+	var heights := data.to_float32_array()
+	heights.resize(count)
+	return heights
 
 
 ## **A body's whole-surface height map, from the GPU**: `FORMAT_RH`, equirectangular, north at the top row,
@@ -202,6 +304,36 @@ func bake(
 ## call, not a copy of the assembly.
 func _source() -> String:
 	return SpacesimSurfaceField.source()
+
+
+## **The heights kernel's own shader and pipeline**, compiled on first use from the same assembler with the other
+## kernel — and kept for the session, because a geometry rebuild asks for heights on every walk.
+##
+## **Its own `RenderingDevice` is NOT created**: this reuses the one [method open] made, so a scene holds one device
+## and one teardown, which is the shape the RID counter and `close()` already assume.
+func _open_heights() -> bool:
+	if _heights_pipeline.is_valid():
+		return true
+	if not open():
+		return false
+	var source := RDShaderSource.new()
+	source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
+	source.source_compute = SpacesimSurfaceField.source_for_heights()
+	var spirv := _device.shader_compile_spirv_from_source(source)
+	var message := spirv.get_stage_compile_error(RenderingDevice.SHADER_STAGE_COMPUTE)
+	if not message.is_empty():
+		_error = "the heights kernel did not compile: " + message
+		return false
+	_heights_shader = _device.shader_create_from_spirv(spirv)
+	if not _heights_shader.is_valid():
+		_error = "heights: shader_create_from_spirv() gave an invalid RID"
+		return false
+	_heights_pipeline = _device.compute_pipeline_create(_heights_shader)
+	if not _heights_pipeline.is_valid():
+		_error = "heights: compute_pipeline_create() gave an invalid RID"
+		return false
+	_rids_live += 2
+	return true
 
 
 ## How many RIDs the device holds right now. **Zero between bakes**, and the GPU suite asserts it: an
