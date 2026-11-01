@@ -153,10 +153,15 @@ void fragment() {
 		lean += dir * amount;
 		slope += abs(amount);
 	}
-	// **Band-limited by the pixel**, so a distant sea is a smooth sheet rather than a moire of chop: the component is
-	// faded out once its wavelength approaches the pixel's own footprint on the water.
-	float pixel_metres = max(depth * 0.0 + footprint_angle * planet_radius * 2.0, 0.05);
-	float fade = 1.0 - smoothstep(0.15, 0.6, pixel_metres / max(w1 * 0.35, 1.0));
+	// **Band-limited by the pixel**, so a distant sea is a smooth sheet rather than a moire of chop — but the
+	// footprint has to be the one ON THE WATER, which is the DISTANCE to it times the pixel's angle. Measuring it as
+	// `angle x planet_radius` gives 0.001 x 6,371 km — about 6 km a pixel — which is true of nothing and killed every
+	// wave at every altitude. Evert, 2026-11-02: *"the ocean still looks a bit too smooth where I was."*
+	float eye_altitude_m = max((length(body_eye_local) - 1.0) * planet_radius, 0.0);
+	float pixel_metres = max((eye_altitude_m + depth) * footprint_angle, 0.05);
+	// Faded where the wavelength approaches TWO pixels — Nyquist, not a look knob. Anything earlier threw away detail
+	// the screen could still show.
+	float fade = 1.0 - smoothstep(0.35, 1.0, pixel_metres / max(w1, 1.0));
 	vec3 normal = normalize(up - lean * fade);   // body space — see where it is written below
 
 	// ===== THE COLOUR, AND HOW MUCH OF THE FLOOR SHOWS ==================================
