@@ -668,7 +668,13 @@ void main() {
 	// Evert, 2026-11-01: *"if you are outside of the atmosphere looking in, it behaves a certain way, and
 	// when you are in the atmosphere looking out, it behaves in another"* — one pass drawing both halves
 	// after the frame is why: every part of the air landed in front of whatever had been drawn.
-	if (scene_depth > 0.0) {
+	// **Handed over, not merely noted.** With no surface on this pixel the whole column is the sky's, and the sky
+	// shader has already drawn it — behind the geometry, where it belongs. Without this return the air was drawn
+	// twice on every sky pixel: once by the sky shader and once over the frame by this pass.
+	if (scene_depth <= 0.0) {
+		return;
+	}
+	{
 		vec4 unprojected = params.inverse_projection * vec4(pixel_uv * 2.0 - 1.0, scene_depth, 1.0);
 		float surface_distance = length(unprojected.xyz / max(abs(unprojected.w), 1.0e-9));
 		// **No exception for clouds.** The pass stops at whatever is nearest, cloud or ground, because
