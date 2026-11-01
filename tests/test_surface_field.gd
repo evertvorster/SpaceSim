@@ -132,10 +132,16 @@ func _test_plan(h) -> void:
 	# **Radial**: the offset is along the direction and nothing else, so a point's angle is unchanged and its radius
 	# alone moves. A lateral component would shear the mesh and move a shared point's neighbours with it.
 	h.check_near(points[2].normalized().dot(directions[2]), 1.0,
-		"a sunken point stays on its own radial line", 1.0e-9)
-	h.check_near(points[2].length(), 6.371e6 + (-1.0 - sea) * amplitude,
-		"and moves inward by exactly (height - sea) x amplitude (%.0f m)" % ((-1.0 - sea) * amplitude), 0.01)
+		"a raised point stays on its own radial line", 1.0e-9)
+	# **The sea floor does not move, because a liquid is a level.** Anything below the datum is sea, and the sea IS the
+	# datum: its offset is a constant zero. Without this clamp every ocean basin is sunk by its own depth — ~16 km on
+	# Earth — which drops the surface off the walk's cap and leaves a black band at the edge of the geometry, flown on
+	# 2026-11-01. The coast is exact by construction: the offset is zero at the threshold the sea discards on.
+	h.check_near(points[2].length(), 6.371e6,
+		"and a point BELOW the datum does not move at all — the sea floor is the datum, not a basin dredged out of it",
+		0.01)
 	h.check_near(points[3].length(), 6.371e6 + (1.0 - sea) * amplitude,
-		"as a raised one moves outward by the same law (%.0f m)" % ((1.0 - sea) * amplitude), 0.01)
-	h.check(points[3].length() > 6.371e6 and points[2].length() < 6.371e6,
-		"so land stands above the datum and a basin sits below it")
+		"while land above it moves outward by exactly (height - sea) x amplitude (%.0f m)" % ((1.0 - sea) * amplitude),
+		0.01)
+	h.check(points[3].length() > 6.371e6 and points[2].length() == before[2].length(),
+		"so only land rises, and nothing is ever drawn below the sphere every other measurement uses")

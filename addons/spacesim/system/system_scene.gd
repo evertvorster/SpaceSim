@@ -1617,19 +1617,25 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 	arrays[0] = vertices
 
 
-## **Move each vertex along its own direction by `(height - sea_level) * amplitude`** — the dialectic arithmetic, on its
-## own so it can be tested without a rendering device.
+## **Move each vertex along its own direction, upward only, by the height above the datum** — the arithmetic, on its own
+## so it can be tested without a rendering device.
 ##
-## **Pure, and it writes in place.** Two things the test pins: the offset is RADIAL (a shared point cannot be moved two
-## ways by two triangles, because there is one point and one direction), and it is measured **from the datum**, so a
-## vertex whose height is the sea level does not move at all — which is what keeps the coast exact and keeps the ship's
-## altitude, the framings' bands and a deck's condensation level measuring from the sphere they always did.
+## **`max(height - sea_level, 0)` is not a preference, it is what a liquid being a LEVEL means.** Below the datum there is
+## sea, and the sea is the datum: its offset is a constant zero, it never moves, and the land moves around it. Without the
+## clamp every ocean basin is sunk by its own depth — measured at ~16 km on Earth, since sea level sits at the ocean
+## fraction and the field's low half is below it — which drops the whole surface off the walk's cap (cut for the datum
+## sphere) and leaves a black band between the geometry's edge and its horizon. The coast is then exact by construction,
+## because the offset is zero at exactly the threshold the sea discards on.
+##
+## **Pure, and it writes in place.** The offset is RADIAL, so a shared point cannot be moved two ways by two triangles —
+## there is one point and one direction.
 static func offset_vertices(
 	vertices: PackedVector3Array, directions: PackedVector3Array, heights: PackedFloat32Array,
 	sea_level: float, amplitude: float
 ) -> void:
 	for index in vertices.size():
-		vertices[index] += directions[index] * (heights[index] - sea_level) * amplitude
+		var above := maxf(heights[index] - sea_level, 0.0)
+		vertices[index] += directions[index] * above * amplitude
 
 
 ## **The field's heights at a list of directions**, on the scene's own device.
