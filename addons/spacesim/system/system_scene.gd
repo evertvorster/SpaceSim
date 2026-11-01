@@ -918,6 +918,22 @@ func update_sky(camera: Camera3D) -> void:
 	# be dragged while flying.
 	star_sky.set_gain(pow(10.0, float(SpacesimSettings.get_value("sky.star_gain"))))
 	star_sky.update(camera)
+	# **The air the sky draws, which is everything beyond the nearest surface.** The pass keeps the near
+	# half — the air in front of whatever the rasteriser drew — so a cloud on a mesh is seen against this
+	# sky rather than having it painted over its face, which is what made inside and outside disagree.
+	var observer: Vector3 = camera.get_global_transform_interpolated().origin
+	var air := air_for_eye(observer)
+	if air.is_empty() or air.get("body") == null:
+		star_sky.set_air_off()
+	else:
+		var body: SpacesimSceneBody = air["body"]
+		var frame: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
+		star_sky.set_air(
+			air["air"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
+			frame.inverse() * (observer - body.node.global_position),
+			frame.inverse() * (air["sun_direction"] as Vector3),
+			frame.inverse()
+		)
 
 	# **The ambient is that same star field, summed from the catalogue.** Recomputed only when the depth
 	# changes, because the sum walks all 119,613 stars and this runs every frame — a float compare once

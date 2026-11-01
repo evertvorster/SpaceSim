@@ -662,20 +662,19 @@ void main() {
 	// opaque ground.
 	vec2 pixel_uv = (vec2(gl_GlobalInvocationID.xy) + 0.5) / max(params.frame.xy, vec2(1.0));
 	float scene_depth = texture(depth_buffer, pixel_uv).r;
+	// **SKY PIXELS ARE NOT THIS PASS'S ANY MORE.** The air beyond the nearest drawn surface is drawn by
+	// the sky shader, which is behind all geometry; this pass draws the air in FRONT of that surface. If
+	// both drew the whole column the sky would be doubled, so the depth's empty pixels are handed over.
+	// Evert, 2026-11-01: *"if you are outside of the atmosphere looking in, it behaves a certain way, and
+	// when you are in the atmosphere looking out, it behaves in another"* — one pass drawing both halves
+	// after the frame is why: every part of the air landed in front of whatever had been drawn.
 	if (scene_depth > 0.0) {
 		vec4 unprojected = params.inverse_projection * vec4(pixel_uv * 2.0 - 1.0, scene_depth, 1.0);
 		float surface_distance = length(unprojected.xyz / max(abs(unprojected.w), 1.0e-9));
-		float cloud_distance = 1.0e30;
-		if (params.deck.x > 0.0) {
-			vec2 cloud_span = ray_sphere(eye, ray, params.deck.x);
-			if (cloud_span.x > 0.0 && cloud_span.x <= cloud_span.y) {
-				cloud_distance = cloud_span.x;
-			}
-		}
-		// The slab's own thickness is the tolerance: the shell is drawn at its base, and the mesh's own sagitta is
-		// far inside it. A floor of two metres keeps a body with no deck from comparing against nothing.
-		float is_cloud = abs(surface_distance - cloud_distance) < max(params.deck.w * 0.5, 2.0) ? 1.0 : 0.0;
-		if (is_cloud < 0.5 && surface_distance > 0.0 && surface_distance < end) {
+		// **No exception for clouds.** The pass stops at whatever is nearest, cloud or ground, because
+		// everything beyond it is the sky shader's — including the air behind a translucent deck, which is
+		// exactly what it used to lose. That exception was the black fade.
+		if (surface_distance > 0.0 && surface_distance < end) {
 			end = surface_distance;
 		}
 	}

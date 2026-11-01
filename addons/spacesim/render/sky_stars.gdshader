@@ -334,5 +334,5 @@ void sky() {
 	if (u_air_on > 0.5) {
 		air_in_scatter = air_sky(u_to_local * EYEDIR, air_transmittance);
 	}
-	COLOR = (acc / UNIT_LUX_PER_SR) * air_transmittance + air_in_scatter;
+	COLOR = (acc * u_gain / UNIT_LUX_PER_SR) * air_transmittance + air_in_scatter;
 }

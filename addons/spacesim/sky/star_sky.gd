@@ -72,6 +72,39 @@ func set_gain(gain: float) -> void:
 		material.set_shader_parameter("u_gain", gain)
 
 
+## **The body's air, for the far half of the atmosphere the star shader now draws.**
+##
+## Everything here is the physics the atmosphere pass already uses, handed over in the body's own
+## frame: the eye's offset from the body centre, the sun as a direction, and the rotation that turns
+## a world `EYEDIR` into that frame. The shader integrates the air from the camera to the top of the
+## atmosphere, which is everything BEYOND the nearest drawn surface — the pass keeps the near half.
+func set_air(
+	air: Dictionary, planet_radius: float, atmosphere_radius: float,
+	eye_local: Vector3, sun_local: Vector3, to_local: Basis
+) -> void:
+	if material == null:
+		return
+	material.set_shader_parameter("u_air_on", 1.0)
+	material.set_shader_parameter("u_air_rayleigh", air.get("rayleigh", Vector3.ZERO))
+	material.set_shader_parameter("u_air_rayleigh_h", float(air.get("rayleigh_scale_height", 1.0)))
+	material.set_shader_parameter("u_air_absorption", air.get("absorption", Vector3.ZERO))
+	material.set_shader_parameter("u_air_mie", float(air.get("mie", 0.0)))
+	material.set_shader_parameter("u_air_mie_h", float(air.get("mie_scale_height", 1.0)))
+	material.set_shader_parameter("u_air_mie_g", float(air.get("mie_anisotropy", 0.758)))
+	material.set_shader_parameter("u_air_sun_intensity", float(air.get("sun_intensity", 0.0)))
+	material.set_shader_parameter("u_planet_radius", planet_radius)
+	material.set_shader_parameter("u_atmosphere_radius", atmosphere_radius)
+	material.set_shader_parameter("u_eye_local", eye_local)
+	material.set_shader_parameter("u_sun_local", sun_local)
+	material.set_shader_parameter("u_to_local", to_local.orthonormalized())
+
+
+## No atmosphere under the camera: the star sky exactly as it was.
+func set_air_off() -> void:
+	if material != null:
+		material.set_shader_parameter("u_air_on", 0.0)
+
+
 ## Point the sky at a camera.
 ##
 ## Only the **camera basis, the field and the aspect** are handed over. The pixel count is deliberately
