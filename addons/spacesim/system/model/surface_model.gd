@@ -388,16 +388,19 @@ static func bands(
 		return result
 	var thermal := _thermal(body, materials, luminosity, distance)
 	var edge := 0.0
-	# The basins first, in authored order among themselves.
-	for key in body.surface.coverage:
-		var material := _material(materials, key)
-		if material == null or phase_of(material, thermal.x, thermal.y) != Phase.LIQUID:
-			continue
-		var weight := float(body.surface.coverage[key])
-		result.append(_band(material, edge, edge + weight, phase_of(material, thermal.x, thermal.y)))
-		edge += weight
-	# Then the solids, sharing what is above the sea surface in proportion to their own weights — so a
-	# body whose coverage sums to 1.0 does not have its land squeezed by the sea that covers part of it.
+	# **NO LIQUID BAND: the ground draws the sea FLOOR, not the sea.** Evert, 2026-11-01: *"chop out the blue fake
+	# ocean. I'm happy with just sand, we'll do an ocean shader soonish, and it needs to be a little transparent, but
+	# only for where the water is really shallow."*
+	#
+	# The basins used to claim the bottom of the ramp and were coloured as water, which made the lowest ground on the
+	# planet blue — an ocean painted on the *land* shader, with no level, no depth and nothing transparent. A liquid is
+	# a LEVEL and it will be its own layer over this one, so the ramp here is solids only and the sea floor is sand.
+	#
+	# **The solids now span the whole range**, which is the point rather than a side effect: with the basins gone
+	# there is no `edge` for them to start above, so what used to be the sea bed is drawn in the deepest solid a body
+	# has. `sea_level` is untouched — it is the datum a translated vertex measures from, and the ocean layer will
+	# need it — as is every liquid in the coverage, which is what tells the ocean shader where water is.
+	# The solids share the range in proportion to their own weights.
 	var solid_total := 0.0
 	for key in body.surface.coverage:
 		if phase_of(_material(materials, key), thermal.x, thermal.y) != Phase.LIQUID:

@@ -293,20 +293,24 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	h.check(material.get_shader_parameter("coarse_map") == null,
 		"and no second, fixed-resolution map for the colour to fall back to")
 
-	# **The ramp is the derivation's picture**: its bottom is Earth's sea band and its top is its land, in
-	# the order `bands()` put them.
+	# **The ramp is the derivation's picture**: solids only, sand at the bottom and vegetation at the top.
+	# **Its bottom is NOT water any more** (2026-11-01): the liquid band was removed from `bands()`, because a blue
+	# ocean painted on the land shader has no level, no depth and nothing transparent — Evert: *"chop out the blue
+	# fake ocean. I'm happy with just sand."* The ocean gets its own layer.
 	var ramp: ImageTexture = material.get_shader_parameter("colour_ramp")
 	h.check(ramp != null, "and a colour ramp built from the derived bands")
 	if ramp != null:
 		var image := ramp.get_image()
-		var sea := image.get_pixel(0, 0)
+		var floor_colour := image.get_pixel(0, 0)
 		var land := image.get_pixel(image.get_width() - 1, 0)
-		h.check(sea.b > sea.r, "whose bottom is water: blue-dominant (%.3f, %.3f)" % [sea.r, sea.b])
+		h.check(floor_colour.r >= floor_colour.b,
+			"whose bottom is the sea FLOOR, drawn in sand rather than water (%.3f red, %.3f blue)"
+				% [floor_colour.r, floor_colour.b])
 		h.check(land.g > land.b, "and whose top is vegetation: green above blue (%.3f, %.3f)" % [land.g, land.b])
 		# **The luminance is the material's albedo**, which is the correction the bands carry — the authored
 		# palette is 2.3-3.4x brighter than the reflectance it claims.
-		h.check(sea.get_luminance() < 0.12,
-			"with the sea at its own darker reflectance (%.3f)" % sea.get_luminance())
+		h.check(floor_colour.get_luminance() < 0.35,
+			"at the solids' own darker reflectance (%.3f)" % floor_colour.get_luminance())
 
 	# **There is ONE surface layer, and it draws the whole sphere.** The sea's layer is gone (2026-10-28): a liquid is
 	# a level, and the layer that drew it was a second material over the same triangles, which the plateau could afford

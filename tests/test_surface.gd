@@ -434,20 +434,25 @@ func _test_bands(h, sol: SpacesimSolarSystem, materials: SpacesimMaterialTable) 
 	var sea_level := SpacesimSurfaceModel.sea_level_percentile(earth, materials, luminosity, distance)
 	h.check_near(sea_level, 0.708, "Earth's sea level is the %.3f of the surface that is under water" % sea_level, 1.0e-6)
 
+	# **THE BANDS ARE SOLIDS ONLY (2026-11-01).** Evert: *"chop out the blue fake ocean. I'm happy with just sand,
+	# we'll do an ocean shader soonish."* The liquid used to claim the bottom of the ramp and was coloured as water,
+	# which painted an ocean on the LAND shader — no level, no depth, nothing transparent. A liquid is a level and
+	# gets its own layer, so the land's ramp is rock, sand and vegetation and no water.
 	var bands := SpacesimSurfaceModel.bands(earth, materials, luminosity, distance)
-	h.check(bands.size() == 3, "and its three materials make three bands (%d)" % bands.size())
-	if bands.size() != 3:
+	h.check(bands.size() == 2, "Earth's two solids make two bands, and the ocean makes none (%d)" % bands.size())
+	if bands.size() != 2:
 		return
-	# Contiguous from the bottom to the top, in the authored order, with the liquid first.
 	var edge := 0.0
 	for band in bands:
 		h.check_near(float(band["from"]), edge, "%s starts where the band below it ended" % band["material"], 1.0e-9)
 		edge = float(band["to"])
-	h.check_near(edge, 1.0, "and the bands cover the whole distribution", 1.0e-9)
-	h.check(String(bands[0]["material"]) == "ocean", "the liquid fills the basins, so it is the lowest band")
-	h.check_near(float(bands[0]["to"]), 0.708, "up to exactly the sea level", 1.0e-6)
-	h.check(String(bands[1]["material"]) == "regolith" and String(bands[2]["material"]) == "vegetation",
-		"and the solids stack in the order the content writes them")
+	h.check_near(edge, 1.0, "and the solids span the whole distribution, sea bed included", 1.0e-9)
+	h.check(String(bands[0]["material"]) == "regolith" and String(bands[1]["material"]) == "vegetation",
+		"the deepest solid is the sand the sea floor is drawn in, then the land")
+	# **The liquid is still in the CONTENT** — the ocean layer will need to know where water is, and `sea_level` is
+	# the datum every translated vertex measures from. It is the *ramp* that no longer draws it.
+	h.check(earth.surface.coverage.has("ocean"),
+		"while the coverage still carries the ocean, which the ocean layer will read")
 
 	# **The colour correction, asserted where it matters.** Every band's luminance is its material's albedo,
 	# so the ramp cannot draw a planet brighter than the light budget believes it is.
@@ -461,11 +466,11 @@ func _test_bands(h, sol: SpacesimSolarSystem, materials: SpacesimMaterialTable) 
 		h.check(absf(colour.b - material.color.b * scale) < 1.0e-6,
 			"with its hue kept rather than greyed")
 
-	# A liquid's shading is what makes it read as water.
-	h.check(float(bands[0]["roughness"]) < 0.2 and float(bands[0]["specular"]) > 0.4,
-		"and the sea is glossy (roughness %.2f, specular %.2f)" % [bands[0]["roughness"], bands[0]["specular"]])
-	h.check(float(bands[2]["roughness"]) > 0.8 and float(bands[2]["specular"]) < 0.3,
-		"while land is not")
+	# **And nothing in the ramp is glossy any more**, because the only glossy phase was the sea.
+	for band in bands:
+		h.check(float(band["roughness"]) > 0.8 and float(band["specular"]) < 0.3,
+			"%s is land, not water (roughness %.2f, specular %.2f)"
+				% [band["material"], band["roughness"], band["specular"]])
 
 	# A body with no surface register has no bands at all.
 	var jupiter := sol.body_by_id("planet:jupiter")
