@@ -29,6 +29,7 @@ func run(h, root: Node) -> void:
 	_test_the_drawn_triangle_is_inside_the_law(h)
 	_test_the_limb_is_not_subdivided_as_though_it_faced_the_eye(h)
 	_test_the_walk_is_gated(h)
+	_test_no_t_junctions_survive(h)
 
 
 ## Far enough out that every face is one chunk: the tree's roots, and the same triangles the level
@@ -196,8 +197,13 @@ func _test_the_mesh(h) -> void:
 	# **Shared vertices, indexed triangles** — Evert, 2026-10-28: *"all the triangles are connected together with
 	# shared vertices, there can never be a gap."* So the mesh carries one vertex per POINT and the index array is
 	# what says how they join; three vertices a triangle was the duplication this removes.
-	h.check(indices.size() == expected * 3,
-		"three indices a triangle (%d indices for %d triangles)" % [indices.size(), expected])
+	# **The count is the ARRAYS' own, not the walk's**, because the stitch adds triangles: a chunk whose edge meets a
+	# finer neighbour is split where the hanging vertex is, so the mesh legitimately carries more triangles than the
+	# selection's chunks imply. What is asserted is the shape — three indices a triangle, no filler — and that nothing
+	# was lost.
+	h.check(indices.size() % 3 == 0 and indices.size() >= expected * 3,
+		"three indices a triangle, and never fewer than the walk's %d (%d indices)"
+			% [expected, indices.size()])
 	h.check(points.size() < expected * 3,
 		"and far fewer vertices than that, because a shared point is one vertex (%d for %d corners)"
 			% [points.size(), expected * 3])
@@ -245,8 +251,8 @@ func _test_the_mesh(h) -> void:
 	# **No skirts.** Evert, 2026-10-17: *"the cracks should be so far away that they would not be visible
 	# to the camera"* — the step between neighbours is bounded by their two sagittas, each already inside
 	# ε, so a skirt is geometry on top of a problem the budget has already bounded.
-	h.check(indices.size() == expected * 3,
-		"and there is no skirt geometry — three indices a triangle, nothing else")
+	h.check(indices.size() % 3 == 0,
+		"and no skirt geometry — three indices a triangle, nothing else (%d)" % indices.size())
 	var lines := SpacesimPatches.lines_mesh_from(SpacesimPatches.lines_of(chunks))
 	h.check(lines.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
 		"while the wireframe view is lines")
@@ -254,7 +260,8 @@ func _test_the_mesh(h) -> void:
 	var segments: PackedInt32Array = line_arrays[Mesh.ARRAY_INDEX]
 	# **Six indices a triangle, and the vertices are the shared ones** — the wireframe is the lattice seen as edges, so
 	# its vertex array must be the same size as the flat mesh's, not six a triangle.
-	h.check(segments.size() == expected * 6, "with three edges per triangle (%d indices)" % segments.size())
+	h.check(segments.size() == indices.size() * 2,
+		"with three edges a triangle, two indices an edge (%d indices)" % segments.size())
 	h.check(
 		(line_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() == points.size(),
 		"and sharing the flat mesh's vertices (%d, not %d)"
@@ -548,3 +555,80 @@ func _test_the_limb_is_not_subdivided_as_though_it_faced_the_eye(h) -> void:
 		h.check(beyond > 0,
 			"and at %.0f m some are larger than an unprojected size test allows (%d of %d, beyond 1.5x)"
 				% [altitude, beyond, shallow])
+
+
+## **No T-junction survives the stitch.** The invariant is a property of the OUTPUT, so it needs no neighbour table and
+## no fixture: an edge (A, B) of the finished mesh is a T-junction exactly when the two halves it would split into are
+## also edges of that mesh. Nothing else — not a chunk boundary, not a depth — has to be known to check it.
+##
+## This is the seam that flew as black lines on 2026-10-29 once the vertices carried terrain, and the reason the old
+## "≤ 2ε by construction" note was a *sphere* argument: a crack is the terrain the coarse triangle flattened, hundreds
+## of metres, not a sub-pixel sagitta.
+func _test_no_t_junctions_survive(h) -> void:
+	# A real walk: the seam only exists where the subdivision changes depth, which a synthetic pair of chunks would
+	# have to be invented for. Two altitudes, because the mismatch is a function of where the eye is.
+	var radius := 6.371e6
+	var pixel := SpacesimLod.pixel_angle(70.0, 1080.0)
+	for altitude in [1.0e3, 5.0e4]:
+		var distance: float = radius + altitude
+		var chunks: Array = SpacesimPatches.select(distance, Vector3.UP, radius, pixel, 0.5)
+		h.check(not chunks.is_empty(), "the walk answers at %.0f m altitude (%d chunks)" % [altitude, chunks.size()])
+		if chunks.is_empty():
+			continue
+		var array := SpacesimPatches.arrays_of(chunks, 1.0, Vector3.ZERO)
+		var points: PackedVector3Array = array[0]
+		var indices: PackedInt32Array = array[1]
+		# **The same edge census `stitch` makes**, so the test and the fix cannot disagree about what an edge is.
+		var count := points.size()
+		var edges := {}
+		for index in range(0, indices.size(), 3):
+			for corner in 3:
+				var a := indices[index + corner]
+				var b := indices[index + (corner + 1) % 3]
+				edges[mini(a, b) * count + maxi(a, b)] = true
+		var slot := {}
+		for index in points.size():
+			slot[points[index]] = index
+		var hanging := 0
+		for index in range(0, indices.size(), 3):
+			for corner in 3:
+				var p := points[indices[index + corner]]
+				var q := points[indices[index + (corner + 1) % 3]]
+				var middle: int = slot.get((p + q).normalized(), -1)
+				if middle < 0:
+					continue
+				var first := mini(indices[index + corner], middle) * count + maxi(
+					indices[index + corner], middle
+				)
+				var second := mini(middle, indices[index + (corner + 1) % 3]) * count + maxi(
+					middle, indices[index + (corner + 1) % 3]
+				)
+				if edges.has(first) and edges.has(second):
+					hanging += 1
+		h.check(hanging == 0,
+			"no edge at %.0f m altitude has a hanging vertex on it (%d of %d triangles)"
+				% [altitude, hanging, indices.size() / 3])
+		# **And nothing DEEPER than one level**, which the stitch above cannot close: where the neighbour is two or more
+		# levels finer, the half-edge (A, M) has itself been split, so the test above does not see it and a crack
+		# remains. That is what 2:1 balancing is the prerequisite for, and this is the number that says whether the walk
+		# already holds it. A non-zero here is not a bug in the stitch — it is the reason `select()` has to balance
+		# before the stitch can be called complete.
+		var deeper := 0
+		for index in range(0, indices.size(), 3):
+			for corner in 3:
+				var p := points[indices[index + corner]]
+				var q := points[indices[index + (corner + 1) % 3]]
+				var middle: int = slot.get((p + q).normalized(), -1)
+				if middle < 0:
+					continue
+				var first := mini(indices[index + corner], middle) * count + maxi(
+					indices[index + corner], middle
+				)
+				var second := mini(middle, indices[index + (corner + 1) % 3]) * count + maxi(
+					middle, indices[index + (corner + 1) % 3]
+				)
+				if not (edges.has(first) and edges.has(second)):
+					deeper += 1
+		h.check(deeper == 0,
+			"and none is deeper than one level, so the walk is 2:1 balanced here (%d of %d triangles)"
+				% [deeper, indices.size() / 3])

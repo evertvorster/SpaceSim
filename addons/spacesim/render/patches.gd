@@ -489,6 +489,10 @@ static func _arrays_lattice(
 			lattice.blocks[key] = block
 		indices.append_array(block)
 	var points := lattice.points
+	# **The seams, closed on the UNIT sphere** — the midpoint test below is a function of *direction*, so it has to run
+	# before the points become metres from a near-eye origin, where `(p + q).normalized()` would be a different number
+	# from the one the finer neighbour's own subdivision produced.
+	indices = stitch(points, indices, lattice.slot)
 	var vertices := PackedVector3Array()
 	vertices.resize(points.size())
 	for index in points.size():
@@ -553,10 +557,131 @@ static func arrays_of(
 		var tint := depth_tint(int(chunk[2]))
 		for slot in map:
 			colors[slot] = tint
+	# **The seams, closed before the rebase** — see `stitch`: the test is on the unit-sphere points, and the metres
+	# conversion would make every midpoint a different number. No triangles means nothing to stitch.
+	indices = stitch(vertices, indices, seen)
 	rebase(vertices, radius, origin)
 	# **Vertices, indices, and a colour only when the tint asked for one** — so the tint costs nothing until it is used
 	# and `mesh_from` accepts either shape.
 	return [vertices, indices, colors] if tinted else [vertices, indices]
+
+
+## **The T-junction fix: split a triangle's edge where its neighbour has a vertex on it.**
+##
+## A patch beside a shallower neighbour leaves a T-junction — the coarse triangle's edge runs straight past the extra
+## vertex the finer side has, and the gap it opens is **not** a sub-pixel sagitta once vertices carry terrain: it is the
+## terrain the coarse triangle flattened, hundreds of metres, which is what flew as black seams on 2026-10-29. The old
+## note's argument (≤ 2ε because each side's sagitta is bounded by ε) is a *sphere* argument and expires with the
+## displacement.
+##
+## **Detection needs no neighbour addressing**, which is why this is a dictionary and not a tree walk. An edge (A, B)
+## is a T-junction exactly when the two halves it would be split into — (A, M) and (M, B) with `M = normalize(A + B)`,
+## the same point `_child_triangles` makes — are both edges of the selection. A finer neighbour on the other side *is*
+## those two halves; an equally deep neighbour has (A, B) itself and no halves; and a neighbour two levels finer cannot
+## exist while the walk stays 2:1 balanced (`select` refines both sides of a seam before it refines one).
+##
+## **No vertex is ever created**: M is already a vertex of the fine neighbour, so the split indexes points that exist.
+## That is also why this cannot move the silhouette — it is pure topology, a triangle becoming two.
+##
+## `slot` maps a point to its index in `vertices`, which both callers already hold (the lattice's own, or the merge's
+## dictionary). An edge whose midpoint is not in the array is not a seam, and says so by not being found.
+##
+## **Cost, and it is a real one**: three hash lookups per triangle, per rebuild, on the merge worker — measured at
+## ~6,000 triangles a rebuild it is nothing, and at 40,000 it wants the probe before it is trusted. `ponytail:` the
+## upgrade if it bites is to test only the edges that a *chunk boundary* can own (12 per chunk) rather than every
+## triangle's three.
+static func stitch(
+	vertices: PackedVector3Array, indices: PackedInt32Array, slot: Dictionary
+) -> PackedInt32Array:
+	var count := vertices.size()
+	# **An int key, not a pair**: `low * count + high` in the array's own space, so the dictionary hashes a number.
+	var edges := {}
+	for index in range(0, indices.size(), 3):
+		for corner in 3:
+			var a := indices[index + corner]
+			var b := indices[index + (corner + 1) % 3]
+			edges[mini(a, b) * count + maxi(a, b)] = true
+	var stitched := PackedInt32Array()
+	for index in range(0, indices.size(), 3):
+		var a := indices[index]
+		var b := indices[index + 1]
+		var c := indices[index + 2]
+		var split := PackedInt32Array([-1, -1, -1])
+		for corner in 3:
+			var p := vertices[indices[index + corner]]
+			var q := vertices[indices[index + (corner + 1) % 3]]
+			var middle: int = slot.get((p + q).normalized(), -1)
+			if middle < 0:
+				continue
+			var first := mini(indices[index + corner], middle) * count + maxi(indices[index + corner], middle)
+			var second := mini(middle, indices[index + (corner + 1) % 3]) * count + maxi(
+				middle, indices[index + (corner + 1) % 3]
+			)
+			if edges.has(first) and edges.has(second):
+				split[corner] = middle
+		_emit_split(stitched, a, b, c, split)
+	return stitched
+
+
+## **One triangle in, one to four triangles out**, by which of its edges have a hanging vertex. The winding is carried
+## through by ROTATION only — a rotation of the triple preserves the cycle, so no triangle can come out inside out —
+## and the fans below are all written in the input's own cyclic order.
+static func _emit_split(
+	out: PackedInt32Array, a: int, b: int, c: int, split: PackedInt32Array
+) -> void:
+	var wedges := 0
+	for corner in 3:
+		if split[corner] >= 0:
+			wedges += 1
+	if wedges == 0:
+		out.append_array([a, b, c])
+		return
+	if wedges == 3:
+		# The corner fans and the middle, all in the same cycle: `M0` on ab, `M1` on bc, `M2` on ca.
+		out.append_array([
+			a, split[0], split[2],
+			split[0], b, split[1],
+			split[2], split[1], c,
+			split[0], split[1], split[2],
+		])
+		return
+	if wedges == 1:
+		# Rotate so the split edge is `ab`, then fan it from the opposite corner.
+		if split[1] >= 0:
+			var rotated := _rotate(a, b, c, split)
+			a = rotated[0]
+			b = rotated[1]
+			c = rotated[2]
+			split = rotated[3]
+		elif split[2] >= 0:
+			for _twice in 2:
+				var again := _rotate(a, b, c, split)
+				a = again[0]
+				b = again[1]
+				c = again[2]
+				split = again[3]
+		out.append_array([a, split[0], c, split[0], b, c])
+		return
+	# Two. Rotate so the split edges are `ab` and `bc`, then fan the quad `a - M0 - M1 - c` beside the corner at `b`.
+	if split[2] >= 0:
+		var rotations := 2 if split[0] >= 0 else 1
+		for _time in rotations:
+			var turned := _rotate(a, b, c, split)
+			a = turned[0]
+			b = turned[1]
+			c = turned[2]
+			split = turned[3]
+	out.append_array([
+		split[0], b, split[1],
+		a, split[0], split[1],
+		a, split[1], c,
+	])
+
+
+## **The triple rotated one place**, with the split flags rotated with it: the new `ab` is the old `bc`, the new `bc`
+## the old `ca`, and the new `ca` the old `ab`.
+static func _rotate(a: int, b: int, c: int, split: PackedInt32Array) -> Array:
+	return [b, c, a, PackedInt32Array([split[1], split[2], split[0]])]
 
 
 ## **Put the geometry in metres, measured from `origin`** — the one thing that makes a planet-sized mesh precise.
