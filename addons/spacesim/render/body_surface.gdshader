@@ -285,8 +285,12 @@ void fragment() {
 		AO = star_transmission(up, body_sun, footprint_angle);
 		AO_LIGHT_AFFECT = 1.0;
 		// **A cloud's shadow multiplies the star's rather than replacing it** — a deck cannot make the sun rise.
+		// **This point's own height above the datum**, which is what tells the shadow whether this ground is under
+		// the cloud or standing up through it. `VERTEX + patch_origin` is the position relative to the body's
+		// centre — the lattice is metres from a near-eye origin, and the origin is published beside it.
+		float ground_altitude = length(VERTEX + patch_origin) - planet_radius;
 		if (deck_shadow_present()) {
-			AO *= deck_shadow_factor(up, planet_radius);
+			AO *= deck_shadow_factor(up, planet_radius, ground_altitude);
 		}
 		SPECULAR = land_specular;
 		// **A specular highlight is a BEAM, and the composite's `1 - alpha` is the deck's DIFFUSE transmittance.**

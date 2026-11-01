@@ -59,6 +59,13 @@ uniform vec3 body_eye_local = vec3(0.0, 0.0, 2.0);
 // **The upgrade path is written down rather than implied**: when the lighting plan gives the ambient an actual
 // sky to come from, this floor should go and the ambient should simply be lit by what is above it.
 uniform float deck_shadow_floor : hint_range(0.0, 1.0) = 1.0;
+// **The deck's BASE above the datum, in metres.** The shadow needs it because a shadow only exists where the ground
+// is *below* the cloud: land that stands up through the band is not under it, and shading a summit that is inside
+// the cloud draws a contour along every ridge that crosses the base.
+uniform float deck_base = 0.0;
+// How far below the base the shadow fades out, in metres. Soft, for the same reason: a hard cut at the crossing is
+// a visible line, and the terrain crosses it at every ridge.
+const float DECK_BASE_FADE = 150.0;
 
 // **The deck's detail ladder, so the shadow is the image of the SAME field the cloud draws.** These are the
 // deck's own numbers, published beside the map: a shadow that sampled only the map would be blotchy where the
@@ -160,6 +167,9 @@ float deck_specular_share(vec3 p, vec3 to_eye, float planet_radius) {
 // How much of the star's light reaches a point whose unit direction is `p`, **after the floor** — the number
 // the caller writes into `AO`. The transmittance itself is the return of `deck_transmittance()` below, kept
 // separate so the concession and the physics are not the same expression.
-float deck_shadow_factor(vec3 p, float planet_radius) {
-	return mix(deck_shadow_floor, 1.0, deck_transmittance(p, planet_radius));
+float deck_shadow_factor(vec3 p, float planet_radius, float altitude) {
+	// **The ground's own height decides whether there is a shadow to cast on it.** Above the base there is none;
+	// below it, the deck's transmittance stands, faded in over `DECK_BASE_FADE` so the crossing is not a line.
+	float under = 1.0 - smoothstep(deck_base - DECK_BASE_FADE, deck_base, altitude);
+	return mix(1.0, mix(deck_shadow_floor, 1.0, deck_transmittance(p, planet_radius)), under);
 }

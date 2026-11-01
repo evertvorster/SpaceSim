@@ -1485,7 +1485,7 @@ func _publish_deck_shadow(
 	# shadow now thresholds the same map the deck draws, so it cannot be a different cloud from the one overhead.
 	SpacesimBodyRenderer.apply_deck_shadow(
 		body.mesh_material, texture, width, threshold, deck.shadow_tau,
-		deck.height + deck.thickness
+		deck.height + deck.thickness, deck.height
 	)
 
 

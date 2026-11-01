@@ -452,7 +452,8 @@ static func face_deck(material: Material, eye_offset: Vector3) -> void:
 ## bright as the cloud's albedo would make it, which is what "the multiply-scattered light" means without a
 ## multiple-scattering model this project does not have.
 static func apply_deck_shadow(
-	material: Material, texture: Texture2D, width: int, threshold: float, tau: float, height: float
+	material: Material, texture: Texture2D, width: int, threshold: float, tau: float, height: float,
+	base: float = 0.0
 ) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null or tau <= 0.0 or height <= 0.0:
@@ -465,6 +466,7 @@ static func apply_deck_shadow(
 	surface.set_shader_parameter("deck_threshold", threshold)
 	surface.set_shader_parameter("deck_tau", tau)
 	surface.set_shader_parameter("deck_height", height)
+	surface.set_shader_parameter("deck_base", base)
 	surface.set_shader_parameter("deck_shadow_floor", DECK_SHADOW_FLOOR)
 
 
