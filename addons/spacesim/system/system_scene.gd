@@ -530,6 +530,9 @@ func _build_body(body: SpacesimSceneBody) -> void:
 		body.ocean_material.set_shader_parameter("sea_level", body.sea_level)
 		body.ocean_material.set_shader_parameter("planet_radius", body.radius)
 		body.ocean_material.set_shader_parameter("field_amplitude", body.surface_plan.amplitude)
+		body.ocean_material.set_shader_parameter(
+			"sky_tint", SpacesimBodyRenderer.sky_reflection_tint(body.air)
+		)
 		body.ocean = _add_body_mesh(body.node, body.ocean_material, "%sOcean" % body.name)
 	# **The datum lattice's own node**, wearing the wireframe material for its whole life: it is a debug view and never
 	# anything else (see `sphere`). Built with no mesh, like the surface, and published by the same poll from the same

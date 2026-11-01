@@ -536,6 +536,16 @@ static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
 	return material
 
 
+## **The colour the sea reflects**, from the body's own air: the Rayleigh coefficients are the sky's hue by
+## derivation (1/lambda^4), so a redder sky reflects red for the same reason the sky is blue. Normalised to unit
+## brightness, because the shader scales it — a reflectance, not a radiance.
+static func sky_reflection_tint(air: Dictionary) -> Color:
+	var rayleigh: Vector3 = air.get("rayleigh", Vector3.ZERO)
+	if rayleigh.length() <= 0.0:
+		return Color(0.20, 0.42, 0.90)
+	return Color(rayleigh.x, rayleigh.y, rayleigh.z).srgb_to_linear() / maxf(rayleigh.length(), 1.0e-9)
+
+
 ## **The reflectance a deck is drawn at**, so that its *average* is the calibrated albedo while its thick tops
 ## are as near white as the budget allows.
 ##

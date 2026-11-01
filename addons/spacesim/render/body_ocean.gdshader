@@ -43,8 +43,21 @@ uniform float field_amplitude = 1.0;
 // **The liquid's own numbers**, from `SpacesimSurfaceModel.band_color` and `band_shading`, with the colour's
 // luminance set to its albedo the way every surface band is drawn.
 uniform vec3 ocean_color = vec3(0.02, 0.06, 0.12);
-uniform float ocean_roughness : hint_range(0.0, 1.0) = 0.08;
-uniform float ocean_specular : hint_range(0.0, 1.0) = 0.5;
+uniform float ocean_roughness : hint_range(0.0, 1.0) = 0.05;
+uniform float ocean_specular : hint_range(0.0, 1.0) = 0.65;
+
+// **THE SKY THE SEA REFLECTS, because a sea is mostly a mirror and not a paint.** Evert, 2026-11-01: *"the water
+// looked too dark, I did not get any reflections of the sun on it."*
+//
+// Both are the same fault: the sea was being drawn as a **dark diffuse surface**. `ocean_color` is the liquid's band
+// colour normalised to its own albedo — about 0.06 for water, which is *correct* and almost black once the light loop
+// multiplies it — and a dielectric with `metallic = 0` has nothing else to give. What a real sea does is reflect the
+// sky at grazing angles and drink it at the zenith, which is Fresnel, and no amount of albedo produces it.
+//
+// `sky_tint` is the air's own hue — the Rayleigh coefficients, which are the sky's colour by derivation rather than
+// a blue someone picked — published by the host. `reflection_gain` is the one free number.
+uniform vec3 sky_tint = vec3(0.20, 0.42, 0.90);
+uniform float reflection_gain : hint_range(0.0, 2.0) = 1.0;
 
 // **How deep the water has to be before it stops showing the floor**, in metres. Evert: *"a little transparent, but
 // only for where the water is really shallow."* Fully opaque by this depth, and never fully clear even at the water's
@@ -142,6 +155,15 @@ void fragment() {
 	NORMAL = normal;
 	ROUGHNESS = mix(0.02, ocean_roughness, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
 	SPECULAR = ocean_specular;
+	// **Fresnel, in the shader because there is no sky probe to reflect yet.** Grazing view -> the sky, straight down
+	// -> the water's own dark colour: `pow(1 - cos, 5)` is the dielectric's own law, and it is what makes a sea read
+	// as a surface rather than as a blue floor.
+	float facing = clamp(dot(normal, eye_direction), 0.0, 1.0);
+	float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+	// Written into `EMISSION` for the same reason the deck's base is: it is light arriving from the sky, not light
+	// the engine can compute from a light source. It is not multiplied by `AO` either, which is the point — the sky
+	// above still reaches the water when the ground beside it is in shadow.
+	EMISSION = sky_tint * fresnel * reflection_gain;
 
 	// **The same light path the land takes.** The star's own occlusion, the air on the way in (brightness into `AO`
 	// because a specular is built from the light, hue into the albedo), and a cloud's shadow on the water.
