@@ -123,6 +123,22 @@ const float SURFACE_TAU = 6.283185307179586;
 // reaches a point can be invented by its normal.
 const float MAP_MAX_TILT = 0.35;
 
+// **How hard the light is told about hills the geometry does not carry.** Evert, 2026-11-01: *"I liked that shading
+// trick, we can put some of that back in."* With a displaced mesh the shape is real, so this is no longer standing in
+// for absent geometry — it is an *exaggeration* of the shape that is there, and it has to stay small enough that the
+// mountain is not counted twice. 2.0 leans the normal by at most `atan(2 x MAP_MAX_TILT)` ~ 35 degrees.
+//
+// **Two things the first version did that this one must not**, both recorded where it was deleted:
+//
+// 1. it took the gradient from a SECOND evaluation of the height at an octave count that stepped with the pixel
+//    footprint, so the shading jumped in rings around the sub-camera point — *"little black triangles in rings"*.
+//    Here the gradient is of the height already computed for the colour: one sampling, one octave set, nothing to
+//    step.
+// 2. it tilted by `max(height - sea_level, 0)`, which is C0 but not C1 — the slope at a coastline is enormous, the
+//    normal tips past vertical, and the shore drew as a black ring. The field itself is smooth, so the tilt uses the
+//    field and the coastline has no kink to fall into.
+uniform float relief_exaggeration : hint_range(0.0, 6.0) = 2.0;
+
 // Model space, and **on this lattice it is METRES, not a unit sphere**: a vertex is measured from an origin near the
 // eye, so a point's direction from the body's centre is `VERTEX + patch_origin` — which is why the normal is derived
 // here rather than uploaded (a normal per vertex in every upload was 12.9-13.5 ms of `mesh_from` on the device).
@@ -255,6 +271,35 @@ void fragment() {
 		// body has almost no pixels to spend it on.
 		SurfacePlan plan = surface_plan();
 		float height = surface_height(up, plan, footprint_angle);
+
+		// ===== THE RELIEF, LEANING THE LIGHT =====================================================
+		//
+		// **The gradient of the height already in hand**, projected onto the tangent plane and taken off the normal.
+		// `dFdx(up)` and `dFdy(up)` are the screen-space steps across the sphere, so a 2x2 solve turns the height's
+		// screen derivatives into a gradient *on the surface* — no tangent attribute, and no second sampling of the
+		// field. Length-clamped, because a slope steeper than `MAP_MAX_TILT` is one the geometry is already showing.
+		if (relief_exaggeration > 0.0) {
+			vec3 n = NORMAL;
+			vec3 t1 = normalize(cross(n, abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+			vec3 t2 = cross(n, t1);
+			vec3 dux = dFdx(up);
+			vec3 duy = dFdy(up);
+			float a = dot(dux, t1);
+			float b = dot(dux, t2);
+			float c = dot(duy, t1);
+			float d = dot(duy, t2);
+			float det = a * d - b * c;
+			if (abs(det) > 1.0e-12) {
+				float dhx = dFdx(height);
+				float dhy = dFdy(height);
+				vec3 gradient = ((d * dhx - b * dhy) / det) * t1 + ((a * dhy - c * dhx) / det) * t2;
+				float lean = length(gradient);
+				if (lean > MAP_MAX_TILT) {
+					gradient *= MAP_MAX_TILT / lean;
+				}
+				NORMAL = normalize(n - relief_exaggeration * gradient);
+			}
+		}
 
 		// The colour, from the ramp the derivation built, indexed by the field's own value.
 		float ramp_position = clamp(height * 0.5 + 0.5, 0.0, 1.0);

@@ -94,12 +94,20 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 	# normal tilted by the field's gradient (`relief_exaggeration`), which was relief the geometry did not have.
 	h.check(not code.contains("VERTEX +="),
 		"the vertex stage moves no height into the position, because the geometry carries it")
-	# **The uniforms, not the bare names** — the comment that records what was deleted names them, and a check on the
-	# word would fail on its own explanation.
-	h.check(
-		not code.contains("uniform float relief_exaggeration")
-			and not code.contains("uniform float relief_max_tilt"),
-		"and the normal is the geometric one, not the field's gradient tilted by a look number")
+	# **The tilt is BACK (2026-11-01), deliberately, and bounded.** Evert: *"I liked that shading trick, we can put
+	# some of that back in."* With the shape in the mesh it is an exaggeration of relief that exists rather than a
+	# substitute for relief that does not — so what is pinned is no longer its absence but the two faults the first
+	# version had:
+	h.check(code.contains("uniform float relief_exaggeration"),
+		"the normal may lean by a look number, as an exaggeration of the geometry's own relief")
+	# **ONE sampling of the field.** The first version took its gradient from a second evaluation at an octave count
+	# that stepped with the pixel footprint, and the shading jumped in rings. The height computed for the colour is
+	# the only one the tilt may differentiate.
+	h.check(code.count("surface_height(") == 1,
+		"and it differentiates the height already computed, not a second evaluation that steps in rings (%d call)"
+			% code.count("surface_height("))
+	h.check(code.contains("MAP_MAX_TILT / lean"),
+		"with the lean clamped, so a slope steeper than the map's ceiling cannot tip the normal")
 	h.check(code.contains("NORMAL = unit_position"),
 		"which is set in `vertex()` from the direction, because the mesh carries no normal array")
 	# **Absences, each one a mechanism that existed only to work around a raster.**
