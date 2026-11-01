@@ -87,15 +87,21 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 		"the footprint is analytic: the pixel's angle over the view cosine")
 	h.check(not code.contains("length(dFdx(up))"),
 		"and never a derivative of the mesh, which changes when the patching does")
-	# **The vertex displacement, pinned as a FORM** — its behaviour is a flight, because headless Godot compiles no
-	# shader and draws nothing, so all a headless check can catch is the line going missing or losing its gate. Two
-	# things about it are requirements rather than style: the offset is `(height - sea_level)`, because a bare height
-	# stands the land above the sphere every other measurement uses, and it is RADIAL, so a shared point cannot be
-	# displaced two ways by two triangles.
-	h.check(code.contains("VERTEX += unit_position * (height - sea_level) * field_amplitude"),
-		"the ground's height moves the vertex, radially, measured from the datum")
-	h.check(code.contains("if (surface_displaced > 0.5)"),
-		"and only when the displacement is switched on")
+	# **The shader draws a FLAT picture, and that is a requirement, not a style.** Evert, 2026-11-01: *"the surface
+	# shader here is still trying to do that fake height thing ... That flat texture is what we are after, as that is
+	# what we want to be sampling to copy and move the vertexes for the surface mesh."* So both stand-ins are pinned
+	# as ABSENT — the vertex displacement (`8817f82`, superseded: the translation is the mesh's, on the CPU) and the
+	# normal tilted by the field's gradient (`relief_exaggeration`), which was relief the geometry did not have.
+	h.check(not code.contains("VERTEX +="),
+		"the vertex stage moves no height into the position, because the geometry carries it")
+	# **The uniforms, not the bare names** — the comment that records what was deleted names them, and a check on the
+	# word would fail on its own explanation.
+	h.check(
+		not code.contains("uniform float relief_exaggeration")
+			and not code.contains("uniform float relief_max_tilt"),
+		"and the normal is the geometric one, not the field's gradient tilted by a look number")
+	h.check(code.contains("NORMAL = unit_position"),
+		"which is set in `vertex()` from the direction, because the mesh carries no normal array")
 	# **Absences, each one a mechanism that existed only to work around a raster.**
 	for gone in [
 		"height_map", "tile_map", "tile_count", "height_smooth(", "banded_detail(",
@@ -269,8 +275,9 @@ func _test_surface_is_derived(h, earth: SpacesimSceneBody, luna: SpacesimSceneBo
 	h.check(material.get_shader_parameter("planet_radius") == earth.radius,
 		"the shader is told the body's radius, which is what turns the field's gradient into a slope")
 	var plan := SpacesimSurfaceField.plan(earth.content.id, earth.radius)
-	h.check_near(float(material.get_shader_parameter("field_amplitude")), plan.amplitude,
-		"and the relief amplitude the plan derives (%.0f m)" % plan.amplitude, 1.0)
+	h.check(not is_nan(plan.amplitude) and plan.amplitude > 0.0,
+		"and the plan still derives the relief amplitude (%.0f m), which is what the geometry will translate by"
+			% plan.amplitude) 
 	# **No map at all, in either direction.** The shader's only sampler is the colour ramp, and the field is
 	# evaluated per pixel — so a `height_map` or a `coarse_map` would be a raster coming back in by the side door.
 	h.check(material.get_shader_parameter("height_map") == null,
@@ -1129,15 +1136,9 @@ func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -
 func _test_shader_defaults_are_the_hosts(h) -> void:
 	var surface := "res://addons/spacesim/render/body_surface.gdshader"
 	var pairs := [
-		[surface, "relief_exaggeration", SpacesimBodyRenderer.RELIEF_EXAGGERATION],
-		[surface, "relief_max_tilt", SpacesimBodyRenderer.RELIEF_MAX_TILT],
 		# The fallback when a publish is missed: a 1080-line 70-degree frame's centre pixel, the same unit
 		# `SpacesimLod.pixel_angle` works in — not zero, which would ask for unbounded detail.
 		[surface, "pixel_angle", SpacesimLod.pixel_angle(70.0, 1080.0)],
-		# **The vertex stage's footprint**, and the same rule at a different consumer: a vertex has no derivatives, so
-		# the field is asked at the subdivision's own angle. Not zero — `surface_height` reads zero as *no limit*, and
-		# a missed publish would then ask every vertex for the whole spectrum.
-		[surface, "facet_angle", SpacesimPatches.FACET_ANGLE],
 		["res://addons/spacesim/render/body_deck.gdshader", "softness", SpacesimBodyRenderer.DECK_SOFTNESS],
 	]
 	for pair in pairs:

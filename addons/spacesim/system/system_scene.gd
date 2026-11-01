@@ -68,9 +68,6 @@ var _deepest := 0
 var _depth_tint := false
 ## The `flat` mode in force, for the same reason as the tint: a uniform write per body per frame is pointless work.
 var _flat_shaded := true
-## Whether the ground's vertices are displaced, in force. The third of the surface's flags, and the only one whose
-## subject is the GEOMETRY rather than the shading — the walk's own answer is untouched by it.
-var _surface_displaced := false
 ## The frame the last `update_lod` ran in, so a change of frame can be seen and paid for.
 var _last_frame_id := ""
 ## The star depth the ambient was last summed to. The ambient is the star field's own illuminance, and
@@ -1089,26 +1086,18 @@ func _count_drawn_triangles() -> int:
 ## trap.
 func _publish_surface_flags() -> void:
 	var wanted := bool(SpacesimSettings.get_value("render.depth_tint"))
-	var displaced := bool(SpacesimSettings.get_value("render.surface_displacement"))
-	if wanted == _depth_tint and flat_shaded == _flat_shaded and displaced == _surface_displaced:
+	if wanted == _depth_tint and flat_shaded == _flat_shaded:
 		return
 	# **The tint's colour lives in the arrays**, so a change has to rebuild them — through the walk gate above, which
 	# compares `_depth_tint`; `flat` is a uniform and only ever changes a branch in the fragment.
 	_depth_tint = wanted
 	_flat_shaded = flat_shaded
-	_surface_displaced = displaced
 	for body in bodies:
 		var material := body.mesh_material as ShaderMaterial
 		if material == null:
 			continue
 		material.set_shader_parameter("tint_amount", 1.0 if wanted else 0.0)
 		material.set_shader_parameter("flat_mode", 1.0 if flat_shaded else 0.0)
-		# **A pair of uniforms that must not disagree**: the vertices move, and the normal stops being exaggerated,
-		# because with the shape present a tilted normal counts the mountain twice and reads as crumpled paper.
-		material.set_shader_parameter("surface_displaced", 1.0 if displaced else 0.0)
-		material.set_shader_parameter(
-			"relief_exaggeration", 1.0 if displaced else SpacesimBodyRenderer.RELIEF_EXAGGERATION
-		)
 	# **The colour lives in the arrays now, so a tint change has to rebuild them — but through the walk gate, not from
 	# here.** Requesting a build in this function left a pool task holding the scene after teardown, which segfaults at
 	# exit (measured: 997 checks passed, then exit 139); the gate is drained by `await_patch_builds` on `tree_exiting`,

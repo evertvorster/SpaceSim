@@ -43,27 +43,6 @@ const SURFACE_SPECULAR := 0.15
 ## simply lit by what is above it.
 const DECK_SHADOW_FLOOR := 0.45
 
-## **How much the height gradient tilts the normal.** A real planet's relief is 0.14 % of its radius, so its
-## slopes are a fraction of a degree and the shading they cast is invisible at any distance — the geometry is
-## honest and the picture is flat. This is the named concession, and it is a *uniform* rather than a constant
-## in the shader so the host owns it and it can be tuned.
-##
-## **5.0, down from 12, because 12 lit the coastlines on the night side.** The exaggeration tilts the normal of
-## a sphere that has no relief; past a certain tilt the fiction beats the geometry, and the symptom is a thin
-## dotted glow tracing every coast in the dark — the coast being the only steep place, and the *interiors*
-## staying correctly black. The shader also clamps the tilt at 19° for the same reason.
-const RELIEF_EXAGGERATION := 5.0
-
-
-## **A ceiling on how far the detail may tilt a normal.** A bump's dark side drawn as absolute black is the
-## missing sky as much as the relief — with no air above it, nothing lifts a shadow — so the fiction may lean
-## only so far before it becomes a hole.
-##
-## (There was a second decay here, `RELIEF_GAIN`, that quartered each rung's relief amplitude. It existed to stop
-## an inflated ladder shading like a bed of black pits, and it went with that ladder: the field's own spectrum
-## already halves the amplitude per octave, so the slope of a fine octave is half the coarse one's for free.)
-const RELIEF_MAX_TILT := 0.6
-
 ## Texels in the colour ramp. **256 along the height axis** is finer than any band edge needs (a band edge
 ## interpolates the measured quantiles, so it is not quantised by this), and it is one row: the ramp is a
 ## lookup table, not a texture.
@@ -309,10 +288,6 @@ static func surface_material(
 	material.shader = SURFACE_SHADER
 	material.set_shader_parameter("colour_ramp", ramp)
 	material.set_shader_parameter("planet_radius", body.radius)
-	material.set_shader_parameter(
-		"field_amplitude", SpacesimSurfaceField.plan(body.id, body.radius).amplitude
-	)
-	material.set_shader_parameter("relief_exaggeration", RELIEF_EXAGGERATION)
 	var plan := SpacesimSurfaceField.plan(body.id, body.radius)
 	# **The field's own numbers, and now the WHOLE plan** — the shader evaluates the field itself, so every number the
 	# bake compiles has to reach it or the two are different fields. Only the fields `surface_height` reads are here;
@@ -340,11 +315,6 @@ static func surface_material(
 	material.set_shader_parameter("field_mottle_plain_gain", plan.mottle_plain_gain)
 	material.set_shader_parameter("field_gain", plan.gain)
 	material.set_shader_parameter("field_lacunarity", plan.lacunarity)
-	material.set_shader_parameter("relief_max_tilt", RELIEF_MAX_TILT)
-	# **The subdivision's own angular limit, handed to the vertex stage** — a vertex has no derivatives, so the field is
-	# asked at the rate the TRIANGLES can carry rather than the pixel's, and that rate is the walk's own constant. One
-	# publish, because it is a constant of the engine rather than of the body.
-	material.set_shader_parameter("facet_angle", SpacesimPatches.FACET_ANGLE)
 	material.set_shader_parameter("land_roughness", SURFACE_ROUGHNESS)
 	material.set_shader_parameter("land_specular", SURFACE_SPECULAR)
 	material.set_shader_parameter("base_color", body.color)
