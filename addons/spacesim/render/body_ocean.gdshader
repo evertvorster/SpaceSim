@@ -157,7 +157,7 @@ void fragment() {
 	// faded out once its wavelength approaches the pixel's own footprint on the water.
 	float pixel_metres = max(depth * 0.0 + footprint_angle * planet_radius * 2.0, 0.05);
 	float fade = 1.0 - smoothstep(0.15, 0.6, pixel_metres / max(w1 * 0.35, 1.0));
-	vec3 normal = normalize(up - lean * fade);
+	vec3 normal = normalize(up - lean * fade);   // body space — see where it is written below
 
 	// ===== THE COLOUR, AND HOW MUCH OF THE FLOOR SHOWS ==================================
 	// **The shallow/deep ramp, in metres** — the same two ends the old layer used.
@@ -169,7 +169,12 @@ void fragment() {
 	float alpha = mix(shore_alpha, 1.0, smoothstep(0.0, shallow_depth, depth));
 	ALBEDO = water;
 	ALPHA = alpha;
-	NORMAL = normal;
+	// **`NORMAL` IS VIEW SPACE IN THE FRAGMENT STAGE.** The land can write a body-space direction into it because it
+	// does so in `vertex()`, where `NORMAL` is model space; here the same assignment made the lighting depend on where
+	// the camera was POINTING — Evert, 2026-11-02: *"there seems to be a light spot that moves around when I rotate
+	// rather than translate the camera"* — and it also darkened the whole sea, because a body-space vector read as a
+	// view-space one faces away from the sun most of the time. The transform is what makes it a normal again.
+	NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(normal, 0.0)).xyz);
 	ROUGHNESS = mix(0.02, ocean_roughness, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
 	SPECULAR = ocean_specular;
 	// **Fresnel, in the shader because there is no sky probe to reflect yet.** Grazing view -> the sky, straight down
