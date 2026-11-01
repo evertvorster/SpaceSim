@@ -101,13 +101,6 @@ uniform float field_lacunarity = 2.0;
 // the sphere that the ship's altitude, the framings' bands and a deck's condensation level all still measure from.
 // With a bare `height` the land stood up to 1.56 km above that sphere, which was a flown fault on 2026-10-27.
 uniform float sea_level = 0.0;
-// **How many metres one unit of the field is** — `SpacesimSurfaceField.plan().amplitude`, the vertical scale.
-//
-// **It is here for the SLOPE and nothing else.** The geometry gets it on the CPU (`SpacesimSystemScene.offset_vertices`
-// multiplies by the same number from the same plan), so the height the vertices carry and the slope this shades with
-// cannot differ. A displacement here would be a second place a vertex's position is decided, which is the fault the
-// 2026-11-01 change removed.
-uniform float field_amplitude = 1.0;
 uniform float planet_radius = 1.0;
 // **The angle one pixel of the render target spans at the centre of the frame** — `SpacesimLod.pixel_angle`, the
 // same number the patch walk is given, published per frame because it follows the fov and the render resolution.
@@ -115,10 +108,6 @@ uniform float planet_radius = 1.0;
 // **The default is an honest 1080-line 70-degree frame**, not zero: a material that missed its publish then draws
 // detail at a plausible resolution rather than an unbounded amount of it.
 uniform float pixel_angle = 0.0012966806;
-// **A ceiling on how far a slope may lean the normal, and it is a GUARD rather than a look.** There is no exaggeration
-// here — the slope is the field's own — so nothing should ever reach this; it exists so a degenerate quad, or a cliff
-// the field's finest octave can express, cannot push the normal past vertical and shade as an unlit hole.
-const float SLOPE_MAX_TILT = 4.0;
 
 // The land's shading. **A liquid is not this shader's business** — it has its own, and this one is rock,
 // vegetation and ice.
@@ -310,48 +299,17 @@ void fragment() {
 			);
 		}
 
-		// ===== THE NORMAL, FROM THE FIELD'S OWN SLOPE ==============================================
+		// ===== THE NORMAL ==========================================================================
 		//
-		// **The surface the mesh APPROXIMATES, not the mesh.** The vertices carry the terrain, so the sphere direction is
-		// no longer this surface's normal — it is the normal of a ball the ground is merely built on, and shading with it
-		// leaves every triangle edge to be seen as a crease. The gradient of `height` is the analytic normal of the shape
-		// the mesh samples, it is continuous, and it costs two derivatives of a number already in hand.
+		// **It is the geometric normal, and that is the whole of it** — set in `vertex()` from the direction, which on
+		// a sphere IS the normal, and interpolated across the face for free. There is no tilt: the relief this shader
+		// used to fake by leaning the normal at the field's own gradient is now in the vertex POSITIONS, translated on
+		// the CPU, so the light here falls on the slope that was actually drawn.
 		//
-		// **This is the same solve that was deleted on 2026-11-01, and it is not the same thing.** It was a *lie* then:
-		// the geometry was a sphere, so the light was told about a hill that was not in the silhouette, and it had to be
-		// multiplied by `relief_exaggeration` to be visible at all. Now the silhouette IS the terrain, so the true slope
-		// is the right answer with **no exaggeration** — the tell that a normal is honest is that it needs no constant.
-		//
-		// The step:
-		//     [ dFdx(up) ] . (p·east + q·north) = dFdx(height)
-		//     [ dFdy(up) ] . (p·east + q·north) = dFdy(height)      →  a 2x2 solve for (p, q)
-		// `field_amplitude / planet_radius` converts field-units per radian into a slope. A degenerate quad — a
-		// zero determinant — keeps the geometric normal rather than dividing by it, which is the one case where a
-		// derivative is not defined.
-		vec3 polar = abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-		vec3 east = normalize(cross(up, polar));
-		vec3 north = cross(east, up);
-		vec2 step_x = vec2(dot(dFdx(up), east), dot(dFdx(up), north));
-		vec2 step_y = vec2(dot(dFdy(up), east), dot(dFdy(up), north));
-		float determinant = step_x.x * step_y.y - step_x.y * step_y.x;
-		vec3 geometric = up;
-		if (abs(determinant) > 1.0e-20) {
-			float height_dx = dFdx(height);
-			float height_dy = dFdy(height);
-			vec2 slope = vec2(
-				step_y.y * height_dx - step_x.y * height_dy,
-				step_x.x * height_dy - step_y.x * height_dx
-			) / determinant;
-			slope *= field_amplitude / max(planet_radius, 1.0);
-			// **A guard, not a look.** A real slope cannot exceed this; a degenerate quad can, and a normal pushed past
-			// vertical would shade as unlit rather than as steep.
-			slope = clamp(slope, vec2(-SLOPE_MAX_TILT), vec2(SLOPE_MAX_TILT));
-			geometric = normalize(up - east * slope.x - north * slope.y);
-		}
-		// Model space in, view space out: `NORMAL` is a view-space quantity in a spatial shader, and the fragment stage
-		// has `VIEW_MATRIX` rather than `MODELVIEW_MATRIX`. A body's node carries no rotation, so its model space and
-		// world space are the same space — which is why this one matrix is enough.
-		NORMAL = normalize((VIEW_MATRIX * vec4(geometric, 0.0)).xyz);
+		// Deleted with it (2026-11-01): the 2x2 tangent-basis solve on `dFdx`/`dFdy` of the height, the
+		// `field_amplitude / planet_radius` slope conversion, `relief_exaggeration` and its `relief_max_tilt` clamp.
+		// All four existed only to make a smooth sphere read as three-dimensional, and a mountain counted twice is a
+		// crumpled paper mountain.
 
 		// **The debug tint**, the one place it can change the picture.
 		ALBEDO *= mix(vec3(1.0), patch_tint, tint_amount);

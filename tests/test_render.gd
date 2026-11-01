@@ -94,21 +94,12 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 	# normal tilted by the field's gradient (`relief_exaggeration`), which was relief the geometry did not have.
 	h.check(not code.contains("VERTEX +="),
 		"the vertex stage moves no height into the position, because the geometry carries it")
-	# **The normal IS taken from the field's slope, and the tell is that it needs no exaggeration.** It was deleted on
-	# 2026-11-01 as a lie — the geometry was a sphere, so the light heard about a hill that was not in the silhouette —
-	# and reinstated the same day once the vertices carried the terrain: the analytic normal of the shape the mesh
-	# samples is continuous, so it hides the facets, and being honest it is multiplied by nothing.
-	h.check(code.contains("dFdx(height)") and code.contains("dFdy(height)"),
-		"the normal comes from the field's own slope, which is the surface the mesh approximates")
-	h.check(not code.contains("uniform float relief_exaggeration")
-		and not code.contains("uniform float relief_max_tilt"),
-		"with no exaggeration and no look clamp: the slope is the slope, and the clamp is a degenerate-quad guard")
-	# **And the slope's vertical scale is the same number the geometry was moved by**, published from the same plan —
-	# a second value there would let the drawn height and the shaded slope disagree.
-	h.check_near(
-		float((earth.mesh_material as ShaderMaterial).get_shader_parameter("field_amplitude")),
-		SpacesimSurfaceField.plan(earth.content.id, earth.radius).amplitude,
-		"and its vertical scale is the plan's own amplitude", 1.0)
+	# **The uniforms, not the bare names** — the comment that records what was deleted names them, and a check on the
+	# word would fail on its own explanation.
+	h.check(
+		not code.contains("uniform float relief_exaggeration")
+			and not code.contains("uniform float relief_max_tilt"),
+		"and the normal is the geometric one, not the field's gradient tilted by a look number")
 	h.check(code.contains("NORMAL = unit_position"),
 		"which is set in `vertex()` from the direction, because the mesh carries no normal array")
 	# **Absences, each one a mechanism that existed only to work around a raster.**
