@@ -145,3 +145,19 @@ func _test_plan(h) -> void:
 		0.01)
 	h.check(points[3].length() > 6.371e6 and points[2].length() == before[2].length(),
 		"so only land rises, and nothing is ever drawn below the sphere every other measurement uses")
+
+	# **And on a BARREN body the clamp does nothing, which is the case this surface is for.** `sea_level_percentile`
+	# returns the LIQUID fraction of a body's coverage, so a world with no liquid gets 0 and its datum resolves to
+	# `value_at(0)` — the field's own floor. Every point is then at or above the datum, so the surface keeps all of its
+	# relief and the lowest ground touches the sphere. A clamp that "flattened the low ground" on an airless world would
+	# be the sea mechanism leaking into a surface that has none.
+	var barren := before.duplicate()
+	var floor := -1.0
+	var field_heights := PackedFloat32Array([floor, floor, -0.5, 0.5])
+	SpacesimSystemScene.offset_vertices(barren, directions, field_heights, floor, amplitude)
+	h.check_near(barren[0].length(), 6.371e6,
+		"on a barren body the lowest ground sits ON the datum, unclamped", 0.01)
+	h.check_near(barren[2].length(), 6.371e6 + 0.5 * amplitude,
+		"and every point keeps its own relief above it (%.0f m)" % (0.5 * amplitude), 0.01)
+	h.check(barren[2].length() > before[2].length() and barren[3].length() > before[3].length(),
+		"which is the whole point: no ground is flattened away on a world with no sea")

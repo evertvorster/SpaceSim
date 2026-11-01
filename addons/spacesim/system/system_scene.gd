@@ -1617,15 +1617,24 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 	arrays[0] = vertices
 
 
-## **Move each vertex along its own direction, upward only, by the height above the datum** — the arithmetic, on its own
-## so it can be tested without a rendering device.
+## **Move each vertex along its own direction, upward only, by its height above the DATUM** — the arithmetic, on its
+## own so it can be tested without a rendering device.
 ##
-## **`max(height - sea_level, 0)` is not a preference, it is what a liquid being a LEVEL means.** Below the datum there is
-## sea, and the sea is the datum: its offset is a constant zero, it never moves, and the land moves around it. Without the
-## clamp every ocean basin is sunk by its own depth — measured at ~16 km on Earth, since sea level sits at the ocean
-## fraction and the field's low half is below it — which drops the whole surface off the walk's cap (cut for the datum
-## sphere) and leaves a black band between the geometry's edge and its horizon. The coast is then exact by construction,
-## because the offset is zero at exactly the threshold the sea discards on.
+## **The rule is "nothing is drawn below the datum", and the datum is per body.**
+##
+## This is **not a sea mechanism** — the surface is the same surface a barren world gets, and there is no liquid in it. The
+## datum is whatever `sea_level` resolves to for that body, which `SpacesimSurfaceModel.sea_level_percentile` derives as
+## the LIQUID fraction of its coverage:
+##
+## - **a body with an ocean**: the datum is the sea's surface, which is a *level* — it does not move, and the land rises
+##   around it. The coast is then exact by construction, because the offset is zero at exactly the threshold the sea
+##   discards on;
+## - **a barren body**: the liquid fraction is 0, so the datum is the field's own floor and the clamp never bites — the
+##   lowest ground sits on the datum and everything else stands above it.
+##
+## On a watery body the clamp is not cosmetic: without it every basin is dredged out by its own depth (~16 km on Earth,
+## measured after the 2026-11-01 flight put the surface off the walk's cap in a black band), while the sea itself must
+## not move at all.
 ##
 ## **Pure, and it writes in place.** The offset is RADIAL, so a shared point cannot be moved two ways by two triangles —
 ## there is one point and one direction.
