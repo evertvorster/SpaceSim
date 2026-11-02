@@ -898,6 +898,17 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		body.content, materials, light.x, light.y
 	)
 	var morphology := SpacesimCloudModel.morphology(body.content, materials, light.x, light.y)
+	# **A FEATURELESS body draws no cloud BAND at all.** Evert, 2026-11-03: *"There still seems to be a band for the
+	# atmosphere on Venus. That needs to be removed, as if it had no cloud band."* The verdict already says the band
+	# scale is the planet — one cell, no structure — and a shell at one altitude is exactly the thing that verdict
+	# denies: an unbroken shroud has no base, no top and no edge to see. So nothing is built, and what draws Venus is
+	# its air (`air_shell.gdshader`), the same as any other body's.
+	#
+	# **The consequence, stated rather than discovered**: the deck was also where the shroud's brightness came from,
+	# and a 92-bar CO2 atmosphere is known to render far too dark under single scattering (`Atmospheres` §13, Venus
+	# at tau 16.6). If Venus comes out black, the fix is in the air's scattering, not a band put back.
+	if morphology.banding == SpacesimCloudModel.Banding.FEATURELESS:
+		return
 	var unclaimed := SpacesimCloudModel.layers(
 		body.content.atmosphere, materials, gravity, equilibrium, body.content
 	)
@@ -910,16 +921,6 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		deck.level = level
 		deck.height = level.height
 		deck.thickness = level.thickness
-		# **A FEATURELESS deck is the whole air, not a skin in it.** `Banding.FEATURELESS` means the band scale is
-		# the planet — one cell, no structure, "a nearly unbroken bright shroud" on Venus — and the condensate law
-		# answers a different question: how deep the condensate itself is, which comes out at a few kilometres
-		# whether the body is Earth (a thin deck in a clear sky) or Venus (an overcast with nothing above it).
-		# Evert, 2026-11-03: *"With a [shroud] atmosphere the cloud shell should basically be the entire
-		# atmosphere, no?"* — for this verdict it should, so the slab runs from its base to the top of the air and
-		# the deck stops reading as a floating shell. The GEOMETRY is unchanged (a deck is drawn at its base; the
-		# thickness is a shading quantity), so what this changes is how opaque the layer is where it covers.
-		if morphology.banding == SpacesimCloudModel.Banding.FEATURELESS:
-			deck.thickness = maxf(body.sky_top - deck.height, deck.thickness)
 		deck.coverage = clouds.coverage_at(index)
 		deck.albedo = clouds.albedo_at(index)
 		deck.palette = _cloud_palette(clouds, index, materials)
