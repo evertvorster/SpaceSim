@@ -29,9 +29,14 @@ func run(h, _root: Node) -> void:
 	var gpu := SpacesimSurfaceGpu.new()
 	if not gpu.open():
 		# **The reported absence, not a silent skip** — the same rule the cloud suite follows, so a run that
-		# never reached a device says so rather than looking green.
-		h.check(not gpu.error().is_empty(), "without a rendering device the reason is reported: %s" % gpu.error())
-		print("    (skipped the bake: no rendering device — run tests/gpu_check.sh)")
+		# never reached a device says so rather than looking green. **Note what this check can and cannot say**:
+		# it asserts that a REASON was reported, not which one, so a shader that will not compile satisfies it.
+		# That is how the surface bake skipped itself for a day (a) and the run still looked healthy (b) — the
+		# guard for the second half is `tests/gpu_check.sh` refusing the skip, and the guard for the first is the
+		# `surface_field.gdshaderinc` uniform check in `test_render`.
+		h.check(not gpu.error().is_empty(),
+			"when the device or its kernel is unavailable, the reason is reported: %s" % gpu.error())
+		print("    (skipped the bake: no usable rendering device — run tests/gpu_check.sh)")
 		return
 	h.check(gpu.live_rids() == 2,
 		"an open device holds the shader and the pipeline, and nothing else (%d live)" % gpu.live_rids())

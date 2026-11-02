@@ -52,6 +52,15 @@ if grep -q "skipped the comparison" "$LOG"; then
 	exit 1
 fi
 
+# **And so is a skipped BAKE, which has its own wording.** The surface suite prints `skipped the bake` where the
+# cloud suite prints `skipped the comparison`, so the guard above could not see it: a surface kernel that would not
+# compile skipped itself, the run reported 0 failed, and the geometry silently lost its height source for a day.
+if grep -q "skipped the bake" "$LOG"; then
+	echo "FAILED: the surface bake did not run, so the GPU path was not exercised"
+	grep -E "skipped the bake|did not compile" "$LOG" | head -5
+	exit 1
+fi
+
 # And the suite must actually have run: a filter that matches nothing reports `0 checks, 0 failed`, which
 # is the success message of a run that tested nothing at all.
 if ! grep -q "texels differ" "$LOG"; then

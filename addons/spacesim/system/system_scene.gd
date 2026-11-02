@@ -53,6 +53,11 @@ var _distributions := SpacesimSurfaceDistribution.new()
 ## body at build and that device is closed straight after, where a translation happens on every walk for the whole
 ## session. One device must not be freed while the other still wants it.
 var _heights_gpu: SpacesimSurfaceGpu
+## **Whether the heights have ever come back empty, so the reason is said once.** A translation that cannot get heights
+## draws the whole ground on the datum, which is a perfectly plausible picture of a body with no terrain — so the one
+## thing that made the 2026-11-01 kernel failure expensive was that it looked like a design choice. The failure is
+## silent in the draw path and loud only in the reason `SpacesimSurfaceGpu.error()` already carries.
+var _translation_failed_reported := false
 ## **The baked cloud maps, one cache for the whole system** — keyed `(body, layer)`, so a stack is entries
 ## rather than a second cache. Unlike the surface's, this one stays open: it has no local `RenderingDevice` of
 ## its own beyond the one `SpacesimCloudGpu` opens for a bake, and a deck refines on approach like the ground.
@@ -1707,6 +1712,14 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 		directions[index] = (vertices[index] + origin).normalized()
 	var heights := _surface_heights(body, directions)
 	if heights.size() != directions.size():
+		# **Say it, once.** No heights means the vertices stay on the datum and the ground draws as a smooth sphere —
+		# a picture that is not obviously wrong, which is why this went unnoticed for a day while the heights kernel
+		# did not compile. The reason is the device's own, and it is the only place it is said.
+		if not _translation_failed_reported:
+			_translation_failed_reported = true
+			print("TRANSLATE: %s has no heights, so its ground is drawn on the datum — %s" % [
+				body.name, _heights_gpu.error() if _heights_gpu != null else "no device"
+			])
 		return
 	offset_vertices(vertices, directions, heights, body.sea_level, body.surface_plan.amplitude)
 	arrays[0] = vertices
