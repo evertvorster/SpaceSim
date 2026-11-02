@@ -95,6 +95,15 @@ var _ambient_depth := -1.0
 var _epoch_time: float = 0.0
 ## The star as a light source; null until build(). The node is `star_light.light`.
 var star_light: SpacesimStarLight
+## **One light per illuminating body, for what it reflects onto the body it orbits.** Evert, 2026-11-03: *"I would
+## like bodies like the moon's reflected light to be a light source on the dark side of earth… just add the light to
+## the scene so I can watch a yellow moon rise and see its light in the shadows on the dark side of a planet."*
+##
+## The strength is `body_luminance` with the PARENT standing where the observer stands — the same expression the
+## point of light uses, so a moon drawn as a splat and the same moon lighting the planet cannot disagree — divided
+## by the moon's solid angle at the parent, since what lights a surface is irradiance and not the disc's luminance.
+## Each record is `{light, body, parent}`.
+var reflected_lights: Array[Dictionary] = []
 ## Triangles in the geometry the last `update_lod` left in place — the instrument the plan's first trap
 ## names: if this does not move when a body's screen size does, the policy is not being consulted.
 var _triangles := 0
@@ -276,6 +285,43 @@ func aim_sun_at(position: Vector3) -> void:
 	if star_body != null and star_body.node != null:
 		origin = star_body.node.global_position
 	star_light.aim_at(position, origin)
+	_update_reflected_lights(position, origin)
+
+
+## **What each body reflects onto the body it orbits**, aimed from that body to the eye and dosed in lux.
+##
+## The luminance is `body_luminance` with the PARENT as the observer — one expression, shared with the point of
+## light — and the irradiance at the parent is that luminance times the body's solid angle there:
+##
+##     E = disc_luminance(illuminance_at(body), albedo, phase(body, parent, star)) * pi * (R_body / d)^2
+##
+## Full Luna delivers about 0.22 lux to Earth against a measured 0.25, which is the calibration.
+func _update_reflected_lights(observer: Vector3, star_position: Vector3) -> void:
+	for record in reflected_lights:
+		var light: DirectionalLight3D = record["light"]
+		var body: SpacesimSceneBody = record["body"]
+		var parent: SpacesimSceneBody = record["parent"]
+		if body.node == null or parent.node == null:
+			continue
+		var to_body := body.node.global_position - observer
+		if to_body.length_squared() <= 0.0:
+			continue
+		# The moon, seen from the body it lights — which is the phase that decides whether it lights it at all.
+		var luminance := body_luminance(body, parent.node.global_position, star_position)
+		var span := (body.node.global_position - parent.node.global_position).length()
+		if span <= 0.0:
+			continue
+		var solid_angle := PI * pow(body.radius / span, 2.0)
+		light.light_intensity_lux = luminance * solid_angle
+		# **From the body toward the eye**, which is `-to_body`: `looking_at` puts the light's -Z along the vector
+		# given, and a light travels the way it shines. The sign is the whole of whether a moon rise lights anything.
+		var direction := -to_body.normalized()
+		var up := Vector3.UP
+		if absf(direction.dot(up)) > 0.999:
+			up = Vector3.RIGHT
+		light.global_transform = light.global_transform.looking_at(
+			light.global_position + direction, up
+		)
 
 
 func star() -> SpacesimSceneBody:
@@ -682,6 +728,21 @@ func _add_lighting() -> void:
 		star_radius = star_body.radius
 	star_light = SpacesimStarLight.new()
 	star_light.create(container, luminosity, temperature, star_radius)
+	# **A light for every body that lights something.** One directional light each, unshadowed, and its colour is
+	# the body's own reflectance — which is what makes a rise read as *that* moon and not as a second sun.
+	for child in bodies:
+		if child.parent_id.is_empty() or child.content == null:
+			continue
+		var parent := body_by_id(child.parent_id)
+		if parent == null:
+			continue
+		var light := DirectionalLight3D.new()
+		light.name = "ReflectedLight_%s" % child.name
+		light.light_color = child.color if child.color.a > 0.0 else Color.WHITE
+		light.shadow_enabled = false
+		light.light_intensity_lux = 0.0
+		container.add_child(light)
+		reflected_lights.append({"light": light, "body": child, "parent": parent})
 
 	var environment := Environment.new()
 	# **The background is the real sky.** It used to be `BG_COLOR` with `Color(0.01, 0.012, 0.02)` — a
