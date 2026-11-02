@@ -1122,16 +1122,20 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# visible thing and a ball under it would only hide it.
 		var wire_sphere := bool(SpacesimSettings.get_value("render.wireframe_sphere"))
 		var wire_surface := bool(SpacesimSettings.get_value("render.wireframe_surface"))
-		# **The ground is not drawn, everywhere.** Evert, 2026-11-02: *"Lets hide it everywhere like I asked."*
-		# The vertex sphere is still BUILT and still published — the decks and the sea are copies of its ARRAYS,
-		# never of this node, so nothing downstream changes — and the wireframe view still draws it, because there
-		# the lattice is the subject rather than a picture.
+		# **A body with no surface draws no ground, because it has none.** Evert, 2026-11-02: *"You can hide it on
+		# planets with no surface."* The vertex sphere still EXISTS and is still built — the decks and the sea are
+		# copies of its ARRAYS, not of this node, so hiding it costs them nothing — and the wireframe view still
+		# shows it, because there the lattice is the thing being looked at rather than a picture.
 		#
-		# What that leaves in the rendered view: this node was the terrain — the displaced copy of the lattice —
-		# so no body draws its ground now. Earth and Mars are the visible cases; Saturn and Venus were the two that
-		# prompted it, a sphere showing through cloud where nothing should be seen.
+		# What it was doing until now: filling the gaps where a deck's coverage is below 100%, in a colour derived
+		# from the body's own gases. On Saturn that is H2/He, so a pale blue ball with a faceted silhouette sat just
+		# under the clouds. If the gaps read badly with it gone, the fallback is to put it back at the DEEPEST deck's
+		# radius in that deck's own `cloud_color` — an interior, not a surface.
+		var has_surface: bool = body.content != null and body.content.surface != null
 		if body.mesh != null:
-			body.mesh.visible = not is_point and wireframe and wire_surface
+			body.mesh.visible = not is_point and (
+				(wireframe and wire_surface) or (not wireframe and has_surface)
+			)
 		if body.sphere != null:
 			body.sphere.visible = not is_point and wireframe and wire_sphere
 		if body.ocean != null:
