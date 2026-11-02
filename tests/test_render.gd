@@ -31,6 +31,7 @@ func run(h, root: Node) -> void:
 
 	_test_surface_is_derived(h, earth, luna)
 	_test_the_ground_is_the_field(h, earth)
+	_test_a_body_without_a_surface_has_no_field(h, scene)
 	_test_the_star_is_a_source(h, scene)
 	_test_the_background_is_the_real_sky(h, scene)
 	_test_the_phase_term_is_a_disc_average(h)
@@ -904,6 +905,36 @@ func _test_the_air_is_drawn_only_where_its_ring_resolves(h, scene: SpacesimSyste
 	h.check(FileAccess.get_file_as_string("res://addons/spacesim/system/system_scene.gd").contains(
 		"SpacesimLod.air_ring_pixels("),
 		"and the shell's gate is what uses it, so the air is not gated on a disc's size")
+
+
+## **A body with no surface content is an interior, not a world.**
+##
+## Evert, 2026-11-02, on a gas giant's picture: *"we need the vertex sphere to be generated, as the clouds are drawn
+## on copies of it. However, we don't need to draw the displacement map on to it when the planet has no surface."*
+##
+## Two halves, and both are asserted because either alone leaves the fault: the **displacement scale** (`amplitude`,
+## which the worker's translation and `_cover_angle`'s basin term both read) and the **shader's own field**, which is
+## what had been painting terrain on a ball that is really the top of an atmosphere.
+func _test_a_body_without_a_surface_has_no_field(h, scene) -> void:
+	# Typed explicitly: `body_by_id` returns a Variant, so `:=` here is the `INFERENCE_ON_VARIANT` error.
+	var jupiter: SpacesimSceneBody = scene.body_by_id("planet:jupiter")
+	var earth: SpacesimSceneBody = scene.body_by_id("planet:earth")
+	h.check(jupiter != null and earth != null, "both a giant and a surfaced body are in the scene")
+	if jupiter == null or earth == null:
+		return
+	h.check(jupiter.surface_plan != null and jupiter.surface_plan.amplitude == 0.0,
+		"a body with no surface is not displaced (Jupiter amplitude 0)")
+	h.check(earth.surface_plan != null and earth.surface_plan.amplitude > 0.0,
+		"and a body with one still is (Earth amplitude %.0f m)" % earth.surface_plan.amplitude)
+	# **The mesh still exists**, which is the other half of Evert's sentence: the decks are copies of it.
+	h.check(jupiter.mesh != null,
+		"the vertex sphere is still built, because the decks are drawn on copies of it")
+	var material := jupiter.mesh_material as ShaderMaterial
+	h.check(material != null and float(material.get_shader_parameter("has_surface")) == 0.0,
+		"and its shader is told there is no surface, so it draws a flat interior")
+	var earth_material := earth.mesh_material as ShaderMaterial
+	h.check(earth_material != null and float(earth_material.get_shader_parameter("has_surface")) == 1.0,
+		"where a surfaced body is told there is one")
 
 
 ## **The air takes its share of the star's light on the way IN, and that share is the sunset.**

@@ -286,14 +286,30 @@ func _place_above(body_name: String, altitude: float) -> void:
 	# altitude that was asked for. Measured 2026-11-02: a nominal 20 km shot came out 12,557 km from the body
 	# centre, and the shell — correctly — drew no air at all.
 	var surface := get_root().find_child(body_name_real + "Surface", true, false) as Node3D
+	if OS.has_environment("SHOT_BODY") and surface == null:
+		var seen: Array = []
+		for n in get_root().find_children("*", "MeshInstance3D", true, false):
+			seen.append((n as Node).name)
+		print("SHOT: no %sSurface; meshes in the tree: %s" % [body_name_real, seen.slice(0, 12)])
 	var body := surface.get_parent() as Node3D if surface != null else null
 	if body == null:
 		body = get_root().find_child(body_name_real, true, false) as Node3D
 	if ship == null or body == null:
 		print("SHOT: could not find the ship or ", body_name)
 		return
+	# **The body's own radius, not Earth's.** This was a hard-coded 6.371e6, so every shot of a gas giant was
+	# taken from *inside* it and measured nothing. The radius is read from the surface material, which is the one
+	# place it is published for the body that has a mesh.
+	var radius := 6.371e6
+	if surface != null and surface is MeshInstance3D:
+		var override := (surface as MeshInstance3D).material_override as ShaderMaterial
+		if override != null:
+			var published: Variant = override.get_shader_parameter("planet_radius")
+			if published is float and float(published) > 0.0:
+				radius = float(published)
+				print("SHOT: %s radius %.0f km" % [body_name_real, radius / 1000.0])
 	var to_star := -body.global_position.normalized()
-	ship.global_position = body.global_position + to_star * (6.371e6 + altitude)
+	ship.global_position = body.global_position + to_star * (radius + altitude)
 	# Point the camera at the body, so the shot shows it rather than empty space.
 	var camera := _find_camera(get_root())
 	if camera == null:

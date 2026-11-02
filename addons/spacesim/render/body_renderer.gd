@@ -336,6 +336,12 @@ static func surface_material(
 	material.set_shader_parameter("deck_shadow_floor", 1.0)
 	# **`flat` is the platform's own mode and not a second material**: the fragment short-circuits to the derived albedo
 	# before it reads a texture, so `flat` costs no map and no ladder. Published beside the tint for the same reason.
+	# **A body with no surface content gets the interior sphere and nothing else.** The mesh still exists — the
+	# decks are drawn on copies of it — so this is not about geometry: it is the field, which a gas giant has no use
+	# for and which had been painting terrain (and, since the vertex translation, *displacing* it) on a ball that
+	# is really the top of an atmosphere.
+	var has_surface := body.content != null and body.content.surface != null
+	material.set_shader_parameter("has_surface", 1.0 if has_surface else 0.0)
 	material.set_shader_parameter("flat_mode", 0.0)
 	return material
 

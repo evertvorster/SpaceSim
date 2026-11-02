@@ -163,6 +163,13 @@ uniform vec3 patch_origin = vec3(0.0);
 // `rendered`, and `wireframe` is a different material (unshaded lines); `flat` is this shader with every texture read
 // short-circuited to the derived albedo, which is what the ground drew before it had a surface stack.
 uniform float flat_mode : hint_range(0.0, 1.0) = 0.0;
+// **Whether this body HAS a surface at all** — a gas giant does not: what you see is its deck, and the sphere
+// beneath is an interior that the deck is drawn on. So the field is not evaluated for it and the sphere draws
+// `base_color` flat, which is exactly what `flat_mode` draws and why the two share one branch rather than
+// getting a second copy of it. Evert, 2026-11-02: *"we need the vertex sphere to be generated, as the clouds are
+// drawn on copies of it. However, we don't need to draw the displacement map on to it when the planet has no
+// surface."*
+uniform float has_surface = 1.0;
 // The body's derived colour, which is what `flat` draws.
 //
 // **The name is `flat_mode` and not `flat`: `flat` is a GLSL interpolation qualifier** — a uniform called `flat`
@@ -195,7 +202,8 @@ void fragment() {
 	// **`flat` is the platform's mode, and it short-circuits every texture read in this shader** — no map, no tile
 	// loop, no ladder. What it draws is the body's derived albedo, which is what the ground looked like before it had a
 	// surface stack; the debug tint is the one thing it shares with `rendered`, because the tint is about the tree.
-	if (flat_mode > 0.5) {
+	if (flat_mode > 0.5 || has_surface < 0.5) {
+		// A surface-less body stops here: no field, no ramp, no relief — the interior an atmosphere is drawn on.
 		ALBEDO = base_color * mix(vec3(1.0), patch_tint, tint_amount);
 		ROUGHNESS = land_roughness;
 		SPECULAR = land_specular;

@@ -526,6 +526,13 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# the coast from it and the translation stands the land up from it. A second reading would be a second chance for
 	# them to disagree, and the fault when they do is a coastline that fights itself.
 	body.surface_plan = SpacesimSurfaceField.plan(body.id, body.radius)
+	# **A body with no surface content has no field to displace.** The vertex sphere is still built, because the
+	# cloud decks are drawn on copies of it — but nothing moves it, and `amplitude` is the one scale both the
+	# translation and `_cover_angle`'s basin term read. Without this a gas giant got Earth's relief law on a ball
+	# that is really the top of its atmosphere. Evert, 2026-11-02: *"we don't need to draw the displacement map on
+	# to it when the planet has no surface."*
+	if body.content == null or body.content.surface == null:
+		body.surface_plan.amplitude = 0.0
 	if entry != null and not entry.quantiles.is_empty():
 		body.sea_level = entry.value_at(body.surface_ocean_fraction)
 		# **The field's real extremes, not the ±1 it is nominally bounded by.** Measured on Earth: **-1.139 to +1.516**,
