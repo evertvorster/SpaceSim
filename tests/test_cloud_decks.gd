@@ -166,12 +166,12 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 		(earth.node.global_position - camera.global_position).normalized(), Vector3.UP
 	)
 	camera.current = true
-	# **Until a rebuild has actually landed**: the walk is a pool task, and three frames is a guess rather
-	# than a wait. The first version of this check failed intermittently for exactly that reason.
-	for frame in 30:
-		scene.update_lod(camera)
-		if earth.patch_triangles > 0:
-			break
+	# **A WAIT, not a guess.** Three frames was a guess and it failed intermittently — twice in five runs on
+	# 2026-11-02, once for each of two different reasons that both amount to "the pool had not finished". The scene
+	# already offers the join (`await_patch_builds`), which polls both halves of the handshake, so there is nothing
+	# here to tune: a test that sleeps for a guessed number of frames is a test that measures the machine.
+	scene.update_lod(camera)
+	scene.await_patch_builds()
 
 	var deck: SpacesimSceneBody.Deck = earth.decks[0]
 	h.check(deck.node.visible, "the deck is visible once the frame has walked it")

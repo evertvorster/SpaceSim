@@ -103,13 +103,16 @@ class Deck:
 ## sized to the disc it would have had and coloured by its radiance. Hidden while the body is drawn as
 ## geometry. Set by `SpacesimSystemScene.update_lod`.
 var point: MeshInstance3D
-## **The walk's last answer, and what it was taken at** — the distance, the eye's direction, ε, and the
-## wireframe flag. `SpacesimPatches.walk_is_due` decides from these whether the walk has to run again, so a
-## sub-millisecond walk stays off the frame when nothing about its answer has moved.
+## **The walk's last answer, and what it was taken at** — the distance, the eye's direction, ε, the extent the
+## selection had to reach, and the wireframe flag. `SpacesimPatches.walk_is_due` decides from these whether the walk
+## has to run again, so a sub-millisecond walk stays off the frame when nothing about its answer has moved.
 var patch_walk_distance := 0.0
 var patch_walk_direction := Vector3.ZERO
 var patch_walk_epsilon := -1.0
 var patch_walk_wireframe := false
+## **How far out the last walk reached, in radians** — the largest `SpacesimPatches.cover_angle` over the layers drawn
+## on this body. `-1` is *never walked*, which is not the same as a zero cap.
+var patch_walk_cover := -1.0
 ## **The selection the walk last produced**, as `[face, path, depth]` chunk references — a hundred entries
 ## where it used to be thirty thousand triangles.
 var patch_chunks: Array = []

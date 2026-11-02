@@ -21,6 +21,7 @@ func run(h, root: Node) -> void:
 	_test_the_eye_side_is_finer(h)
 	_test_it_is_monotone_in_distance(h)
 	_test_the_horizon_is_exact(h)
+	_test_the_cover_reaches_the_topmost_layer(h)
 	_test_the_law_bounds_the_walk(h)
 	_test_the_lattice_merge_matches_a_rebuild(h)
 	_test_the_tint_costs_nothing_until_asked(h)
@@ -162,6 +163,66 @@ func _test_the_horizon_is_exact(h) -> void:
 ## Evert, 2026-10-28: *"We don't care about budget, that should be removed. Just have the count so I can judge."* So what
 ## is asserted instead is that the walk answers the law at both ends of the range, and that the count it produces is a
 ## number a person can read rather than one a cap chose.
+func _test_the_cover_reaches_the_topmost_layer(h) -> void:
+	# **Every layer wears one array, so the walk's cap has to be the furthest any of them can be seen.** The ground's
+	# own horizon is `acos(R/d)`; a deck standing above it is visible past that horizon, and at 2 m the difference is
+	# 5.05 km against 139 km — which is why the deck was cut off with sky beyond it on 2026-11-02.
+	var altitude := 2.0
+	var distance := EARTH_RADIUS + altitude
+	var deck := EARTH_RADIUS + 1400.0
+	h.check(is_equal_approx(
+		SpacesimPatches.cover_angle(distance, EARTH_RADIUS, EARTH_RADIUS),
+		acos(EARTH_RADIUS / distance)
+	), "with no layer above the eye, the cover is the surface's own horizon")
+	var cover := SpacesimPatches.cover_angle(distance, EARTH_RADIUS, deck)
+	h.check(cover > 1.0 * PI / 180.0 and cover < 1.5 * PI / 180.0,
+		"and a 1.4 km deck at 2 m is visible to about 1.25 degrees (%.5f rad, %.1f km)" % [
+			cover, cover * EARTH_RADIUS / 1000.0
+		])
+	# **Checked against the geometry rather than against the formula**: a point on the layer is visible iff the
+	# segment from the eye to it misses the ball. Sampled either side of the answer, which is what makes this a
+	# check of the *law* rather than a second copy of the closed form.
+	var eye := Vector3.UP * distance
+	# **Built around `Vector3.UP`**, not in the XZ plane: the cap is an angle from the sub-eye direction, and a point
+	# 90° from it is on the far side of the planet whatever the cap says.
+	var inside := 0.9 * cover
+	var outside := 1.1 * cover
+	var target := (Vector3.UP * cos(inside) + Vector3.RIGHT * sin(inside)) * deck
+	h.check(_segment_misses_planet(eye, target, EARTH_RADIUS),
+		"a point inside the cover is not hidden by the planet")
+	target = (Vector3.UP * cos(outside) + Vector3.RIGHT * sin(outside)) * deck
+	h.check(not _segment_misses_planet(eye, target, EARTH_RADIUS),
+		"and one outside it is, so the cap is the boundary and not a guess")
+	# **The selection is a superset**, not a different walk: the ground's chunks are all still there, so a deck and
+	# the surface under it remain one tessellation wherever they overlap.
+	var narrow := SpacesimPatches.select(distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0)
+	var wide := SpacesimPatches.select(
+		distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0, cover
+	)
+	var keys := {}
+	for chunk in wide:
+		keys["%d/%s/%d" % [int(chunk[0]), String(chunk[1]), int(chunk[2])]] = true
+	var missing := 0
+	for chunk in narrow:
+		if not keys.has("%d/%s/%d" % [int(chunk[0]), String(chunk[1]), int(chunk[2])]):
+			missing += 1
+	h.check(missing == 0,
+		"the wider walk contains the narrow one rather than replacing it (%d missing of %d)"
+			% [missing, narrow.size()])
+	h.check(wide.size() > narrow.size(),
+		"and it really does reach further (%d chunks against %d)" % [wide.size(), narrow.size()])
+
+
+## **Whether the eye can see a point without the planet in the way** — the segment form, worked independently of
+## `cover_angle` so the cap is checked against geometry rather than against itself.
+func _segment_misses_planet(eye: Vector3, point: Vector3, planet: float) -> bool:
+	var along := point - eye
+	var closest := -eye.dot(along) / along.length_squared()
+	if closest <= 0.0 or closest >= 1.0:
+		return true
+	return (eye + along * closest).length() >= planet
+
+
 func _test_the_law_bounds_the_walk(h) -> void:
 	# **At 100 km**, where the apparent-size limit and the sagitta limit are within a factor of two of each other.
 	var chunks := SpacesimPatches.select(

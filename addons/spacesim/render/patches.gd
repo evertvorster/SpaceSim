@@ -164,6 +164,39 @@ static var _chunk_cache: Dictionary = {}
 static var _chunk_cache_lock := Mutex.new()
 
 
+## **How far out a LAYER is visible, from an eye that may be under it** — the cap the walk has to cover.
+##
+## `select`'s own horizon is the *surface's*: `acos(radius / distance)`, the true horizon at the eye's altitude. That
+## is the right question for the ground and the wrong one for anything standing above it, because a layer at altitude
+## is visible far past the ground's horizon — the sight line to it passes over the curve. At 2 m up, Earth's ground
+## is visible to 5.05 km and its 1.4 km cloud deck to **139 km**: 27x the arc. The deck was drawn on the ground's
+## selection, so 96 % of what it should cover was missing, and its edge sat at 15.5 degrees of elevation with sky
+## beneath it. Evert, 2026-11-02, from a flight over the sea: *"the cloud layer is not drawn completely when I am
+## close to the surface."*
+##
+## Two cases, both closed form:
+##
+## - **the eye above the layer** (`distance > layer`): the layer's own horizon, `acos(layer / distance)`. Note this is
+##   *smaller* than the ground's, so a caller taking the max over layers keeps the ground's.
+## - **the eye below it**: the limit is the ray that just grazes the planet. It leaves the eye at the dip angle below
+##   the local horizontal, and where it meets the layer is the furthest visible point — one square root, no iteration.
+##
+## Checked against the segment test (`the line eye→point must miss the ball`) at 2 m under a 1.4 km deck: 1.25 deg /
+## 139 km, which is the arc whose edge appears at 15.5 deg of elevation — where the flight saw the deck stop.
+static func cover_angle(distance: float, radius: float, layer_radius: float) -> float:
+	var top := maxf(layer_radius, radius)
+	if distance <= radius:
+		return 0.0
+	if distance > top:
+		return acos(clampf(top / distance, -1.0, 1.0))
+	# **The grazing ray**, and `reach` is how far along it the layer is met: `|E + s·u| = layer`, with `E` the eye and
+	# `u` the unit ray, so `s = E·u + sqrt((E·u)² + layer² - d²)` and `E·u = d·sin(dip)`.
+	var dip := acos(clampf(radius / distance, -1.0, 1.0))
+	var along := distance * sin(dip)
+	var reach := along + sqrt(maxf(along * along + top * top - distance * distance, 0.0))
+	return acos(clampf((distance - reach * sin(dip)) / top, -1.0, 1.0))
+
+
 ## **The chunks for one body**: an array of `[face, path, depth]`, one per drawn chunk.
 ##
 ## `face` indexes the twenty roots, `path` is the base-4 digit route down the tree (`""` is the root), and
@@ -174,9 +207,14 @@ static var _chunk_cache_lock := Mutex.new()
 ## the camera is from that centre, and `radius` is the body's. Everything about the camera's *view
 ## direction* is deliberately absent: the patches are chosen by what is resolvable and visible on the
 ## sphere, and the frame's own frustum culls the rest for free once they are drawn.
+##
+## **`cover` is how far out the selection has to reach, in radians**, and it exists because every layer drawn on this
+## body wears this one array: the ground's own horizon is too short for a deck standing above it. Left at `-1` the
+## walk uses the surface's horizon, which is what it did before there was an argument — see [method cover_angle],
+## which is where that number is derived.
 static func select(
 	distance: float, camera_direction: Vector3, radius: float,
-	pixel_angle: float, epsilon: float
+	pixel_angle: float, epsilon: float, cover := -1.0
 ) -> Array:
 	var chunks: Array = []
 	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or epsilon <= 0.0:
@@ -189,7 +227,7 @@ static func select(
 	# is 60 degrees across, so its centre is well over the limb while part of it is plainly visible, and
 	# at 10 m altitude the *entire* visible cap is a fraction of one face. Culling on the centre alone
 	# deleted the ground under the camera.
-	var horizon := acos(clampf(radius / distance, -1.0, 1.0))
+	var horizon := cover if cover >= 0.0 else acos(clampf(radius / distance, -1.0, 1.0))
 	# The stack holds `[a, b, c, depth, face, path]`; popping from the end keeps it a depth-first walk, so
 	# the budget stops the *deepest* work first rather than a whole side of the planet.
 	var stack: Array = []
@@ -282,11 +320,17 @@ static func select(
 static func walk_is_due(
 	last_distance: float, last_direction: Vector3,
 	distance: float, direction: Vector3,
-	pixel_angle: float, epsilon: float, radius: float, last_epsilon: float
+	pixel_angle: float, epsilon: float, radius: float, last_epsilon: float,
+	cover := -1.0, last_cover := -1.0
 ) -> bool:
 	if last_distance <= 0.0 or last_direction.is_zero_approx():
 		return true
 	if not is_equal_approx(epsilon, last_epsilon):
+		return true
+	# **And the extent, which no other term can infer.** A deck appearing or going away moves the selection's cap
+	# without moving the eye at all — the same class as the wireframe flag, and the reason this is a comparison
+	# against what the last walk ran with rather than a function of where the ship is.
+	if not is_equal_approx(cover, last_cover):
 		return true
 	# **The dead band, and what it costs to close it** — see `LOG_GATE`. At cruise this is ten walks a
 	# second; the walk is on a pool thread and the previous selection stays drawn, so the frame pays nothing.

@@ -1090,14 +1090,15 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# that collided, then a bucket on `log(d/R)` that went flat near the ground and stopped refining).
 		# A gate on what the law actually depends on cannot go stale in either of those ways.
 		var to_eye := (observer - body.node.global_position).normalized()
+		var cover := _cover_angle(body, distance)
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
-			pixel, epsilon, body.radius, body.patch_walk_epsilon
+			pixel, epsilon, body.radius, body.patch_walk_epsilon, cover, body.patch_walk_cover
 		) or wireframe != body.patch_walk_wireframe or _depth_tint != body.patch_walk_tinted:
 			# **The walk goes to a pool thread.** It measured 11-17 ms of pure recursion on the main thread at the
 			# selections a low flight asks for — a whole frame, on every tangential frame, because that is exactly
 			# when patches cross the threshold. Evert, 2026-10-28: *"flying along it there is a drop in performance."*
-			_request_walk(body, distance, to_eye, pixel, epsilon, wireframe)
+			_request_walk(body, distance, to_eye, pixel, epsilon, wireframe, cover)
 	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
 	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
 	# different scene. Drawing it with the geometry selected for the previous one is wrong however it looks,
@@ -1172,7 +1173,7 @@ func _publish_surface_flags() -> void:
 ## has. So a walk that takes a frame lags by a coarser frame, never by a hole: the LOD rule's publish-over.
 func _request_walk(
 	body: SpacesimSceneBody, distance: float, direction: Vector3, pixel: float, epsilon: float,
-	wireframe: bool
+	wireframe: bool, cover: float
 ) -> void:
 	if body.patch_walk_task != -1:
 		return
@@ -1181,20 +1182,46 @@ func _request_walk(
 	body.patch_walk_epsilon = epsilon
 	body.patch_walk_wireframe = wireframe
 	body.patch_walk_tinted = _depth_tint
+	body.patch_walk_cover = cover
 	body.patch_walk_task = WorkerThreadPool.add_task(
 		Callable(self, "_walk_patches").bind(
-			body, distance, direction, body.radius, pixel, epsilon
+			body, distance, direction, body.radius, pixel, epsilon, cover
 		)
 	)
+
+
+## **How far out this body's selection has to reach**, in radians — the furthest a layer drawn on it can be seen.
+##
+## **One array is worn by every layer**, so the walk has to cover the union: a deck at 1.4 km is visible 27x further
+## than the ground whose triangles it copies, and without this the deck was cut off at the ground's horizon with sky
+## beyond it (2026-11-02, flown). The ground and the sea are then built out to the same cap and most of that is
+## behind their own horizon — hidden, and cheap, because the LOD law makes the far ring whatever size the distance
+## allows.
+##
+## **Only layers that are actually drawn count**, which is Evert's own phrasing — *"dynamically select the biggest
+## radius for whatever is on screen"* — so turning the clouds off gives the walk back its surface horizon and costs
+## nothing. `_update_decks` has already applied `render.cloud_decks` to `visible` by the time this runs.
+##
+## The layer's **base** radius, not its top: the mesh sits at `radius + height`, and the slab's thickness is a
+## shading quantity that the geometry does not wear.
+func _cover_angle(body: SpacesimSceneBody, distance: float) -> float:
+	var cover := SpacesimPatches.cover_angle(distance, body.radius, body.radius)
+	for deck in body.decks:
+		if deck.node == null or not deck.node.visible:
+			continue
+		cover = maxf(cover, SpacesimPatches.cover_angle(
+			distance, body.radius, body.radius + deck.height
+		))
+	return cover
 
 
 ## **Runs on a worker thread.** Pure arithmetic over immutable data — no node, no `RenderingServer`, no settings — and
 ## it writes exactly one field.
 func _walk_patches(
 	body: SpacesimSceneBody, distance: float, direction: Vector3, radius: float, pixel: float,
-	epsilon: float
+	epsilon: float, cover: float
 ) -> void:
-	body.patch_walk_chunks = SpacesimPatches.select(distance, direction, radius, pixel, epsilon)
+	body.patch_walk_chunks = SpacesimPatches.select(distance, direction, radius, pixel, epsilon, cover)
 
 
 ## **The main thread's half of a walk**, once a frame: publish the selection and ask its rebuild in the same frame.
