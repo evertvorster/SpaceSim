@@ -1314,6 +1314,31 @@ func _build_patch_arrays(
 	body.patch_arrays_wireframe = lines
 
 
+## **Put a published mesh where its vertices were measured from — and tell the interpolator, or it glides.**
+##
+## A publish writes this transform from `_process`, on a node that did not move on the physics tick: that is a
+## **teleport**, and `physics/common/physics_interpolation` is on. Without the reset the interpolator still holds the
+## origin the *previous* build was measured from and draws the node sliding to the new one across a tick — while the
+## vertex data under it already carries the new origin. Every vertex is then drawn
+## `unit * radius - origin_new + lerp(origin_old, origin_new, t)`, i.e. the whole lattice displaced by
+## `(t - 1) * (origin_new - origin_old)` for one frame and back to nothing the next.
+##
+## **That delta is the eye's own motion since the last publish** — `LOG_GATE` is 1 % of the distance — so the lurch
+## grows with speed, vanishes at rest, and grows with the gate: the ten-times-a-second walk of 2026-10-29 shrank it
+## tenfold and was read as a fix, because it hid this. Evert, 2026-11-02, on the original symptom: *"the entire
+## lattice moves a couple of pixels for one frame, then moves back to the original position in the next."*
+##
+## The same law as `SpacesimFrameTree.place_in_frame` and `_place_point`, which is where the idiom comes from; these
+## nodes were simply not on the list, because before the rebase they had no transform to teleport.
+##
+## The scale goes with the position because the pair is one decision: a basis holding 6,371,000 is what rounded every
+## vertex at 0.76 m (see `SpacesimPatches.rebase`), so a published mesh is metres from its origin and scale 1.
+func _teleport(node: Node3D, origin: Vector3) -> void:
+	node.position = origin
+	node.scale = Vector3.ONE
+	node.reset_physics_interpolation()
+
+
 ## **A copy of a mesh with every vertex at a different radius** — the one operation a deck is. The index array (and a
 ## colour, when the tint asked for one) is carried across untouched, because the deck is the *same* triangles; only
 ## where each point sits changes.
@@ -1571,8 +1596,7 @@ func _poll_patch_builds() -> void:
 		# **The vertices are metres from this origin**, so the node carries the origin and drops the radius scale —
 		# and the pair is written here, beside the mesh, so the transform can never describe a different build. The
 		# scale has to be 1: a basis holding 6,371,000 is what rounded every vertex at 0.76 m (see `rebase`).
-		body.mesh.position = body.patch_arrays_origin
-		body.mesh.scale = Vector3.ONE
+		_teleport(body.mesh, body.patch_arrays_origin)
 		# **The origin the vertices are measured from, for the normal.** The mesh carries no normal array: the surface's
 		# direction is `VERTEX + patch_origin`, computed in the vertex stage. Published beside the transform it belongs
 		# to, so the two cannot describe different builds.
@@ -1595,8 +1619,7 @@ func _poll_patch_builds() -> void:
 			deck.arrays = []
 			if deck.node.mesh == null:
 				continue
-			deck.node.position = deck.origin
-			deck.node.scale = Vector3.ONE
+			_teleport(deck.node, deck.origin)
 			(deck.material as ShaderMaterial).set_shader_parameter("patch_origin", deck.origin)
 			# **The material follows the VIEW, and the switch does not touch it**: in a wireframe the deck wears the
 			# same unshaded line material the ground does, and otherwise the cloud's own. Published only when it is
@@ -1613,8 +1636,7 @@ func _poll_patch_builds() -> void:
 			body.ocean.mesh = SpacesimPatches.mesh_from(body.ocean_arrays)
 			body.ocean_arrays = []
 			if body.ocean.mesh != null:
-				body.ocean.position = body.ocean_arrays_origin
-				body.ocean.scale = Vector3.ONE
+				_teleport(body.ocean, body.ocean_arrays_origin)
 				(body.ocean_material as ShaderMaterial).set_shader_parameter(
 					"patch_origin", body.ocean_arrays_origin
 				)
@@ -1625,8 +1647,7 @@ func _poll_patch_builds() -> void:
 			body.sphere.mesh = SpacesimPatches.lines_mesh_from(body.sphere_arrays)
 			body.sphere_arrays = []
 			if body.sphere.mesh != null:
-				body.sphere.position = body.patch_arrays_origin
-				body.sphere.scale = Vector3.ONE
+				_teleport(body.sphere, body.patch_arrays_origin)
 		# **A material is published only when it is a different material**, and never a null one: assigning
 		# `material_override = null` silently falls back to the engine's default material, which is unshaded —
 		# it reads as "the surface lost its shading", far from the line that did it.
