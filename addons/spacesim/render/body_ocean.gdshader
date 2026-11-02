@@ -85,10 +85,19 @@ uniform float shore_alpha : hint_range(0.0, 1.0) = 0.45;
 // **Mostly calm, with a few rough patches and large smooth ones.** Evert, 2026-11-01: *"mostly calm, average of 0.5m
 // waves, some patches might be up to 7m waves, but also large patches smooth."*
 //
-// Two crossed sines at incommensurate frequencies give patches hundreds of kilometres across with no noise function
-// and no texture: the field is smooth, has no aliasing of its own, and the same patch is in the same place from every
-// altitude. It is a *weather pattern* rather than a spectrum, which is the right cheapness for a look that has to be
-// read at a glance from orbit.
+// **REDESIGNED 2026-11-02 as a sum of directional waves, and the reason is precision.** Two sampled-field versions
+// came before this and both were wrong in a way only flight showed: the first evaluated an fbm four times per field
+// to get a slope by central difference (28 octaves a pixel on top of the terrain field's 21), and the second took the
+// slope from screen derivatives of a single evaluation, which speckled. The speckle was not the maths — it was the
+// **coordinate**. A position on a 6,371 km sphere in float32 is quantised at **0.5 m**, so a 3 m capillary wave is
+// six ULPs and its slope is quantisation noise; a difference quotient averaged that noise, a derivative amplified it.
+// The ladder below is 512 m down to 64 m — 128 float32 steps per cycle at the finest, and nothing shorter is
+// representable on a planet in this engine at all.
+//
+// What replaces it is what a sea actually is: **a sum of directional waves, evaluated analytically**. The normal is
+// the exact slope of the surface that is described, so there is no sampling and therefore nothing to alias; the
+// band-limit is per wave and is the same law the noise used. Everything below 64 m is the ROUGHNESS term's job, and
+// that is where it belongs — chop the screen cannot resolve does not vanish, it widens the sun's image into a path.
 uniform float calm_wave : hint_range(0.0, 5.0) = 0.5;
 uniform float rough_wave : hint_range(0.0, 20.0) = 7.0;
 // Where in [0,1] the patch field starts and finishes raising the sea. Below `patch_calm` it is `calm_wave`
@@ -96,11 +105,24 @@ uniform float rough_wave : hint_range(0.0, 20.0) = 7.0;
 // "mostly calm" means as a number.
 uniform float patch_calm : hint_range(0.0, 1.0) = 0.55;
 uniform float patch_rough : hint_range(0.01, 1.0) = 0.85;
-// The capillary chop's own amplitude, in metres. Small, fixed, and unrelated to the swell — that is the point: it is
-// what the sea does when it is otherwise calm, and it is what turns a mirror into a glitter path.
-uniform float ripple_scale : hint_range(0.0, 0.2) = 0.05;
 // The steepest a wave may lean, as a slope — about 19 degrees, the same ceiling the ground's relief uses.
 const float MAP_TILT_LIMIT = 0.35;
+
+// **The wave ladder.** Four directions and four sizes, and the size matters as much as the count.
+//
+// - **Equal slope per octave**: every wave leans by the same `slope` whatever its wavelength, so the picture is
+//   scale-free — a sea rather than a corrugated roof. The amplitude is then `slope / k`, proportional to the
+//   wavelength, which is how a real spectrum falls.
+// - **The golden angle** turns each direction by 2.4000 rad, so no two are parallel and no lattice forms. Turning them
+//   by the *patch field* as well means neighbouring weather leans differently, which is what stops the swell reading
+//   as one machine.
+// - `WAVE_BASE` is the longest and `WAVE_COUNT` halves it; 512 m down to 64 m.
+const int WAVE_COUNT = 4;
+const float WAVE_BASE = 512.0;
+// How steep the whole ladder is at `rough_wave`: four waves at equal slope add up to about 0.24 in the worst phase
+// agreement, against the 0.35 ceiling — so the clamp below is a guard, not the mechanism.
+const float WAVE_GAIN = 0.7;
+const float GOLDEN_ANGLE = 2.399963229728653;
 
 varying vec3 unit_position;
 
@@ -145,48 +167,35 @@ void fragment() {
 	// `amplitude x wavenumber`, which is what makes a 7 m swell read as rough rather than as a 7 m hill.
 	float patch = sea_patch(up);
 	float swell = mix(calm_wave, rough_wave, smoothstep(patch_calm, patch_rough, patch));
-	// **The swell's shape is the field's own noise, not crossed sines.** Evert, 2026-11-02: *"the swell noise is
-	// very regular, it needs to be much more random."* Three sines at fixed directions produce a lattice — visible as
-	// a repeating web rather than as sea. The gradient of an fbm has no such structure, and `fnl_fbm3_banded` takes the
-	// pixel's own footprint in metres, so it fades the octaves the screen cannot resolve instead of being faded by a
-	// constant somewhere downstream.
-	// **The pixel's footprint ON THE WATER** — the distance to it times the pixel's angle. Not `angle x planet_radius`,
-	// which is the size of a pixel on a surface 6,371 km away and matches nothing.
+	// **The pixel's footprint ON THE WATER** — the eye's height plus this fragment's own depth, times the pixel's
+	// angle. Not `angle x planet_radius`, which is the size of a pixel on a surface 6,371 km away and matches nothing.
 	float eye_altitude_m = max((length(body_eye_local) - 1.0) * planet_radius, 0.0);
 	float pixel_metres = max((eye_altitude_m + depth) * footprint_angle, 0.05);
-	vec3 p = up * planet_radius;
-	// Two directions in the surface's tangent plane, to take the gradient along.
+	// Two directions in the surface's tangent plane, to lay the waves along.
 	vec3 t1 = normalize(cross(up, abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
 	vec3 t2 = cross(up, t1);
-	// The step is a pixel on the water, so the difference quotient measures the slope the screen can see.
-	float step_m = max(pixel_metres, 1.0);
-	float wavelength = mix(60.0, 220.0, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
-	float frequency = 1.0 / wavelength;
-	int seed = 7301;
-	float h1 = fnl_fbm3_banded(p + t1 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	float h2 = fnl_fbm3_banded(p - t1 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	float h3 = fnl_fbm3_banded(p + t2 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	float h4 = fnl_fbm3_banded(p - t2 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	// `dh/dx` in metres of height per metre across, which times the swell's amplitude is the slope.
-	vec3 gradient = t1 * ((h1 - h2) / (2.0 * step_m)) + t2 * ((h3 - h4) / (2.0 * step_m));
-	vec3 lean = gradient * swell;
-	// **CAPILLARY RIPPLES: the steep little facets that make a sun path wide.** A 0.5 m swell over a 60 m wavelength is
-	// a slope of ~0.008 — flat water, and flat water reflects the sun as a MIRROR: one narrow streak. Evert,
-	// 2026-11-02: *"I expected a wider range of glinting near the horizon."* What widens it in reality is the
-	// centimetre-scale chop, whose slopes are steep however calm the swell is. Its own noise, its own short
-	// wavelength, and an amplitude that does not follow the swell at all.
-	float ripple_wavelength = 3.0;
-	float ripple_frequency = 1.0 / ripple_wavelength;
-	float r1 = fnl_fbm3_banded(p + t1 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	float r2 = fnl_fbm3_banded(p - t1 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	float r3 = fnl_fbm3_banded(p + t2 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	float r4 = fnl_fbm3_banded(p - t2 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	lean += (t1 * ((r1 - r2) / (2.0 * step_m)) + t2 * ((r3 - r4) / (2.0 * step_m))) * ripple_scale;
-	float fade = 1.0;
+	vec3 p = up * planet_radius;
+	// **The slope every wave leans by**, from the equal-slope ladder. `slope × cos(phase)` is the exact derivative
+	// of `amplitude × sin(phase)` with `amplitude = slope / k`, so the normal below is not an approximation of a
+	// sampled surface — it IS the surface.
+	float slope = swell * WAVE_GAIN * TAU / WAVE_BASE;
+	vec3 lean = vec3(0.0);
+	for (int i = 0; i < WAVE_COUNT; i++) {
+		float wavelength = WAVE_BASE * exp2(-float(i));
+		// **The band-limit, per wave and before any work is done**: an octave the pixel cannot resolve is skipped,
+		// which is a real branch on a value that is uniform for the wave rather than a masked-out calculation.
+		float fade = 1.0 - smoothstep(wavelength * 0.25, wavelength * 0.5, pixel_metres);
+		if (fade <= 0.0) {
+			continue;
+		}
+		float angle = GOLDEN_ANGLE * float(i) + patch * 1.7;
+		vec3 dir = t1 * cos(angle) + t2 * sin(angle);
+		lean += dir * (slope * cos(TAU * dot(dir, p) / wavelength) * fade);
+	}
 	if (length(lean) > MAP_TILT_LIMIT) {
 		lean *= MAP_TILT_LIMIT / length(lean);
 	}
-	vec3 normal = normalize(up - lean * fade);   // body space — see where it is written below
+	vec3 normal = normalize(up - lean);   // body space — see where it is written below
 
 	// ===== THE COLOUR, AND HOW MUCH OF THE FLOOR SHOWS ==================================
 	// **The shallow/deep ramp, in metres** — the same two ends the old layer used.
@@ -205,10 +214,13 @@ void fragment() {
 	// view-space one faces away from the sun most of the time. The transform is what makes it a normal again.
 	NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(normal, 0.0)).xyz);
 	// **What the pixel cannot resolve does not disappear — it widens the lobe.** A distant sea has the same slope
-	// variance as a near one, but sampled coarser; the honest cheap version is a rougher specular where the footprint
-	// exceeds the ripple wavelength, so the sun's image spreads into a path instead of a point. This is what makes the
-	// glint read as a *range* near the horizon.
-	float unresolved = clamp(pixel_metres / max(ripple_wavelength * 20.0, 1.0), 0.0, 1.0);
+	// variance as a near one, but sampled coarser; the honest cheap version is a rougher specular once the footprint
+	// passes the shortest wave's own resolving scale, so the sun's image spreads into a path instead of a point. This
+	// is what makes the glint read as a *range* near the horizon — and since the ladder is where the waves END, this
+	// is also where the detail the ladder cannot carry is handed over. Evert, 2026-11-02: *"I expected a wider range
+	// of glinting near the horizon."*
+	float finest = WAVE_BASE * exp2(-float(WAVE_COUNT - 1));
+	float unresolved = clamp(pixel_metres / max(finest * 0.5, 1.0), 0.0, 1.0);
 	ROUGHNESS = mix(
 		mix(0.02, ocean_roughness, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0)),
 		max(ocean_roughness, 0.45),
