@@ -1,5 +1,13 @@
 class_name SpacesimAtmospherePass
 extends CompositorEffect
+## **RETIRED 2026-11-02 — no longer in the compositor, and no longer drawing air.**
+##
+## The air is `air_shell.gdshader` now: one shell per band, worn by the body, clipped at the frame's depth by the
+## rasteriser's own buffer instead of by a post-transparent pass. Evert, 2026-11-02: *"when the atmosphere pass
+## was tied to the planet, it worked properly. When we moved it to the skybox, it stopped working properly"* — and
+## the shells are the third answer, which is neither of those. What is kept here is `march_deck`/`deck_span` and
+## the optics the shell was ported from; deleting the file is its own step.
+##
 ## **The atmosphere, as ONE volumetric march over the whole frame.**
 ##
 ## Evert, 2026-10-18: *"the atmosphere should be visible from outer space, so when a planet fills the

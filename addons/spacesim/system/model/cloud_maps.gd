@@ -101,7 +101,7 @@ var _gpu_bakes := 0
 ## Venus's clouds: *"the atmosphere suddenly disappeared"*, with the allocator errors that name it.
 ##
 ## **But the GPU bake was not that leak, and it is the whole point of having one** (Evert, 2026-10-20: *"that's
-## why we bake on the GPU, not the CPU"*). The allocator was exhausted by `SpacesimAtmospherePass`'s per-frame
+## why we bake on the GPU, not the CPU"*). The allocator was exhausted, at the time, by an atmosphere pass's per-frame
 ## uniform set, which is fixed and now instrumented; this device frees every RID it creates, on every bake and
 ## at `close()`, and `SpacesimCloudGpu` counts them so a leak cannot be silent. The speed is not a detail:
 ## **47 ms for 8192x4096 against 26.8 s** on the CPU path, which is the difference between a refinement that

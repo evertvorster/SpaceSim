@@ -194,9 +194,10 @@ static func _build(level: int) -> ArrayMesh:
 	for face in faces:
 		# **Reversed, because Godot's front face is CLOCKWISE seen from outside** — which is what
 		# `SphereMesh` is wound as, and every material here is written against it: a body's materials are
-		# drawn from outside and cull back faces. (The one front-culling consumer, the air shell's
-		# `body_atmosphere.gdshader`, was deleted on 2026-10-19; the convention stays because `SphereMesh`
-		# and every mesh a Godot project adds share it.) The construction above is the
+		# drawn from outside and cull back faces. **The front-culling consumer is the air's shell**
+		# (`air_shell.gdshader`), which wants the far face and nothing else — `body_atmosphere.gdshader`
+		# wanted the same between 2026-10-13 and 2026-10-19, and the convention never had to change.) The
+		# construction above is the
 		# standard counter-clockwise one, so the flip happens here, once, where it can be seen. Getting
 		# it wrong renders a planet inside out — and **an inside-out sphere still looks like a disc**, so
 		# it shows up as a sky that is black from inside and a body with no shading, not as an obvious

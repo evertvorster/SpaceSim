@@ -11,6 +11,11 @@ extends RefCounted
 ## to fly past or into, not somewhere to go.
 
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
+## **How finely the air's shell is tessellated.** Its own icosphere at a fixed level, because a shell is a
+## sphere of constant radius and its only silhouette is the one at the limb: level 5 is 20,480 triangles and a
+## facet dips 1 km below the band's outer radius between vertices, which at 100 km is a density change of one
+## part in a thousand — invisible, where the patch walk's own selection was not.
+const AIR_SHELL_LEVEL := 5
 const FrameTree := preload("res://addons/spacesim/coordinate/frame_tree.gd")
 const TransitionRule := preload("res://addons/spacesim/coordinate/transition_rule.gd")
 const ScaleBody := preload("res://addons/spacesim/travel/scale_body.gd")
@@ -58,6 +63,9 @@ var _heights_gpu: SpacesimSurfaceGpu
 ## thing that made the 2026-11-01 kernel failure expensive was that it looked like a design choice. The failure is
 ## silent in the draw path and loud only in the reason `SpacesimSurfaceGpu.error()` already carries.
 var _translation_failed_reported := false
+## **The shell's handover, said once**, for the same reason the pass printed its own: a shell handed the wrong
+## eye or the wrong band draws air that looks plausible and is wrong, and no picture distinguishes them.
+var _air_shell_reported := false
 ## **The baked cloud maps, one cache for the whole system** — keyed `(body, layer)`, so a stack is entries
 ## rather than a second cache. Unlike the surface's, this one stays open: it has no local `RenderingDevice` of
 ## its own beyond the one `SpacesimCloudGpu` opens for a bake, and a deck refines on approach like the ground.
@@ -559,6 +567,25 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	_derive_air(body)
 	_build_decks(body)
 	_publish_air(body)
+	# **After `_derive_air`, because the shell is made of what that derives** — its optics and the band's
+	# outer radius (`sky_top`). Before it, `body.air` is empty and this silently builds nothing, which is a
+	# picture with no air rather than an error.
+	# **The air, as a shell at the top of its own band.** Evert, 2026-11-02: *"If a planet has an atmosphere, it
+	# gets at least one air volumetric shader."* One band today — ground to the atmosphere's top — with the deck's
+	# base as the next boundary to split on.
+	#
+	# **Its own icosphere, at level `AIR_SHELL_LEVEL`, never the patch walk.** A surface that must be visible
+	# everywhere cannot borrow a mesh whose coverage was selected for something else — the deleted shell rode the
+	# patch mesh and its horizon ended where the walk's selection did.
+	#
+	# The node's scale IS the band's outer radius, because the mesh is a unit sphere; nothing else about the node
+	# moves, and the shader works in the body's frame rather than in model space.
+	if not body.air.is_empty() and body.sky_top > 0.0:
+		var outer := body.radius + body.sky_top
+		body.air_shell_material = SpacesimBodyRenderer.air_shell_material(body.air, body.radius, outer)
+		body.air_shell = _add_body_mesh(body.node, body.air_shell_material, "%sAir" % body.name)
+		body.air_shell.mesh = SpacesimIcosphere.mesh_at(AIR_SHELL_LEVEL)
+		body.air_shell.scale = Vector3.ONE * outer
 
 	if not body.landable:
 		return
@@ -697,9 +724,10 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 	return best
 
 
-## **The deck the near regime can draw, as `SpacesimAtmospherePass` needs it** — or `{}` when there is
-## nothing to draw, which is the honest answer for a body with no deck, a layer with no thickness, or a map
-## that has not landed.
+## **The deck the near regime can draw, as the retired `SpacesimAtmospherePass` wants it** — or `{}` when
+## there is nothing to draw, which is the honest answer for a body with no deck, a layer with no thickness, or
+## a map that has not landed. Nothing reads it today: the deck's own base is the boundary the second shell will
+## split on, and this is where that boundary's numbers already are.
 ##
 ## **The material is the source, not a second copy of it.** Threshold, gain and colour are what the shell is
 ## drawing with this frame, fitted to the map it is sampling, so reading them back is what stops the slab and
@@ -768,7 +796,7 @@ func near_deck(body: SpacesimSceneBody, observer: Vector3) -> Dictionary:
 
 
 ## **The air's numbers, derived once per body**: its scattering coefficients, its heights, and the
-## dictionary `SpacesimAtmospherePass` reads.
+## dictionary every consumer of the air reads — the shells, the ocean's sky tint, and the decks' light path.
 ##
 ## **How tall it is, and why that is derived.** `SHELL_SCALE_HEIGHTS` scale heights, floored by the
 ## framing's own atmosphere altitude — one authored altitude for the whole system is right for exactly one
@@ -776,8 +804,9 @@ func near_deck(body: SpacesimSceneBody, observer: Vector3) -> Dictionary:
 ## surface density at the top. `SpacesimSystemScene.sky_reach()` then reads it, because the camera's far
 ## plane has to reach the sky.
 ##
-## **Nothing here draws anything.** The shell that used to be built from these numbers is gone; the march
-## that draws the air (`SpacesimAtmospherePass`) is given the numbers, and that is the only consumer.
+## **Nothing here draws anything.** The shells that draw the air (`air_shell.gdshader`, one per band) and every
+## material that applies it on the light's path are given these numbers, so there is one derivation and no
+## second sky.
 func _derive_air(body: SpacesimSceneBody) -> void:
 	if body.content == null or body.content.atmosphere == null:
 		return
@@ -792,7 +821,7 @@ func _derive_air(body: SpacesimSceneBody) -> void:
 		body.content.atmosphere, _materials(), temperature, gravity
 	)
 	body.sky_top = maxf(air_reach, _framing.atmosphere_altitude)
-	# **The air's scattering numbers, derived once**, in the one dictionary `SpacesimAtmospherePass` reads. A
+	# **The air's scattering numbers, derived once**, in the one dictionary the shells and the materials read. A
 	# second derivation on the draw side would be a second sky, and it is the numbers rather than the shader
 	# that decide what colour the air is. `sun_intensity` is `sky_scale(illuminance)` — the frame's own
 	# currency (`radiance / UNIT_LUX_PER_SR`), not lux.
@@ -947,22 +976,17 @@ func update_sky(camera: Camera3D) -> void:
 	# be dragged while flying.
 	star_sky.set_gain(pow(10.0, float(SpacesimSettings.get_value("sky.star_gain"))))
 	star_sky.update(camera)
-	# **The air the sky draws, which is everything beyond the nearest surface.** The pass keeps the near
-	# half — the air in front of whatever the rasteriser drew — so a cloud on a mesh is seen against this
-	# sky rather than having it painted over its face, which is what made inside and outside disagree.
-	var observer: Vector3 = camera.get_global_transform_interpolated().origin
-	var air := air_for_eye(observer)
-	if air.is_empty() or air.get("body") == null:
-		star_sky.set_air_off()
-	else:
-		var body: SpacesimSceneBody = air["body"]
-		var frame: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
-		star_sky.set_air(
-			air["air"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
-			frame.inverse() * (observer - body.node.global_position),
-			frame.inverse() * (air["sun_direction"] as Vector3),
-			frame.inverse()
-		)
+	# **The sky is a star field again: the air is not its business any more.** Between 2026-11-01 and today the
+	# sky shader drew the FAR half of every column, on the argument that a sky is drawn behind all geometry and so
+	# a cloud on a mesh would composite over it correctly. It did that, and it also hid the air in front of every
+	# body the rasteriser drew — Luna came out black where the sky beside it glowed — because the half a sky owns
+	# can never be drawn in front of anything. Evert, 2026-11-02: *"when the atmosphere pass was tied to the
+	# planet, it worked properly. When we moved it to the skybox, it stopped working properly."*
+	#
+	# The air is `air_shell.gdshader` now — one shell per band, worn by the body, drawn where its own geometry
+	# is and clipped at the frame's depth. So the switch goes off unconditionally, and `set_air` is kept only
+	# until the last reader of the parameter set is deleted.
+	star_sky.set_air_off()
 
 	# **The ambient is that same star field, summed from the catalogue.** Recomputed only when the depth
 	# changes, because the sum walks all 119,613 stars and this runs every frame — a float compare once
@@ -1067,10 +1091,12 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		var energy := SpacesimLod.angular_radius(body.radius, distance)
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
-		# **Four things a body may draw, and each has its own switch**: the surface, the datum lattice it is built on, each
-		# cloud deck (its switch is `_update_decks`'s, one function down, because it owns the maps too), and the point of
-		# light. **The sphere is a wireframe's subject only** — outside one the surface is the visible thing and a ball
-		# under it would only hide it.
+		# How much of the air this body's shell draws, from the gate below — read again when it is published.
+		var air_strength := 0.0
+		# **Five things a body may draw, and each has its own switch**: the surface, the datum lattice it is built on,
+		# each cloud deck (its switch is `_update_decks`'s, one function down, because it owns the maps too), the air's
+		# shell, and the point of light. **The sphere is a wireframe's subject only** — outside one the surface is the
+		# visible thing and a ball under it would only hide it.
 		var wire_sphere := bool(SpacesimSettings.get_value("render.wireframe_sphere"))
 		var wire_surface := bool(SpacesimSettings.get_value("render.wireframe_surface"))
 		if body.mesh != null:
@@ -1079,10 +1105,27 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			body.sphere.visible = not is_point and wireframe and wire_sphere
 		if body.ocean != null:
 			body.ocean.visible = not is_point
+		if body.air_shell != null:
+			# **The gate is the AIR's own resolution, not the size of its disc.** The deleted shell had
+			# `shell_ring_pixels`; the march inherited the job and not the gate, and it took a flight 13.5 Gm
+			# from Jupiter to find out (Evert, 2026-10-25: *"we are drawing the atmosphere from way too far
+			# away, as it changes the albedo"*). The ring's width in pixels is the air's depth projected — the
+			# span over which the column, and so the picture, changes — and it fades over 2-4 px like every
+			# other ladder's boundary.
+			#
+			# **The fade is a STRENGTH, not a switch**: a shell that appeared at two pixels would pop, and the
+			# shell's own alpha is what a strength has to scale.
+			var ring := SpacesimLod.air_ring_pixels(body.sky_top, distance, pixel)
+			air_strength = smoothstep(
+				SpacesimLod.AIR_RING_FADE.x, SpacesimLod.AIR_RING_FADE.y, ring
+			)
+			if not bool(SpacesimSettings.get_value("render.atmosphere_volume")):
+				air_strength = 0.0
+			body.air_shell.visible = not is_point and air_strength > 0.0
 		for deck in body.decks:
 			deck.node.visible = not is_point
-		# **A body too small to be a disc is its own light, and nothing else is drawn for it.** The air is
-		# not drawn by anything yet, and a deck is not a thing this tree has.
+		# **A body too small to be a disc is its own light, and nothing else is drawn for it**: the surface,
+		# the sea, the decks and the air are all switched off above, and the point of light is what is left.
 		if body.point != null:
 			body.point.visible = is_point
 		if is_point:
@@ -1091,6 +1134,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		if body.mesh == null:
 			continue
 		_face_bodies_at_star(body, observer, pixel)
+		_publish_air_shell(body, camera, observer, air_strength)
 		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
@@ -1476,6 +1520,40 @@ func _publish_air(body: SpacesimSceneBody) -> void:
 		SpacesimBodyRenderer.apply_air(body.ocean_material, body.air, 0.0)
 	for deck in body.decks:
 		SpacesimBodyRenderer.apply_air(deck.material, body.air, deck.height)
+
+
+## **The air's shell, per frame: where the eye is, where the star is, and how the frame is turned.**
+##
+## All three are in the BODY's own frame, because a GLSL float has ~7 digits and a body centre sits at 1.5e11 m;
+## the subtraction happens here, in double, and the shader only ever sees small numbers. `u_to_local` maps a
+## fragment's VIEW space into that frame, which is what turns `normalize(VERTEX)` into the pixel's own ray —
+## `body⁻¹ · camera`, the same composition `SpacesimAtmospherePass.prepare()` does for a deck's map.
+##
+## **This is not `_publish_air`'s job.** That one publishes what does not change — the optics, the band's radii
+## — once, at build. These three change whenever the ship turns.
+func _publish_air_shell(body: SpacesimSceneBody, camera: Camera3D, observer: Vector3, strength: float) -> void:
+	if body.air_shell_material == null:
+		return
+	var body_basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
+	var to_local := body_basis.inverse() * (camera.global_transform.basis as Basis).orthonormalized()
+	var sun := Vector3.UP
+	var star_body := star()
+	if star_body != null:
+		sun = (star_body.position - body.position).normalized()
+	body.air_shell_material.set_shader_parameter("u_to_local", to_local)
+	body.air_shell_material.set_shader_parameter(
+		"u_eye_local", body_basis.inverse() * (observer - body.node.global_position)
+	)
+	body.air_shell_material.set_shader_parameter("u_sun_local", body_basis.inverse() * sun)
+	body.air_shell_material.set_shader_parameter("u_strength", strength)
+	if not _air_shell_reported:
+		_air_shell_reported = true
+		var eye_local := body_basis.inverse() * (observer - body.node.global_position)
+		print("AIR SHELL: %s eye_radius=%.0f m band=(%.0f, %.0f) sun_local=(%.2f, %.2f, %.2f) strength=%.2f" % [
+			body.name, eye_local.length(), body.radius, body.radius + body.sky_top,
+			(body_basis.inverse() * sun).x, (body_basis.inverse() * sun).y, (body_basis.inverse() * sun).z,
+			strength
+		])
 
 
 ## **Where the star is, and how wide it looks, for every drawn body** — per frame, and NOT inside `_update_decks`.

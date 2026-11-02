@@ -7,9 +7,9 @@ extends RefCounted
 ## (Jeans escape) is the one part that is not built. Everything is a pure function of content, so the
 ## renderer cannot disagree with the model.
 ##
-## The sky itself is `SpacesimAtmospherePass`: one `shader_type sky` layer marching the frame, built as
-## `glsl-atmosphere` applied to a ray rather than to a shell (the shell and its
-## `body_atmosphere.gdshader` were deleted on 2026-10-19). Its inputs are exactly these numbers — see
+## The sky is drawn by `air_shell.gdshader`: one shell per band, marching each pixel's ray through the band it
+## owns — `glsl-atmosphere` applied to a ray, which is what the 2026-10-13 shell did and what the pass did
+## after it. Its inputs are exactly these numbers — see
 ## [[SpaceSim/Atmospheres]].
 
 ## A temperature for the callers that take one and for the internals that must not care. **The air's
@@ -355,7 +355,7 @@ static func horizon_dip(altitude: float, radius: float) -> float:
 ##
 ## **Rayleigh's scale height is used for it and the caller multiplies absorption by the same column**, which is
 ## not right for ozone (it sits in a 25 km layer rather than following the air) and is exactly what
-## `SpacesimAtmospherePass`'s march does. **Agreeing with the pass matters more than being right**: the ground
+## `air_shell.gdshader`'s march does. **Agreeing with the shell matters more than being right**: the ground
 ## and the sky over it are one integral, and two laws for one optical depth is how they would come to
 ## disagree about how thick the air is.
 static func sun_optical_depth(

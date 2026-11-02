@@ -83,9 +83,9 @@ const REGISTRY := {
 	# and there is no hull for a key to toggle.
 	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
 	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
-	# --- the air. **The march is the only thing that draws air when it is on** (`SpacesimAtmospherePass`), and a
-	# material that applies air of its own beside it applies the same air twice — see `Atmospheres` §9a. This is
-	# the pass's gate and its blend at once: zero leaves the frame exactly as it was drawn.
+	# --- the air. **The shells are the only thing that draw the eye's air** (`air_shell.gdshader`, one per band
+	# per body); a material that applied air of its own beside them would draw the same air twice — see
+	# `Atmospheres` §9a. Zero hides every shell, and the frame is then drawn exactly as the rasteriser left it.
 	"render.atmosphere_volume": {"default": true, "scope": Scope.PLAYER},
 	# --- the cloud decks. **One switch for one mechanism**: it reads no other switch, which is the rule a
 	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
@@ -179,9 +179,13 @@ const REGISTRY := {
 	# threshold, 1 only at the brightest texel the map can hold — so a patch anyone would call thick reads
 	# 0.5-0.7, and "full strength, dictated by the texture" arrived as a 50-70% veil. This scales that reading
 	# into the opacity it should mean, clamped at 1. The ramp needs no number: full at the base, zero at the
-	# shell's top, both fixed by geometry. Read every frame by `main.gd` and handed to
-	# `SpacesimAtmospherePass.fog_gain`. Evert, 2026-10-21: *"maybe this should be a tunable so that I can
+	# shell's top, both fixed by geometry. Evert, 2026-10-21: *"maybe this should be a tunable so that I can
 	# iterate and find something that looks like I expect."*
+	#
+	# **PARKED 2026-11-02: nothing reads it.** The fog lived in the atmosphere pass, which no longer draws; the
+	# setting stays so that a saved settings file does not change shape, and so the parked fog can come back with
+	# its one free number. Evert, 2026-11-02: *"we can cut it out and re-implement it once we have the layers
+	# working, as we might not need it at all."*
 	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky

@@ -899,11 +899,11 @@ func _test_the_air_is_drawn_only_where_its_ring_resolves(h, scene: SpacesimSyste
 		"an airless body has no ring, so its air is never drawn")
 	h.check(SpacesimLod.air_ring_pixels(earth_depth, 0.0, pixel) == 0.0,
 		"and a degenerate distance is zero rather than a division")
-	# **The call site, because a law nobody calls is decoration.** Read as source: `main.gd` owns the frame, and
-	# the pass is the only thing that consumes this.
-	h.check(FileAccess.get_file_as_string("res://game/main.gd").contains(
+	# **The call site, because a law nobody calls is decoration.** Read as source: the gate lives with the shells,
+	# which the scene owns — `main.gd` no longer knows the air exists (`air_shell.gdshader` is worn by the body).
+	h.check(FileAccess.get_file_as_string("res://addons/spacesim/system/system_scene.gd").contains(
 		"SpacesimLod.air_ring_pixels("),
-		"and the frame gate is what uses it, so the march is not gated on a disc's size")
+		"and the shell's gate is what uses it, so the air is not gated on a disc's size")
 
 
 ## **The air takes its share of the star's light on the way IN, and that share is the sunset.**

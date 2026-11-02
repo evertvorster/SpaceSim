@@ -55,6 +55,11 @@ var ocean: MeshInstance3D
 var ocean_material: ShaderMaterial
 var ocean_arrays: Array = []
 var ocean_arrays_origin := Vector3.ZERO
+## **The air, as one shell per band** — the atmosphere's top boundary for now (2026-11-02), a deck's base once
+## the stack is split. Its own icosphere at the band's outer radius, NOT the patch walk: a surface that must be
+## visible everywhere cannot borrow a mesh whose coverage was selected for the ground.
+var air_shell: MeshInstance3D
+var air_shell_material: ShaderMaterial
 
 ## **The cloud stack**: one deck per layer the model places a level for, highest first, each a node on the
 ## body's own patch mesh at its own derived radius. Empty for a body with no air, no authored deck, or no
@@ -176,8 +181,8 @@ var scale_body: SpacesimScaleBody
 ##
 ## Kept on the body rather than recomputed because the camera's far plane needs it
 ## (`SpacesimSystemScene.sky_reach`), which falls short of the air's top otherwise. Zero for a body with
-## no air. It is what `SpacesimAtmospherePass` marches to — the shell that used to be built at this radius is
-## gone, and the air is one volumetric march over the frame (`416294b`).
+## no air. **It is the outer radius of the body's first air shell** (`air_shell.gdshader`), and the gate —
+## `SpacesimLod.air_ring_pixels` — is measured from it.
 var sky_top: float = 0.0
 ## **The air's scattering numbers, derived once at build** — the per-channel Rayleigh coefficient, the
 ## absorption, the scale height, the Mie constants and the sun's intensity in frame units. Empty for a body

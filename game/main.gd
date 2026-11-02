@@ -47,7 +47,6 @@ var _throttle_stop := false
 var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass
-var _atmosphere_pass: SpacesimAtmospherePass
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -102,12 +101,13 @@ func _ready() -> void:
 	# **The surface maps refine on the render thread**, through a pass of this camera's compositor: a bake is a
 	# `RenderingDevice` dispatch, and a callback *is* the render thread. After the exposure pass, because it
 	# writes no colour and must not sit between the frame and the metre.
-	# **The air goes before the exposure**, so the metre measures the finished frame: the march writes the air
-	# into the colour buffer and the exposure pass reads it. A pass placed after would leave the exposure
-	# metering an intermediate frame — the same class of fault as metering the 2D layer.
-	_atmosphere_pass = SpacesimAtmospherePass.new()
+	#
+	# **The air is not a pass here any more.** It is `air_shell.gdshader` on each body's own geometry, so the
+	# rasteriser's depth is what clips it and the exposure still meters the finished frame. `SpacesimAtmospherePass`
+	# is left in the tree, unregistered: `march_deck`/`deck_span` are the deck-as-a-boundary machinery the second
+	# shell will want, and deleting a 45 KB effect is its own commit rather than a footnote on this one.
 	var compositor := Compositor.new()
-	var effects: Array[CompositorEffect] = [_atmosphere_pass, _exposure_pass]
+	var effects: Array[CompositorEffect] = [_exposure_pass]
 	compositor.compositor_effects = effects
 	_camera.compositor = compositor
 	_apply_settings()
@@ -332,7 +332,6 @@ func _apply_settings() -> void:
 	_exposure_pass.adaptation_rate = float(
 		SpacesimSettings.get_value("exposure.adaptation_rate")
 	)
-	_atmosphere_pass.fog_gain = float(SpacesimSettings.get_value("fog.gain"))
 	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
 	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
 	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))
@@ -423,63 +422,6 @@ func _print_build() -> void:
 	print("SpaceSim: build %s%s" % [head, "" if git.is_clean() else ", with uncommitted changes"])
 
 
-## **The air, as one volumetric march over the frame**, when the setting asks for it, or nothing at all.
-##
-## The gate is the setting, read through `get_value` so it stays hot, and the pass is told `blend = 0` when the
-## air should not be drawn — a frame with it off is left exactly as it was drawn.
-##
-## **The gate is the AIR's own resolution, not the size of its disc** — and it was the disc until 2026-10-25,
-## which is how the air came to be drawn 13.5 Gm from Jupiter (Evert, flying: *"we are drawing the atmosphere
-## from way too far away, as it changes the albedo"*). At that distance the body is nine pixels across, so
-## every pixel of it is a grazing chord: the transmittance falls to zero at the rim and the in-scatter climbs to
-## its maximum there, and the whole picture — a dark disc with a bright ring — is **a sub-pixel structure point
-## sampled**. With the frame meter pinned at its ceiling on an empty scene, that ring blooms into a white halo.
-##
-## **The quantity that decides is the ring's own width**, which is just the air's depth projected:
-##
-##     ring_px = (sky_top / distance) / pixel_angle
-##
-## — the angular span over which the column is long. It is the same sampling law as the detail ladders: full
-## while a pixel holds four samples of the feature, gone by two. That is 44,000 km for Earth and 96,000 km for
-## Jupiter, against 1.25 Gm and 13.5 Gm before, and the sunset at 15-18 Mm — a ring of ~5 px — is comfortably
-## inside it.
-##
-## **A fade and not a step**, because every boundary in this project is a pair of thresholds with a dead band:
-## the air arrives over 2-4 px of ring instead of appearing. Below 2 px the pass is told `blend = 0` and the
-## callback returns before it builds anything, so a distant frame still costs nothing: measured 340 -> 240 fps
-## in empty space when the air was drawn for a body too small to be a disc at all.
-##
-## **A distance gate was tried before and is wrong in the other direction** — four atmosphere-radii made the air
-## vanish until the body covered a quarter of the screen, which reads as the LOD being skipped. This is not
-## that: it is a threshold on what the effect would *look* like, not on how far away the observer is.
-func _update_atmosphere_volume(observer: Vector3) -> void:
-	if _atmosphere_pass == null or _camera == null:
-		return
-	if not bool(SpacesimSettings.get_value("render.atmosphere_volume")):
-		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
-		return
-	var air := _system.air_for_eye(observer)
-	if air.is_empty():
-		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
-		return
-	var distance := observer.distance_to(air["centre"])
-	var pixel := SpacesimLod.pixel_angle(_camera.fov, float(_camera.get_viewport().size.y))
-	# **The air's own limb ring, in pixels** — the depth of the air projected at this distance, which is the
-	# width over which the column, and so the picture, changes. `SpacesimLod` owns both the arithmetic and the
-	# fade bounds, so "too small to draw" stays one rule in the project.
-	var ring := SpacesimLod.air_ring_pixels(
-		float(air["atmosphere_radius"]) - float(air["planet_radius"]), distance, pixel
-	)
-	var blend := smoothstep(SpacesimLod.AIR_RING_FADE.x, SpacesimLod.AIR_RING_FADE.y, ring)
-	if blend <= 0.0:
-		_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
-		return
-	_atmosphere_pass.prepare(
-		_camera, air["centre"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
-		air["sun_direction"], air["air"], blend, air.get("deck", {})
-	)
-
-
 ## Everything that is **drawn** rather than simulated, and it runs once per drawn frame.
 ##
 ## **Presentation belongs here and not in `_physics_process`**, and two reasons point the same way.
@@ -511,9 +453,9 @@ func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
 	_system.aim_sun_at(observer)
-	# **The air is one march over the whole frame** (`SpacesimAtmospherePass`), told which body to march — or
-	# nothing — below. The body's decks go over with the air (`_update_decks` hands them to the pass), so the
-	# march draws cloud and air in one integral.
+	# **The air rides on the bodies themselves** (`air_shell.gdshader`, one shell per band), so nothing about it is
+	# published from here: the scene hands each shell its eye, its star and the frame's rotation in `update_lod`.
+	# The sky is a star field again, and `update_sky` says why.
 	_system.update_sky(_camera)
 	# **The tessellation follows from where the camera is**, so it is decided here, once a frame, next to
 	# the other things that depend on the eye rather than on the world.
@@ -531,7 +473,6 @@ func _update_view(delta: float) -> void:
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
 	_exposure_pass.frame_delta = delta
-	_update_atmosphere_volume(observer)
 	# **EV compensation, on or off.** On is the metre's — a compute pass over the rendered pixels, so the exposure and
 	# the frame cannot disagree. Off disables the pass, so the frame is drawn at Godot's own reference: no multiplier,
 	# and a difference in the picture is a difference in the geometry rather than in the exposure.

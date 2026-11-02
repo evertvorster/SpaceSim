@@ -190,8 +190,9 @@ void fragment() {
 	// vary and are not. From altitude the 1.6 km move is invisible in a 6,374 km radius; from underneath it is the
 	// difference between the cloud's real underside and a sheet at the height of the tallest column in the map.
 	//
-	// So there is no base-sphere projection and no crossfade: the mesh is a sphere at the deck's TOP radius and
-	// the map is painted on it, which is all this ever was. Above the deck you see the outside of that sphere;
+	// So there is no base-sphere projection and no crossfade: **the mesh is a sphere at the deck's BASE** — the
+	// node is scaled to it, and it is the only boundary this surface has — and the map is painted on it, which is
+	// all this ever was. Above the deck you see the outside of that sphere;
 	// below it you see the inside of the same sphere, which is why the pattern is mirrored and stretched toward
 	// the horizon — the parallax a painted surface has, and no attempt is made to hide it.
 	//

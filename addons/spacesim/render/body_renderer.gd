@@ -7,9 +7,11 @@ extends RefCounted
 ## the constants below rather than buried in the shader, because a hidden constant is one nobody can find
 ## when the picture is wrong.
 ##
-## **Nothing here draws air.** The air is one volumetric march over the frame (`SpacesimAtmospherePass`), and a
-## material that applied air of its own beside it would apply the same air twice. The cloud deck shells and the
-## surface-texture
+## **Nothing here draws the air's PIXELS.** The air is its own shell (`air_shell.gdshader`, built by
+## `air_shell_material()` below): a material that applied the eye's integral beside it would draw the same air
+## twice. What a material *does* apply is the air on the LIGHT's path, which is a different quantity —
+## `apply_air()` below, and the one place the two meet is the `air` dictionary they are both fed.
+## The cloud deck shells and the surface-texture
 ## mapping are all gone; the next features are built from their plans, not from these materials.
 ## `SpacesimClouds` stays and is still read: `bond_albedo` needs it, and Earth's calibrated 0.302 against a
 ## measured 0.306 depends on the deck's fraction and albedo.
@@ -18,6 +20,7 @@ const SURFACE_SHADER := preload("res://addons/spacesim/render/body_surface.gdsha
 const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 const OCEAN_SHADER := preload("res://addons/spacesim/render/body_ocean.gdshader")
+const AIR_SHELL_SHADER := preload("res://addons/spacesim/render/air_shell.gdshader")
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
 ## emitted at**, so the two cannot disagree.
@@ -500,11 +503,11 @@ static func face_surface_star(
 ## because it is derived from what the body is made of and where the layer sits, and neither changes while
 ## the game runs. Six uniform writes, and unlike the star's direction they never need repeating.
 ##
-## **`air` is the same dictionary `SpacesimAtmospherePass` is fed**, so the ground and the sky over it cannot
-## come to disagree about how thick the air is — which is the whole reason the derivation has one home.
+## **`air` is the same dictionary the shells are fed**, so the ground and the sky over it cannot come to
+## disagree about how thick the air is — which is the whole reason the derivation has one home.
 ##
-## **The view half is deliberately absent.** The pass owns the transmittance along the eye ray; a material
-## that applied it too would count the same air twice. One integral, one place each.
+## **The view half is deliberately absent.** `air_shell.gdshader` owns the transmittance along the eye ray; a
+## material that applied it too would count the same air twice. One integral, one place each.
 static func apply_air(material: Material, air: Dictionary, altitude: float) -> void:
 	var surface := material as ShaderMaterial
 	if surface == null:
@@ -515,6 +518,30 @@ static func apply_air(material: Material, air: Dictionary, altitude: float) -> v
 	surface.set_shader_parameter("air_mie", float(air.get("mie", 0.0)))
 	surface.set_shader_parameter("air_mie_height", float(air.get("mie_scale_height", 0.0)))
 	surface.set_shader_parameter("air_altitude", altitude)
+
+
+## **The air's shell: one band of one body's atmosphere.**
+##
+## The static half of the shell's state — the optics and the band's two radii — goes in here, beside every
+## other material this renderer builds. The per-frame half (the eye, the star, the rotation) is published by
+## the scene, because it changes every frame and this does not.
+##
+## **`u_band_inner` is the surface the band stands on**, so it is `planet_radius` for the one band a body has
+## today; a deck's base is where it moves to when the stack is split.
+static func air_shell_material(air: Dictionary, planet_radius: float, band_outer: float) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = AIR_SHELL_SHADER
+	material.set_shader_parameter("u_rayleigh", air.get("rayleigh", Vector3.ZERO))
+	material.set_shader_parameter("u_rayleigh_h", float(air.get("rayleigh_scale_height", 1.0)))
+	material.set_shader_parameter("u_absorption", air.get("absorption", Vector3.ZERO))
+	material.set_shader_parameter("u_mie", float(air.get("mie", 0.0)))
+	material.set_shader_parameter("u_mie_h", float(air.get("mie_scale_height", 1.0)))
+	material.set_shader_parameter("u_mie_g", float(air.get("mie_anisotropy", 0.758)))
+	material.set_shader_parameter("u_sun_intensity", float(air.get("sun_intensity", 0.0)))
+	material.set_shader_parameter("u_planet_radius", planet_radius)
+	material.set_shader_parameter("u_band_inner", planet_radius)
+	material.set_shader_parameter("u_band_outer", band_outer)
+	return material
 
 
 ## **The sea's material, from the liquid's own `SpacesimSpecies`.**

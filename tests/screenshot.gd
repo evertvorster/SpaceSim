@@ -39,6 +39,24 @@ func _initialize() -> void:
 ## way would be overruled before the frame was drawn, and would report a measurement of an unchanged
 ## picture. `layers = 0` puts an instance on no render layer at all, which nothing in the game writes, so
 ## the hide holds for every frame after it.
+## **`SHOT_EV=off` turns the frame's EV compensation off, in memory and never saved.** The exposure pass
+## multiplies the whole frame by a metered factor, so any brightness read off a shot is that factor times
+## the picture — and when a new shader is being looked at, the meter is a second unknown.
+##
+## **Looked up by path, not by name.** A `--script` runner cannot see the autoloads as identifiers — they are
+## registered for the running game, not for a `MainLoop` script — so the node is fetched from `/root` and
+## `set_value` is called without `save_now`, which leaves the user's settings file alone.
+func _turn_off_ev() -> void:
+	if OS.get_environment("SHOT_EV") != "off":
+		return
+	var settings := get_root().get_node_or_null("/root/SpacesimSettings")
+	if settings == null:
+		print("SHOT: no settings autoload found, so EV is whatever the file says")
+		return
+	settings.set_value("render.ev_compensation", false)
+	print("SHOT: EV compensation off, in memory only")
+
+
 func _hide_parts() -> void:
 	if not OS.has_environment("SHOT_HIDE"):
 		return
@@ -68,6 +86,10 @@ func _hide_parts() -> void:
 ## **On the first frame, with the ship, and for the same reason**: the game builds its scene and its
 ## environment a frame after the scene is added, so an `_initialize()` that looks for either finds
 ## nothing and says nothing.
+## **`SHOT_EV=off` turns the frame's EV compensation off, in memory and never saved.** The exposure pass
+## multiplies the whole frame by a metered factor, so every brightness read off a shot is that factor times
+## the picture — and when a new shader is being looked at, the meter is a second unknown. `set_value` without
+## `save_now` leaves the user's settings file alone.
 func _prepare_measurement() -> void:
 	if not OS.has_environment("SHOT_TONEMAP"):
 		return
@@ -88,6 +110,7 @@ func _process(delta: float) -> bool:
 	# shot where the ship happens to be out of frame.
 	if _frames == 1:
 		_hide_ship()
+		_turn_off_ev()
 		# `SHOT_WIREFRAME=1` asks the game for its own debug view rather than re-implementing it: the
 		# toggle lives in `game/main.gd` and is what the `L` key calls, so the rig cannot drift from it.
 		if OS.has_environment("SHOT_WIREFRAME"):
@@ -258,7 +281,14 @@ func _view_name() -> String:
 func _place_above(body_name: String, altitude: float) -> void:
 	var ship := _find_ship(get_root())
 	var body_name_real := body_name if body_name != "star" else "Sol"
-	var body := get_root().find_child(body_name_real, true, false) as Node3D
+	# **The BODY's node, found by the mesh it owns rather than by name.** A `find_child("Earth")` can land on a
+	# frame that shares the name, and then every shot is taken from somewhere else while the HUD reports the
+	# altitude that was asked for. Measured 2026-11-02: a nominal 20 km shot came out 12,557 km from the body
+	# centre, and the shell — correctly — drew no air at all.
+	var surface := get_root().find_child(body_name_real + "Surface", true, false) as Node3D
+	var body := surface.get_parent() as Node3D if surface != null else null
+	if body == null:
+		body = get_root().find_child(body_name_real, true, false) as Node3D
 	if ship == null or body == null:
 		print("SHOT: could not find the ship or ", body_name)
 		return

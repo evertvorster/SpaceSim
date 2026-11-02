@@ -194,7 +194,8 @@ static func sky_radiance(
 ## the base, where the clamp then silently did nothing and the march ran the whole column down to the ground.
 ## Evert, 2026-10-20: *"below the ground textures are invisible, just a grey haze. Then, it's a grey haze all
 ## the way down to the surface."* The law is here so that its consequence can be asserted without a GPU;
-## `SpacesimAtmospherePass`'s `deck_span()` is its transcription into GLSL.
+## `SpacesimAtmospherePass`'s `deck_span()` is its transcription into GLSL (retired 2026-11-02, and kept for the
+## deck-as-a-boundary the second shell will need).
 static func spans(eye_radius: float, along: float, top_radius: float, base_radius: float) -> PackedFloat32Array:
 	var empty := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
 	if top_radius <= base_radius or eye_radius <= 0.0:
