@@ -27,12 +27,14 @@ func _test_plan(h) -> void:
 	h.check(absf(earth.plate_phase - luna.plate_phase) > 1.0e-6,
 		"with its plate lattice turned elsewhere (%.3f against %.3f)" % [earth.plate_phase, luna.plate_phase])
 
-	# **The relief is a fraction of the radius**, derived rather than authored: Earth's real spread is 0.14 %
-	# of its radius, which is where the constant comes from and what makes 8.9 km come out here.
+	# **Metres per FIELD UNIT**, derived rather than authored — and re-derived on 2026-11-02 when the field became two
+	# crust populations. It used to be 0.14 % of the radius because the field's unit was a half-range about a mean; with
+	# the whole range now spanned by real crust levels, one unit of field covers the same 8.9 km of land that it used to
+	# cover in 1.55. What matters is not the constant but the product: the land's measured span times this.
 	h.check_near(earth.amplitude, 6.371e6 * SpacesimSurfaceField.RELIEF_FRACTION,
-		"Earth's relief is %.0f m, 0.14 %% of its radius" % earth.amplitude, 1.0)
-	h.check(earth.amplitude > 8000.0 and earth.amplitude < 10000.0,
-		"which is the order of the real 9 km")
+		"Earth's scale is %.0f m per field unit, 0.10 %% of its radius" % earth.amplitude, 1.0)
+	h.check(earth.amplitude > 5000.0 and earth.amplitude < 8000.0,
+		"which puts nine kilometres of land inside the field's own span")
 
 	# Everything the shader reads has to be a number rather than a zero: a frequency of 0 would make a
 	# mechanism constant, and a belt width of 0 a field with no boundaries.
@@ -116,23 +118,13 @@ func _test_plan(h) -> void:
 		).rotated(Vector3.UP, TAU * float(index) / 3.0).normalized()
 		directions.append(unit)
 		points.append(unit * 6.371e6)
-	var sea := 0.825
-	# **Two scales, not one**, because a planet is not symmetric about sea level: 0.14 % of the radius up and 0.17 %
-	# down, Earth's 8.8 km of mountain and 11 km of ocean. One scale for both gave the land 1.56 km of relief and the
-	# basins 16.3 km of trench (2026-11-02).
+	# **One scale, and the datum.** The field now carries the land/ocean asymmetry itself (two crust populations), so
+	# the translation is one number per field unit either side of the sea — which is the whole point of the redesign.
+	var sea := 0.0
 	var amplitude := 8919.0
-	var depth := 10830.0
-	# **The scales, not the amplitudes**: metres per field unit on each side, from the body's own MEASURED range --
-	# Earth's field runs -1.139 to +1.516, not ±1, and dividing by the nominal span put the peaks at 35 km.
-	var field_min := -1.139
-	var field_max := 1.516
-	# The two extremes are what the scales are FOR: a point at the field's floor must land exactly `depth` below the
-	# datum and one at its ceiling exactly `amplitude` above, whatever the field's own asymmetries are.
-	var heights := PackedFloat32Array([sea, sea, field_min, field_max])
-	var up_scale := amplitude / (field_max - sea)
-	var down_scale := depth / (sea - field_min)
+	var heights := PackedFloat32Array([sea, sea, -1.0, 1.0])
 	var before := points.duplicate()
-	SpacesimSystemScene.offset_vertices(points, directions, heights, sea, up_scale, down_scale)
+	SpacesimSystemScene.offset_vertices(points, directions, heights, sea, amplitude)
 	# **A centimetre, not a micron**: the heights are a `PackedFloat32Array` — the kernel writes floats — so 0.825
 	# arrives as 0.82499998 and an 8.9 km amplitude turns that into 1e-4 m. The law is exact; the input is float32.
 	h.check_near(points[0].length(), 6.371e6,
@@ -145,17 +137,13 @@ func _test_plan(h) -> void:
 	# alone moves. A lateral component would shear the mesh and move a shared point's neighbours with it.
 	h.check_near(points[2].normalized().dot(directions[2]), 1.0,
 		"a raised point stays on its own radial line", 1.0e-9)
-	# **The sea floor now moves, and that is the point.** A liquid is a level in the shader's sense — the SEA does not
-	# move — but the ground under it is a basin, and drawing it flat at the datum is what Evert saw on 2026-11-02:
-	# *"the surface is capped at 0m depth"*. A point at the field's floor goes to the FULL `depth_amplitude` below the
-	# datum, so the ocean has a floor rather than a lid.
-	h.check_near(points[2].length(), 6.371e6 - depth,
-		"and a point at the field's floor sinks to exactly the body's ocean depth (%.0f m below the datum)" % depth,
-		0.01)
+	# **Both directions, one scale**, because a planet's asymmetry is the FIELD's job now and not the translation's.
+	h.check_near(points[2].length(), 6.371e6 - amplitude,
+		"the field's floor sinks one amplitude below the datum (%.0f m)" % amplitude, 0.01)
 	h.check_near(points[3].length(), 6.371e6 + amplitude,
-		"while the highest ground stands `amplitude` above it (%.0f m)" % amplitude, 0.01)
+		"and its ceiling stands one amplitude above it (%.0f m)" % amplitude, 0.01)
 	h.check(points[3].length() > 6.371e6 and points[2].length() < 6.371e6,
-		"so the surface spans both sides of the datum: up through the decks, down into the basins")
+		"so the surface spans both sides of the datum on the same scale: up through the decks, down into the basins")
 
 	# **And on a BARREN body the clamp does nothing, which is the case this surface is for.** `sea_level_percentile`
 	# returns the LIQUID fraction of a body's coverage, so a world with no liquid gets 0 and its datum resolves to
@@ -165,10 +153,10 @@ func _test_plan(h) -> void:
 	var barren := before.duplicate()
 	var floor := -1.0
 	var field_heights := PackedFloat32Array([floor, floor, -0.5, 0.5])
-	SpacesimSystemScene.offset_vertices(barren, directions, field_heights, floor, amplitude / 2.0, depth)
+	SpacesimSystemScene.offset_vertices(barren, directions, field_heights, floor, amplitude)
 	h.check_near(barren[0].length(), 6.371e6,
 		"on a barren body the lowest ground sits ON the datum, unclamped", 0.01)
-	h.check_near(barren[2].length(), 6.371e6 + 0.5 * (amplitude / 2.0),
-		"and every point keeps a share of the relief above it (%.0f m of %.0f)" % [0.5 * (amplitude / 2.0), amplitude], 0.01)
+	h.check_near(barren[2].length(), 6.371e6 + 0.5 * amplitude,
+		"and every point keeps its own relief above it (%.0f m)" % (0.5 * amplitude), 0.01)
 	h.check(barren[2].length() > before[2].length() and barren[3].length() > before[3].length(),
 		"which is the whole point: no ground is flattened away on a world with no sea")

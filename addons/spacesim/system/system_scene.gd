@@ -1219,10 +1219,12 @@ func _cover_angle(body: SpacesimSceneBody, distance: float) -> float:
 	# *wider* visible cap than the sphere it is drawn on, so the walk that stops at the datum's horizon leaves the edge
 	# of the ocean floor falling off into black. That is exactly what the 2026-11-01 flight saw at 142 m in wireframe,
 	# and the clamp that hid it has gone (2026-11-02) — this is the fix that lets the basins exist.
-	if body.surface_plan != null and body.surface_plan.depth_amplitude > 0.0:
-		cover = maxf(cover, SpacesimPatches.cover_angle(
-			distance, body.radius, body.radius - body.surface_plan.depth_amplitude
-		))
+	if body.surface_plan != null:
+		var deepest := (body.sea_level - body.field_min) * body.surface_plan.amplitude
+		if deepest > 1.0:
+			cover = maxf(cover, SpacesimPatches.cover_angle(
+				distance, body.radius, body.radius - deepest
+			))
 	for deck in body.decks:
 		if deck.node == null or not deck.node.visible:
 			continue
@@ -1765,49 +1767,37 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 				body.name, _heights_gpu.error() if _heights_gpu != null else "no device"
 			])
 		return
-	# **Two scales, both derived**: the relief or depth divided by the field's own measured span either side of the
-	# datum. Floored spans, because a body whose sea level IS its field's floor has no downward range at all.
-	var up_scale := body.surface_plan.amplitude / maxf(body.field_max - body.sea_level, 1.0e-4)
-	var down_scale := body.surface_plan.depth_amplitude / maxf(body.sea_level - body.field_min, 1.0e-4)
-	offset_vertices(vertices, directions, heights, body.sea_level, up_scale, down_scale)
+	offset_vertices(vertices, directions, heights, body.sea_level, body.surface_plan.amplitude)
 	arrays[0] = vertices
 
 
-## **Move each vertex along its own direction by its height either side of the DATUM** — the arithmetic, on its own
-## so it can be tested without a rendering device.
+## **Move each vertex along its own direction by its height above the DATUM** — the arithmetic, on its own so it can be
+## tested without a rendering device. **One scale**, `amplitude` metres per field unit: the field itself now carries the
+## asymmetry between land and ocean (`surface_plate_level` gives continental and oceanic crust as two populations), so
+## nothing here has to know which side of the datum it is on.
 ##
-## **The datum is per body, and the two directions have their own scale.** `SpacesimSurfaceModel.sea_level_percentile`
-## derives the datum as the LIQUID fraction of the coverage, resolved through the measured quantiles — **0.825 field
-## units for Earth**, which is 71 % of the way up the field's own range. One scale for both directions therefore gave
-## the land the top 17.5 % of the range and the basins the bottom 82.5 %: 1.56 km of relief against a 16.3 km trench.
-## The old answer was to clamp at the datum, which flattened every basin onto the sea; the answer now is to
-## **normalise about the datum and scale each side by its own fraction** — `amplitude` above (0.14 % of the radius) and
-## `depth_amplitude` below (0.17 %), which are Earth's 8.8 km of mountain and 11 km of ocean.
+## That is the whole of the change from two days of special cases: the ground is the field times one number, minus where
+## the sea is. `SpacesimSurfaceModel.sea_level_percentile` derives the datum as the LIQUID fraction of the coverage
+## resolved through the measured quantiles, so a vertex at the datum does not move and the coast is exact by
+## construction, while the ship's altitude, the framings' bands and a deck's condensation level keep measuring from the
+## same sphere.
 ##
-## - **a body with an ocean**: the datum is the sea's surface, which is a *level* — it does not move, and the land rises
-##   through the decks above it while the basins fall below it. The coast is exact by construction, because the offset
-##   is zero at exactly the threshold the sea discards on;
-## - **a barren body**: the liquid fraction is 0, so the datum is the field's own floor and there is no basin branch to
-##   take — the lowest ground sits on the datum and everything else stands above it.
+## - **a body with an ocean**: the land rises through the decks above the datum and the basins fall below it;
+## - **a barren body**: the liquid fraction is 0, so the datum is the field's own floor and every vertex is at or above
+##   it — there is no basin branch to take, and nothing is flattened.
 ##
-## **A basin is only drawable because the walk's cap now reaches it** — a surface BELOW the datum has a *wider* visible
-## cap than the sphere, which is what the 2026-11-01 flight found as a black band and what `_cover_angle` answers.
+## **A basin is only drawable because the walk's cap reaches it** — a surface BELOW the datum has a *wider* visible cap
+## than the sphere, which is what the 2026-11-01 flight found as a black band and what `_cover_angle` answers.
 ##
 ## **Pure, and it writes in place.** The offset is RADIAL, so a shared point cannot be moved two ways by two triangles —
 ## there is one point and one direction.
 static func offset_vertices(
 	vertices: PackedVector3Array, directions: PackedVector3Array, heights: PackedFloat32Array,
-	sea_level: float, up_scale: float, down_scale: float
+	sea_level: float, amplitude: float
 ) -> void:
-	# **METRES PER FIELD UNIT, one number per side** — `relief / (the field's own measured span)`, computed from the
-	# quantiles because the field is NOT bounded to ±1: Earth measures -1.139 to +1.516. Dividing by the nominal span
-	# put the highest ground at 35 km on Earth (2026-11-02). Floored so a body whose datum sits at an end of its range
-	# (a barren world's is the field's floor) cannot divide by nothing.
 	for index in vertices.size():
-		var height := heights[index] - sea_level
-		vertices[index] += directions[index] * (
-			height * up_scale if height >= 0.0 else height * down_scale
-		)
+		var metres := (heights[index] - sea_level) * amplitude
+		vertices[index] += directions[index] * metres
 
 
 ## **The field's heights at a list of directions**, on the scene's own device.

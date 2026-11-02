@@ -113,8 +113,29 @@ vec3 surface_plate_centre(int index, float phase) {
 // is the default instead (about a quarter of the plates reach +1, half sit at -1, and the rest are between),
 // which is what a look at Earth's own hypsometry asks for: a floor with most of the area, and a minority
 // standing clear of it. What the fraction of *water* is stays content's business.
+// **TWO POPULATIONS, not a spread.** Evert, 2026-11-02: *"a planet has to have a certain amount of rock, with a
+// surface roughness that turns into continents and islands. Then it also needs to have an amount of liquid, which would
+// then fill the lower surfaces first, and give us the ocean level. Should be calculable.... special casing things below
+// the ocean surface would make later work more difficult."*
+//
+// Continental crust and oceanic crust are different things at two different levels; a planet is not one surface with a
+// symmetric spread about its mean. So a plate is either standing or sitting, and *which* is a hash of its index — that
+// is what makes them populations rather than a slope — with the region term and the roughness on top carrying the
+// variation within each one.
+//
+// **The split is a hash, not a coin flip against the water.** The sea level is a percentile of this field, so the area
+// of ocean is whatever content says it is either way; what this decides is how much *land* exists to be flooded. At
+// 62 % oceanic plates, 71 % water leaves the sea standing in the shallow continental crust — shelves — rather than
+// drowning every standing plate down to its peaks.
+const float OCEAN_CRUST = -0.95;
+const float CONTINENT_CRUST = 0.45;
+const float OCEANIC_SHARE = 0.62;
+
 float surface_plate_level(int index, float phase) {
-	return clamp(3.0 * sin(float(index) * 12.9898 + phase * 7.0) - 0.55, -1.0, 1.0);
+	// A hash, not an interpolation: the point is that the value is one of exactly two, so the hypsometry has two modes
+	// and the sea level lands between them instead of somewhere on a ramp.
+	float hash = fract(sin(float(index) * 12.9898 + phase * 7.0) * 43758.5453);
+	return mix(CONTINENT_CRUST, OCEAN_CRUST, step(1.0 - OCEANIC_SHARE, hash));
 }
 
 
