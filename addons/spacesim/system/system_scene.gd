@@ -858,7 +858,12 @@ func _derive_air(body: SpacesimSceneBody) -> void:
 		"absorption": SpacesimAtmosphereModel.absorption_coefficient(
 			body.content.atmosphere, _materials(), temperature
 		),
-		"mie": SpacesimAtmosphereModel.MIE_COEFFICIENT,
+		# **The body's own aerosol**, scaled from Earth's — see `aerosol_coefficient`. The single number the
+		# shell marches and every material applies to the star's path, so the shroud and the light on the ground
+		# agree by construction.
+		"mie": SpacesimAtmosphereModel.aerosol_coefficient(
+			body.content.clouds if body.content != null else null
+		),
 		"mie_scale_height": SpacesimAtmosphereModel.MIE_SCALE_HEIGHT,
 		"mie_anisotropy": SpacesimAtmosphereModel.MIE_ANISOTROPY,
 		"sun_intensity": SpacesimAtmosphereModel.sky_scale(

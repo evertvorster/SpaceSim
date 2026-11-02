@@ -37,6 +37,38 @@ const MIE_COEFFICIENT := 21.0e-6
 const MIE_SCALE_HEIGHT := 1.2e3
 const MIE_ANISOTROPY := 0.758
 
+## **The optical depth an ordinary deck is worth, as the reference the aerosol scales from.** Earth's authored
+## cloud is the one the constant above was fitted to, so a body whose own layers state the same thickness keeps
+## exactly the haze it had, and a body whose shroud is thicker gets more.
+const AEROSOL_TAU_REFERENCE := 0.7
+
+
+## **The body's own aerosol, scaled from that reference — never a second, Earth-shaped one.**
+##
+## Evert, 2026-11-03, flying Venus: *"I can still see the curve of the planet through it, so the absorption that we
+## calculate for it is not correct"* — and he was right about which term: Rayleigh scales with density and Venus's
+## 92 bar of CO2 gives it plenty, but **Mie is the aerosol, and it was one Earth-authored constant for every
+## body**. What hides a planet is the aerosol, so Venus wore Earth's haze over a sulphuric-acid shroud.
+##
+## The quantity is the layer's own stated optical depth — `optical_depth_at` where a layer states it, otherwise
+## `-ln(1 - opacity)`, which is the same reading `deck.shadow_tau` takes — divided by the reference above. A body
+## thinner than Earth's deck is *not* made clearer (the ratio floors at 1), because the constant is the anchor the
+## picture was calibrated with and this change is not the place to re-tune a clear sky.
+##
+## **One number, one home**: `body.air["mie"]` is what the shell marches and what every material applies to the
+## star's path, so the shroud that hides the curve and the light that reaches the ground cannot disagree about it.
+static func aerosol_coefficient(clouds: SpacesimClouds) -> float:
+	if clouds == null or clouds.layer_count() <= 0:
+		return MIE_COEFFICIENT
+	var tau := 0.0
+	for index in clouds.layer_count():
+		var stated := clouds.optical_depth_at(index)
+		if stated > 0.0:
+			tau += stated
+			continue
+		tau += -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
+	return MIE_COEFFICIENT * maxf(1.0, tau / AEROSOL_TAU_REFERENCE)
+
 ## **The sky's scale is the star's own light, converted — there is no free constant in it.**
 ##
 ## The shader's integration returns a quantity in **inverse steradians**: the phase function times the
