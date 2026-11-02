@@ -77,16 +77,29 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 	var code := FileAccess.get_file_as_string("res://addons/spacesim/render/body_surface.gdshader")
 	h.check(code.contains("surface_height(up, plan, footprint_angle)"),
 		"the height is the field, evaluated at the resolution the pixel can resolve")
-	# **The plan lives in the FIELD's include, since 2026-11-01** — the ocean evaluates the same field to find the
+	# **The plan lives in its OWN include, beside the field** — the ocean evaluates the same field to find the
 	# waterline, so a copy of the parameters in a second shader is the drift this project keeps paying for. One home,
-	# included by both.
-	var field := FileAccess.get_file_as_string(
-		"res://addons/spacesim/system/model/surface_field.gdshaderinc"
+	# included by both. It is a separate file for a reason that cost a day: `surface_field.gdshaderinc` is
+	# CONCATENATED into a Vulkan compute source for the bake and the heights kernel, and glslang refuses a
+	# non-opaque uniform outside a block there. With the uniforms inside it, both kernels stopped compiling and the
+	# heights came back empty — so the surface published untranslated and said nothing, from 2026-11-01 to 2026-11-02.
+	var plan_file := FileAccess.get_file_as_string(
+		"res://addons/spacesim/system/model/surface_plan.gdshaderinc"
 	)
-	h.check(field.contains("SurfacePlan surface_plan()"),
-		"from the plan the host publishes, one place — in the field's own include")
-	h.check(code.contains("surface_field.gdshaderinc"),
+	h.check(plan_file.contains("SurfacePlan surface_plan()"),
+		"from the plan the host publishes, one place — `surface_plan.gdshaderinc`")
+	h.check(code.contains("surface_plan.gdshaderinc"),
 		"which the land includes rather than restating")
+	# **The field's include carries a struct and a function and no uniforms**, which is what keeps it legal in a
+	# compute assembly. A check rather than a note, because the failure was invisible in the draw path.
+	var declares_uniform := false
+	for line in FileAccess.get_file_as_string(
+		"res://addons/spacesim/system/model/surface_field.gdshaderinc"
+	).split("\n"):
+		if line.strip_edges().begins_with("uniform "):
+			declares_uniform = true
+	h.check(not declares_uniform,
+		"and the field include declares no uniform, so the bake and the heights kernel still compile")
 	# **The footprint must not come from the mesh.** `dFdx(up)` measures it only as faithfully as the triangulation
 	# does, so re-selecting the patches moved it at a fixed pixel — and with it the octave count, the height, the
 	# colour ramp's index and the relief normal. That is a texture that moves while the geometry does not, which is

@@ -7,6 +7,9 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // geology. The include is the whole mechanism: one field, two compilers.
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+// **The parameters and the plan they assemble, beside the field rather than inside it** — an include reachable from a
+// compute assembly may not carry uniforms, and this one is. See the file's own header.
+#include "res://addons/spacesim/system/model/surface_plan.gdshaderinc"
 // **The star: where it is, how wide it looks, and what the air leaves of it.** First, because it declares
 // `body_sun` and the include below reads it — a shader compiles top to bottom.
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"

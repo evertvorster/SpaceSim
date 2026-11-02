@@ -21,6 +21,9 @@ render_mode blend_mix, cull_back, diffuse_burley, specular_schlick_ggx, depth_dr
 
 #include "res://addons/spacesim/system/model/noise.gdshaderinc"
 #include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
+// The field's parameters, the same file the land includes — one home for the numbers, and a separate file because the
+// field's *definition* is concatenated into a compute source where uniforms are illegal. See `surface_plan.gdshaderinc`.
+#include "res://addons/spacesim/system/model/surface_plan.gdshaderinc"
 // **The same three includes the land takes**, or the sea and the shore cannot agree: whether the body occludes the
 // star, what the air took on the way in, and a cloud's shadow.
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
