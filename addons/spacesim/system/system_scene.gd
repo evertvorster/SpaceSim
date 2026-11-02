@@ -1311,7 +1311,7 @@ func _poll_walks() -> void:
 		# answer looks exactly like a body that was never walked.
 		if body.patch_chunks.is_empty() and not body.patch_empty_reported:
 			body.patch_empty_reported = true
-			print("PATCH: %s has no patches — the walk answered empty at %.1f m" % [
+			SpacesimDebug.say("PATCH: %s has no patches — the walk answered empty at %.1f m" % [
 				body.name, body.patch_walk_distance
 			])
 		_request_patch_build(body, body.patch_walk_wireframe)
@@ -1549,11 +1549,13 @@ func _publish_air_shell(body: SpacesimSceneBody, camera: Camera3D, observer: Vec
 	if not _air_shell_reported:
 		_air_shell_reported = true
 		var eye_local := body_basis.inverse() * (observer - body.node.global_position)
-		print("AIR SHELL: %s eye_radius=%.0f m band=(%.0f, %.0f) sun_local=(%.2f, %.2f, %.2f) strength=%.2f" % [
-			body.name, eye_local.length(), body.radius, body.radius + body.sky_top,
-			(body_basis.inverse() * sun).x, (body_basis.inverse() * sun).y, (body_basis.inverse() * sun).z,
-			strength
-		])
+		SpacesimDebug.say(
+			"AIR SHELL: %s eye_radius=%.0f m band=(%.0f, %.0f) sun_local=(%.2f, %.2f, %.2f) strength=%.2f" % [
+				body.name, eye_local.length(), body.radius, body.radius + body.sky_top,
+				(body_basis.inverse() * sun).x, (body_basis.inverse() * sun).y,
+				(body_basis.inverse() * sun).z, strength
+			]
+		)
 
 
 ## **Where the star is, and how wide it looks, for every drawn body** — per frame, and NOT inside `_update_decks`.

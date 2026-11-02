@@ -96,6 +96,11 @@ func _ready() -> void:
 	# **The attributes stay attached.** Identity is `CameraAttributesPhysical` with the multiplier at 1.0,
 	# never `null`: with no attributes the engine skips the factor that implements Godot's lux
 	# convention and the scene renders about 95x too bright (`light_storage.cpp:764`).
+	# **`--debug` before anything can print.** The command line is read here because `_ready` is the first
+	# place the game owns before a frame, and `SpacesimDebug.enabled` is what every diagnostic print checks.
+	SpacesimDebug.enabled = (
+		OS.get_cmdline_user_args().has("--debug") or OS.get_cmdline_args().has("--debug")
+	)
 	_exposure.identity()
 	_exposure_pass = SpacesimExposurePass.new()
 	# **The surface maps refine on the render thread**, through a pass of this camera's compositor: a bake is a
@@ -216,7 +221,7 @@ func set_wireframe(on: bool) -> void:
 		for node in find_children("*%s*" % suffix, "MeshInstance3D", true, false):
 			(node as VisualInstance3D).layers = 0 if on else 1
 			hidden += 1
-	print("wireframe %s: %d deck/air mesh(es) %s" % [
+	SpacesimDebug.say("wireframe %s: %d deck/air mesh(es) %s" % [
 		"on" if on else "off", hidden, "hidden" if on else "restored"
 	])
 
