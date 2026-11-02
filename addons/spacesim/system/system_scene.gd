@@ -589,12 +589,23 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# moves, and the shader works in the body's frame rather than in model space.
 	if not body.air.is_empty() and body.sky_top > 0.0:
 		var outer := body.radius + body.sky_top
-		# **No band floor is computed or published any more.** The air has an outer bound and no inner one — a
-		# giant has no floor, so the march ends on opacity or on whatever the frame drew. Evert, 2026-11-02:
-		# *"First thing I want to try is to do number 2. No inner limit."* Two nights of floors (the datum, then the
-		# highest cloud top, then the lowest) each fixed one artefact and caused another, which is the shape of a
-		# mechanism that should not be reading those numbers at all.
-		body.air_shell_material = SpacesimBodyRenderer.air_shell_material(body.air, body.radius, outer)
+		# **The band's floor**: the ground for a body that has one, and the **lowest cloud bottom** for one that does
+		# not. Evert, 2026-11-02: *"I want to see the lowest cloud bottom on planets with no surface."* So the band
+		# reaches down THROUGH the stack rather than stopping at the top deck — every layer is then looked at through
+		# the same air, and the deck below a gap has air in front of it like the one above.
+		#
+		# A giant's deck bases are NEGATIVE altitudes (Saturn measures -5 km and -138 km), so neither the datum nor a
+		# clamp against it will do: clamping to `max(datum, cloud)` keeps the datum in exactly the case being fixed,
+		# and stopping at the highest cloud top leaves the lower decks with no air in front of them.
+		var inner := body.radius
+		if body.content == null or body.content.surface == null:
+			if not body.decks.is_empty():
+				inner = INF
+				for deck in body.decks:
+					inner = minf(inner, body.radius + deck.height)
+		body.air_shell_material = SpacesimBodyRenderer.air_shell_material(
+			body.air, body.radius, outer, inner
+		)
 		body.air_shell = _add_body_mesh(body.node, body.air_shell_material, "%sAir" % body.name)
 		body.air_shell.mesh = SpacesimIcosphere.mesh_at(AIR_SHELL_LEVEL)
 		body.air_shell.scale = Vector3.ONE * outer

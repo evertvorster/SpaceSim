@@ -43,12 +43,9 @@ uniform float u_mie_h = 1200.0;
 uniform float u_mie_g = 0.758;
 uniform float u_sun_intensity = 0.0;
 uniform float u_planet_radius = 6371000.0;
-// **The band has an OUTER bound and no inner one.** Evert, 2026-11-02: *"just like an atmosphere does not
-// really have an upper bound, for planets without a surface, we need to make something like that with no inner
-// bound, or at least _something_ to get some air under the last layer."* A gas giant has no floor: its datum is
-// a pressure, so any sphere drawn under the clouds is a boundary the air does not have. What ends the march is
-// **opacity** (below) and **whatever the frame drew** (the depth buffer) — never an analytic radius. That also
-// removes the class of bug where a number derived from a deck's altitude could reach this shader at all.
+// **The band this shell is.** `inner` is the surface it stands on — the ground's, or a deck's base once a
+// second shell exists — and `outer` is the next boundary outward.
+uniform float u_band_inner = 6371000.0;
 uniform float u_band_outer = 6471000.0;
 // The eye, offset from the body's centre; the star, as a unit direction; and the rotation from view space.
 uniform vec3 u_eye_local = vec3(0.0);
@@ -87,8 +84,14 @@ void fragment() {
 	}
 	float t0 = max(outer.x, 0.0);
 	float t1 = outer.y;
-	// **No inner sphere.** There is deliberately nothing here: a body with a surface gets its ground from the depth
-	// buffer like any other drawn thing, and a body without one has no floor to clip at. See the uniform's comment.
+	// **The ground inside the band**, and the only occlusion this shader does not get from the depth buffer:
+	// the planet itself is a sphere and needs no sampling. `inner.x > t0` is the front surface ahead; the eye
+	// inside the inner sphere is the "under the ground" case, which starts the chord after the far wall —
+	// wrong, and impossible for a camera that is above its own surface.
+	vec2 inner = ray_sphere(u_eye_local, dir, u_band_inner);
+	if (inner.x <= inner.y && inner.x > t0) {
+		t1 = min(t1, inner.x);
+	}
 
 	// ===== WHERE THE FRAME SAYS THE SURFACE IS ===========================================
 	//
@@ -119,7 +122,6 @@ void fragment() {
 	float span = t1 - t0;
 	float depth_r = 0.0;
 	float depth_m = 0.0;
-	vec3 T = vec3(1.0);
 	vec3 sum_r = vec3(0.0);
 	vec3 sum_m = vec3(0.0);
 	for (int i = 0; i < I_STEPS; i++) {
@@ -155,14 +157,6 @@ void fragment() {
 			+ (u_rayleigh + u_absorption) * (depth_r + sun_r)));
 		sum_r += step_rayleigh * attenuation;
 		sum_m += step_mie * attenuation;
-		// **THE MARCH ENDS ON OPACITY, and that is what replaces the inner sphere.** With no floor the chord runs
-		// through the whole body, so there must be a reason to stop other than geometry: past a transmittance of
-		// 1% nothing behind this sample can be seen, and every step beyond it is paid for nothing. It is also the
-		// physical answer to "how deep does a gas giant's air go" — as deep as it is opaque.
-		T = exp(-(u_mie * depth_m + (u_rayleigh + u_absorption) * depth_r));
-		if (dot(T, vec3(0.2126, 0.7152, 0.0722)) < 0.01) {
-			break;
-		}
 	}
 
 	// ===== THE COMPOSITE =================================================================
@@ -173,6 +167,7 @@ void fragment() {
 	//
 	// shader: scalar extinction — a sunset's blue-weighted dimming of the ground is approximated by a grey
 	// one. The honest fix is per-channel alpha, which no blend mode has; measure it before reaching for one.
+	vec3 T = exp(-(u_mie * depth_m + (u_rayleigh + u_absorption) * depth_r));
 	vec3 L = (phase_r * u_rayleigh * sum_r + phase_m * u_mie * sum_m) * u_sun_intensity;
 	float alpha = 1.0 - clamp(dot(T, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 	// **Straight colour and an alpha**, because `blend_mix` multiplies by alpha itself: `ALBEDO * ALPHA +

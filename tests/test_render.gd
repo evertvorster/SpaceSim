@@ -954,18 +954,20 @@ func _test_a_body_without_a_surface_has_no_field(h, scene) -> void:
 		"Saturn's air: sky_top %.0f km, %d deck(s), lowest base %.0f m" % [
 			saturn.sky_top / 1000.0, saturn.decks.size(), lowest
 		])
-	# **The air has no inner bound at all now** — Evert, 2026-11-02: *"First thing I want to try is to do number 2.
-	# No inner limit."* So the assertion is the *absence* of the parameter: if `u_band_inner` ever comes back, a
-	# number derived from a deck's altitude can reach the shader's chord again, which is the class of bug the two
-	# previous floors were. `get_shader_parameter` returns null for a name the shader does not declare.
+	# **The air's band floor**, which is the fix for the artefact that flight reported: a giant's air must start at
+	# its highest cloud top, not at a datum its clouds are below. Read back from the material, because that is the
+	# number the shader actually marches with.
 	var saturn_air := saturn.air_shell_material as ShaderMaterial
 	h.check(saturn_air != null, "Saturn has an air shell")
 	if saturn_air != null:
-		h.check(saturn_air.get_shader_parameter("u_band_inner") == null,
-			"its air carries no inner bound")
+		var floor_saturn := float(saturn_air.get_shader_parameter("u_band_inner"))
+		h.check(floor_saturn < saturn.radius - 100000.0,
+			"its air reaches the LOWEST cloud bottom, not the top deck (%.0f km below the datum)" % [
+				(saturn.radius - floor_saturn) / 1000.0
+			])
 	var earth_air := earth.air_shell_material as ShaderMaterial
-	h.check(earth_air != null and earth_air.get_shader_parameter("u_band_inner") == null,
-		"and neither does a surfaced body's")
+	h.check(earth_air != null and float(earth_air.get_shader_parameter("u_band_inner")) == earth.radius,
+		"and a surfaced body's air still starts at its ground")
 
 
 ## **The air takes its share of the star's light on the way IN, and that share is the sunset.**
