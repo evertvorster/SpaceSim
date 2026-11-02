@@ -29,6 +29,9 @@ render_mode blend_mix, cull_back, diffuse_burley, specular_schlick_ggx, depth_dr
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 #include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
+// **The surface gradient from screen derivatives**, shared with the land: one home for a 2x2 solve that used to be
+// written twice, and the difference that makes the swell and the ripple affordable.
+#include "res://addons/spacesim/render/surface_gradient.gdshaderinc"
 
 // **The datum, in field units** — `SpacesimSurfaceModel.sea_level()` through the measured quantiles. It is what the
 // ground's displaced vertices measure from, so the two layers cannot disagree about where the waterline is.
@@ -155,20 +158,21 @@ void fragment() {
 	float eye_altitude_m = max((length(body_eye_local) - 1.0) * planet_radius, 0.0);
 	float pixel_metres = max((eye_altitude_m + depth) * footprint_angle, 0.05);
 	vec3 p = up * planet_radius;
-	// Two directions in the surface's tangent plane, to take the gradient along.
-	vec3 t1 = normalize(cross(up, abs(up.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-	vec3 t2 = cross(up, t1);
-	// The step is a pixel on the water, so the difference quotient measures the slope the screen can see.
-	float step_m = max(pixel_metres, 1.0);
+	// Two directions in the surface's tangent plane. **``up``, not the normal**: the tangent frame is fixed by the
+	// sphere, so the two noise fields are sampled in one frame and cannot disagree about which way lean points.
+	vec3 t1;
+	vec3 t2;
+	surface_tangents(up, t1, t2);
 	float wavelength = mix(60.0, 220.0, clamp(swell / max(rough_wave, 0.001), 0.0, 1.0));
 	float frequency = 1.0 / wavelength;
 	int seed = 7301;
-	float h1 = fnl_fbm3_banded(p + t1 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	float h2 = fnl_fbm3_banded(p - t1 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	float h3 = fnl_fbm3_banded(p + t2 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	float h4 = fnl_fbm3_banded(p - t2 * step_m, seed, frequency, 4, 0.5, 2.0, 0.7, step_m);
-	// `dh/dx` in metres of height per metre across, which times the swell's amplitude is the slope.
-	vec3 gradient = t1 * ((h1 - h2) / (2.0 * step_m)) + t2 * ((h3 - h4) / (2.0 * step_m));
+	// **ONE evaluation of each field, and the gradient from the screen.** The central difference that stood here
+	// sampled the same fbm four times per field — 28 octaves a pixel — to obtain a slope two hardware derivatives
+	// already carry. Evert, 2026-11-02: *"the water shader is a bit heavy."* The band-limit the difference quotient
+	// was providing for free is now the footprint the noise is asked for, which is the same number and the honest
+	// one: fade the octaves this pixel cannot resolve.
+	float swell_height = fnl_fbm3_banded(p, seed, frequency, 4, 0.5, 2.0, 0.7, pixel_metres);
+	vec3 gradient = surface_gradient(up, t1, t2, swell_height);
 	vec3 lean = gradient * swell;
 	// **CAPILLARY RIPPLES: the steep little facets that make a sun path wide.** A 0.5 m swell over a 60 m wavelength is
 	// a slope of ~0.008 — flat water, and flat water reflects the sun as a MIRROR: one narrow streak. Evert,
@@ -177,16 +181,12 @@ void fragment() {
 	// wavelength, and an amplitude that does not follow the swell at all.
 	float ripple_wavelength = 3.0;
 	float ripple_frequency = 1.0 / ripple_wavelength;
-	float r1 = fnl_fbm3_banded(p + t1 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	float r2 = fnl_fbm3_banded(p - t1 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	float r3 = fnl_fbm3_banded(p + t2 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	float r4 = fnl_fbm3_banded(p - t2 * step_m, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, step_m);
-	lean += (t1 * ((r1 - r2) / (2.0 * step_m)) + t2 * ((r3 - r4) / (2.0 * step_m))) * ripple_scale;
-	float fade = 1.0;
+	float ripple_height = fnl_fbm3_banded(p, 4409, ripple_frequency, 3, 0.5, 2.0, 0.7, pixel_metres);
+	lean += surface_gradient(up, t1, t2, ripple_height) * ripple_scale;
 	if (length(lean) > MAP_TILT_LIMIT) {
 		lean *= MAP_TILT_LIMIT / length(lean);
 	}
-	vec3 normal = normalize(up - lean * fade);   // body space — see where it is written below
+	vec3 normal = normalize(up - lean);
 
 	// ===== THE COLOUR, AND HOW MUCH OF THE FLOOR SHOWS ==================================
 	// **The shallow/deep ramp, in metres** — the same two ends the old layer used.
