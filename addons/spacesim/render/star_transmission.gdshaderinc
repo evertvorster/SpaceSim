@@ -74,18 +74,6 @@ uniform float air_mie = 0.0;
 uniform float air_mie_height = 0.0;
 // Metres above this body's surface — 0 for the ground and the sea, the deck's own base height for a cloud.
 uniform float air_altitude = 0.0;
-// **The nearest moon, as a second light.** A body that orbits this one reflects the star onto it, and on the night
-// side that is the only light there is. `body_moon` is a direction in the same frame as `body_sun` — the body's own
-// — and `moon_irradiance` is the illuminance that body delivers HERE, in lux per channel, so its colour is the
-// reflectance of whatever is shining.
-//
-// **A hand-computed lobe and not a scene light**, and the reason is in the history: a `DirectionalLight3D` has no
-// position so it lit the whole moon-facing hemisphere with no falloff (Evert: *"not just the side that is facing
-// the moon"*), and an `OmniLight3D` at planetary range came out wildly too bright. Three uniforms and one Lambert
-// term have no engine-side scale to get wrong — and this way the light comes THROUGH the air, which no scene light
-// can do.
-uniform vec3 body_moon = vec3(0.0, -1.0, 0.0);
-uniform vec3 moon_irradiance = vec3(0.0);
 
 const float STAR_MIN_HALF_WIDTH = 1.0e-6;
 
