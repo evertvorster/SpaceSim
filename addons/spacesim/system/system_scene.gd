@@ -910,6 +910,16 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		deck.level = level
 		deck.height = level.height
 		deck.thickness = level.thickness
+		# **A FEATURELESS deck is the whole air, not a skin in it.** `Banding.FEATURELESS` means the band scale is
+		# the planet — one cell, no structure, "a nearly unbroken bright shroud" on Venus — and the condensate law
+		# answers a different question: how deep the condensate itself is, which comes out at a few kilometres
+		# whether the body is Earth (a thin deck in a clear sky) or Venus (an overcast with nothing above it).
+		# Evert, 2026-11-03: *"With a [shroud] atmosphere the cloud shell should basically be the entire
+		# atmosphere, no?"* — for this verdict it should, so the slab runs from its base to the top of the air and
+		# the deck stops reading as a floating shell. The GEOMETRY is unchanged (a deck is drawn at its base; the
+		# thickness is a shading quantity), so what this changes is how opaque the layer is where it covers.
+		if morphology.banding == SpacesimCloudModel.Banding.FEATURELESS:
+			deck.thickness = maxf(body.sky_top - deck.height, deck.thickness)
 		deck.coverage = clouds.coverage_at(index)
 		deck.albedo = clouds.albedo_at(index)
 		deck.palette = _cloud_palette(clouds, index, materials)
@@ -1420,10 +1430,13 @@ func _build_patch_arrays(
 		body.sphere_arrays = base
 		body.patch_arrays = base.duplicate(true)
 	else:
-		# Outside a wireframe the sphere is not drawn, so there is nothing to copy it for — and the surface keeps the
-		# array itself.
+		# **A copy here too, and for the reason Evert stated rather than for the wireframe.** Evert, 2026-11-01:
+		# *"The mesh that has been created by the walks shall be copied, and each vertex translated."* This path used
+		# to keep the array ITSELF, which worked only because the decks and the sea take their copies earlier in this
+		# function — an ordering accident, not a guarantee. A body whose surface is never drawn still needs the rule
+		# to hold, so the translation can never write through to the array every other consumer is built from.
 		body.sphere_arrays = []
-		body.patch_arrays = base
+		body.patch_arrays = base.duplicate(true)
 	# **Each deck is the same mesh, scaled to its level.** A vertex is metres from a near-eye origin, so moving the whole
 	# mesh from `radius` to `radius + height` is one multiply, and the origin goes the same way: exactly what a copy with
 	# every vertex at a different radius means. The alternative — asking the walk again at the deck's radius — built a
