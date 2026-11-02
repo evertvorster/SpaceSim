@@ -116,15 +116,23 @@ func _test_plan(h) -> void:
 		).rotated(Vector3.UP, TAU * float(index) / 3.0).normalized()
 		directions.append(unit)
 		points.append(unit * 6.371e6)
-	var heights := PackedFloat32Array([0.825, 0.825, -1.0, 1.0])
 	var sea := 0.825
 	# **Two scales, not one**, because a planet is not symmetric about sea level: 0.14 % of the radius up and 0.17 %
 	# down, Earth's 8.8 km of mountain and 11 km of ocean. One scale for both gave the land 1.56 km of relief and the
 	# basins 16.3 km of trench (2026-11-02).
 	var amplitude := 8919.0
 	var depth := 10830.0
+	# **The scales, not the amplitudes**: metres per field unit on each side, from the body's own MEASURED range --
+	# Earth's field runs -1.139 to +1.516, not ±1, and dividing by the nominal span put the peaks at 35 km.
+	var field_min := -1.139
+	var field_max := 1.516
+	# The two extremes are what the scales are FOR: a point at the field's floor must land exactly `depth` below the
+	# datum and one at its ceiling exactly `amplitude` above, whatever the field's own asymmetries are.
+	var heights := PackedFloat32Array([sea, sea, field_min, field_max])
+	var up_scale := amplitude / (field_max - sea)
+	var down_scale := depth / (sea - field_min)
 	var before := points.duplicate()
-	SpacesimSystemScene.offset_vertices(points, directions, heights, sea, amplitude, depth)
+	SpacesimSystemScene.offset_vertices(points, directions, heights, sea, up_scale, down_scale)
 	# **A centimetre, not a micron**: the heights are a `PackedFloat32Array` — the kernel writes floats — so 0.825
 	# arrives as 0.82499998 and an 8.9 km amplitude turns that into 1e-4 m. The law is exact; the input is float32.
 	h.check_near(points[0].length(), 6.371e6,
@@ -157,10 +165,10 @@ func _test_plan(h) -> void:
 	var barren := before.duplicate()
 	var floor := -1.0
 	var field_heights := PackedFloat32Array([floor, floor, -0.5, 0.5])
-	SpacesimSystemScene.offset_vertices(barren, directions, field_heights, floor, amplitude, depth)
+	SpacesimSystemScene.offset_vertices(barren, directions, field_heights, floor, amplitude / 2.0, depth)
 	h.check_near(barren[0].length(), 6.371e6,
 		"on a barren body the lowest ground sits ON the datum, unclamped", 0.01)
-	h.check_near(barren[2].length(), 6.371e6 + 0.25 * amplitude,
-		"and every point keeps a share of the relief above it (%.0f m of %.0f)" % [0.25 * amplitude, amplitude], 0.01)
+	h.check_near(barren[2].length(), 6.371e6 + 0.5 * (amplitude / 2.0),
+		"and every point keeps a share of the relief above it (%.0f m of %.0f)" % [0.5 * (amplitude / 2.0), amplitude], 0.01)
 	h.check(barren[2].length() > before[2].length() and barren[3].length() > before[3].length(),
 		"which is the whole point: no ground is flattened away on a world with no sea")

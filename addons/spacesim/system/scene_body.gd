@@ -42,6 +42,13 @@ var sphere_arrays: Array = []
 ## translation means the shader and the mesh cannot be given two different datums.
 var surface_plan: SpacesimSurfaceField.Plan
 var sea_level := 0.0
+## **The field's measured extremes for this body** — `quantiles[0]` and `quantiles[last]`, which are NOT ±1: the
+## shares are summed and the warp pushes past the normaliser, so Earth measures **-1.139 to +1.516**. The translation
+## normalises about the datum by these spans, so they are what makes "the highest ground stands `amplitude` metres up"
+## true; dividing by the nominal ±1 put the peaks at 35 km on Earth (2026-11-02). The field's own floor for bodies with
+## no measurement, which is the barren case where nothing below the datum exists anyway.
+var field_min := -1.0
+var field_max := 1.0
 ## **The sea**, when the body has a liquid on it: a node wearing the GROUND's own mesh at ratio 1.0, because the sea's
 ## surface IS the sphere the ground is displaced from. Empty arrays mean the walk has not published yet.
 var ocean: MeshInstance3D

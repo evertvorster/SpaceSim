@@ -520,6 +520,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.surface_plan = SpacesimSurfaceField.plan(body.id, body.radius)
 	if entry != null and not entry.quantiles.is_empty():
 		body.sea_level = entry.value_at(body.surface_ocean_fraction)
+		# **The field's real extremes, not the ±1 it is nominally bounded by.** Measured on Earth: **-1.139 to +1.516**,
+		# because the shares are summed and the warp pushes past the normaliser — so a translation that divided by the
+		# nominal span put the highest ground at 35 km instead of 8.9. Any range that has to be normalised has to be
+		# the MEASURED one; `tests/probe_surface_distribution.gd` prints the table.
+		body.field_min = entry.quantiles[0]
+		body.field_max = entry.quantiles[entry.quantiles.size() - 1]
 	(body.mesh_material as ShaderMaterial).set_shader_parameter("sea_level", body.sea_level)
 	# The mesh itself is built by the first `update_lod`, from the patch tree — there is no whole-sphere
 	# level to start from any more.
@@ -1759,10 +1765,11 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 				body.name, _heights_gpu.error() if _heights_gpu != null else "no device"
 			])
 		return
-	offset_vertices(
-		vertices, directions, heights, body.sea_level,
-		body.surface_plan.amplitude, body.surface_plan.depth_amplitude
-	)
+	# **Two scales, both derived**: the relief or depth divided by the field's own measured span either side of the
+	# datum. Floored spans, because a body whose sea level IS its field's floor has no downward range at all.
+	var up_scale := body.surface_plan.amplitude / maxf(body.field_max - body.sea_level, 1.0e-4)
+	var down_scale := body.surface_plan.depth_amplitude / maxf(body.sea_level - body.field_min, 1.0e-4)
+	offset_vertices(vertices, directions, heights, body.sea_level, up_scale, down_scale)
 	arrays[0] = vertices
 
 
@@ -1790,20 +1797,17 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 ## there is one point and one direction.
 static func offset_vertices(
 	vertices: PackedVector3Array, directions: PackedVector3Array, heights: PackedFloat32Array,
-	sea_level: float, relief_above: float, relief_below: float
+	sea_level: float, up_scale: float, down_scale: float
 ) -> void:
-	# The field's own range either side of the datum — **the field is bounded to ±1** by its FBM normalisers, so the
-	# spans are `1 - sea_level` upward and `sea_level + 1` downward. Floored, because a body whose datum sits at an end
-	# of the range (a barren world's is the field's floor) must not divide by nothing.
-	var up_span := maxf(1.0 - sea_level, 1.0e-4)
-	var down_span := maxf(sea_level + 1.0, 1.0e-4)
+	# **METRES PER FIELD UNIT, one number per side** — `relief / (the field's own measured span)`, computed from the
+	# quantiles because the field is NOT bounded to ±1: Earth measures -1.139 to +1.516. Dividing by the nominal span
+	# put the highest ground at 35 km on Earth (2026-11-02). Floored so a body whose datum sits at an end of its range
+	# (a barren world's is the field's floor) cannot divide by nothing.
 	for index in vertices.size():
 		var height := heights[index] - sea_level
-		var metres := (
-			height / up_span * relief_above if height >= 0.0
-			else height / down_span * relief_below
+		vertices[index] += directions[index] * (
+			height * up_scale if height >= 0.0 else height * down_scale
 		)
-		vertices[index] += directions[index] * metres
 
 
 ## **The field's heights at a list of directions**, on the scene's own device.
