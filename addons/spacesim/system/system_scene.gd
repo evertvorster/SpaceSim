@@ -529,12 +529,15 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# 1.0 — the sea's surface is the sphere the land is displaced FROM, so the two are the same triangles by
 	# construction and cannot fight about where the waterline is. Which parts are water is decided per pixel in the
 	# shader, from the same field the land uses.
+	# **Its own mesh, at the DATUM**: the sea is the sphere the land is displaced from, so it takes the walk's lattice
+	# *before* `_translate_surface` moves the ground's copy, and the two cannot disagree about where the surface is.
+	# Which parts are water is decided per pixel, and **how deep it is comes from the frame's own depth** — the planet
+	# is drawn below the sea and shows through where the water is thin (Evert, 2026-11-02), so the sea publishes no
+	# terrain numbers at all: `sea_level` and `field_amplitude` had no reader left and are gone.
 	var liquid := _liquid_material(body, light.x, light.y)
 	if liquid != null:
 		body.ocean_material = SpacesimBodyRenderer.ocean_material(liquid)
-		body.ocean_material.set_shader_parameter("sea_level", body.sea_level)
 		body.ocean_material.set_shader_parameter("planet_radius", body.radius)
-		body.ocean_material.set_shader_parameter("field_amplitude", body.surface_plan.amplitude)
 		body.ocean_material.set_shader_parameter(
 			"sky_tint", SpacesimBodyRenderer.sky_reflection_tint(body.air)
 		)

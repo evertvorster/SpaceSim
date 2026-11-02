@@ -19,29 +19,27 @@ shader_type spatial;
 // different numbers, and nothing Earth-specific is written here.
 render_mode blend_mix, cull_back, diffuse_burley, specular_schlick_ggx, depth_draw_opaque;
 
-#include "res://addons/spacesim/system/model/noise.gdshaderinc"
-#include "res://addons/spacesim/system/model/surface_field.gdshaderinc"
-// The field's parameters, the same file the land includes — one home for the numbers, and a separate file because the
-// field's *definition* is concatenated into a compute source where uniforms are illegal. See `surface_plan.gdshaderinc`.
-#include "res://addons/spacesim/system/model/surface_plan.gdshaderinc"
 // **The same three includes the land takes**, or the sea and the shore cannot agree: whether the body occludes the
 // star, what the air took on the way in, and a cloud's shadow.
 #include "res://addons/spacesim/render/star_transmission.gdshaderinc"
 #include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
+// **The frame's own depth, because the floor is already drawn in it.** See the floor block below: the sea measures its
+// own thickness against the surface in the depth buffer instead of evaluating the terrain field a second time. This is
+// a `spatial` shader in the transparent queue, so the opaque depth behind it is exactly the planet.
+uniform sampler2D depth_texture : hint_depth_texture;
+
 // **The datum, in field units** — `SpacesimSurfaceModel.sea_level()` through the measured quantiles. It is what the
 // ground's displaced vertices measure from, so the two layers cannot disagree about where the waterline is.
-uniform float sea_level = 0.0;
+// **Gone from this shader on 2026-11-02**: the sea stopped asking the terrain field how far down the floor is and reads
+// the frame's own depth instead, so `sea_level` and `field_amplitude` had no reader left. The land still translates its
+// vertices by them; the water no longer needs to know.
 uniform float planet_radius = 6371000.0;
 uniform vec3 patch_origin = vec3(0.0);
 // `body_eye_local`, `body_sun` and `air_altitude` come from the includes below — the same declarations the land
 // shares, so the two cannot be given different values.
 uniform float pixel_angle = 0.001;
-// **Metres per field unit**, which is what turns a height difference into a depth. Published from
-// `SpacesimSurfaceField.Plan.amplitude` — the same number the vertex translation multiplies by, so the sea's depth
-// and the land's displacement are one quantity.
-uniform float field_amplitude = 1.0;
 
 // **The liquid's own numbers**, from `SpacesimSurfaceModel.band_color` and `band_shading`, with the colour's
 // luminance set to its albedo the way every surface band is drawn.
@@ -76,7 +74,12 @@ uniform float reflection_gain : hint_range(0.0, 2.0) = 1.0;
 // **How deep the water has to be before it stops showing the floor**, in metres. Evert: *"a little transparent, but
 // only for where the water is really shallow."* Fully opaque by this depth, and never fully clear even at the water's
 // edge — a sea has a surface as well as a bottom.
-uniform float shallow_depth : hint_range(0.1, 20.0) = 2.5;
+//
+// **15 m, not 2.5** — Evert, 2026-11-02: *"I have seen seawater clear up to 15m deep."* That is the honest scale: a
+// dive over sand reads at fifteen metres, and the old value was the *ramp's* shallow end borrowed for transparency,
+// which made the sea opaque at the depth where it is most translucent. The ramp's own shallow end (`shallow_metres`,
+// 5 m) is a colour question and stays where it is.
+uniform float shallow_depth : hint_range(0.1, 20.0) = 15.0;
 // The floor's visible share at zero depth. Not 0: the water itself still reflects and scatters at the shoreline.
 uniform float shore_alpha : hint_range(0.0, 1.0) = 0.45;
 
@@ -147,18 +150,38 @@ void fragment() {
 	vec3 eye_direction = normalize(body_eye_local - up);
 	float footprint_angle = pixel_angle / max(dot(up, eye_direction), 0.02);
 
-	// ===== THE FLOOR, AND THEREFORE THE DEPTH ============================================
+	// ===== THE FLOOR, FROM THE FRAME ITSELF =================================================
 	//
-	// The same function the ground evaluates, at the same footprint, so the coastline this shader draws is the
-	// coastline the ground's own vertices were translated to. One field, one answer.
-	SurfacePlan plan = surface_plan();
-	float ground = surface_height(up, plan, footprint_angle);
+	// **The water's thickness is what is already drawn under this pixel**, not a second evaluation of the field.
+	// Evert, 2026-11-02: *"the ocean shader is supposed to be on its own mesh. The surface of the planet must still be
+	// below it, and actually shine through in areas where it is thin."* The planet IS drawn below — it is the opaque
+	// pass, it is in the depth buffer, and `ALPHA` is a blend against it. So the column is `ground distance - water
+	// distance` along this pixel's own ray: measured against the surface on screen rather than derived from a field
+	// that has to agree with it.
+	//
 	// **No discard: the coastline IS the intersection, and the depth test makes it.** The land is opaque and drawn
 	// first, the water is transparent and drawn after, so where the ground stands above sea level the water fragment
 	// is behind it and Godot's depth test rejects it — no rule of ours needed. Evert, 2026-11-01: *"why is
-	// coastlines handled seperately? They should just be where the water and land intersect?"* He is right, and
-	// `discard` here would be a second mechanism deciding what the depth test already decides.
-	float depth = max((sea_level - ground) * max(field_amplitude, 1.0e-6), 0.0);
+	// coastlines handled seperately? They should just be where the water and land intersect?"* He is right.
+	//
+	// **What this deletes**: `surface_height` was the last 21 octaves this shader paid, and the land, the sea and the
+	// decks were each evaluating the same five-octave field every frame. The sea no longer knows what the terrain is
+	// made of at all — it only knows where the floor was drawn.
+	//
+	// **The risk, named**: the depth buffer is reversed-Z over a far plane set by `sky_reach` (hundreds of km), so its
+	// resolution at 20 km is metres, not centimetres. If the shallows band proves coarse in flight, the fix is a
+	// tighter far plane or a near-field pass — not a return to the field.
+	float buffer_depth = texture(depth_texture, SCREEN_UV).r;
+	vec4 scene_view = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, buffer_depth, 1.0);
+	vec3 scene_point = scene_view.xyz / max(scene_view.w, 1.0e-9);
+	// **The camera looks down -Z in view space**, so a distance is the negated z. `VERTEX` in the fragment stage is
+	// this fragment in that same space, which is what makes the subtraction a length rather than a guess.
+	float scene_distance = -scene_point.z;
+	float water_distance = -VERTEX.z;
+	float thickness = max(scene_distance - water_distance, 0.0);
+	// **The vertical COLUMN, not the ray**: a pixel at the horizon looks through a hundred times more water than the
+	// column beneath it, and the ramp is about the column.
+	float depth = thickness * max(dot(eye_direction, up), 0.0);
 
 	// ===== THE SURFACE ===================================================================
 	//
