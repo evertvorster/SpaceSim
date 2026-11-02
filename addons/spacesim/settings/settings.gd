@@ -131,11 +131,12 @@ const REGISTRY := {
 	# `render.cloud_decks`, which already owns them in every mode.
 	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER},
 	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER},
-	# **The vertices carry the terrain.** On, the surface's points move radially by `(height - sea_level) * amplitude`
-	# — the field asked at each point's own direction on the device (`SpacesimSurfaceGpu.heights`), so there is no
-	# raster and no second implementation of the field. **Off by default while it is proven**: it is one switch so both
-	# pictures can be flown in one session. Evert, 2026-11-01, on where the heights come from: *"Lets try 1."* — the
-	# dispatch, not a texture.
+	# **The vertices carry the terrain.** On, the surface's points move radially by their own height either side of the
+	# datum — normalised about it and scaled separately up (`amplitude`) and down (`depth_amplitude`), so land rises through
+	# the decks and basins fall to an ocean floor — the field asked at each point's own direction on the device
+	# (`SpacesimSurfaceGpu.heights`), so there is no raster and no second implementation of the field. **Off by default
+	# while it is proven**: it is one switch so both pictures can be flown in one session. Evert, 2026-11-01, on where
+	# the heights come from: *"Lets try 1."* — the dispatch, not a texture.
 	#
 	# **It creates no vertices and refines nothing**, and the walk's answer does not depend on it.
 	"render.surface_translation": {"default": false, "scope": Scope.PLAYER},

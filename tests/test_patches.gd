@@ -211,6 +211,20 @@ func _test_the_cover_reaches_the_topmost_layer(h) -> void:
 			% [missing, narrow.size()])
 	h.check(wide.size() > narrow.size(),
 		"and it really does reach further (%d chunks against %d)" % [wide.size(), narrow.size()])
+	# **A surface BELOW the datum needs a WIDER cap, not a narrower one**, which is the half of this that cost a flight
+	# on 2026-11-01 (a black band at the edge of a dredged basin). A smaller sphere's horizon is at a larger centre-angle
+	# from the same eye, so `cover_angle` must return the layer's own answer and the caller must max over layers — folding
+	# the body's radius into it would answer with the ground's cap for every layer and re-open exactly that hole.
+	var basin := SpacesimPatches.cover_angle(distance, EARTH_RADIUS, EARTH_RADIUS - 10000.0)
+	var ground_cap := SpacesimPatches.cover_angle(distance, EARTH_RADIUS, EARTH_RADIUS)
+	h.check(basin > ground_cap,
+		"a layer ten kilometres BELOW the datum has a wider visible cap than the sphere (%.4f against %.4f rad)"
+			% [basin, ground_cap])
+	var deep := SpacesimPatches.select(
+		distance, Vector3.UP, EARTH_RADIUS, PIXEL_ANGLE, 2.0, basin
+	)
+	h.check(deep.size() > narrow.size(),
+		"and a walk asked for it emits more of the sphere (%d chunks against %d)" % [deep.size(), narrow.size()])
 
 
 ## **Whether the eye can see a point without the planet in the way** — the segment form, worked independently of

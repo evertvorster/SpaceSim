@@ -1209,6 +1209,14 @@ func _request_walk(
 ## shading quantity that the geometry does not wear.
 func _cover_angle(body: SpacesimSceneBody, distance: float) -> float:
 	var cover := SpacesimPatches.cover_angle(distance, body.radius, body.radius)
+	# **And the BASINS**, which is the other half of why a selection can end in mid-air: a surface below the datum has a
+	# *wider* visible cap than the sphere it is drawn on, so the walk that stops at the datum's horizon leaves the edge
+	# of the ocean floor falling off into black. That is exactly what the 2026-11-01 flight saw at 142 m in wireframe,
+	# and the clamp that hid it has gone (2026-11-02) — this is the fix that lets the basins exist.
+	if body.surface_plan != null and body.surface_plan.depth_amplitude > 0.0:
+		cover = maxf(cover, SpacesimPatches.cover_angle(
+			distance, body.radius, body.radius - body.surface_plan.depth_amplitude
+		))
 	for deck in body.decks:
 		if deck.node == null or not deck.node.visible:
 			continue
@@ -1751,38 +1759,51 @@ func _translate_surface(body: SpacesimSceneBody, arrays: Array) -> void:
 				body.name, _heights_gpu.error() if _heights_gpu != null else "no device"
 			])
 		return
-	offset_vertices(vertices, directions, heights, body.sea_level, body.surface_plan.amplitude)
+	offset_vertices(
+		vertices, directions, heights, body.sea_level,
+		body.surface_plan.amplitude, body.surface_plan.depth_amplitude
+	)
 	arrays[0] = vertices
 
 
-## **Move each vertex along its own direction, upward only, by its height above the DATUM** — the arithmetic, on its
-## own so it can be tested without a rendering device.
+## **Move each vertex along its own direction by its height either side of the DATUM** — the arithmetic, on its own
+## so it can be tested without a rendering device.
 ##
-## **The rule is "nothing is drawn below the datum", and the datum is per body.**
-##
-## This is **not a sea mechanism** — the surface is the same surface a barren world gets, and there is no liquid in it. The
-## datum is whatever `sea_level` resolves to for that body, which `SpacesimSurfaceModel.sea_level_percentile` derives as
-## the LIQUID fraction of its coverage:
+## **The datum is per body, and the two directions have their own scale.** `SpacesimSurfaceModel.sea_level_percentile`
+## derives the datum as the LIQUID fraction of the coverage, resolved through the measured quantiles — **0.825 field
+## units for Earth**, which is 71 % of the way up the field's own range. One scale for both directions therefore gave
+## the land the top 17.5 % of the range and the basins the bottom 82.5 %: 1.56 km of relief against a 16.3 km trench.
+## The old answer was to clamp at the datum, which flattened every basin onto the sea; the answer now is to
+## **normalise about the datum and scale each side by its own fraction** — `amplitude` above (0.14 % of the radius) and
+## `depth_amplitude` below (0.17 %), which are Earth's 8.8 km of mountain and 11 km of ocean.
 ##
 ## - **a body with an ocean**: the datum is the sea's surface, which is a *level* — it does not move, and the land rises
-##   around it. The coast is then exact by construction, because the offset is zero at exactly the threshold the sea
-##   discards on;
-## - **a barren body**: the liquid fraction is 0, so the datum is the field's own floor and the clamp never bites — the
-##   lowest ground sits on the datum and everything else stands above it.
+##   through the decks above it while the basins fall below it. The coast is exact by construction, because the offset
+##   is zero at exactly the threshold the sea discards on;
+## - **a barren body**: the liquid fraction is 0, so the datum is the field's own floor and there is no basin branch to
+##   take — the lowest ground sits on the datum and everything else stands above it.
 ##
-## On a watery body the clamp is not cosmetic: without it every basin is dredged out by its own depth (~16 km on Earth,
-## measured after the 2026-11-01 flight put the surface off the walk's cap in a black band), while the sea itself must
-## not move at all.
+## **A basin is only drawable because the walk's cap now reaches it** — a surface BELOW the datum has a *wider* visible
+## cap than the sphere, which is what the 2026-11-01 flight found as a black band and what `_cover_angle` answers.
 ##
 ## **Pure, and it writes in place.** The offset is RADIAL, so a shared point cannot be moved two ways by two triangles —
 ## there is one point and one direction.
 static func offset_vertices(
 	vertices: PackedVector3Array, directions: PackedVector3Array, heights: PackedFloat32Array,
-	sea_level: float, amplitude: float
+	sea_level: float, relief_above: float, relief_below: float
 ) -> void:
+	# The field's own range either side of the datum — **the field is bounded to ±1** by its FBM normalisers, so the
+	# spans are `1 - sea_level` upward and `sea_level + 1` downward. Floored, because a body whose datum sits at an end
+	# of the range (a barren world's is the field's floor) must not divide by nothing.
+	var up_span := maxf(1.0 - sea_level, 1.0e-4)
+	var down_span := maxf(sea_level + 1.0, 1.0e-4)
 	for index in vertices.size():
-		var above := maxf(heights[index] - sea_level, 0.0)
-		vertices[index] += directions[index] * above * amplitude
+		var height := heights[index] - sea_level
+		var metres := (
+			height / up_span * relief_above if height >= 0.0
+			else height / down_span * relief_below
+		)
+		vertices[index] += directions[index] * metres
 
 
 ## **The field's heights at a list of directions**, on the scene's own device.

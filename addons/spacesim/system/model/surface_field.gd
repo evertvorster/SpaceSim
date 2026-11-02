@@ -113,6 +113,22 @@ const BELT_WIDTH := 0.08
 ## right before anything can be drawn, and the picture does not depend on the third digit.
 const RELIEF_FRACTION := 0.0014
 
+## **The depth scale, as a fraction of the body's radius** — how far the ground may sink BELOW the datum, and a
+## separate number from the relief above it because a planet is not symmetric about sea level.
+##
+## **Why it has to be separate, and what it replaces.** The field's own distribution puts Earth's sea level 71 % of the
+## way up — `sea_level` resolves to **0.825 field units** — so one scale for both directions gave the land the top
+## 17.5 % of the range and the basins the bottom 82.5 %: **1.56 km of land relief against a 16.3 km trench**, against
+## Earth's 8.8 km of mountain and 11 km of ocean. The translation used to clamp at the datum to hide that, which
+## flattened every basin onto the sea — Evert, 2026-11-02: *"I thought the surface of the planet would be going up
+## through the clouds at some points, and way below the ocean level on this planet. From what I can see, the surface is
+## capped at 0m depth."*
+##
+## So the field is normalised about the datum and scaled on each side by its own fraction: 0.14 % up (Earth's ±9 km) and
+## **0.17 % down** (Earth's 11 km, the Challenger Deep). Both derived from the body's size, like the relief, so no
+## content carries a number that has to be right before anything can be drawn.
+const DEPTH_FRACTION := 0.0017
+
 ## **There is no width constant here, and that is deliberate.** A map's widths belong to
 ## `SpacesimSurfaceDistribution` — the build width, the ceiling the display implies, and the rungs between them — so a
 ## second copy of those numbers in the field could only drift from the one the ladder actually bakes at. Two
@@ -148,6 +164,10 @@ class Plan:
 	var region_bounding := 1.0
 	## The field's own value times this is metres. Zero for a body with no radius to speak of.
 	var amplitude := 0.0
+	## **The same, below the datum** — metres from sea level down to the deepest basin. The field is normalised about
+	## `sea_level` before either scale is applied, so the two are the full ranges either side of it rather than a
+	## half-range each. See `DEPTH_FRACTION` for why they are not one number.
+	var depth_amplitude := 0.0
 
 
 ## **The compute source, assembled once for every caller**: `#version`, the noise, the field, the plan's block, the
@@ -263,6 +283,7 @@ static func plan(body_id: String, radius: float) -> Plan:
 	# continents jittered.
 	result.plate_phase = float(absi(result.seed) % 6283) * 0.001
 	result.amplitude = maxf(radius, 0.0) * RELIEF_FRACTION
+	result.depth_amplitude = maxf(radius, 0.0) * DEPTH_FRACTION
 	return result
 
 

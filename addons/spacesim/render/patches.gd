@@ -183,8 +183,13 @@ static var _chunk_cache_lock := Mutex.new()
 ##
 ## Checked against the segment test (`the line eye→point must miss the ball`) at 2 m under a 1.4 km deck: 1.25 deg /
 ## 139 km, which is the arc whose edge appears at 15.5 deg of elevation — where the flight saw the deck stop.
+##
+## **`layer_radius` may be BELOW `radius`**, and that case is a basin rather than a cloud: a surface at `radius - depth`
+## has a *wider* visible cap than the sphere, so the walk that stops at the datum's horizon ends the ocean floor in a
+## black band. Which is why this returns the layer's own cap and **the caller takes the max over every layer drawn** —
+## do not fold the body's radius in here, or a layer above the eye would drag every other layer's answer down to its own.
 static func cover_angle(distance: float, radius: float, layer_radius: float) -> float:
-	var top := maxf(layer_radius, radius)
+	var top := layer_radius
 	if distance <= radius:
 		return 0.0
 	if distance > top:
