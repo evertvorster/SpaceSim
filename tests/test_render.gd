@@ -961,8 +961,8 @@ func _test_a_body_without_a_surface_has_no_field(h, scene) -> void:
 	h.check(saturn_air != null, "Saturn has an air shell")
 	if saturn_air != null:
 		var floor_saturn := float(saturn_air.get_shader_parameter("u_band_inner"))
-		h.check(floor_saturn < saturn.radius,
-			"its air starts below the datum, at the cloud tops (%.0f km below)" % [
+		h.check(floor_saturn < saturn.radius - 100000.0,
+			"its air reaches the LOWEST cloud bottom, not the top deck (%.0f km below the datum)" % [
 				(saturn.radius - floor_saturn) / 1000.0
 			])
 	var earth_air := earth.air_shell_material as ShaderMaterial

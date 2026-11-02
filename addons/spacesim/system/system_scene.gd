@@ -589,19 +589,20 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# moves, and the shader works in the body's frame rather than in model space.
 	if not body.air.is_empty() and body.sky_top > 0.0:
 		var outer := body.radius + body.sky_top
-		# **The band's floor**: the ground for a body that has one, and the highest cloud top for one that does not —
-		# below that there is only more cloud, which is drawn. For a giant the deck bases are NEGATIVE altitudes
-		# (Saturn measures -138,425 m), so using the datum would end the air inside the clouds and leave a hard
-		# circle at the datum sphere, which is exactly the artefact a flight reported on 2026-11-02.
+		# **The band's floor**: the ground for a body that has one, and the **lowest cloud bottom** for one that does
+		# not. Evert, 2026-11-02: *"I want to see the lowest cloud bottom on planets with no surface."* So the band
+		# reaches down THROUGH the stack rather than stopping at the top deck — every layer is then looked at through
+		# the same air, and the deck below a gap has air in front of it like the one above.
+		#
+		# A giant's deck bases are NEGATIVE altitudes (Saturn measures -5 km and -138 km), so neither the datum nor a
+		# clamp against it will do: clamping to `max(datum, cloud)` keeps the datum in exactly the case being fixed,
+		# and stopping at the highest cloud top leaves the lower decks with no air in front of them.
 		var inner := body.radius
 		if body.content == null or body.content.surface == null:
-			# **The highest cloud top, not the largest of `max(datum, cloud top)`.** A giant's deck bases are
-			# negative altitudes, so clamping against the datum keeps the datum and the fix evaporates — which is
-			# exactly how the first attempt at this failed. Start below every deck and let the decks raise it.
 			if not body.decks.is_empty():
-				inner = -INF
+				inner = INF
 				for deck in body.decks:
-					inner = maxf(inner, body.radius + deck.height)
+					inner = minf(inner, body.radius + deck.height)
 		body.air_shell_material = SpacesimBodyRenderer.air_shell_material(
 			body.air, body.radius, outer, inner
 		)
