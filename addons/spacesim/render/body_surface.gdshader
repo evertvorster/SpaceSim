@@ -16,9 +16,6 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 // **The deck above, as a shadow.** One law, shared with the sea, so the two cannot disagree.
 #include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
 #include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
-// **The surface gradient from screen derivatives** — the relief's 2x2 solve, shared with the sea rather than written
-// twice. See the include's own header.
-#include "res://addons/spacesim/render/surface_gradient.gdshaderinc"
 
 // **The ground: the field itself, in a fragment shader, with no raster anywhere.**
 //
@@ -248,15 +245,25 @@ void fragment() {
 		// field. Length-clamped, because a slope steeper than `MAP_MAX_TILT` is one the geometry is already showing.
 		if (relief_exaggeration > 0.0) {
 			vec3 n = NORMAL;
-			vec3 t1;
-			vec3 t2;
-			surface_tangents(n, t1, t2);
-			vec3 gradient = surface_gradient(up, t1, t2, height);
-			float lean = length(gradient);
-			if (lean > MAP_MAX_TILT) {
-				gradient *= MAP_MAX_TILT / lean;
+			vec3 t1 = normalize(cross(n, abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+			vec3 t2 = cross(n, t1);
+			vec3 dux = dFdx(up);
+			vec3 duy = dFdy(up);
+			float a = dot(dux, t1);
+			float b = dot(dux, t2);
+			float c = dot(duy, t1);
+			float d = dot(duy, t2);
+			float det = a * d - b * c;
+			if (abs(det) > 1.0e-12) {
+				float dhx = dFdx(height);
+				float dhy = dFdy(height);
+				vec3 gradient = ((d * dhx - b * dhy) / det) * t1 + ((a * dhy - c * dhx) / det) * t2;
+				float lean = length(gradient);
+				if (lean > MAP_MAX_TILT) {
+					gradient *= MAP_MAX_TILT / lean;
+				}
+				NORMAL = normalize(n - relief_exaggeration * gradient);
 			}
-			NORMAL = normalize(n - relief_exaggeration * gradient);
 		}
 
 		// The colour, from the ramp the derivation built, indexed by the field's own value.

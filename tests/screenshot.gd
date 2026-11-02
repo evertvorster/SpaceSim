@@ -51,10 +51,6 @@ func _hide_parts() -> void:
 				suffixes.append("Deck")  # matched with a trailing wildcard, see below
 			"air":
 				suffixes.append("Air")
-			# **The sea, so the shader's OWN cost can be ablated** rather than inferred: the sea draws over the ground it
-			# is the datum of, so the two cannot be priced apart while both are in the frame (2026-11-02).
-			"ocean":
-				suffixes.append("Ocean")
 	for suffix in suffixes:
 		var found := 0
 		for node in get_root().find_children("*%s*" % suffix, "MeshInstance3D", true, false):
