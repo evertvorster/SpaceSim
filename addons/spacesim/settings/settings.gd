@@ -122,6 +122,16 @@ const REGISTRY := {
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
 	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	# **The angle a facet may subtend, in DEGREES** — the one number that sets how finely the ground is cut. Evert,
+	# 2026-11-02: *"I want the viewing angle that set the triangle subdivision size to be a configurable option."*
+	#
+	# It was a constant (2 degrees) carrying a note arguing it should not be a setting. The argument was real: the
+	# walk's apparent-size limit and `finest_edge_angle` — which the rebuild gate uses to decide how far the eye may
+	# swing — must agree, or the gate keeps asking for a selection the walk will not produce. That is now handled the
+	# way `lod.error_budget` already is: the value is read here once a frame, passed down as an argument (a pool
+	# thread may not read settings), and compared in `walk_is_due`, so changing it re-walks immediately and the two
+	# consumers cannot drift apart.
+	"lod.facet_angle": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.25, "max": 16.0},
 	# **The wireframe view's two divisions of itself**, so the three things drawn there can be told apart or isolated.
 	# The SUBDIVISION is the datum lattice — the same chunks and the same points, with nothing translated — and it is
 	# only ever drawn in a wireframe. The SURFACE is that lattice as the ground actually sits (translated, once the

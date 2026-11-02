@@ -120,6 +120,9 @@ var patch_walk_wireframe := false
 ## **How far out the last walk reached, in radians** — the largest `SpacesimPatches.cover_angle` over the layers drawn
 ## on this body. `-1` is *never walked*, which is not the same as a zero cap.
 var patch_walk_cover := -1.0
+## **The facet angle the last walk ran with**, in radians — `lod.facet_angle`, which is a setting. `walk_is_due` compares
+## it, because it is an input to the selection and a change to it has to re-walk even though the eye has not moved.
+var patch_walk_facet := -1.0
 ## **The selection the walk last produced**, as `[face, path, depth]` chunk references — a hundred entries
 ## where it used to be thirty thousand triangles.
 var patch_chunks: Array = []

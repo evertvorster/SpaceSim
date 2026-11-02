@@ -12,8 +12,10 @@ extends RefCounted
 ##  * near the ground it subdivides far harder than the sagitta law alone would;
 ##  * and far away the sagitta limit still wins, which is what keeps a distant body's silhouette.
 ##
-## **It is a constant, not a setting** — Evert, 2026-10-28: *"this subdivision code is also something that is a defining
-## feature of the game, it does not need a setting, it must always be on."*
+## **The mechanism is always on; its ANGLE is a setting as of 2026-11-02.** Evert, 2026-10-28: *"this subdivision code
+## is also something that is a defining feature of the game, it does not need a setting, it must always be on"* — that
+## still holds, the walk cannot be switched off. And on 2026-11-02: *"I want the viewing angle that set the triangle
+## subdivision size to be a configurable option"* — so the number moved to `lod.facet_angle` while the law stayed.
 
 const RADIUS := 6.371e6
 const FOV := 70.0
@@ -25,6 +27,7 @@ const FACET_ANGLE_PX := 27.0
 
 func run(h, _root: Node) -> void:
 	print("  facet size")
+	_test_the_angle_is_the_knob(h)
 
 	var pixel := SpacesimLod.pixel_angle(FOV, HEIGHT)
 	# The constant, in pixels at this screen — about 27 at 1080p and 70° of field.
@@ -136,3 +139,29 @@ func _finest_pixels(chunks: Array, root_edge: float, ground_distance: float, pix
 		deepest = maxi(deepest, int(chunk[2]))
 	var edge := root_edge / pow(2.0, float(deepest)) / float(1 << SpacesimPatches.CHUNK_SUBDIVISIONS)
 	return RADIUS * edge / (ground_distance * pixel)
+
+
+## **`lod.facet_angle` is a setting, and it is the subdivision.** Evert, 2026-11-02: *"I want the viewing angle that set
+## the triangle subdivision size to be a configurable option."* A knob that does not move the number it names is worse
+## than no knob, so this walks the SAME viewpoint at three angles and asserts the count rises as the angle falls.
+func _test_the_angle_is_the_knob(h) -> void:
+	var distance: float = RADIUS + 1.0e4
+	var pixel := SpacesimLod.pixel_angle(FOV, HEIGHT)
+	var coarse: Array = SpacesimPatches.select(
+		distance, Vector3.UP, RADIUS, pixel, EPSILON, -1.0, deg_to_rad(8.0)
+	)
+	var def: Array = SpacesimPatches.select(
+		distance, Vector3.UP, RADIUS, pixel, EPSILON, -1.0, deg_to_rad(2.0)
+	)
+	var fine: Array = SpacesimPatches.select(
+		distance, Vector3.UP, RADIUS, pixel, EPSILON, -1.0, deg_to_rad(0.5)
+	)
+	h.check(coarse.size() < def.size() and def.size() < fine.size(),
+		"a smaller facet angle cuts the ground finer (%d / %d / %d chunks at 8, 2 and 0.5 degrees)"
+			% [coarse.size(), def.size(), fine.size()])
+	# **And the gate sees it**, which is the half that fails silently: the walk would be right and the ground would
+	# never rebuild if `walk_is_due` ignored the angle.
+	h.check(SpacesimPatches.walk_is_due(
+		distance, Vector3.UP, distance, Vector3.UP, pixel, EPSILON, RADIUS, EPSILON,
+		-1.0, -1.0, deg_to_rad(2.0), deg_to_rad(0.5)
+	), "and a change to the angle alone opens the rebuild gate, with the eye quite still")

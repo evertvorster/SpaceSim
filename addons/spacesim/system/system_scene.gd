@@ -1037,6 +1037,10 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 	if pixel <= 0.0:
 		return
 	var epsilon := float(SpacesimSettings.get_value("lod.error_budget"))
+	# **The subdivision's own angle**, in degrees in the registry because that is what a person reads, and in radians
+	# here because every law below is in radians. Read through `get_value` every frame so it is hot, and handed down as
+	# an argument — a pool thread may not read settings.
+	var facet_angle := deg_to_rad(float(SpacesimSettings.get_value("lod.facet_angle")))
 	# **The interpolated eye**, because this runs once a drawn frame and `get_global_transform()` is
 	# only accurate to the most recent physics tick. It is the same transform the camera is drawn with,
 	# so the level chosen belongs to the frame on screen — see `game/main.gd::_update_view`.
@@ -1102,12 +1106,13 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		var cover := _cover_angle(body, distance)
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
-			pixel, epsilon, body.radius, body.patch_walk_epsilon, cover, body.patch_walk_cover
+			pixel, epsilon, body.radius, body.patch_walk_epsilon, cover, body.patch_walk_cover,
+			facet_angle, body.patch_walk_facet
 		) or wireframe != body.patch_walk_wireframe or _depth_tint != body.patch_walk_tinted:
 			# **The walk goes to a pool thread.** It measured 11-17 ms of pure recursion on the main thread at the
 			# selections a low flight asks for — a whole frame, on every tangential frame, because that is exactly
 			# when patches cross the threshold. Evert, 2026-10-28: *"flying along it there is a drop in performance."*
-			_request_walk(body, distance, to_eye, pixel, epsilon, wireframe, cover)
+			_request_walk(body, distance, to_eye, pixel, epsilon, wireframe, cover, facet_angle)
 	# **A frame change is a synchronous rebuild.** A mesh belongs to a viewpoint, and a transition is a
 	# discrete event — the near and far planes change, the observer is moved, and the frame that follows is a
 	# different scene. Drawing it with the geometry selected for the previous one is wrong however it looks,
@@ -1182,7 +1187,7 @@ func _publish_surface_flags() -> void:
 ## has. So a walk that takes a frame lags by a coarser frame, never by a hole: the LOD rule's publish-over.
 func _request_walk(
 	body: SpacesimSceneBody, distance: float, direction: Vector3, pixel: float, epsilon: float,
-	wireframe: bool, cover: float
+	wireframe: bool, cover: float, facet_angle: float
 ) -> void:
 	if body.patch_walk_task != -1:
 		return
@@ -1192,9 +1197,10 @@ func _request_walk(
 	body.patch_walk_wireframe = wireframe
 	body.patch_walk_tinted = _depth_tint
 	body.patch_walk_cover = cover
+	body.patch_walk_facet = facet_angle
 	body.patch_walk_task = WorkerThreadPool.add_task(
 		Callable(self, "_walk_patches").bind(
-			body, distance, direction, body.radius, pixel, epsilon, cover
+			body, distance, direction, body.radius, pixel, epsilon, cover, facet_angle
 		)
 	)
 
@@ -1238,9 +1244,11 @@ func _cover_angle(body: SpacesimSceneBody, distance: float) -> float:
 ## it writes exactly one field.
 func _walk_patches(
 	body: SpacesimSceneBody, distance: float, direction: Vector3, radius: float, pixel: float,
-	epsilon: float, cover: float
+	epsilon: float, cover: float, facet_angle: float
 ) -> void:
-	body.patch_walk_chunks = SpacesimPatches.select(distance, direction, radius, pixel, epsilon, cover)
+	body.patch_walk_chunks = SpacesimPatches.select(
+		distance, direction, radius, pixel, epsilon, cover, facet_angle
+	)
 
 
 ## **The main thread's half of a walk**, once a frame: publish the selection and ask its rebuild in the same frame.

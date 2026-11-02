@@ -70,7 +70,16 @@ const ROOT_EDGE := 1.0514622242382672
 ## stops a pathological radius (zero, or a body smaller than its own floor) from walking forever.
 const MAX_DEPTH := 40
 
-## **The apparent size a facet may be, in radians — and it is not a setting, because it is the subdivision.**
+## **The apparent size a facet may be, in radians** — the default for `lod.facet_angle`, which is a setting.
+##
+## **It was a constant, and the note here argued for that.** The reason was sound as far as it went: this is the
+## subdivision itself, and two consumers read it — the walk's apparent-size limit, and `finest_edge_angle`, which tells
+## the rebuild gate how far the eye may swing before the selection changes. Give them different numbers and the gate
+## asks for something the walk will not produce, so the ground either never rebuilds or rebuilds forever. Both now
+## take the value as an ARGUMENT and the gate compares it against what the last walk used, which is the same
+## arrangement `lod.error_budget` has had all along: hot, and impossible to drift.
+##
+## The rest of this note still applies and is why the default is 2 degrees:
 ##
 ## The sagitta law (`lod.error_budget`) bounds a facet's *curvature*, which near the ground is an error the eye cannot
 ## resolve: at 1 km altitude and ε 0.5 it permits a facet 5.8 km across, which is ~17,700 pixels of screen. What a person
@@ -219,7 +228,7 @@ static func cover_angle(distance: float, radius: float, layer_radius: float) -> 
 ## which is where that number is derived.
 static func select(
 	distance: float, camera_direction: Vector3, radius: float,
-	pixel_angle: float, epsilon: float, cover := -1.0
+	pixel_angle: float, epsilon: float, cover := -1.0, facet_angle := FACET_ANGLE
 ) -> Array:
 	var chunks: Array = []
 	if radius <= 0.0 or distance <= radius or pixel_angle <= 0.0 or epsilon <= 0.0:
@@ -297,7 +306,7 @@ static func select(
 		# Compared SQUARED throughout, so holding the projected area constant (`edge² × cos θ`) costs one normalize
 		# and no square root.
 		var tilt := maxf(absf(centre.dot((camera - centre * radius).normalized())), FACET_TILT_FLOOR)
-		var apparent_squared := FACET_ANGLE * FACET_ANGLE * (to_patch / radius) * (to_patch / radius) / tilt
+		var apparent_squared := facet_angle * facet_angle * (to_patch / radius) * (to_patch / radius) / tilt
 		var minimum_edge_squared := loosen * minf(
 			_edge_limit_squared(to_patch, pixel_angle, epsilon, radius),
 			apparent_squared
@@ -326,7 +335,7 @@ static func walk_is_due(
 	last_distance: float, last_direction: Vector3,
 	distance: float, direction: Vector3,
 	pixel_angle: float, epsilon: float, radius: float, last_epsilon: float,
-	cover := -1.0, last_cover := -1.0
+	cover := -1.0, last_cover := -1.0, facet_angle := FACET_ANGLE, last_facet := FACET_ANGLE
 ) -> bool:
 	if last_distance <= 0.0 or last_direction.is_zero_approx():
 		return true
@@ -336,6 +345,10 @@ static func walk_is_due(
 	# without moving the eye at all — the same class as the wireframe flag, and the reason this is a comparison
 	# against what the last walk ran with rather than a function of where the ship is.
 	if not is_equal_approx(cover, last_cover):
+		return true
+	# **And the facet angle**, for the same reason: it is an input to the answer, so a change to it has to open the
+	# gate even though nothing about the eye has moved (`lod.facet_angle` became a setting on 2026-11-02).
+	if not is_equal_approx(facet_angle, last_facet):
 		return true
 	# **The dead band, and what it costs to close it** — see `LOG_GATE`. At cruise this is ten walks a
 	# second; the walk is on a pool thread and the previous selection stays drawn, so the frame pays nothing.
@@ -351,7 +364,7 @@ static func walk_is_due(
 	if absf(log(altitude / last_altitude)) > LOG_GATE:
 		return true
 	return last_direction.angle_to(direction) > 0.5 * finest_edge_angle(
-		distance, pixel_angle, epsilon, radius
+		distance, pixel_angle, epsilon, radius, facet_angle
 	)
 
 
@@ -373,12 +386,13 @@ static func depth_ceiling_for(radius: float) -> int:
 
 
 static func finest_edge_angle(
-	distance: float, pixel_angle: float, epsilon: float, radius: float
+	distance: float, pixel_angle: float, epsilon: float, radius: float,
+	facet_angle := FACET_ANGLE
 ) -> float:
 	var to_patch := maxf(distance - radius, ALTITUDE_FLOOR)
 	# **The same minimum the walk takes**, or the gate's own idea of the finest patch disagrees with the walk's and the
 	# eye has to move further than it should before the selection is rebuilt.
-	var apparent := FACET_ANGLE * to_patch / radius
+	var apparent := facet_angle * to_patch / radius
 	var law := sqrt(minf(_edge_limit_squared(to_patch, pixel_angle, epsilon, radius), apparent * apparent))
 	# **No finer than the floor allows**, or the gate keeps asking for a level that cannot exist and the eye has to move
 	# further than the picture actually changes before the selection is rebuilt. This function answers in **leaf** angles
