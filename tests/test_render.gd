@@ -936,6 +936,39 @@ func _test_a_body_without_a_surface_has_no_field(h, scene) -> void:
 	h.check(earth_material != null and float(earth_material.get_shader_parameter("has_surface")) == 1.0,
 		"where a surfaced body is told there is one")
 
+	# **And no sea.** Evert, 2026-11-02: *"If a planet does not have a surface, it should not have an ocean either,
+	# right?"* — right, and `_liquid_material` says so by refusing a body with no surface content. Asserted because
+	# a waterline on a gas giant is the kind of thing that is invisible in the model and obvious on screen.
+	var saturn: SpacesimSceneBody = scene.body_by_id("planet:saturn")
+	h.check(saturn != null, "Saturn is in the scene")
+	if saturn == null:
+		return
+	h.check(saturn.ocean == null and saturn.ocean_material == null,
+		"a body with no surface has no sea (Saturn)")
+	# **The numbers the shell's band is built from**, so a giant's geometry is on the record rather than assumed:
+	# its deck bases sit BELOW the datum, which is what puts them inside the air's inner sphere.
+	var lowest := 0.0
+	for deck in saturn.decks:
+		lowest = minf(lowest, deck.height)
+	h.check(saturn.sky_top > 0.0,
+		"Saturn's air: sky_top %.0f km, %d deck(s), lowest base %.0f m" % [
+			saturn.sky_top / 1000.0, saturn.decks.size(), lowest
+		])
+	# **The air's band floor**, which is the fix for the artefact that flight reported: a giant's air must start at
+	# its highest cloud top, not at a datum its clouds are below. Read back from the material, because that is the
+	# number the shader actually marches with.
+	var saturn_air := saturn.air_shell_material as ShaderMaterial
+	h.check(saturn_air != null, "Saturn has an air shell")
+	if saturn_air != null:
+		var floor_saturn := float(saturn_air.get_shader_parameter("u_band_inner"))
+		h.check(floor_saturn < saturn.radius,
+			"its air starts below the datum, at the cloud tops (%.0f km below)" % [
+				(saturn.radius - floor_saturn) / 1000.0
+			])
+	var earth_air := earth.air_shell_material as ShaderMaterial
+	h.check(earth_air != null and float(earth_air.get_shader_parameter("u_band_inner")) == earth.radius,
+		"and a surfaced body's air still starts at its ground")
+
 
 ## **The air takes its share of the star's light on the way IN, and that share is the sunset.**
 ##

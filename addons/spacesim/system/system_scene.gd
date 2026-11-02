@@ -589,7 +589,22 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# moves, and the shader works in the body's frame rather than in model space.
 	if not body.air.is_empty() and body.sky_top > 0.0:
 		var outer := body.radius + body.sky_top
-		body.air_shell_material = SpacesimBodyRenderer.air_shell_material(body.air, body.radius, outer)
+		# **The band's floor**: the ground for a body that has one, and the highest cloud top for one that does not —
+		# below that there is only more cloud, which is drawn. For a giant the deck bases are NEGATIVE altitudes
+		# (Saturn measures -138,425 m), so using the datum would end the air inside the clouds and leave a hard
+		# circle at the datum sphere, which is exactly the artefact a flight reported on 2026-11-02.
+		var inner := body.radius
+		if body.content == null or body.content.surface == null:
+			# **The highest cloud top, not the largest of `max(datum, cloud top)`.** A giant's deck bases are
+			# negative altitudes, so clamping against the datum keeps the datum and the fix evaporates — which is
+			# exactly how the first attempt at this failed. Start below every deck and let the decks raise it.
+			if not body.decks.is_empty():
+				inner = -INF
+				for deck in body.decks:
+					inner = maxf(inner, body.radius + deck.height)
+		body.air_shell_material = SpacesimBodyRenderer.air_shell_material(
+			body.air, body.radius, outer, inner
+		)
 		body.air_shell = _add_body_mesh(body.node, body.air_shell_material, "%sAir" % body.name)
 		body.air_shell.mesh = SpacesimIcosphere.mesh_at(AIR_SHELL_LEVEL)
 		body.air_shell.scale = Vector3.ONE * outer

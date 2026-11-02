@@ -534,7 +534,9 @@ static func apply_air(material: Material, air: Dictionary, altitude: float) -> v
 ##
 ## **`u_band_inner` is the surface the band stands on**, so it is `planet_radius` for the one band a body has
 ## today; a deck's base is where it moves to when the stack is split.
-static func air_shell_material(air: Dictionary, planet_radius: float, band_outer: float) -> ShaderMaterial:
+static func air_shell_material(
+	air: Dictionary, planet_radius: float, band_outer: float, band_inner: float
+) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = AIR_SHELL_SHADER
 	material.set_shader_parameter("u_rayleigh", air.get("rayleigh", Vector3.ZERO))
@@ -545,7 +547,11 @@ static func air_shell_material(air: Dictionary, planet_radius: float, band_outer
 	material.set_shader_parameter("u_mie_g", float(air.get("mie_anisotropy", 0.758)))
 	material.set_shader_parameter("u_sun_intensity", float(air.get("sun_intensity", 0.0)))
 	material.set_shader_parameter("u_planet_radius", planet_radius)
-	material.set_shader_parameter("u_band_inner", planet_radius)
+	# **Where the air starts**, which is the datum for a body with a surface and NOT for a gas giant. A giant's
+	# deck bases sit below its datum (a pressure, not a floor), so the datum sphere is *inside* the clouds: a band
+	# from it upward stops in mid-atmosphere and draws a hard circle at a sphere nothing can be seen on.
+	# Evert, 2026-11-02, flying Saturn: *"there is something exactly on the sphere"* — this is that.
+	material.set_shader_parameter("u_band_inner", band_inner)
 	material.set_shader_parameter("u_band_outer", band_outer)
 	return material
 
