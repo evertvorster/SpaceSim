@@ -54,7 +54,12 @@ uniform float pixel_angle = 0.001;
 uniform vec3 shallow_color = vec3(0.2, 0.5, 0.5);
 uniform vec3 deep_color = vec3(0.02, 0.06, 0.15);
 uniform float shallow_metres : hint_range(0.1, 50.0) = 5.0;
-uniform float deep_metres : hint_range(10.0, 10000.0) = 3000.0;
+// **The ramp ENDS where the transparency does.** Evert, 2026-11-02: *"once the ocean is deeper than a certain point,
+// 15 meters or so, then we should not be able to see the surface below it at all, and it should just be its own color,
+// reflecting."* It was 3000 m, which left the sea painted the bright shallow colour for the first three kilometres
+// while `shallow_depth` had already made it fully opaque at fifteen — the floor invisible and the colour still saying
+// otherwise. The two ends now share one scale: shallow at 5 m, the water's own colour from 15 m down.
+uniform float deep_metres : hint_range(10.0, 10000.0) = 15.0;
 uniform float ocean_roughness : hint_range(0.0, 1.0) = 0.14;
 uniform float ocean_specular : hint_range(0.0, 1.0) = 0.45;
 
