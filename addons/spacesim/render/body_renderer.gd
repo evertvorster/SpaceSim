@@ -505,6 +505,20 @@ static func face_surface_star(
 	surface.set_shader_parameter("pixel_angle", pixel_angle)
 
 
+## **The nearest moon, as a light this body wears** — direction in the body's own frame, illuminance in lux.
+##
+## Evert, 2026-11-03: *"I would like bodies like the moon's reflected light to be a light source on the dark side of
+## earth"*, and after two scene lights failed for opposite reasons (a directional one had no falloff, an omni at
+## planetary range was far too bright) this is the third route: a hand-computed lobe in the material, which has no
+## engine-side scale to get wrong and can put the light through the air.
+static func face_surface_moon(material: Material, direction: Vector3, irradiance: Vector3) -> void:
+	var surface := material as ShaderMaterial
+	if surface == null:
+		return
+	surface.set_shader_parameter("body_moon", direction)
+	surface.set_shader_parameter("moon_irradiance", irradiance)
+
+
 ## **The air's own share of the star's light, at a material's altitude** — published once, at scene build,
 ## because it is derived from what the body is made of and where the layer sits, and neither changes while
 ## the game runs. Six uniform writes, and unlike the star's direction they never need repeating.

@@ -1640,8 +1640,37 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angl
 	# The eye in body radii — the model space every surface direction is measured in, and the same units the
 	# deck's own material is handed as `eye_local`.
 	var eye_local := (observer - body.node.global_position) / maxf(body.radius, 1.0)
+	# **The body that reflects the most onto this one**, if there is one. One lobe per material and one moon: a second
+	# — a righthand — moon's light is a quarter of the first's by the solid angle, and summing them buys a hue nobody
+	# can see for a loop nobody asked for.
+	var moon_direction := Vector3.ZERO
+	var moon_irradiance := Vector3.ZERO
+	if star_light != null and body.node != null:
+		var brightest := 0.0
+		for child in bodies:
+			if child.parent_id != body.id or child.content == null or child.node == null:
+				continue
+			var offset: Vector3 = child.node.global_position - body.node.global_position
+			var span := offset.length()
+			if span <= 0.0:
+				continue
+			# **The same number the point of light uses**, with this body standing where the observer stands, times
+			# the solid angle the moon subtends here. `body_luminance` owns the phase.
+			var star_at := star_body.position if star_body != null else Vector3.ZERO
+			var luminance := body_luminance(child, body.node.global_position, star_at)
+			var irradiance := luminance * PI * pow(child.radius / span, 2.0)
+			if irradiance <= brightest:
+				continue
+			brightest = irradiance
+			moon_direction = offset / span
+			# The hue of what is shining, normalised to unit peak: the brightness is already in `irradiance` from the
+			# albedo, so a grey moon must not also dim itself by being grey.
+			var tint := child.color.srgb_to_linear()
+			var peak := maxf(tint.r, maxf(tint.g, tint.b))
+			moon_irradiance = (tint / peak if peak > 0.0 else Vector3.ONE) * irradiance
 	for material in materials:
 		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle, eye_local, pixel_angle)
+		SpacesimBodyRenderer.face_surface_moon(material, moon_direction, moon_irradiance)
 
 
 ## **A deck, per frame, per layer**: the eye in the deck's own frame, and the map it should be sampling.

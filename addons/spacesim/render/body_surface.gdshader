@@ -361,7 +361,26 @@ void fragment() {
 		// All four existed only to make a smooth sphere read as three-dimensional, and a mountain counted twice is a
 		// crumpled paper mountain.
 
+		// ===== MOONLIGHT =================================================================================
+		//
+		// **A second Lambert lobe, computed here rather than by a light Godot owns.** The light a moon reflects is
+		// `E * albedo / PI * cos(theta)`, and the air takes its share on the way in exactly as it does for the star —
+		// `star_air_transmittance` per channel, then `star_transmission` for the moon's own horizon, so the terminator
+		// this lobe gives is the moon's and not a plane.
+		//
+		// **Written to `EMISSION`**, which is added after the light loop: this is light the PBR loop does not know
+		// about, so handing it to ALBEDO would have multiplied an unlit surface's colour by nothing.
+		if (dot(moon_irradiance, vec3(1.0)) > 0.0) {
+			float moon_facing = max(dot(up, body_moon), 0.0);
+			if (moon_facing > 0.0) {
+				vec3 moon_through = star_air_transmittance(up, body_moon, air_altitude, planet_radius);
+				float moon_up = star_transmission(up, body_moon, footprint_angle);
+				EMISSION += ALBEDO * moon_irradiance * moon_through * moon_up * moon_facing / SURFACE_PI;
+			}
+		}
+
 		// **The debug tint**, the one place it can change the picture.
 		ALBEDO *= mix(vec3(1.0), patch_tint, tint_amount);
 	}
+
 }
