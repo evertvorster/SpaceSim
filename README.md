@@ -8,51 +8,55 @@ assets** and is not a vegastrike port; that codebase is only a reference for wha
 
 ## Status
 
-**Early, but real.** Sol and the player are the game now, not a demo: coordinate
-frames, the travel unit, a data-driven system, navigation markers, settings, a player who can be
-saved, loaded and browsed, a body whose surface **subdivides as you approach it**, and **the stars**:
-the real sky above Sol, from the HYG catalogue, with an exposure metered from the **rendered frame** on the
-GPU and adapting in **stops** — exponential, so it closes a large gap quickly and fine-tunes a small one.
+**Early, but real — and the drawing side of it is done.** Sol and the player are the game now, not a demo:
+coordinate frames, the travel unit, a data-driven system, navigation markers, settings, a player who can be
+saved, loaded and browsed, bodies whose surfaces **subdivide as you approach them**, and **the stars**: the real
+sky above Sol, from the HYG catalogue, with an exposure metered from the **rendered frame** on the GPU and
+adapting in **stops** — exponential, so it closes a large gap quickly and fine-tunes a small one.
 
-**The surface is derived, not authored.** What a body's surface *is* comes from the phase of its
-composition — a Voronoi plate partition with each plate standing or sagging, a region term slower than a plate
-so one continent stands higher than another, structure inside each plate, and mountain belts where plates meet.
-The field is baked to an `R16F` map on the GPU, refined on the render thread as the eye approaches, and the near
-field is a quadtree of tiles. Below the map's texel a **detail ladder continues the field's own octaves** — the
-same function, evaluated deeper — and the sea is its own layer, coplanar with the land and complementary to it by
-one threshold.
+**The surface is derived, not authored, and it is not a texture.** What a body's surface *is* comes from the
+phase of its composition — a Voronoi plate partition with each plate standing or sagging, a region term slower
+than a plate so one continent stands higher than another, structure inside each plate, and mountain belts where
+plates meet. **The shader evaluates that field itself, per pixel**, at the resolution the pixel can resolve: a
+coastline is a level set of the height, so it is exactly as smooth as whatever carries it, and a raster carries
+it as a staircase one texel wide. The octave count is the pixel footprint's, which is what makes it affordable —
+a 20-pixel moon pays for one octave, the ground at walking height for eighteen. **The relief is the geometry's**:
+vertices are translated on the CPU to their height, so the light falls on the slope that was drawn. The sea is a
+level on its own mesh at the datum, coplanar with the land and complementary to it by one threshold.
 
-**The air is one volumetric march over the whole frame.** A `CompositorEffect` at `POST_TRANSPARENT`, before the
-exposure pass, marching one ray per pixel with sixteen samples along it and eight toward the sun, light scattered
-by the species mix the body is made of. It draws the air over a planet's *disk* from space, the limb, and the sky
-from underneath, because it owns every pixel rather than a shell that can only be where the geometry is. Measured
-in flight the same day the surface landed: **339 fps / 2.9 ms**, from 423 m inside it. The same pass draws the
-cloud deck's fog and marches the air as **one segment** — nothing in it occludes the air, and a segment structure
-that skips the span it does not fill loses the medium in that span.
+**The air is a stack of shells, one band per shell, worn by the body.** Each marches its own ray's chord through
+its band, which is why bands sum to the column and no shell needs to know the eye's altitude. It draws the far
+face as well as the near one (`cull_front`), so **the air in front of a mountain is drawable**, and where the
+march stops comes from the frame's depth rather than a depth test — a mountain standing in the way is harmless.
+A `CompositorEffect` before the exposure pass draws the **fog** and nothing else: the fog is a medium at the eye,
+over the whole view, which a per-pixel shell clipped at the frame's depth cannot express.
 
-**The clouds are drawn.** A layer's condensate thickness is derived — the dew point's height and how far the column
-above it rises — and it is baked into a **coverage map** whose brightness stands in for height. The map is painted
-on **one sphere per layer**, scaled to that layer's *base* radius, because a condensation level is a level: every
-column starts at the same altitude while the tops vary, and that variation is what the map holds. The same map
-draws the deck from above, from below and from inside, and casts the ground shadow as a ray test against the
-field rather than a shadow map.
+**The clouds are drawn, and a stack of them.** A deck is **the ground's own patch mesh translated to its level** —
+the same lattice, the same chunks, the same index array — so one tessellation serves the surface and every deck
+over it. Its thickness is not built, it is **sampled**: the layer's base and top are both real derived radii, and
+the shader composites a slab whose opacity is Beer–Lambert, `1 − exp(−τ·thickness/μ)`, so a deck thickens at the
+limb for the physical reason. Which face a fragment is decides how it is lit — **reflection above, transmission
+below** — so a deck seen from underneath shows what got through the slab rather than a black void. The coverage
+is **reconstructed** rather than interpolated (a cloud's edge is a level set, and bilinear has a corner at every
+texel), and **one optical depth per layer** feeds the alpha, the base's light and the ground's shadow, which is a
+ray test against the same map rather than a shadow map.
 
-**Inside and below a deck** the air pass adds a fog, because a surface has no cross-section to draw: its strength
-is the map at the camera and its ramp runs from full at the deck's base to nothing at its top. One number, `fog.gain`,
-is hot for tuning. **The far regime draws every layer a body has; the near regime reads one deck**, so Jupiter and
-Saturn lose their lower layer once you are inside or just under the upper one — multiple decks is the next rung and
-needs a per-deck parameter block, a sampler array and an eye-ordered walk (the vault's `Cloud Decks Plan` §D9).
+**A body can have several, and two of them are new.** Earth draws water at 1.4 km under an **ice sheet at 7.7 km**
+— a gas that states a `solid_form` gets a level at the **tropopause**, where rising air stops and what it carried
+freezes out, which needs no authored altitude. Jupiter draws a **diffuse white veil above its ammonia**, a haze
+layer whose opacity varies over a broad latitude envelope, because Jupiter bands *twice*: the cream and brown
+bands are the circulation cells and the broad white zones span several of them. A body with **no surface** draws
+an opaque interior floor at the depth the model stops claiming to know the troposphere, so a gap between two decks
+shows darkness and never stars.
 
-**The air and the clouds share one composite, in one place.** The pass owns every pixel: air in front of the deck,
-the deck, and air behind it — which is the thing a shell composited before the pass can never get right.
+**Every number the engine invents says so.** A constant that is neither derived nor measured is marked
+`A GUESS:` in the code with what would settle it, and the register is `grep -rn "A GUESS:" addons/`.
 
-There is no terrain displacement, no physics and no simulation.
+**What a stack still wants, now that the decks themselves are done**: the air as **one band per stack level**
+rather than one per body, and a fog that reads **the deck the eye is inside** instead of the top one. Neither is
+needed for the decks to look right from outside.
 
-**The star data is third-party and is licensed separately from the code.** `addons/spacesim/sky/`
-holds HYG v4.4 (Hipparcos + Yale Bright Star + Gliese) under **CC BY-SA 4.0**, which is compatible
-with this repository's GPL-3.0 because the data and the code are separate works. Attribution, the
-exact source, the file format and the calibration are in `addons/spacesim/sky/PROVENANCE.md`, and the
-reduction is reproducible with `tools/build_star_catalogue.py`.
+There is no physics and no simulation.
 
 ## Saves
 
@@ -74,9 +78,11 @@ addons/spacesim/   the engine library (idiomatic Godot addon layout)
     content/       the authored content as Godot Resources — bodies, orbits, layers, species
     model/         the derivation: what a body's numbers are, from what it is made of
   lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
-  render/          what is drawn: the surface, the ocean, the patch quadtree, the level law, the
-                   render-thread map bake, the clouds on a sphere per deck, and the air as one
-                   volumetric march over the frame (which also carries the near regime's fog)
+  render/          what is drawn: the surface (the field itself, per pixel, with the ramp and the
+                   relief normal), the ocean, the patch quadtree and the level law, the cloud
+                   decks (the ground's mesh per layer, coverage reconstructed, one tau per layer),
+                   the opaque interior of a surface-less body, the air as a stack of shells, and
+                   the atmosphere pass, which now draws only the fog
   player/          the player's own state (attributes and assets) and the screen for it
   navigation/      the overlay: a ring at each object, a short line, and its label, placed
                    so labels never overlap and a moon yields to its planet only where the two
