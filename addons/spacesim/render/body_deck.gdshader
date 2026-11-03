@@ -74,6 +74,9 @@ uniform float ramp_gain : hint_range(0.0, 1.0) = 1.0;
 // shader multiplies it by the thickness it samples, so opacity and the base's transmittance are the same law
 // from the same texel.
 uniform float tau_full = 0.0;
+// **The light a base shows that did not come straight through**: multiple scattering inside the slab, which
+// has no model here. Enough that a thick cloud reads as the underside of a cloud rather than as a hole.
+const float UNDERSIDE_FLOOR = 0.12;
 
 // ===== THE SLAB, AND ITS TWO SIDES ==================================================
 //
@@ -257,13 +260,36 @@ void fragment() {
 	// **The two things that decide how much star reaches this texel**: whether the body is in front of it at
 	// all, and what the air then took. Composed by multiplication — one is a geometric occlusion at the
 	// star's own angular width, the other a per-channel filter — and neither double-counts the other.
-	vec3 radiance = cloud_color * ramp_gain
-		* star_air_transmittance(p, body_sun, air_altitude, planet_radius)
+	vec3 air_through = star_air_transmittance(p, body_sun, air_altitude, planet_radius);
+	vec3 radiance = cloud_color * ramp_gain * air_through
 		* star_transmission(p, body_sun, deck_footprint);
 
-	// **Both faces draw the same way**: the same albedo, the same alpha, the same engine light. On this branch
-	// the only thing that distinguishes them is the normal, and that only because a surface seen from the inside
-	// has its normal pointing away from the viewer.
+	// ===== THE BASE SEES THE SLAB TRANSMITTED, NOT REFLECTED ==========================================
+	//
+	// **A slab has two radiating faces and they move in OPPOSITE directions as it thickens.** The top
+	// (reflection) saturates white — extra depth only attenuates what comes back. The base (transmission)
+	// DARKENS: what it shows is the light that got *through*, so `base ≈ cloud · exp(−τ/μ_sun)`, which is
+	// brightest where the cloud is thin and goes to nothing where it is thick.
+	//
+	// Evert, 2026-11-03: *"we did discuss and plan to draw the cloud texture from below differently, with thinner
+	// areas towards the light in bright white, and thicker areas darker. Of course, where the cloud cover is
+	// nothing, it still needs to be transparent."* Both halves fall out of one expression: the thin rim transmits
+	// nearly all of it and is bright; the thick centre transmits nothing and is dark; and where there is no cloud
+	// at all `alpha` is zero, so none of this is drawn.
+	//
+	// **`mu_sun` is clamped rather than floored at zero**: a base is by definition looking away from the star, and
+	// a hard `max(dot, 0)` would make the whole underside black at every sun angle that is not near the limb.
+	// **`UNDERSIDE_FLOOR` stands in for multiple scattering** — the light that arrives at the base after bouncing
+	// inside the slab, which this project has no model for and which is what keeps a thick cloud from reading as a
+	// hole in the sky.
+	if (eye_radius < 1.0) {
+		float mu_sun = clamp(dot(p, body_sun), 0.10, 1.0);
+		float sun_through = exp(-tau_full * thickness / mu_sun);
+		radiance = cloud_color * ramp_gain * air_through * (sun_through + UNDERSIDE_FLOOR);
+	}
+
+	// **Both faces draw the same way otherwise**: the same alpha, the same engine light. What differs is which
+	// light reaches each — reflection above, transmission below — and that is the whole of the difference.
 	ALBEDO = radiance;
 	ALPHA = alpha;
 	ROUGHNESS = 0.9;
