@@ -1593,7 +1593,15 @@ func _publish_air_shell(body: SpacesimSceneBody, camera: Camera3D, observer: Vec
 	if body.air_shell_material == null:
 		return
 	var body_basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
-	var to_local := body_basis.inverse() * (camera.global_transform.basis as Basis).orthonormalized()
+	# **The INTERPOLATED camera, or the shell turns one tick behind the frame it is drawn in.** Evert,
+	# 2026-11-03: *"when I rotate my camera, it sometimes flashes slightly darker or lighter."* `global_transform`
+	# is accurate to the most recent physics tick and this runs once per drawn frame, so a rotating camera gave the
+	# shader a basis from the previous tick — and `u_to_local` is what turns the fragment into the ray that decides
+	# both the chord and the sun angle. Stationary, the two agree; rotating, they differ by one tick of rotation,
+	# which is a brightness that flickers. Same trap, same fix, as `main.gd` records for every other transform here.
+	var to_local := body_basis.inverse() * (
+		camera.get_global_transform_interpolated().basis as Basis
+	).orthonormalized()
 	var sun := Vector3.UP
 	var star_body := star()
 	if star_body != null:

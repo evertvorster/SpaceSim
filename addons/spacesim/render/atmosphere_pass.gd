@@ -166,7 +166,10 @@ func prepare(
 ) -> void:
 	if camera == null:
 		blend = 0.0
-	var view := camera.global_transform
+	# **The interpolated camera**, for the reason `main.gd` gives for every transform it reads: this runs once per
+	# drawn frame and `global_transform` is only accurate to the physics tick, so a rotating camera would hand the
+	# fog a view from the previous tick — a veil that flickers with the turn rather than with the scene.
+	var view := camera.get_global_transform_interpolated()
 	# **The EYE relative to the body's centre**, not the other way round — the march's sphere test takes the
 	# ray's origin and a sphere centred on the origin, so this is the vector from the body to the camera.
 	# Getting it backwards marches away from the planet: the density is zero, the transmittance stays 1 and
