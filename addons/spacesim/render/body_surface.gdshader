@@ -321,7 +321,7 @@ void fragment() {
 		// **This point's own height above the datum**, which is what tells the shadow whether this ground is under
 		// the cloud or standing up through it. Interpolated from the vertex stage — see the varying's note.
 		if (deck_shadow_present()) {
-			AO *= deck_shadow_factor(up, planet_radius, surface_altitude);
+			AO *= deck_shadow_factor(up, planet_radius, surface_altitude, footprint_angle);
 		}
 		SPECULAR = land_specular;
 		// **A specular highlight is a BEAM, and the composite's `1 - alpha` is the deck's DIFFUSE transmittance.**
@@ -330,7 +330,7 @@ void fragment() {
 		// with, so this corrects *which* transmittance applies rather than adding a second law about the cloud.
 		if (deck_shadow_present()) {
 			SPECULAR *= deck_specular_share(
-				up, normalize(body_eye_local - up), planet_radius
+				up, normalize(body_eye_local - up), planet_radius, footprint_angle
 			);
 		}
 

@@ -220,7 +220,15 @@ void fragment() {
 	float deck_footprint = length(fwidth(local_position));
 	// **Reconstructed, not interpolated** — see `cloud_coverage.gdshaderinc`. The map is 2:1, so its texel is `(1/w, 2/w)`.
 	vec2 cover_texel = vec2(1.0, 2.0) / float(max(cover_width, 1));
-	float field = cloud_coverage(cover, cloud_map_uv(p), cover_texel);
+	// **The mip is chosen from the FOOTPRINT, never from the uv's derivative.** `u` comes from `atan(z, x)`, so it
+	// passes 1 -> 0 inside one pixel at the antimeridian; `texture()` would read that as "everything is sub-pixel"
+	// and draw ONE column from the coarsest mip — a one-pixel vertical line at every distance, which is exactly what
+	// was reported (Evert, 2026-11-03). `deck_footprint` is already the pixel's angular size for the star's own
+	// occlusion, and it is a direction rather than a wrapping number, so it is continuous everywhere.
+	float field = cloud_coverage(
+		cover, cloud_map_uv(p), cover_texel,
+		cloud_uv_lod(p, deck_footprint, float(max(cover_width, 1)))
+	);
 	// **No noise ladder**, for the reason the ground lost its own: the ladder was not the texture, it was a stand-in
 	// for structure the field already has. A rung at 2-4 px added to a coverage field is the steepest thing here, and
 	// it is where the banding and the extra noise came from.
@@ -307,7 +315,7 @@ void fragment() {
 	// one of them.
 	bool underside = !FRONT_FACING;
 	if (underside) {
-		float sun_path = deck_column_path(p, body_sun, planet_radius, true);
+		float sun_path = deck_column_path(p, body_sun, planet_radius, true, deck_footprint);
 		float sun_through = sun_path < 0.0 ? 1.0 : exp(-max(deck_tau * sun_path, 0.0));
 		radiance = cloud_color * ramp_gain * air_through * (sun_through + UNDERSIDE_FLOOR);
 	}

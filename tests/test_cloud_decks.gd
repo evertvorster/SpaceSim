@@ -422,10 +422,20 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 		h.check(code.contains("cloud_coverage("), "%s reconstructs the coverage" % named)
 		h.check(not code.contains("texture(cover, cloud_map_uv(") and not code.contains("texture(deck_cover, deck_shadow_uv("),
 			"%s and does not point-sample it" % named)
-	h.check(FileAccess.get_file_as_string(
+	var kernel := FileAccess.get_file_as_string(
 		"res://addons/spacesim/render/cloud_coverage.gdshaderinc"
-	).contains("float cloud_coverage(sampler2D map, vec2 uv, vec2 texel)"),
+	)
+	h.check(kernel.contains("float cloud_coverage(sampler2D map, vec2 uv, vec2 texel, float lod)"),
 		"from one shared kernel, so the shadow cannot be a different cloud from the deck")
+	# **And the kernel takes its LOD from the call, never from the uv's derivative.** `u` is built from `atan(z, x)`,
+	# so it passes from 1 to 0 inside one pixel at the antimeridian: an implicit `texture()` reads that as "the whole
+	# map is sub-pixel" and draws ONE column from the coarsest mip — a one-pixel vertical line at every distance, which
+	# is what Evert reported (2026-11-03) and what no amount of map-continuity fixes could touch, because the map was
+	# already continuous there at every mip level. `textureLod` ignores the derivatives completely.
+	h.check(kernel.contains("textureLod(map, at, lod)") and not kernel.contains("texture(map, at)"),
+		"which samples its sixteen taps at the LOD it was GIVEN, not one it derives from a wrapping coordinate")
+	h.check(kernel.contains("float cloud_uv_lod(vec3 direction, float footprint_angle, float map_width)"),
+		"and that LOD comes from the sphere's own footprint, which is a direction and so cannot wrap")
 
 	# **The shadow and the deck now sample one thing — the map — because neither has a ladder.** The check that
 	# matters is therefore that they read the *same map*, which is asserted above; a seed comparison would be

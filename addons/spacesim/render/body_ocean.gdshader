@@ -273,6 +273,6 @@ void fragment() {
 	AO = star_transmission(up, body_sun, footprint_angle) * air_brightness;
 	AO_LIGHT_AFFECT = 1.0;
 	if (deck_shadow_present()) {
-		AO *= deck_shadow_factor(up, planet_radius, 0.0);
+		AO *= deck_shadow_factor(up, planet_radius, 0.0, footprint_angle);
 	}
 }
