@@ -16,6 +16,17 @@ extends Resource
 ## Because systems will be generated procedurally, the fields here are the *only* per-layer numbers
 ## permitted to be invented, and they are all bounded 0..1 except the colour.
 
+## **A diffuse HAZE, not a cloud on a condensation level of its own.**
+##
+## Jupiter bands twice: the fine cream and brown bands are the circulation cells, and the broad diffuse WHITE
+## zones cover several of them at once — recorded 2026-10-17 and asked for again on 2026-11-03: *"I was
+## expecting a third deck with white bands in it."* A haze has no level the model can derive, so it is placed at
+## the **top of the highest deck in the stack** — where an upper ammonia haze physically is — and it carries no
+## map: it is drawn from the white texel, with its opacity varying over a broad latitude envelope.
+##
+## `species` is then ignored, because there is no condensation to attribute it to.
+@export var haze: bool = false
+
 ## Which condensable this layer is made of — a `SpacesimSpecies.species_name`.
 ##
 ## **Empty means "not attributed"**, which is what a body authored before the stack existed gets: one

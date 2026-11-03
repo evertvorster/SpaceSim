@@ -877,6 +877,28 @@ albedo = 0.22
 color = Color(0.9, 0.72, 0.42, 1)
 opacity = 0.5
 
+[sub_resource type="Resource" id="CL_jupiter_haze"]
+; **The third deck: the broad diffuse WHITE zones**, and they are a SHEET rather than a cloud on a level of
+; their own. Jupiter bands twice — fine cream and brown bands (the circulation cells) and broad white zones
+; covering several of them — recorded 2026-10-17 (*"the white bands ... seem to cover multiple of the darker
+; cream and brown bands"*) and asked for on 2026-11-03: *"I was expecting a third deck with white bands in it."*
+;
+; `haze = true` places it at the TOP of the stack (it has no condensation level: a shell above the cloud tops,
+; where an upper ammonia haze physically is) and gives it no map — it is drawn from the white texel, with its
+; opacity varying over a broad latitude envelope (`cells / BROAD_DIVISOR`, `BROAD_FLOOR`, both A GUESS).
+;
+; **A veil, not a slab, but thick enough to READ as white**: at 1.0 a full column is 63% opaque, so a zone is
+; visibly the same brightness as the cream bands below it and distinctly paler than a belt. At 0.4 it was 33%
+; and read as a wash over the whole disc — the difference between "the zones are white" and "the planet is
+; slightly milky". Marked in `Marked guesses` alongside the envelope's two numbers.
+; Its coverage is what `bond_albedo` weights it by, and it is the broad zones' share of the sky.
+script = ExtResource("cloud_layer")
+haze = true
+coverage = 0.3
+albedo = 0.85
+color = Color(1, 1, 1, 1)
+optical_depth = 1.0
+
 [sub_resource type="Resource" id="CL_jupiter_ammonia"]
 ; **The deck you can see: ammonia, at 0.90 bar.** Its colour here is AUTHORED and not the species' own,
 ; because the giants' visible tint is a chromophore — complex organics and phosphorus compounds mixed
@@ -886,7 +908,7 @@ opacity = 0.5
 script = ExtResource("cloud_layer")
 species = "ammonia"
 coverage = 0.6
-albedo = 0.678
+albedo = 0.478
 color = Color(0.93, 0.89, 0.8, 1)
 opacity = 1.0
 ; The ammonia deck is optically thick in the zones and thin in the belts - which is the belt/zone
@@ -900,7 +922,7 @@ optical_depth = 1.5
 script = ExtResource("cloud_layer")
 species = "water_vapour"
 coverage = 0.8
-albedo = 0.3
+albedo = 0.211
 color = Color(0.55, 0.38, 0.24, 1)
 opacity = 1.0
 ; Deeper and denser than the ammonia above it.
@@ -915,7 +937,7 @@ fraction = 0.0
 albedo = 0.0
 color = Color(0.85, 0.78, 0.68, 1)
 opacity = 1.0
-layers = Array[ExtResource("cloud_layer")]([SubResource("CL_jupiter_ammonia"), SubResource("CL_jupiter_water")])
+layers = Array[ExtResource("cloud_layer")]([SubResource("CL_jupiter_haze"), SubResource("CL_jupiter_ammonia"), SubResource("CL_jupiter_water")])
 
 [sub_resource type="Resource" id="CL_saturn_ammonia"]
 script = ExtResource("cloud_layer")

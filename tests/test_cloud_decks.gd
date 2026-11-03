@@ -96,11 +96,33 @@ func _test_earths_stack(h, scene: SpacesimSystemScene) -> void:
 			"and its geometry sits on the level the model derived for it", 1.0e-6)
 
 
-## **The two-deck bodies are the ones that can tell a loop from a field.** Jupiter authors ammonia above
-## water, and the levels are derived from each species' own partial pressure — so the two decks land at
-## different altitudes with air between them, which is what the pairing rule has to get right.
+## **The stacked bodies are the ones that can tell a loop from a field.** Jupiter authors a HAZE above
+## ammonia above water — three layers, one of which has no condensation level — and the two condensations are
+## derived from each species' own partial pressure, so they land at different altitudes with air between them.
 func _test_a_stack(h, scene: SpacesimSystemScene) -> void:
-	for id in ["planet:jupiter", "planet:saturn"]:
+	# **Jupiter is the three-layer case** since 2026-11-03: the broad white zones are a haze above the stack,
+	# which is the one layer the model cannot derive a level for.
+	var jupiter := scene.body_by_id("planet:jupiter")
+	h.check(jupiter != null and jupiter.decks.size() == 3,
+		"Jupiter authors three layers and gets three decks, the top one a haze (%d)"
+			% (jupiter.decks.size() if jupiter != null else -1))
+	if jupiter != null and jupiter.decks.size() == 3:
+		var haze: SpacesimSceneBody.Deck = jupiter.decks[0]
+		h.check(haze.haze and haze.level.species == "haze",
+			"the highest is the haze, at %.0f m — the top of the stack, which has no condensation level"
+				% haze.height)
+		h.check(haze.height > jupiter.decks[1].height + jupiter.decks[1].thickness - 1.0,
+			"and it sits above the ammonia deck's own top, not on its base")
+		var material := haze.material as ShaderMaterial
+		h.check(float(material.get_shader_parameter("envelope_lobes")) > 0.0,
+			"with the SECOND band scale on its material (%.1f broad cells a hemisphere)"
+				% float(material.get_shader_parameter("envelope_lobes")))
+		# **Unset is the honest answer for an ordinary deck** — the uniform defaults to 0 and is never published,
+		# so reading it back gives `null` rather than 0.0.
+		var below: Variant = jupiter.decks[1].material.get_shader_parameter("envelope_lobes")
+		h.check(below == null or float(below) == 0.0,
+			"while the decks below keep ONE scale, which is the whole reason it is a layer")
+	for id in ["planet:saturn"]:
 		var body := scene.body_by_id(id)
 		h.check(body != null and body.decks.size() == 2,
 			"%s authors two layers and gets two decks (%d)" % [id, body.decks.size()])

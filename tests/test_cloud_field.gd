@@ -39,7 +39,6 @@ func run(h, root: Node) -> void:
 	_test_determinism(h, earth)
 	_test_a_featureless_body_costs_nothing(h, venus)
 	_test_the_bands_are_bands(h, jupiter, earth)
-	_test_the_broad_scale(h, jupiter, earth)
 	# **Every body, not just the softest one.** Earth is SHREDDED, so a meander discontinuity hides under its
 	# own weather: the step across the wrap is compared against the biggest step the field takes anywhere, and a
 	# ragged field's interior steps are large. Jupiter is BANDED — 75 % envelope, smooth belts — which is where
@@ -274,78 +273,6 @@ func _test_it_is_continuous_where_the_seam_is(
 	h.check(bad == 0, "and 64 samples in a cap at the pole are all finite and in range")
 	h.check(worst < 0.5,
 		"and the cap is continuous with the pole itself (worst %.3f of the field's range)" % worst)
-
-
-## **The second band scale**: the broad, diffuse zones that span several of the fine ones.
-##
-## Evert, 2026-11-03: *"In pictures of Jupiter, I see white bands that are missing."* Jupiter has two scales of
-## banding and the model had one. The broad scale is a guess (`BROAD_DIVISOR`, `BROAD_FLOOR`), but its PERIOD
-## is not — it is stated as a number of cells — and what is checked here is that period, that it is bounded,
-## **and that the fine bands still carry the small-scale structure inside it**, which is what stops the broad
-## term from being a regression.
-func _test_the_broad_scale(
-	h, jupiter: SpacesimCloudModel.Morphology, earth: SpacesimCloudModel.Morphology
-) -> void:
-	for pair in [["Jupiter", jupiter], ["Earth", earth]]:
-		var name: String = pair[0]
-		var morphology: SpacesimCloudModel.Morphology = pair[1]
-		var cells := morphology.cells
-		var phase := SpacesimCloudField.meander_phase(SpacesimCloudField.seed_for("x", 0))
-		var samples := 2000
-		# **The lobes it claims**, counted rather than assumed: one broad cell is one cosine, so a hemisphere
-		# holds `cells / (2 * BROAD_DIVISOR)` bright zones.
-		var per_hemisphere := cells / (2.0 * SpacesimCloudField.BROAD_DIVISOR)
-		var bright := 0
-		var rising := false
-		var previous := SpacesimCloudField.broad_at(-PI * 0.5 + 1.0e-4, cells, phase)
-		for index in samples:
-			var latitude := -PI * 0.5 + PI * float(index) / float(samples)
-			var value := SpacesimCloudField.broad_at(latitude, cells, phase)
-			if value > previous and not rising:
-				rising = true
-			elif value < previous and rising:
-				rising = false
-				bright += 1
-			previous = value
-		h.check(absi(bright - int(round(2.0 * per_hemisphere))) <= 2,
-			"%s: the broad scale has %d bright zones, which is %.1f per hemisphere as `BROAD_DIVISOR` claims"
-				% [name, bright, per_hemisphere])
-		# **In range, and never zero** — a zone cannot exceed the scale and a broad belt must not erase the
-		# cloud, or the fine bands inside it would be invisible.
-		var lowest := 1.0
-		var highest := 0.0
-		for index in samples:
-			var latitude := -PI * 0.5 + PI * float(index) / float(samples)
-			var value := SpacesimCloudField.broad_at(latitude, cells, phase)
-			lowest = minf(lowest, value)
-			highest = maxf(highest, value)
-		h.check(lowest >= SpacesimCloudField.BROAD_FLOOR - 1.0e-6 and highest <= 1.0 + 1.0e-6,
-			"%s: inside [BROAD_FLOOR, 1] (%.3f to %.3f), so a broad belt dims without erasing"
-				% [name, lowest, highest])
-		# **And the fine structure survives** — a MODULATION, not a replacement. Down a meridian the field still
-		# turns over about `cells` times a hemisphere.
-		var plan := SpacesimCloudField.plan(SpacesimCloudField.seed_for("x", 0), morphology)
-		var turns := 0
-		var going_up := true
-		var last := SpacesimCloudField.bands_at(
-			_direction(-PI * 0.5 + 0.01, 0.3), cells, morphology.ratio, plan.phase,
-			SpacesimCloudField.MEANDER
-		)
-		for index in samples:
-			var latitude := -PI * 0.5 + 0.01 + (PI - 0.02) * float(index) / float(samples)
-			var value := SpacesimCloudField.bands_at(
-				_direction(latitude, 0.3), cells, morphology.ratio, plan.phase,
-				SpacesimCloudField.MEANDER
-			)
-			if value > last and not going_up:
-				going_up = true
-				turns += 1
-			elif value < last and going_up:
-				going_up = false
-			last = value
-		h.check(turns >= int(cells) - 2,
-			"%s: and the fine bands still turn over %d times down a meridian (%.2f cells)"
-				% [name, turns, cells])
 
 
 ## A direction from a latitude and a longitude, in the bake's own convention.

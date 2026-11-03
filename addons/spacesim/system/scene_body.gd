@@ -95,6 +95,9 @@ class Deck:
 	## What content says this layer covers and reflects, and the hue it is drawn in — resolved once at build,
 	## because the map's threshold and ramp gain are fitted to them on every publish.
 	var coverage := 0.0
+	## A diffuse haze rather than a cloud on a condensation level: it sits at the top of the highest deck and
+	## carries no map — see `SpacesimCloudLayer.haze`.
+	var haze := false
 	var albedo := 0.0
 	var palette := Color.WHITE
 	## The layer's optical depth at full thickness as CONTENT stated it, or 0 where it stated none. Kept apart

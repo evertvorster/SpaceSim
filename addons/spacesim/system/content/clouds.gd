@@ -75,6 +75,14 @@ func opacity_at(index: int) -> float:
 	return opacity
 
 
+## Whether a layer is a diffuse HAZE rather than a cloud on its own condensation level — see
+## [member SpacesimCloudLayer.haze].
+func is_haze(index: int) -> bool:
+	if not layers.is_empty():
+		return index < layers.size() and layers[index].haze
+	return false
+
+
 ## The layer's own optical depth, or 0 where it has not stated one.
 func optical_depth_at(index: int) -> float:
 	if not layers.is_empty():

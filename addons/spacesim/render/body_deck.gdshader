@@ -45,6 +45,22 @@ uniform float threshold : hint_range(0.0, 1.0) = 0.0;
 // The width of a cloud's edge, in field units. One number drives the coverage and nothing else: the deck has
 // no separate alpha channel, because a cloud's boundary being soft and being thin are the same fact.
 uniform float softness : hint_range(0.001, 0.5) = 0.05;
+// ===== THE SECOND BAND SCALE, AND ONLY A HAZE HAS ONE ==============================
+//
+// **Jupiter bands twice**: the fine cream and brown bands are the circulation cells, and the broad diffuse WHITE
+// zones cover several of them at once (Evert, 2026-10-17, again 2026-11-03: *"I was expecting a third deck with
+// white bands in it"*). The white is a **layer**, not a change to the band term — a diffuse, low-tau veil whose
+// opacity varies over a broad latitude envelope.
+//
+// So the envelope is here, on the veil's own material, and `envelope_lobes = 0` is every ordinary deck: the field
+// keeps ONE scale. `envelope_lobes` is how many broad cells a hemisphere holds (`cells / BROAD_DIVISOR`), and the
+// shape is the same cosine-per-cell the circulation uses, counted over several of them.
+uniform float envelope_lobes : hint_range(0.0, 64.0) = 0.0;
+// The multiplier in a broad BELT, 0..1 — 1.0 would make the second scale invisible, 0 erases the veil there.
+uniform float envelope_floor : hint_range(0.0, 1.0) = 1.0;
+// From the body's own seed, so two bodies' zones are not in the same places.
+uniform float envelope_phase = 0.0;
+
 // **For a deck with no map to threshold.** A `FEATURELESS` body has no map because there is no noise to bake,
 // and a uniform field cannot express partial *area* coverage — every texel would land on the same side of
 // the threshold. So the coverage comes in here and the result is a veil, which is the honest picture of a
@@ -269,7 +285,16 @@ void fragment() {
 	// highlight is a BEAM, not a diffuse one"* — and this is the same quantity.
 	float column_tau = tau_full * thickness / mu;
 	float transmit = exp(-max(column_tau, 0.0));
-	float alpha = covered * veil * (1.0 - transmit);
+	// **The veil's second scale**, and a no-op on every ordinary deck: `envelope_lobes = 0` skips it entirely.
+	// It multiplies the ALPHA and not the albedo — a zone is more *opaque* white sheet over several bands, not a
+	// brighter paint — which is what makes the cream and brown bands read through it.
+	float envelope = 1.0;
+	if (envelope_lobes > 0.0) {
+		float envelope_span = (PI * 0.5) / envelope_lobes;
+		float envelope_turn = PI * abs(asin(clamp(p.y, -1.0, 1.0))) / envelope_span + envelope_phase;
+		envelope = envelope_floor + (1.0 - envelope_floor) * (1.0 + cos(envelope_turn)) * 0.5;
+	}
+	float alpha = covered * veil * envelope * (1.0 - transmit);
 	// **The inside-the-slab branch is GONE, and deleting it is what removes the flash at the deck's top.** It
 	// used to set `alpha = covered` for an eye between the base and the top — a step by construction, where
 	// what should change continuously is the cross-section of cloud along the ray. Evert saw it as "at 3k

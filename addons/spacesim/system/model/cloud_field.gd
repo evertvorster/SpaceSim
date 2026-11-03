@@ -123,27 +123,34 @@ const MEANDER_SECOND := 0.618
 ## A GUESS: the second harmonic's weight against the first. Settled by fitting a real band-edge track.
 const MEANDER_SECOND_SHARE := 0.6
 
-## A GUESS: **how many of the circulation cells one BROAD zone spans.**
+## A GUESS: **how many circulation cells one broad WHITE zone spans**, for the veil that draws them.
 ##
-## Jupiter has two scales of banding and the model had one. The fine bands are the circulation cells; the
-## broad, diffuse WHITE zones cover several of them at once — Evert, 2026-10-17: *"the white bands I am
-## talking about on Jupiter seem to cover multiple of the darker cream and brown bands"*, and again flying on
-## 2026-11-03: *"In pictures of Jupiter, I see white bands that are missing."*
+## Jupiter bands twice: the fine cream and brown bands are the circulation cells, and the broad diffuse WHITE
+## zones cover several of them at once — Evert, 2026-10-17: *"the white bands … seem to cover multiple of the
+## darker cream and brown bands"*, again on 2026-11-03: *"I was expecting a third deck with white bands in it."*
 ##
-## GUESSED because the model has no second scale to derive it from. The three candidates, from `Cloud Layers`
-## §3: a low overtone of the same circulation (`cells / k`, which is this one, and is a calibration); the
-## convecting layer's depth over the radius (`H_conv / a`, the only one with a physical form, and it needs a
-## convecting depth the model does not carry); or a low spherical-harmonic mode of the abundance, which would
-## also make the zones asymmetric between hemispheres — this does not, because `broad_at()` is even in
-## latitude. **Settled by** a convecting depth, or by fitting Jupiter's own albedo map's power spectrum.
+## **These two numbers belong to the VEIL, not to the field.** They were briefly applied to `bands_at` itself,
+## which modulated the cream and brown bands instead of adding a layer — against the decision recorded on
+## 2026-10-17: *"the broad white layer is a THIRD thing… NOT a change to the band term but ANOTHER LAYER IN THE
+## STACK: a diffuse, low-tau, white veil whose latitude envelope varies on a broad scale."* They are read by
+## `SpacesimBodyRenderer` and published as the deck shader's `envelope_lobes` / `envelope_floor`, so only a layer
+## that asks for them gets a second scale. The field keeps ONE.
+##
+## GUESSED because the model has no second scale to derive them from. The candidates, from `Cloud Layers` §3:
+## a low overtone of the same circulation (`cells / k`, which is this, and is a calibration); the convecting
+## layer's depth over the radius (`H_conv / a`, the only one with a physical form, and it needs a convecting
+## depth the model does not carry); or a low spherical-harmonic mode of the abundance, which would also make the
+## zones asymmetric between hemispheres — this does not. **Settled by** a convecting depth, or by fitting
+## Jupiter's own albedo map's power spectrum.
 const BROAD_DIVISOR := 2.0
 
-## A GUESS: **how much fainter a broad belt is than a broad zone**, as a multiplier's floor.
+## A GUESS: **how much fainter the veil is in a broad belt than in a broad zone**, as a multiplier's floor.
 ##
-## 1.0 would make the broad scale invisible and 0.0 would erase the cloud in a broad belt; 0.5 leaves the fine
-## bands legible inside both, which is the point — a zone is *brighter over several bands*, not a band of its
-## own. GUESSED, and settled by the same fit as `BROAD_DIVISOR`. Evert tunes this by flight.
-const BROAD_FLOOR := 0.5
+## 1.0 would make the second scale invisible and 0.0 would erase the veil in a belt. **0.5 was tried and it read
+## as a global wash rather than as bands** — the veil was still a third of its full strength in every belt, so the
+## brown went pale everywhere instead of the zones standing out. 0.2 is the veil nearly gone in a belt, which is
+## what makes a zone a *band*. GUESSED, and settled by the same fit as `BROAD_DIVISOR`; Evert tunes it by flight.
+const BROAD_FLOOR := 0.2
 
 
 ## **Where the bands are, allowing for the meander.** This is the function the field reads instead of
@@ -178,14 +185,11 @@ static func bands_at(
 	var latitude := asin(clampf(direction.y, -1.0, 1.0))
 	if cells <= 0.0:
 		return 1.0
-	# **Two scales of banding, multiplied** — the cells, and the broad zones that span several of them.
-	# Evert, 2026-11-03: *"In pictures of Jupiter, I see white bands that are missing."* See `broad_at()`.
-	var broad := broad_at(latitude, cells, phase)
 	if ratio <= 0.0 or meander <= 0.0:
-		return SpacesimCloudModel.condensation_favouring(latitude, cells) * broad
+		return SpacesimCloudModel.condensation_favouring(latitude, cells)
 	return SpacesimCloudModel.condensation_favouring(
 		latitude + meander_offset(direction, ratio, phase, meander, cells), cells
-	) * broad
+	)
 
 
 ## **How far the bands wander, in RADIANS OF LATITUDE** — the whole of `bands_at`'s meander, in one place so
@@ -230,28 +234,6 @@ static func meander_offset(
 	return amplitude * lerpf(
 		_harmonics(low, longitude, phase), _harmonics(low + 1.0, longitude, phase), share
 	)
-
-
-## **The BROAD scale: how far this latitude sits inside a broad zone (1) or a broad belt (BROAD_FLOOR).**
-##
-## A second cosine in latitude at `cells / BROAD_DIVISOR` — the same shape as one circulation cell's
-## favouring, counted over several cells — so a zone lifts every fine band inside it and a belt dims them,
-## and the fine structure stays legible through both.
-##
-## **It is EVEN in latitude, and the two hemispheres therefore match.** Real Jupiter's do not (its broad zones
-## are not mirror images), and the candidate that would give that asymmetry — a low spherical-harmonic mode of
-## the abundance — is the one that is not built. Named rather than hidden: this is the cheap version.
-##
-## `phase` comes from the body's seed, so two bodies' broad zones are not in the same places. Unlike the
-## meander it is NOT meandered itself: the feature is already several bands wide, and offsetting it would cost
-## a second `sin` to move something nobody could see move.
-static func broad_at(latitude: float, cells: float, phase: float) -> float:
-	if cells <= 0.0:
-		return 1.0
-	var broad_cells := maxf(cells / BROAD_DIVISOR, 1.0)
-	var span := (PI * 0.5) / broad_cells
-	var turn := PI * absf(latitude) / span + phase
-	return BROAD_FLOOR + (1.0 - BROAD_FLOOR) * (1.0 + cos(turn)) * 0.5
 
 
 ## One whole wavenumber's meander profile — two integer waves, the second offset so they do not line up.

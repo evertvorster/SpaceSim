@@ -906,39 +906,66 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 	var unclaimed := SpacesimCloudModel.layers(
 		body.content.atmosphere, materials, gravity, equilibrium, body.content
 	)
-	for index in clouds.layer_count():
-		var level := _claim_level(unclaimed, clouds.species_at(index))
-		if level == null:
-			continue
-		var deck := SpacesimSceneBody.Deck.new()
-		deck.index = index
-		deck.level = level
-		deck.height = level.height
-		deck.thickness = level.thickness
-		deck.coverage = clouds.coverage_at(index)
-		deck.albedo = clouds.albedo_at(index)
-		deck.palette = _cloud_palette(clouds, index, materials)
-		deck.optical_depth = clouds.optical_depth_at(index)
-		# **The layer's ONE optical depth.** A layer that states none gets `−ln(1 − opacity)` — "how opaque it is
-		# where it covers" already means `α = 1 − e^{−τ}` at a full column. The alpha, the base's light and the
-		# shadow all read this; they used to read two numbers that no law related (3.07x apart on Earth).
-		deck.tau = deck.optical_depth
-		if deck.tau <= 0.0:
-			deck.tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
-		deck.morphology = morphology
-		deck.material = SpacesimBodyRenderer.deck_material(body, level, deck.palette, index)
-		# **An empty node, because the geometry comes from the GROUND's walk.** A deck is the same triangles as the
-		# surface under it, translated to this level's radius — see `_build_patch_arrays`. It has no sphere of its
-		# own any more, and with none to pad there is no sagitta to reconcile: the walk refines until a facet's
-		# sagitta is under the error budget in pixels, so a deck built on those triangles cannot dip into the ground.
-		#
-		# Evert, 2026-11-01: *"We need to use that for the basis of each deck... EVERYTHING that is on the planet that
-		# the user can see."* The 2026-10-30 flight had the two intersecting, which is what `shell_scale` was padding
-		# for; the fixed arrangement has one mesh to be right about instead of two to reconcile.
-		deck.node = _add_body_mesh(
-			body.node, deck.material, "%sDeck%d" % [body.name, index]
-		)
-		body.decks.append(deck)
+	# **Two passes: the condensations first, then the veils.** A haze has no level the model can derive — it is a
+	# thin sheet above the deck it belongs to — so its height is the TOP of the stack, and there is no "top" until
+	# every ordinary layer has claimed its level.
+	for haze_pass in [false, true]:
+		for index in clouds.layer_count():
+			if clouds.is_haze(index) != haze_pass:
+				continue
+			var level: SpacesimAtmosphereModel.Condensation = null
+			if haze_pass:
+				level = _haze_level(body)
+			else:
+				level = _claim_level(unclaimed, clouds.species_at(index))
+			if level == null:
+				continue
+			var deck := SpacesimSceneBody.Deck.new()
+			deck.index = index
+			deck.haze = haze_pass
+			deck.level = level
+			deck.height = level.height
+			deck.thickness = level.thickness
+			deck.coverage = clouds.coverage_at(index)
+			deck.albedo = clouds.albedo_at(index)
+			deck.palette = _cloud_palette(clouds, index, materials)
+			deck.optical_depth = clouds.optical_depth_at(index)
+			# **The layer's ONE optical depth.** A layer that states none gets `−ln(1 − opacity)` — "how opaque it is
+			# where it covers" already means `α = 1 − e^{−τ}` at a full column. The alpha, the base's light and the
+			# shadow all read this; they used to read two numbers that no law related (3.07x apart on Earth).
+			deck.tau = deck.optical_depth
+			if deck.tau <= 0.0:
+				deck.tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
+			deck.morphology = morphology
+			deck.material = SpacesimBodyRenderer.deck_material(body, level, deck.palette, index)
+			# **A haze gets the SECOND band scale and nothing else does** — see `body_deck.gdshader`'s
+			# `envelope_*` uniforms. `cells / BROAD_DIVISOR` broad cells a hemisphere, the floor from the same
+			# guess, and the phase from the body's own seed so two worlds' zones are not in the same places.
+			if haze_pass:
+				deck.material.set_shader_parameter(
+					"envelope_lobes", maxf(morphology.cells / SpacesimCloudField.BROAD_DIVISOR, 1.0)
+				)
+				deck.material.set_shader_parameter("envelope_floor", SpacesimCloudField.BROAD_FLOOR)
+				deck.material.set_shader_parameter(
+					"envelope_phase",
+					SpacesimCloudField.meander_phase(SpacesimCloudField.seed_for(body.id, index))
+				)
+			# **An empty node, because the geometry comes from the GROUND's walk.** A deck is the same triangles as the
+			# surface under it, translated to this level's radius — see `_build_patch_arrays`. It has no sphere of its
+			# own any more, and with none to pad there is no sagitta to reconcile: the walk refines until a facet's
+			# sagitta is under the error budget in pixels, so a deck built on those triangles cannot dip into the ground.
+			#
+			# Evert, 2026-11-01: *"We need to use that for the basis of each deck... EVERYTHING that is on the planet that
+			# the user can see."* The 2026-10-30 flight had the two intersecting, which is what `shell_scale` was padding
+			# for; the fixed arrangement has one mesh to be right about instead of two to reconcile.
+			deck.node = _add_body_mesh(
+				body.node, deck.material, "%sDeck%d" % [body.name, index]
+			)
+			body.decks.append(deck)
+	# **Highest first, which is the order every reader assumes** — `near_deck` and the fog take `decks[0]` for
+	# "the deck overhead". A haze is built AFTER the stack it sits on, so the append order is not that order.
+	body.decks.sort_custom(func(a: SpacesimSceneBody.Deck, b: SpacesimSceneBody.Deck) -> bool:
+		return a.height > b.height)
 
 
 ## **An opaque interior, so a body with no surface cannot be seen through.**
@@ -979,6 +1006,29 @@ func _build_interior(body: SpacesimSceneBody) -> void:
 			deepest = deck
 	body.interior_material = SpacesimBodyRenderer.interior_material(body, deepest.palette)
 	body.interior = _add_body_mesh(body.node, body.interior_material, "%sInterior" % body.name)
+
+
+## **Where a HAZE sits: the top of the highest deck in the stack.**
+##
+## A veil has no condensation level — there is no temperature it is the crossing of; it is a thin sheet of the
+## same stuff as the deck under it, above it. So its height is derived from the stack instead of claimed from
+## `condensation_levels`, and `_build_decks` places the ordinary layers first so there IS a top to measure.
+##
+## Its `thickness` is **zero** and that is honest rather than lazy: a veil has no depth to state, and the
+## shader's alpha for it comes from `1 - e^-tau` on the white texel rather than from a map's thickness. Its
+## species is `"haze"`, which is how a test can tell it from a condensation without a second field.
+func _haze_level(body: SpacesimSceneBody) -> SpacesimAtmosphereModel.Condensation:
+	if body.decks.is_empty():
+		return null
+	var top := 0.0
+	for deck in body.decks:
+		top = maxf(top, deck.height + deck.thickness)
+	var level := SpacesimAtmosphereModel.Condensation.new()
+	level.species = "haze"
+	level.regime = SpacesimAtmosphereModel.Condensation.Regime.LEVEL
+	level.formation = SpacesimAtmosphereModel.Condensation.Formation.CONDENSATION
+	level.height = top
+	return level
 
 
 ## **The level a content layer is made of**, taken out of the unclaimed pool so two layers cannot land on
@@ -1740,6 +1790,16 @@ func _update_decks(
 		if width == deck.published_width:
 			continue
 		deck.published_width = width
+		# **A haze is drawn from the white texel, never from a map.** It has no field of its own to bake, and a
+		# baked one would give it the cream and brown fine bands it exists to span. Its structure is the latitude
+		# envelope published on its material; its opacity is `1 - e^-tau` on a uniform sheet.
+		if deck.haze:
+			var haze_gain := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, 1.0)
+			SpacesimBodyRenderer.apply_cloud_map(
+				deck.material, SpacesimBodyRenderer.white_texel(), 0, 0.0, haze_gain.value, 1.0, deck.tau
+			)
+			_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, 0)
+			continue
 		if texture == null or width <= 0:
 			# **A `FEATURELESS` body has no map to threshold**, so its coverage goes in as a veil with
 			# `threshold = 0` and the whole disc is cloud — the recipe's rule, and the reason a hazy world
