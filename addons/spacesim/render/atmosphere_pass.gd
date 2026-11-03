@@ -1,12 +1,19 @@
 class_name SpacesimAtmospherePass
 extends CompositorEffect
-## **RETIRED 2026-11-02 — no longer in the compositor, and no longer drawing air.**
+## **HALF RETIRED: the air march is dead, and the FOG is alive again.**
 ##
-## The air is `air_shell.gdshader` now: one shell per band, worn by the body, clipped at the frame's depth by the
-## rasteriser's own buffer instead of by a post-transparent pass. Evert, 2026-11-02: *"when the atmosphere pass
-## was tied to the planet, it worked properly. When we moved it to the skybox, it stopped working properly"* — and
-## the shells are the third answer, which is neither of those. What is kept here is `march_deck`/`deck_span` and
-## the optics the shell was ported from; deleting the file is its own step.
+## The air is `air_shell.gdshader` — one shell per band, worn by the body, clipped at the frame's depth by the
+## rasteriser's own buffer instead of by a post-transparent pass (2026-11-02, the third answer after the shell and
+## the skybox and neither of those). Everything in this file that marched air is unreachable with it.
+##
+## **What still runs is the fog** — the medium at the eye, keyed to the deck's base and its own thickness, which a
+## per-pixel shell cannot express because it is what the camera is *sitting in* rather than a segment on a ray.
+## Evert, 2026-11-03: *"Can we re-enable fog? We disabled it for reasons when doing the layered atmosphere shaders."*
+## So the pass went back into the compositor for that alone, ahead of the exposure pass so the metre weighs the veil.
+## `main.gd::_update_fog` feeds it, `blend = 1`, and the only numbers it uses are the deck's own (`params.deck`,
+## `deck_radiance`, the cover map and the camera's altitude through the layer).
+##
+## `march_deck`/`deck_span` are kept because a second air band at a deck's base will want them.
 ##
 ## **The atmosphere, as ONE volumetric march over the whole frame.**
 ##

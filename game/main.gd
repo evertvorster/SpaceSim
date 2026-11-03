@@ -47,6 +47,12 @@ var _throttle_stop := false
 var _exposure: SpacesimExposure
 ## The frame-wide exposure pass: the metre and the multiply, on the GPU. See `SpacesimExposurePass`.
 var _exposure_pass: SpacesimExposurePass
+## **The fog, which is the atmosphere pass's one remaining live behaviour.** Evert, 2026-11-03: *"Can we re-enable
+## fog? We disabled it for reasons when doing the layered atmosphere shaders."* The pass came back into the
+## compositor for this alone: its air march is still unreachable (`MARCHES_DECK`), the shells own the air, and what
+## is left in it is the medium at the eye — the cloud map read at the camera and ramped from the deck's base to its
+## top. Re-enabled rather than re-implemented, because that code has been flown.
+var _atmosphere_pass: SpacesimAtmospherePass
 var _markers: SpacesimMarkers
 var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
@@ -111,8 +117,11 @@ func _ready() -> void:
 	# rasteriser's depth is what clips it and the exposure still meters the finished frame. `SpacesimAtmospherePass`
 	# is left in the tree, unregistered: `march_deck`/`deck_span` are the deck-as-a-boundary machinery the second
 	# shell will want, and deleting a 45 KB effect is its own commit rather than a footnote on this one.
+	# **The fog composites before the exposure**, so the metre weighs the finished frame — the same ordering the air
+	# march needed when it lived here, and still right for a veil over the view.
+	_atmosphere_pass = SpacesimAtmospherePass.new()
 	var compositor := Compositor.new()
-	var effects: Array[CompositorEffect] = [_exposure_pass]
+	var effects: Array[CompositorEffect] = [_atmosphere_pass, _exposure_pass]
 	compositor.compositor_effects = effects
 	_camera.compositor = compositor
 	_apply_settings()
@@ -337,6 +346,7 @@ func _apply_settings() -> void:
 	_exposure_pass.adaptation_rate = float(
 		SpacesimSettings.get_value("exposure.adaptation_rate")
 	)
+	_atmosphere_pass.fog_gain = float(SpacesimSettings.get_value("fog.gain"))
 	_markers.rebuild_pool(int(SpacesimSettings.get_value("markers.pool_size")))
 	_markers.font_size = int(SpacesimSettings.get_value("markers.font_size"))
 	_markers.margin = float(SpacesimSettings.get_value("markers.margin"))
@@ -427,6 +437,46 @@ func _print_build() -> void:
 	print("SpaceSim: build %s%s" % [head, "" if git.is_clean() else ", with uncommitted changes"])
 
 
+## **The fog: a medium at the eye, and the only thing the atmosphere pass still draws.**
+##
+## Evert, 2026-10-21, on what it is for: *"We are approximating based on the refined texture, and scaling based on
+## distance between the top and the bottom of the cloud layer."* Two numbers, neither invented — the deck's own map
+## read **at the camera** for how cloudy this patch is, and the camera's altitude through the layer's own thickness
+## for how much of it is in front of you. Full at the base, nothing at the top, so the ramp's ends are geometry.
+##
+## **Why it belongs over the whole view and not inside the air shell**: the fog is what the camera is *sitting in*,
+## not a segment on a ray. The shell marches per pixel and is clipped by depth; a veil at the eye is not, and that
+## distinction is the one that made returning early on empty depth wrong on 2026-11-01 — it removed the fog from
+## every pixel of sky, which is most of the frame when you are inside a band.
+##
+## **`blend = 1`**: the pass's composite weight is its only remaining dial, and the march it used to scale is dead
+## code. Zero means "do not draw", which is what every early return below hands it.
+func _update_fog(observer: Vector3) -> void:
+	if _atmosphere_pass == null or _camera == null:
+		return
+	if _atmosphere_pass.fog_gain <= 0.0 or not bool(SpacesimSettings.get_value("render.atmosphere_volume")):
+		_clear_fog()
+		return
+	var air := _system.air_for_eye(observer)
+	if air.is_empty():
+		_clear_fog()
+		return
+	var deck: Dictionary = air.get("deck", {})
+	if deck.is_empty():
+		_clear_fog()
+		return
+	_atmosphere_pass.prepare(
+		_camera, air["centre"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
+		air["sun_direction"], air["air"], 1.0, deck
+	)
+
+
+## **Tell the pass to draw nothing**, which is `blend = 0`: it returns before it builds a pipeline or a uniform set,
+## so a frame at a body with no deck, or with the fog switched off, costs nothing at all.
+func _clear_fog() -> void:
+	_atmosphere_pass.prepare(_camera, Vector3.ZERO, 0.0, 0.0, Vector3.UP, {}, 0.0)
+
+
 ## Everything that is **drawn** rather than simulated, and it runs once per drawn frame.
 ##
 ## **Presentation belongs here and not in `_physics_process`**, and two reasons point the same way.
@@ -478,6 +528,7 @@ func _update_view(delta: float) -> void:
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
 	_exposure_pass.frame_delta = delta
+	_update_fog(observer)
 	# **EV compensation, on or off.** On is the metre's — a compute pass over the rendered pixels, so the exposure and
 	# the frame cannot disagree. Off disables the pass, so the frame is drawn at Godot's own reference: no multiplier,
 	# and a difference in the picture is a difference in the geometry rather than in the exposure.
