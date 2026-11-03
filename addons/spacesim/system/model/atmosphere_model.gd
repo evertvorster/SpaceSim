@@ -54,7 +54,7 @@ const AEROSOL_OPACITY_REFERENCE := 0.9
 ## body**. What hides a planet is the aerosol, so Venus wore Earth's haze over a sulphuric-acid shroud.
 ##
 ## The quantity is the layer's own stated optical depth — `optical_depth_at` where a layer states it, otherwise
-## `-ln(1 - opacity)`, which is the same reading `deck.shadow_tau` takes — divided by the reference above. A body
+## `-ln(1 - opacity)`, which is the same reading `SpacesimSceneBody.Deck.tau` takes — divided by the reference above. A body
 ## thinner than Earth's deck is *not* made clearer (the ratio floors at 1), because the constant is the anchor the
 ## picture was calibrated with and this change is not the place to re-tune a clear sky.
 ##

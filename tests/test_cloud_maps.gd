@@ -319,7 +319,7 @@ func _test_one_measurement(h) -> void:
 			exceedance, SpacesimCloudMaps.mean_exceedance(image, threshold)
 		], 0.02)
 	h.check_near(opacity, SpacesimCloudMaps.mean_opacity(
-		image, threshold, SpacesimCloudMaps.column_depth(exceedance, 1000.0)
+		image, threshold, 1000.0
 	), "and its opacity is the per-texel pass's (%.4f)" % opacity, 0.02)
 	h.check(SpacesimCloudMaps.measure(null, 0.5, 0.0)["threshold"] == 1.0,
 		"a map that does not exist measures as full coverage, not as a crash")

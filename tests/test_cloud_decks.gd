@@ -248,10 +248,34 @@ func _test_the_deck_goes_live(h, scene: SpacesimSystemScene, root: Node) -> void
 	# picture, so the assertion belongs on the published value.
 	var tau_full := float(deck.material.get_shader_parameter("tau_full"))
 	h.check(tau_full > 0.0, "the deck's optical depth is published, or its alpha is zero (%.4f)" % tau_full)
-	h.check(is_equal_approx(tau_full, scene._deck_tau_full(earth, deck)),
+	h.check(is_equal_approx(tau_full, deck.tau),
 		"and it is the layer's own column depth")
 	h.check(deck.material.get_shader_parameter("cover") != SpacesimBodyRenderer.white_texel(),
 		"sampling that map rather than the white texel")
+	# **ONE tau, and it is the same number everywhere it is used** (2026-11-03). There were two: the deck drew with
+	# `−ln(1 − mean exceedance)` from the map and the shadow cast with `−ln(1 − opacity)` from the content, 3.07x
+	# apart on this very body and 6.81x on Neptune, with nothing relating them. So the law is asserted directly, from
+	# the layer's own fields, plus the measurement being taken at the depth the deck draws with.
+	for other in earth.decks:
+		var layer_tau := earth.content.clouds.optical_depth_at(other.index)
+		if layer_tau > 0.0:
+			h.check_near(other.tau, layer_tau,
+				"%s states an optical depth and takes it verbatim (%.3f)" % [other.level.species, layer_tau], 1.0e-9)
+		else:
+			var stated := -log(maxf(1.0 - earth.content.clouds.opacity_at(other.index), 1.0e-3))
+			h.check_near(other.tau, stated,
+				"%s states only an opacity, so its depth is −ln(1 − opacity) (%.3f)" % [other.level.species, stated],
+				1.0e-9)
+		var own_map := scene._cloud_maps.map(
+			earth.id, other.index, earth.radius, other.coverage, earth.radius * 3.0, other.morphology, other.tau
+		)
+		if own_map != null:
+			# **Annotated**: a `Dictionary` lookup is a `Variant`, and `:=` on one is a hard parse error.
+			var measured: float = SpacesimCloudMaps.measure(
+				own_map.get_image(), other.coverage, other.tau
+			)["opacity"]
+			h.check_near(scene._cloud_maps.opacity_mean_of(earth.id, other.index), measured,
+				"and the map's mean opacity is measured at that same depth", 1.0e-9)
 	var threshold := float(deck.material.get_shader_parameter("threshold"))
 	h.check(threshold > 0.0 and threshold < 1.0,
 		"at the percentile its coverage implies (%.3f)" % threshold)
@@ -302,8 +326,8 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 			deck.level.species if deck != null else "none", deck.height if deck != null else 0.0])
 	if deck == null:
 		return
-	h.check(deck.shadow_tau > 0.0,
-		"with an optical depth to cast with (%.3f), its opacity turned into the same law" % deck.shadow_tau)
+	h.check(deck.tau > 0.0,
+		"with an optical depth to cast with (%.3f), its opacity turned into the same law" % deck.tau)
 	var land := earth.mesh_material as ShaderMaterial
 	# **Every deck in the stack, not only the casting one**: the rule is a *selection*, and the pairs on Jupiter and
 	# Saturn are where a selection between two real decks earns its keep.
@@ -321,34 +345,34 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 			"which is not the first layer in the stack, so the check can tell the two apart")
 	# **Already published, by the frame walk this suite drove a moment ago** — which is the stronger claim:
 	# the shadow is wired into `update_lod`, not merely available to be set.
-	h.check_near(float(land.get_shader_parameter("deck_tau")), deck.shadow_tau,
+	h.check_near(float(land.get_shader_parameter("deck_tau")), deck.tau,
 		"and the frame walk has already given the land that depth", 1.0e-9)
 
 	# **And each deck is lit by ITS OWN slab**, which is the fault this fixed (2026-11-03): every deck material used
 	# to be handed the SHADOWING deck's map and tau, so Earth's ice sheet — its own 0.2 — was darkened by the water
-	# deck's 2.30 and read as a heavy shadow it was not casting. `tau_full`, not `shadow_tau`: the base must
-	# transmit what the top's alpha withholds, so both come from one law on one texel.
+	# deck's 2.30 and read as a heavy shadow it was not casting. One `deck.tau` now serves the alpha, the base's
+	# light and the shadow, so the two cannot be different numbers again.
 	var ice: SpacesimSceneBody.Deck = earth.decks[0]
 	for other in earth.decks:
-		var own := scene._deck_tau_full(earth, other)
+		var own := other.tau
 		h.check_near(float((other.material as ShaderMaterial).get_shader_parameter("deck_tau")), own,
 			"%s is lit by its own column depth (%.3f)" % [other.level.species, own], 1.0e-9)
 	h.check(float((ice.material as ShaderMaterial).get_shader_parameter("deck_tau")) < 1.0,
-		"so the ice sheet is not wearing the water deck's %0.2f" % deck.shadow_tau)
+		"so the ice sheet is not wearing the water deck's %0.2f" % deck.tau)
 
 	# Publish what a landed map would publish, and check the surface took it. **One surface now**: the sea's layer is
 	# gone (2026-10-28) and with it the "both layers" half of this contract — the deck's shadow reaches the ground,
 	# which is the only thing drawn below it.
 	var cover := SpacesimBodyRenderer.white_texel()
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, cover, deck.published_width, 0.843, deck.shadow_tau,
+		earth.mesh_material, cover, deck.published_width, 0.843, deck.tau,
 		deck.height + deck.thickness
 	)
 	for pair in [[land, "land"]]:
 		var material: ShaderMaterial = pair[0]
 		if material == null:
 			continue
-		h.check_near(float(material.get_shader_parameter("deck_tau")), deck.shadow_tau,
+		h.check_near(float(material.get_shader_parameter("deck_tau")), deck.tau,
 			"the %s is shadowed by the deck's own depth" % pair[1], 1.0e-9)
 		h.check_near(float(material.get_shader_parameter("deck_height")),
 			deck.height + deck.thickness,
@@ -370,7 +394,7 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	refined.fill(Color(0.5, 0.5, 0.5, 1.0))
 	var refined_texture := ImageTexture.create_from_image(refined)
 	SpacesimBodyRenderer.apply_deck_shadow(
-		earth.mesh_material, refined_texture, 8, 0.7, deck.shadow_tau,
+		earth.mesh_material, refined_texture, 8, 0.7, deck.tau,
 		deck.height + deck.thickness
 	)
 	h.check(land.get_shader_parameter("deck_cover") == refined_texture,

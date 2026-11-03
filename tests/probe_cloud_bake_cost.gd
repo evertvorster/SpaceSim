@@ -16,7 +16,7 @@ func _init() -> void:
 		var threshold := SpacesimCloudMaps.threshold_for(image, 0.5)
 		var exceed := SpacesimCloudMaps.mean_exceedance(image, threshold)
 		var opacity := SpacesimCloudMaps.mean_opacity(
-			image, threshold, SpacesimCloudMaps.column_depth(exceed, 1000.0)
+			image, threshold, 1000.0
 		)
 		var quantiles := SpacesimSurfaceDistribution.quantiles_of(image)
 		var old_us := Time.get_ticks_usec() - t

@@ -757,25 +757,13 @@ func air_for_eye(observer: Vector3) -> Dictionary:
 ## the shell from disagreeing about the same cloud. The extinction comes from the same law the test asserts
 ## (`SpacesimCloudBand.extinction`) over the air's own derived scale height.
 ##
-## **A layer's vertical optical depth at full thickness**, which is the one number opacity, the base's
-## transmittance and the near regime's march all come from.
-##
-## A tau layer states it; a RAMP layer's equivalent is `SpacesimCloudMaps.column_depth()`, **which is where
-## that law lives** — this function reads it rather than restating it. It used to carry its own copy with
-## different clamps (`0.02..0.98` against the model's `0..0.999`), so the depth the deck drew with was not the
-## depth its own `opacity_mean` was measured at: they agree at a mean of 0.5 and part company to 3.9 against
-## 4.6 at 0.99. That is the "two copies drift apart on exactly the bodies nobody looks at" failure, in this
-## function, while its own comment claimed one home.
-func _deck_tau_full(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
-	return SpacesimCloudMaps.column_depth(
-		_cloud_maps.ramp_mean_of(body.id, deck.index), deck.optical_depth
-	)
-
-
-## The per-metre coefficient a march needs, from the layer's own column — `tau_full / thickness`, so the near
+## The per-metre coefficient a march needs, from the layer's own column — `tau / thickness`, so the near
 ## regime integrates exactly the depth the shell draws with.
+##
+## **`deck.tau` and not a second derivation.** There were two of these and they disagreed by up to 6.8x — see
+## `SpacesimSceneBody.Deck.tau`.
 func _deck_extinction(body: SpacesimSceneBody, deck: SpacesimSceneBody.Deck) -> float:
-	return _deck_tau_full(body, deck) / maxf(deck.thickness, 1.0)
+	return deck.tau / maxf(deck.thickness, 1.0)
 
 
 ## **The top layer only, and that is this rung's named limit.** The near regime is live inside or just under
@@ -930,11 +918,12 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		deck.albedo = clouds.albedo_at(index)
 		deck.palette = _cloud_palette(clouds, index, materials)
 		deck.optical_depth = clouds.optical_depth_at(index)
-		# **What the SHADOW is cast with.** A layer on the ramp path states no optical depth, and its honest
-		# equivalent is `−ln(1 − opacity)` — "how opaque it is where it covers" already means `α = 1 − e^{−τ}`.
-		deck.shadow_tau = deck.optical_depth
-		if deck.shadow_tau <= 0.0:
-			deck.shadow_tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
+		# **The layer's ONE optical depth.** A layer that states none gets `−ln(1 − opacity)` — "how opaque it is
+		# where it covers" already means `α = 1 − e^{−τ}` at a full column. The alpha, the base's light and the
+		# shadow all read this; they used to read two numbers that no law related (3.07x apart on Earth).
+		deck.tau = deck.optical_depth
+		if deck.tau <= 0.0:
+			deck.tau = -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
 		deck.morphology = morphology
 		deck.material = SpacesimBodyRenderer.deck_material(body, level, deck.palette, index)
 		# **An empty node, because the geometry comes from the GROUND's walk.** A deck is the same triangles as the
@@ -1693,7 +1682,7 @@ func _update_decks(
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
 		var texture := _cloud_maps.map(
 			body.id, deck.index, body.radius, deck.coverage, distance, deck.morphology,
-			deck.optical_depth
+			deck.tau
 		)
 		var width := _cloud_maps.width_of(body.id, deck.index)
 		if width == deck.published_width:
@@ -1706,7 +1695,7 @@ func _update_decks(
 			var veil := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, 1.0)
 			SpacesimBodyRenderer.apply_cloud_map(
 				deck.material, SpacesimBodyRenderer.white_texel(), 0, 0.0, veil.value, deck.coverage,
-				_deck_tau_full(body, deck)
+				deck.tau
 			)
 			# **A uniform veil casts a uniform shadow**: a one-texel white map with `threshold = 0` is a single
 			# thickness everywhere, which is what a deck the model calls FEATURELESS actually is.
@@ -1719,7 +1708,7 @@ func _update_decks(
 		var gain := SpacesimBodyRenderer.cloud_gain(deck.albedo, deck.palette, mean)
 		var threshold := _cloud_maps.threshold_of(body.id, deck.index)
 		SpacesimBodyRenderer.apply_cloud_map(
-			deck.material, texture, width, threshold, gain.value, 1.0, _deck_tau_full(body, deck)
+			deck.material, texture, width, threshold, gain.value, 1.0, deck.tau
 		)
 		_publish_deck_shadow(body, deck, texture, threshold, width)
 
@@ -1750,8 +1739,8 @@ func _shadowing_deck(body: SpacesimSceneBody) -> SpacesimSceneBody.Deck:
 ##
 ## Two targets and two currencies, and which deck they belong to is the whole of it:
 ##
-## - **the deck itself**, always, lit by its own slab: its own map, its own `_deck_tau_full`;
-## - **the ground and the sea**, from the SHADOWING deck only, in `deck.shadow_tau`.
+## - **the deck itself**, always, lit by its own slab: its own map, its own `deck.tau`;
+## - **the ground and the sea**, from the SHADOWING deck only.
 ##
 ## The lever arm is the deck's **top** above the surface: a shadow's offset is `height · tan(zenith)`, and
 ## using the base would put every shadow a slab's thickness too close to its cloud.
@@ -1768,11 +1757,10 @@ func _publish_deck_shadow(
 	# the WATER deck's 2.30 and read as a heavy shadow it was not casting. Jupiter's and Saturn's ammonia decks were
 	# lit at their water decks' tau for the same reason, from the day their stacks existed.
 	#
-	# **The deck's own number is `_deck_tau_full`, not `deck.shadow_tau`, and the difference is the point**: the base
-	# must transmit what the top's alpha withholds, so both come from one law on one texel. `shadow_tau` is the
-	# layer's OPACITY read as a tau, which is the right currency for the ground and the wrong one for a slab.
+	# **Both targets take `deck.tau`**, the one number the deck's alpha is drawn with, so a base transmits exactly
+	# what the top's opacity withholds.
 	SpacesimBodyRenderer.apply_deck_shadow(
-		deck.material, texture, width, threshold, _deck_tau_full(body, deck),
+		deck.material, texture, width, threshold, deck.tau,
 		deck.height + deck.thickness, deck.height
 	)
 	# **The ground and the sea take the deck NEAREST THE GROUND, and only that one** — see `_shadowing_deck`. One
@@ -1787,7 +1775,7 @@ func _publish_deck_shadow(
 		if material == null:
 			continue
 		SpacesimBodyRenderer.apply_deck_shadow(
-			material, texture, width, threshold, deck.shadow_tau,
+			material, texture, width, threshold, deck.tau,
 			deck.height + deck.thickness, deck.height
 		)
 

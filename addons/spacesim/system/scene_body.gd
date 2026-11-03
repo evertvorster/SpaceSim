@@ -88,13 +88,20 @@ class Deck:
 	var coverage := 0.0
 	var albedo := 0.0
 	var palette := Color.WHITE
-	## The layer's optical depth at full thickness, or 0 for the reflectance-ramp path. It decides which of
-	## the map's two measured means the ramp gain is fitted to.
+	## The layer's optical depth at full thickness as CONTENT stated it, or 0 where it stated none. Kept apart
+	## from `tau` because it is the authored number and `tau` is the one that is actually used.
 	var optical_depth := 0.0
-	## **The depth the SHADOW uses**, which is not always the one the deck draws with: a layer on the ramp path
-	## states no `optical_depth`, and its honest equivalent is `−ln(1 − opacity)` — what "how opaque it is where
-	## it covers" already means, since `α = 1 − e^{−τ}`. Zero for a layer that is neither.
-	var shadow_tau := 0.0
+	## **The layer's optical depth at a full column — ONE number, and every use reads it** (2026-11-03).
+	##
+	## `ALPHA = covered · veil · (1 − exp(−tau · thickness / mu))` draws the deck, `exp(−tau · path)` lights its
+	## base and shades the ground, and the ramp gain is fitted to `mean(R(tau))` measured at this same depth. It
+	## used to be two numbers: the deck drew with the depth the map's mean thickness implied and the shadow cast
+	## with `−ln(1 − opacity)`, which were 3.07x apart on Earth and 6.81x on Neptune, with no law relating them.
+	##
+	## **It is `optical_depth` where content states one, and `−ln(1 − opacity)` otherwise** — the second is what
+	## "how opaque it is where it covers" already means, since `α = 1 − e^{−τ}` at a full column. Zero for a
+	## layer that states neither, which is a deck that draws nothing.
+	var tau := 0.0
 	## The body's cloud organisation, which is what the field is generated from. One derivation for the whole
 	## stack: the bands do not change with altitude.
 	var morphology: SpacesimCloudModel.Morphology

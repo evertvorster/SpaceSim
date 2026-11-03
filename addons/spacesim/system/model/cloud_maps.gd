@@ -55,10 +55,6 @@ class Entry:
 	var texel := 0.0
 	## **The percentile the layer's coverage implies**, 0 to 1, computed when the map was baked.
 	var threshold := 0.0
-	## **The mean exceedance above that threshold**, measured from the same map — what a reflectance ramp
-	## needs to know so that the deck's *average* reflectance is the calibrated one while its thick tops
-	## are near white. One for a body with no map, whose field is uniformly at its top.
-	var ramp_mean := 1.0
 	## **The mean of `1 - exp(-tau * thickness)` over the covered texels** — what a tau layer's reflectance
 	## ramp must be fitted to, since the drawn average is `ALBEDO * ALPHA` and `ALPHA` is now that exponential
 	## rather than the thickness itself. One where the layer states no tau, which is the flat case.
@@ -223,19 +219,21 @@ static func measure(
 	result["threshold"] = threshold
 	if tail_count == 0:
 		return result
-	var exceedance := exceed_sum / float(tail_count)
-	result["exceedance"] = exceedance
-	# **The depth the opacity is measured at is the layer's own, or the one its mean implies** — `column_depth()`, the
-	# same equivalence the shadow uses. So this second walk needs the exceedance, and it is another 256 bins rather
-	# than another eight million texels: `two_flux` is evaluated once per *bin*, not once per texel.
-	var effective := column_depth(exceedance, depth)
+	result["exceedance"] = exceed_sum / float(tail_count)
+	# **The depth the opacity is measured at is the LAYER'S OWN tau, straight through** (2026-11-03). It used to be
+	# `column_depth(exceedance, depth)` — the depth the map's mean thickness implied — which made the deck's alpha
+	# law come from one number and its shadow from another, 3.07x apart on Earth and 6.81x on Neptune. The map's
+	# exceedance still says how thick the field's mean is, but it does not decide the layer's optical depth: content
+	# states that (`opacity`, or a stated `optical_depth`), and one tau now serves the alpha, the base's light and
+	# the shadow. Another 256 bins rather than another eight million texels, because `two_flux` is evaluated once
+	# per *bin*, not once per texel.
 	var opacity_sum := 0.0
 	for bin in range(level, 256):
 		var count := bins[bin]
 		if count == 0:
 			continue
 		opacity_sum += float(count) * SpacesimCloudBand.two_flux(
-			effective * ((float(bin) - float(level)) / span)
+			depth * ((float(bin) - float(level)) / span)
 		).x
 	result["opacity"] = opacity_sum / float(tail_count)
 	return result
@@ -294,24 +292,6 @@ static func mean_exceedance(image: Image, threshold: float) -> float:
 	if count == 0:
 		return 0.0
 	return total / float(count)
-
-
-## The depth a ramp layer's mean thickness implies, or the depth the layer stated.
-##
-## **The one home for this equivalence.** A tau layer states its depth; a RAMP layer states none, and its
-## equivalent is `-ln(1 - mean)` — the mean thickness the ramp was calibrated on, so at the mean column the
-## layer's transmittance is that number.
-##
-## `SpacesimSystemScene._deck_tau_full()` used to derive its own copy with different clamps (`0.02..0.98`
-## against this one's `0..0.999`), so the tau the deck drew with and the tau its own `opacity_mean` was
-## measured at were two different numbers on exactly the bodies nobody looks at. It calls this now.
-##
-## The `1e-3` floor is what keeps a fully covered ramp finite: at a mean of 1 the column is opaque, and
-## `-ln(0)` is not a number the shader can multiply by.
-static func column_depth(ramp_mean: float, stated := 0.0) -> float:
-	if stated > 0.0:
-		return stated
-	return -log(maxf(1.0 - clampf(ramp_mean, 0.0, 0.999), 1.0e-3))
 
 
 ## **How much light the layer actually blocks, averaged over the area it covers**: the mean of `R(tau)`, the
@@ -444,11 +424,6 @@ func opacity_mean_of(body_id: String, layer: int) -> float:
 	return 1.0 if entry == null else entry.opacity_mean
 
 
-func ramp_mean_of(body_id: String, layer: int) -> float:
-	var entry: Entry = _entries.get("%s#%d" % [body_id, layer])
-	return 1.0 if entry == null else entry.ramp_mean
-
-
 ## How many bakes have been started. The suite uses it to show a cache hit is a hit.
 func bakes() -> int:
 	return _bakes
@@ -511,10 +486,6 @@ func _bake_floor(
 	entry.texel = (TAU * radius) / float(FLOOR_WIDTH)
 	var measured := measure(image, coverage, depth)
 	entry.threshold = measured["threshold"]
-	entry.ramp_mean = measured["exceedance"]
-	# **The optical depth is derived here, from this image**, when the layer states none: `-ln(1 - ramp_mean)` is
-	# the depth whose transmittance is the mean thickness, which is the equivalence the shadow already uses. So the
-	# mean the gain is fitted to is `mean(R(tau))` for every layer, ramp or tau, and one map cannot carry two laws.
 	entry.opacity_mean = measured["opacity"]
 	entry.texture = _map_texture(image)
 
@@ -601,7 +572,6 @@ func _measure(entry: Entry, coverage: float, depth: float) -> void:
 	# opacity, all derived from the same sample so they cannot describe two different images.
 	var measured := measure(entry.image, coverage, depth)
 	entry.threshold = measured["threshold"]
-	entry.ramp_mean = measured["exceedance"]
 	entry.opacity_mean = measured["opacity"]
 
 

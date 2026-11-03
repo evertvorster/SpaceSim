@@ -400,7 +400,7 @@ func _deepest_deck(h, body: SpacesimSceneBody, who: String) -> SpacesimSceneBody
 		return null
 	var deepest: SpacesimSceneBody.Deck = body.decks[0]
 	for candidate in body.decks:
-		if candidate.shadow_tau > deepest.shadow_tau:
+		if candidate.tau > deepest.tau:
 			deepest = candidate
 	return deepest
 
