@@ -878,32 +878,20 @@ color = Color(0.9, 0.72, 0.42, 1)
 opacity = 0.5
 
 [sub_resource type="Resource" id="CL_jupiter_ammonia"]
-; **The deck you can see: ammonia, at 0.90 bar.**
-;
-; **Its colour is near-WHITE, and that is a correction rather than a loss of the chromophore.** It carried a
-; pale cream, standing in for the giants' chromophore — complex organics and phosphorus compounds mixed into
-; the cloud — but put on the deck that OUGHT to be white it tinted the zones as well as the belts, so Jupiter
-; had no white anywhere (Evert, 2026-11-03: *"I don't see any white bands"*). A chromophore belongs to the DEEP
-; cloud, which is where `Cloud Layers` §6 puts the belt colour: a belt is thin ammonia over browner stuff, not
-; a latitude painted cream. So the tint lives in the water deck below and in the interior floor, and what is
-; above them is ammonia ice — `SpacesimSpecies.color`, which is what a species' own scattering colour is for.
-; **The average reflectance does not move**: `cloud_gain` divides by the palette's own luminance. Only the hue.
+; **The deck you can see: ammonia, at 0.90 bar.** Its colour here is AUTHORED and not the species' own,
+; because the giants' visible tint is a chromophore — complex organics and phosphorus compounds mixed
+; into the cloud — and **the chromophore is not in the species table**. A pale cream stands in for it,
+; which is the honest interim: `SpacesimSpecies.color` supplies a species' true scattering colour, and a
+; chromophore needs to exist as a material before it can supply this one.
 script = ExtResource("cloud_layer")
 species = "ammonia"
 coverage = 0.6
 albedo = 0.678
-color = Color(0.97, 0.96, 0.93, 1)
+color = Color(0.93, 0.89, 0.8, 1)
 opacity = 1.0
 ; The ammonia deck is optically thick in the zones and thin in the belts - which is the belt/zone
 ; difference, and it now falls out of tau through the field's own thickness rather than a coverage switch.
-;
-; **5.0, and the arithmetic is why: this is what makes a zone WHITE.** At 1.5 the deck's thickest texel came
-; to `1 - exp(-1.5)` = 0.777 opaque, so 22% of whatever is below showed through EVERYWHERE and the brightest
-; cloud Jupiter had was a pale cream -  Evert, 2026-11-03: *"I don't see any white bands."* At 5.0 the thick
-; core is 0.993 and only the thin belts stay translucent, which is the physical mechanism: a zone is optically
-; thick ammonia over the deep brown, a belt is thin ammonia showing it. Content, flight-tuned; the ramp gain
-; re-fits on its own, so the drawn average is still the layer's 0.678 albedo.
-optical_depth = 5.0
+optical_depth = 1.5
 
 [sub_resource type="Resource" id="CL_jupiter_water"]
 ; **Water at 7.3 bar, and this is the layer that MAKES THE BELTS.** Where the ammonia above is thin the
