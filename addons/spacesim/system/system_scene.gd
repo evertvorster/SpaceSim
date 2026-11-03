@@ -1753,10 +1753,18 @@ func _publish_deck_shadow(
 ) -> void:
 	# **No seed and no feature any more**: they existed for the shadow's own noise ladder, which is deleted — the
 	# shadow now thresholds the same map the deck draws, so it cannot be a different cloud from the one overhead.
-	SpacesimBodyRenderer.apply_deck_shadow(
-		body.mesh_material, texture, width, threshold, deck.shadow_tau,
-		deck.height + deck.thickness, deck.height
-	)
+	#
+	# **Every material that draws this body's surface, not just the land.** Evert, 2026-11-03: *"Cloud decks are
+	# casting shadows on land, but not on the ocean."* The include is in both shaders and both compute
+	# `deck_shadow_present()`, but this publish handed the map to `body.mesh_material` alone — so the sea asked a
+	# question whose answer was never set, and drew in full sun under the same cloud as the shore beside it.
+	for material in [body.mesh_material, body.ocean_material]:
+		if material == null:
+			continue
+		SpacesimBodyRenderer.apply_deck_shadow(
+			material, texture, width, threshold, deck.shadow_tau,
+			deck.height + deck.thickness, deck.height
+		)
 
 
 func _poll_patch_builds() -> void:
