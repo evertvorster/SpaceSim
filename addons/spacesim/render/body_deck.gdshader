@@ -193,8 +193,8 @@ void fragment() {
 	// is an offset from a near-eye point rather than a direction — `patch_origin` is what turns it back into one, and
 	// the `vertex()` stage is where that has to happen. Normalising a vector of length ~1 is exact.
 	vec3 p = normalize(local_position);
-	// **Inside the deck's sphere** — the only boundary this surface has, since the node is scaled to its BASE.
-	float eye_radius = length(eye_local);
+	// **The deck's sphere is the only boundary this surface has**, since the node is scaled to its BASE — and which
+	// side of it a fragment is on is `FRONT_FACING`, not the eye's radius. See the underside branch below.
 	vec3 to_eye = normalize(eye_local - p);
 
 	// **ONE SAMPLE, ON ONE SPHERE, ALWAYS** — and since 2026-10-21 that sphere is at the deck's BASE. Evert:
@@ -292,7 +292,21 @@ void fragment() {
 	// **`UNDERSIDE_FLOOR` stands in for multiple scattering** — the light that arrives at the base after bouncing
 	// inside the slab, which this project has no model for and which is what keeps a thick cloud from reading as a
 	// hole in the sky.
-	if (eye_radius < 1.0) {
+	// **Which face this is, per FRAGMENT and not per eye.** Evert, 2026-11-03: *"When above the bottom of the cloud
+	// deck, looking at the horizon the cloud deck curves down, and you can see the top side of the near clouds, and
+	// the bottom of the far clouds. The far clouds render as black where they should be white."*
+	//
+	// That is one picture showing both faces at once, and the test here was the eye's position (`eye_radius < 1`),
+	// which is the same answer for every fragment in the frame: inside the band it said "top" everywhere, so the far
+	// clouds — whose undersides are what you actually see — got a top face's light, which is the engine's `NdotL`
+	// against a normal pointing away from the star. Black.
+	//
+	// `FRONT_FACING` is the honest test and the geometry already carries it: a front face is seen from outside (the
+	// top), a back face from inside (the base). With `cull_disabled` both are drawn, so this is exactly the
+	// distinction that was missing — and it is the same one `cull_front` makes for the air's shell by drawing only
+	// one of them.
+	bool underside = !FRONT_FACING;
+	if (underside) {
 		float sun_path = deck_column_path(p, body_sun, planet_radius, true);
 		float sun_through = sun_path < 0.0 ? 1.0 : exp(-max(deck_tau * sun_path, 0.0));
 		radiance = cloud_color * ramp_gain * air_through * (sun_through + UNDERSIDE_FLOOR);
@@ -312,7 +326,11 @@ void fragment() {
 	// and was still wrong everywhere else. Inside the sphere every fragment is a BACK face whose normal points
 	// away from the viewer, and without the flip the underside is lit as though it faced away and goes black.
 	// Crossing the sphere is exactly when that starts, so that is where the flip belongs.
-	if (eye_radius < 1.0) {
+	// **The same test flips the normal**, for the same reason: inside the sphere every fragment is a BACK face whose
+	// normal points away from the viewer, and without the flip the underside is lit as though it faced away and goes
+	// black. Using the eye's position here had the identical fault as the radiance above — one answer for a frame
+	// that contains both faces.
+	if (underside) {
 		NORMAL = -NORMAL;
 	}
 	// **Depth is written where there IS cloud, and nowhere else.** The air pass clips its march at the first
