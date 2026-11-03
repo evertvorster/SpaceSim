@@ -291,6 +291,10 @@ condensation_temperature = 373.15
 melting_temperature = 273.15
 triple_point_pressure = 611.657
 latent_heat = 40650.0
+; **The ice deck overhead is this gas's own solid form.** Earth's cirrus is water: the same substance,
+; frozen at the top of the convective column, ~7.4 km up against the vapour's 1.4 km. Stated rather than
+; suffix-derived, and left empty on every other gas until its haze deck is wanted.
+solid_form = "water_ice"
 
 [sub_resource type="Resource" id="Sp_methane"]
 script = ExtResource("species")

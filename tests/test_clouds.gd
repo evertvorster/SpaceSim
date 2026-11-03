@@ -43,6 +43,7 @@ func run(h, root: Node) -> void:
 	_test_the_deck_thickness(h, scene, materials, luminosity)
 	_test_a_cloud_stack_composites(h, scene, materials)
 	_test_a_product_needs_its_reactants(h)
+	_test_a_solid_form_needs_a_cold_top(h)
 
 	scene.container.free()
 
@@ -146,6 +147,72 @@ func _test_a_product_needs_its_reactants(h) -> void:
 	var only_plain := SpacesimAtmosphereModel.condensation_levels(atmosphere, table, gravity, 255.0)
 	h.check(_formation_of(only_plain, "plain") == SpacesimAtmosphereModel.Condensation.Formation.CONDENSATION,
 		"while a gas in the mix is CONDENSATION")
+
+
+## **A gas's solid form is a level at the TOP of the column, and only where the top is cold enough.**
+##
+## The gate and the height are the two things that cannot be read off a real body alone (Sol has one ice
+## deck and nothing to compare it against a warm body), so they are exercised on a synthetic table the way
+## the product rule above is.
+func _test_a_solid_form_needs_a_cold_top(h) -> void:
+	var table := SpacesimMaterialTable.new()
+	var gas := SpacesimSpecies.new()
+	gas.species_name = "gas"
+	gas.molar_mass = 18.0
+	gas.heat_capacity = 1000.0
+	gas.condensation_temperature = 373.15
+	gas.latent_heat = 40000.0
+	gas.solid_form = "frost"
+	table.species.append(gas)
+	var frost := SpacesimSpecies.new()
+	frost.species_name = "frost"
+	frost.molar_mass = 18.0
+	frost.heat_capacity = 1000.0
+	frost.condensation_temperature = 373.15
+	frost.melting_temperature = 273.15
+	frost.latent_heat = 51000.0
+	table.species.append(frost)
+
+	var gravity := 9.81
+	var atmosphere := SpacesimAtmosphere.new()
+	atmosphere.surface_pressure = 101325.0
+	atmosphere.species = {"gas": 1.0}
+
+	# **A cold tropopause gives a level AT it**, which is the whole rule: the height is the clamp the
+	# temperature profile already has, so nothing new is authored.
+	var cold := 255.0
+	var surface := SpacesimAtmosphereModel.surface_temperature(atmosphere, table, gravity, cold)
+	var lapse := SpacesimAtmosphereModel.lapse_rate(atmosphere, table, gravity)
+	var ceiling := SpacesimAtmosphereModel.tropopause_temperature(cold)
+	var levels := SpacesimAtmosphereModel.condensation_levels(atmosphere, table, gravity, cold)
+	var deposition := _level_of_species(levels, "frost")
+	h.check(deposition != null, "a solid form whose melting point is above the ceiling gets a level")
+	if deposition != null:
+		h.check(deposition.formation == SpacesimAtmosphereModel.Condensation.Formation.DEPOSITION,
+			"and it is a DEPOSITION level, not a condensation one")
+		h.check_near(deposition.height, (surface - ceiling) / lapse,
+			"placed at the tropopause, where the profile stops cooling (%.0f m)" % deposition.height, 1.0e-6)
+		# **Not zero, which is what the tropopause CAP would have made it.** `_level_for` caps a deck at
+		# `(surface - ceiling)/lapse - height`, exactly zero here, so this is the assertion that the
+		# deposition level was not routed through it.
+		h.check(deposition.thickness > 0.0,
+			"with a real thickness from the condensate scale height (%.0f m)" % deposition.thickness)
+
+	# **A warm top and the substance is not solid up there**, so there is no level — the honest answer,
+	# rather than a sheet placed at a height where it would be liquid.
+	var warm := 400.0
+	var warm_levels := SpacesimAtmosphereModel.condensation_levels(atmosphere, table, gravity, warm)
+	h.check(_level_of_species(warm_levels, "frost") == null,
+		"while a ceiling above the melting point gives none (%s)" % SpacesimAtmosphereModel.tropopause_temperature(warm))
+
+
+## A level for a species, or null.
+func _level_of_species(levels: Array, species_name: String) -> SpacesimAtmosphereModel.Condensation:
+	for level in levels:
+		var condensation: SpacesimAtmosphereModel.Condensation = level
+		if condensation.species == species_name:
+			return condensation
+	return null
 
 
 ## The formation of the level for a species, or -1 where there is no level.
@@ -354,10 +421,23 @@ func _test_the_layer_stack(h, scene: SpacesimSystemScene, materials: SpacesimMat
 	var found := ""
 	for level in levels:
 		found += String(level.species) + " "
-	h.check(found.contains("water_vapour"),
-		"Earth's deck stack is its water vapour, at %.0f m (%s)" % [levels[0].height if not levels.is_empty() else 0.0, found.strip_edges()])
-	h.check(levels.size() >= 1, "and it is a stack of one or more condensables, not one deck")
-
+	# **TWO levels from ONE substance**, and that is the point of the ice deck: the same water that condenses at
+	# 1.4 km is frozen at the top of the convective column. A saturated column can hold only one water cloud, so
+	# the upper one is at the cold trap rather than at a second lapse crossing.
+	h.check(levels.size() == 2 and found.contains("water_ice") and found.contains("water_vapour"),
+		"Earth's deck stack is water under ice, two levels (%s)" % found.strip_edges())
+	if levels.size() == 2:
+		var top: SpacesimAtmosphereModel.Condensation = levels[0]
+		var below: SpacesimAtmosphereModel.Condensation = levels[1]
+		h.check(top.species == "water_ice"
+			and top.formation == SpacesimAtmosphereModel.Condensation.Formation.DEPOSITION,
+			"the upper one is a DEPOSITION level of the ice at %.0f m" % top.height)
+		# **Inside the observed band for cirrus**, 8-10 km, and low for the reason the module names: the profile
+		# is a DRY adiabat, which puts Earth's tropopause at 7.4 against a real 11-12.
+		h.check(top.height > 6000.0 and top.height < 10000.0,
+			"high enough to be cirrus and inside the model's own dry-adiabat error")
+		h.check(below.species == "water_vapour" and below.height < 2000.0,
+			"while the water deck sits where cumulus does (%.0f m)" % below.height)
 	# **An ice giant's honest answer is an empty stack.** Uranus's methane is below its condensation
 	# point everywhere (49-57 K against methane's 90.7), so a well-mixed model has no level to put a
 	# deck on — its real 1.2 bar methane deck exists because methane is *undersaturated* there, and

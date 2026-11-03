@@ -26,7 +26,7 @@ func run(h, root: Node) -> void:
 		return
 	scene.build(root)
 
-	_test_a_single_deck(h, scene)
+	_test_earths_stack(h, scene)
 	_test_a_stack(h, scene)
 	_test_who_gets_no_deck(h, scene)
 	_test_a_deck_below_its_datum(h, scene)
@@ -40,34 +40,59 @@ func run(h, root: Node) -> void:
 	scene.container.free()
 
 
-## **Earth authors one deck, in the flat shorthand** — no species named, no stack. It gets one node, placed on the
-## level the model derives for its water vapour. **The geometry is not here**: a deck's points are the ground's, built
-## by the walk, so they are asserted in `_test_the_deck_goes_live` where a build has actually landed.
-func _test_a_single_deck(h, scene: SpacesimSystemScene) -> void:
+## **Earth authors a STACK of two** — water at 1.4 km under the ice sheet the model puts at the top of the
+## convective column (2026-11-03). Two decks, one node each, on two derived levels.
+##
+## **The geometry is not here**: a deck's points are the ground's, built by the walk, so they are asserted in
+## `_test_the_deck_goes_live` where a build has actually landed.
+func _test_earths_stack(h, scene: SpacesimSystemScene) -> void:
 	var earth := scene.body_by_id("planet:earth")
-	h.check(earth != null and earth.decks.size() == 1,
-		"Earth authors one deck and gets one, from the level the model places (%d)" % earth.decks.size())
-	if earth.decks.is_empty():
+	h.check(earth != null and earth.decks.size() == 2,
+		"Earth authors two layers and gets two decks, one per derived level (%d)"
+			% earth.decks.size())
+	if earth.decks.size() != 2:
 		return
-	var deck: SpacesimSceneBody.Deck = earth.decks[0]
-	h.check(deck.level.species == "water_vapour",
-		"and it is its water vapour, at %.0f m" % deck.height)
+	# Highest first, the same order as the content stack.
+	var ice: SpacesimSceneBody.Deck = earth.decks[0]
+	var water: SpacesimSceneBody.Deck = earth.decks[1]
+	h.check(ice.level.species == "water_ice",
+		"the upper deck is ice, at %.0f m" % ice.height)
+	h.check(water.level.species == "water_vapour",
+		"and the lower is water, at %.0f m" % water.height)
+	# **The ice level is at the tropopause**, so it is high: 7.7 km against the water deck's 1.4. A number rather
+	# than a range because a regression here would be a level found by the ordinary lapse crossing again.
+	h.check(ice.height > 5000.0 and water.height < 3000.0,
+		"with 6 km of air between them, which is what makes them two decks")
+	# **A level AT the tropopause is the case the thickness cap would have emptied.** `_level_for` caps at
+	# `(surface - ceiling)/lapse - height`, which is exactly zero up here, so a deposition level that went through
+	# it would be a node collapsed onto its own base — the fault Venus's 160 m slab produced. Asserted because it
+	# is the one arithmetic that had to be written twice.
+	h.check(ice.thickness > 100.0,
+		"and the ice sheet has a real thickness (%.0f m), not a cap of zero" % ice.thickness)
+	# **The flat shorthand takes the HIGHEST level**, which is now an ice sheet on any body whose gas has a solid
+	# form — so a body that wants its water deck has to say so, as Earth now does. Titan is the live example.
+	var titan := scene.body_by_id("m.moon:titan") if scene.body_by_id("m.moon:titan") != null \
+		else scene.body_by_id("m.titan")
+	if titan != null and not titan.decks.is_empty():
+		var claimed: SpacesimSceneBody.Deck = titan.decks[0]
+		h.check(claimed.level.species == "nitrogen" and claimed.level.height > 10000.0,
+			"while a flat deck still claims the highest level (%s at %.0f m)" % [
+				claimed.level.species, claimed.height])
 	# **A condensation level is a level**, so the deck's points are the ground's scaled to `radius + height` about the
 	# body's centre — no terrain, and no second tessellation. Asserted as arithmetic on the published arrays, which is
 	# the whole claim: `p*(r+h) - o_d == (p*r - o_g) * (r+h)/r` when `o_d = o_g*(r+h)/r`, so the two vertex arrays differ
 	# by exactly one scale factor and nothing else.
-	var base_radius := earth.radius + deck.height
-	h.check_near(deck.node.scale.x, 1.0,
-		"the node's scale is 1, because the points are already in metres", 1.0e-9)
-	h.check(deck.node.get_parent() == earth.node,
-		"and it is a child of the body, so it inherits the body's place in the frame tree")
-	h.check(deck.material != null and deck.material.shader != null,
-		"with a shader material, which is what carries the map")
-	h.check(deck.material.get_shader_parameter("base_ratio") == null,
-		"with no base/top ratio, because the base is the only sphere there is")
-	h.check(deck.thickness > 0.0, "with the derived thickness behind it (%.0f m)" % deck.thickness)
-	h.check_near(base_radius, earth.radius + deck.level.height,
-		"and its geometry sits on the level the model derived for it", 1.0e-6)
+	for deck in [ice, water]:
+		h.check_near(deck.node.scale.x, 1.0,
+			"each node's scale is 1, because the points are already in metres", 1.0e-9)
+		h.check(deck.node.get_parent() == earth.node,
+			"and a child of the body, so it inherits the body's place in the frame tree")
+		h.check(deck.material != null and deck.material.shader != null,
+			"with a shader material, which is what carries the map")
+		h.check(deck.material.get_shader_parameter("base_ratio") == null,
+			"with no base/top ratio, because the base is the only sphere there is")
+		h.check_near(earth.radius + deck.height, earth.radius + deck.level.height,
+			"and its geometry sits on the level the model derived for it", 1.0e-6)
 
 
 ## **The two-deck bodies are the ones that can tell a loop from a field.** Jupiter authors ammonia above
@@ -265,31 +290,34 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	if earth == null or earth.decks.is_empty() or earth.mesh_material == null:
 		h.check(false, "Earth has a deck and a land material to shadow")
 		return
-	var deck: SpacesimSceneBody.Deck = earth.decks[0]
-	h.check(deck.shadow_tau > 0.0,
-		"Earth's deck has an optical depth to cast with (%.3f), derived from its opacity" % deck.shadow_tau)
-	var land := earth.mesh_material as ShaderMaterial
-	# **The LOWEST deck casts, not the highest** (Evert, 2026-10-20) — a star subtends an angle, so a shadow's
-	# penumbra widens with the distance from the casting layer to the ground, and the deck nearest the planet
-	# gives the sharpest edges. Earth has one deck, so the rule is checked on a body that has two.
+	# **The deck that CASTS is not the first in the stack** — a star subtends an angle, so a shadow's penumbra widens
+	# with the distance from the casting layer to the ground, and the deck nearest the planet gives the sharpest
+	# edges (Evert, 2026-10-20). Earth has two decks now, so its own pair checks the rule.
 	#
 	# `_shadowing_deck` is private, like every rule this scene derives for itself; it is the rule that is under
 	# test, so it is what the test calls rather than a copy of it.
-	var two_decked: SpacesimSceneBody = null
+	var deck: SpacesimSceneBody.Deck = scene._shadowing_deck(earth)
+	h.check(deck != null and deck == earth.decks[earth.decks.size() - 1],
+		"Earth's shadow is cast by the deck nearest the ground, not the ice sheet above it (%s at %.0f m)" % [
+			deck.level.species if deck != null else "none", deck.height if deck != null else 0.0])
+	if deck == null:
+		return
+	h.check(deck.shadow_tau > 0.0,
+		"with an optical depth to cast with (%.3f), its opacity turned into the same law" % deck.shadow_tau)
+	var land := earth.mesh_material as ShaderMaterial
+	# **Every deck in the stack, not only the casting one**: the rule is a *selection*, and the pairs on Jupiter and
+	# Saturn are where a selection between two real decks earns its keep.
 	for body in scene.bodies:
-		if body.decks.size() > 1:
-			two_decked = body
-			break
-	h.check(two_decked != null, "Sol has a body with more than one deck to test the shadow rule on")
-	if two_decked != null:
-		var lowest: SpacesimSceneBody.Deck = two_decked.decks[0]
-		for candidate in two_decked.decks:
+		if body.decks.size() <= 1:
+			continue
+		var lowest: SpacesimSceneBody.Deck = body.decks[0]
+		for candidate in body.decks:
 			if candidate.height + candidate.thickness < lowest.height + lowest.thickness:
 				lowest = candidate
-		h.check(scene._shadowing_deck(two_decked) == lowest,
+		h.check(scene._shadowing_deck(body) == lowest,
 			"and %s's shadow comes from the deck nearest the ground, not the top of its stack"
-				% two_decked.id)
-		h.check(lowest != two_decked.decks[0],
+				% body.id)
+		h.check(lowest != body.decks[0],
 			"which is not the first layer in the stack, so the check can tell the two apart")
 	# **Already published, by the frame walk this suite drove a moment ago** — which is the stronger claim:
 	# the shadow is wired into `update_lod`, not merely available to be set.

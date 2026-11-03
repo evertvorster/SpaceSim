@@ -812,20 +812,53 @@ albedo = 0.76
 color = Color(0.98, 0.92, 0.72, 1)
 opacity = 1.0
 
-[sub_resource type="Resource" id="C_earth"]
-; **0.419 is the NET reflectance of the cloud system, and it was 0.45 under the gross accounting.**
-; `bond_albedo` is net as of 2026-10-16 — the clear column is weighted by the cloud-free fraction and the
-; air's own reflection is counted — so the deck's number had to give up the light the clear column it
-; hides would have reflected. The value is fitted to hold Earth's measured 0.306 exactly: the fit
-; `(0.306 - (1-f)*(surface + air)) / f` is printed by `tests/test_surface.gd`, and the CERES-implied
-; deck reflectance for f = 0.6 is 0.389, so this is within 8% of the published split rather than
-; 1.9x off it. Nothing else moves: with `fraction = 1.0` the clear term carries no weight at all, so
-; Venus and all four giants are untouched by the change.
-script = ExtResource("clouds")
-fraction = 0.6
-albedo = 0.419
+[sub_resource type="Resource" id="CL_earth_water"]
+; **The deck you can see: water, at 1.4 km.** Its reflectance is the net number the Bond-albedo fit
+; produced (0.419 with one deck at 0.6 coverage) and it is NOT free to move: the ice sheet above it now
+; adds its own reflection, so the two shares are fitted together to hold Earth's measured 0.306.
+script = ExtResource("cloud_layer")
+species = "water_vapour"
+coverage = 0.55
+albedo = 0.429
 color = Color(0.95, 0.96, 1, 1)
 opacity = 0.9
+
+[sub_resource type="Resource" id="CL_earth_ice"]
+; **The sheet overhead: the same water, frozen, at 7.7 km.** The height is not authored -- the model puts
+; a solid-forming gas's level at the top of the convective column (the tropopause, where rising air stops
+; rising), and 779 m thick comes from the condensate scale height at that temperature.
+;
+; **Thin, and the tau is what says so.** A cirrus sheet is transparent because it is optically thin
+; (`alpha = 1 - exp(-tau * thickness / mu)`, tau 0.2), not because a veil was set: it still shows the
+; water deck and the ground through it, and it thickens at the limb for the physical reason.
+script = ExtResource("cloud_layer")
+species = "water_ice"
+coverage = 0.3
+albedo = 0.33
+color = Color(0.95, 0.97, 1, 1)
+optical_depth = 0.2
+
+[sub_resource type="Resource" id="C_earth"]
+; **TWO LAYERS, and the total is the same measurement as before** (2026-11-03). Earth's deck was one flat
+; `fraction = 0.6, albedo = 0.419`; it is now water at 1.4 km under an ice sheet at 7.7 km, and the pair
+; is fitted to hold Earth's measured **0.306** exactly. The fit is printed by `tests/test_surface.gd`,
+; and the two reflectances are not independently free: what the ice sheet reflects at 0.30 coverage the
+; water deck below no longer has to, so they were solved together rather than one at a time.
+;
+; **The coverage is the other half of the same budget.** Splitting the deck must not quietly raise the
+; planet's cover, so the two shares were chosen to total `1 - (0.45 * 0.70) = 0.685` against a real ~0.67
+; — up from one deck's 0.60, because a second deck can only add sky. Evert tunes these by flight; the
+; constraint that does not move is the composite landing on 0.306.
+;
+; **A flat deck on a body with a `solid_form` gas would now claim the ICE level**, because the flat
+; shorthand takes the highest unclaimed level and that is the sheet. This is why Earth states a stack:
+; the shorthand means "the deck seen from outside", and an author who wants the water deck must say so.
+script = ExtResource("clouds")
+fraction = 0.0
+albedo = 0.0
+color = Color(0.95, 0.96, 1, 1)
+opacity = 1.0
+layers = Array[ExtResource("cloud_layer")]([SubResource("CL_earth_ice"), SubResource("CL_earth_water")])
 
 [sub_resource type="Resource" id="C_mars"]
 ; Same fit as Earth's: 0.4 -> 0.488, holding Mars's measured 0.250 under the net accounting. It goes UP

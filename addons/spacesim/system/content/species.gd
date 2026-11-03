@@ -61,6 +61,18 @@ enum Domain { SOLID, LIQUID, GAS }
 ##
 ## Empty means an ordinary species: it condenses where its own `T_cond` is crossed.
 @export var formed_from: PackedStringArray = []
+
+## **The species this gas freezes into, as a `species_name`, or empty if it has no solid form here.**
+##
+## A gas can have a second deck above its own: water vapour condenses at 1.4 km, and the air at the top of
+## the convective column is far colder than that, so the same substance is also a sheet of ice up there.
+## **Which row is that? It is stated rather than derived** — `water_vapour`'s sibling is `water_ice`, not
+## `water_vapour_ice`, so a suffix rule would be a guess. See
+## [method SpacesimAtmosphereModel.condensation_levels], where the upper level is placed at the tropopause.
+##
+## Empty means "no solid phase is modelled here", which is the table's standing *not stated* rather than a
+## claim that the substance never freezes.
+@export var solid_form: String = ""
 ## **Specific heat capacity at constant pressure**, J/(kg·K) — what sets the adiabatic lapse rate
 ## `g / c_p`, and therefore the shape of every temperature profile. Sourced physical values, like
 ## `density` and `molar_mass`; zero where a species is not a gas.

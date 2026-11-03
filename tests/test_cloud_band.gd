@@ -93,7 +93,8 @@ func _test_extinction(h) -> void:
 ## condensate deck on a 6,371 km body.
 func _test_the_chord(h, scene: SpacesimSystemScene) -> void:
 	var earth := scene.body_by_id("planet:earth")
-	var deck := _top_deck(h, earth, "Earth")
+	# The deck the doc above describes: the 1.6 km condensate deck, which is now the LOWER of Earth's two.
+	var deck := _deepest_deck(h, earth, "Earth")
 	if deck == null:
 		return
 	var base := earth.radius + deck.height
@@ -319,7 +320,11 @@ func _test_the_bound(h) -> void:
 ## exponential is astronomically small and the picture it produces is finished in the first sample.
 func _test_the_march(h, scene: SpacesimSystemScene, materials, luminosity) -> void:
 	var earth := scene.body_by_id("planet:earth")
-	var deck := _top_deck(h, earth, "Earth")
+	# **The deck that actually IS optically deep**, which since 2026-11-03 is not the first in the stack: Earth
+	# now draws a thin ice sheet at 7.7 km above its water deck, and this test's premise — that the limb is tens
+	# of optical depths — is a claim about the opaque deck. Chosen by depth rather than by index, so a third
+	# layer cannot make it silently measure the wrong one.
+	var deck := _deepest_deck(h, earth, "Earth")
 	if deck == null:
 		return
 	var scale_height := _scale_height(scene, earth, materials, luminosity)
@@ -385,12 +390,19 @@ func _test_every_deck_in_sol(h, scene: SpacesimSystemScene, materials, luminosit
 
 
 ## The deck the picture is actually about: the highest layer, which is the one seen from outside.
-func _top_deck(h, body: SpacesimSceneBody, who: String) -> SpacesimSceneBody.Deck:
+## The deck with the most optical depth to its name — the one the limb arithmetic is about. A layer on the
+## reflectance ramp states no `optical_depth` and is read through [method SpacesimCloudBand.extinction]'s
+## fallback, which is what this test leaned on by accident before Earth had a second deck.
+func _deepest_deck(h, body: SpacesimSceneBody, who: String) -> SpacesimSceneBody.Deck:
 	var ok: bool = body != null and body.decks.size() > 0
 	h.check(ok, "%s has a deck to do the band arithmetic on" % who)
 	if not ok:
 		return null
-	return body.decks[0]
+	var deepest: SpacesimSceneBody.Deck = body.decks[0]
+	for candidate in body.decks:
+		if candidate.shadow_tau > deepest.shadow_tau:
+			deepest = candidate
+	return deepest
 
 
 ## The air's own scale height, through the derivation rather than from it — the same three calls the scene

@@ -454,6 +454,7 @@ class Condensation:
 	enum Formation {
 		CONDENSATION, ## a gas in the mix, where `T(h)` crosses its own `T_cond` — the ordinary case
 		REACTION, ## not in the mix: a product of two gases that meet at that level (NH\u2084SH)
+		DEPOSITION, ## the solid form of a gas in the mix, at the **top of the convective column** — cirrus
 	}
 	var formation := Formation.CONDENSATION
 	## Metres above the surface. Only meaningful for `LEVEL`.
@@ -468,7 +469,9 @@ class Condensation:
 	##
 	##     d(ln e_s)/dh = −L Γ / (R T²)   ⇒   H_w = (R / L) · T_base² / Γ
 	##
-	## capped by the tropopause, because a cloud cannot rise past it. `R` and `L` are both **molar**
+	## capped by the tropopause, because a cloud cannot rise past it. **The one exception is a `DEPOSITION`
+	## level, which sits AT the tropopause** and so is not capped by it at all — see
+	## [method _deposition_level_for], where the cap would be exactly zero. `R` and `L` are both **molar**
 	## (`latent_heat` is J/mol), which is what makes `R/L` a reciprocal temperature and `H_w` metres.
 	##
 	## Measured against the real decks: **Earth comes out 1,604 m** against cumulus bases 1–2 km and tops
@@ -546,6 +549,26 @@ static func condensation_levels(
 			material, Condensation.Formation.REACTION, surface, ceiling, lapse, atmosphere, air_height,
 			materials
 		))
+	# **The solid forms, at the top of the convective column.** A saturated column can hold only ONE water
+	# cloud: above its condensation level the vapour is already at saturation, so cooling it further keeps
+	# it saturated and ice is reached within a kilometre of the liquid deck, not eight. Real cirrus is high
+	# because the air up there is **not in equilibrium** — convection carried the vapour up and left it — so
+	# the level is where rising air stops rising: the **tropopause**, which is the clamp `temperature_at`
+	# already applies. Its height is `(surface - ceiling) / lapse`, so it needs no new number, and it moves
+	# with the body's own composition and gravity.
+	for key in atmosphere.species:
+		var gas := materials.by_name(String(key))
+		if gas == null or gas.solid_form.is_empty():
+			continue
+		var solid := materials.by_name(gas.solid_form)
+		# **Cold enough up there to be solid at all**, which is the only gate that can be stated honestly:
+		# the solid's own melting point against the ceiling. A body whose tropopause is warmer than that
+		# contributes nothing, which is how "no ice deck" is said rather than a deck guessed into place.
+		if solid == null or solid.melting_temperature <= 0.0 or ceiling >= solid.melting_temperature:
+			continue
+		var deposition := _deposition_level_for(solid, surface, ceiling, lapse, atmosphere, air_height)
+		if deposition != null:
+			levels.append(deposition)
 	levels.sort_custom(func(a: Condensation, b: Condensation) -> bool: return a.height > b.height)
 	return levels
 
@@ -637,6 +660,48 @@ static func _level_for(
 				), 0.0)
 	return level
 
+
+
+## **A solid form's level, at the top of the convective column.**
+##
+## The height is the tropopause itself — `(surface - ceiling) / lapse`, the point where `temperature_at`
+## stops cooling — and the physical reading is the **cold trap**: ascending air stops rising there, what it
+## carried freezes out, and it stays because nothing removes it. That is why cirrus is a thin sheet at the
+## top of the troposphere while cumulus is a lumpy deck at the base, and it is why the level does not need
+## an authored altitude.
+##
+## **The thickness is NOT capped by the tropopause here, and that is the whole reason this is its own
+## function.** `_level_for` caps at `(surface - ceiling) / lapse - height`, which at this height is
+## **exactly zero** — a deck collapsed onto its own base, which is the fault Venus's 160 m slab produced.
+## The cap means "a cloud cannot rise past the tropopause"; this level is not trying to, so it is the
+## condensate scale height uncapped: `(R / L) * T_ceiling^2 / lapse`, evaluated at the temperature the sheet
+## actually sits in rather than at the base's.
+##
+## `null` where the profile has no troposphere (the clamp is already in force at the ground) or where the
+## height is below the depth the model represents — a height of zero is not a level either way.
+static func _deposition_level_for(
+	solid: SpacesimSpecies,
+	surface: float,
+	ceiling: float,
+	lapse: float,
+	atmosphere: SpacesimAtmosphere,
+	air_height: float
+) -> Condensation:
+	if lapse <= 0.0:
+		return null
+	var level := Condensation.new()
+	level.species = solid.species_name
+	level.formation = Condensation.Formation.DEPOSITION
+	level.height = (surface - ceiling) / lapse
+	var deepest := -air_height * log(MODELLED_PRESSURE_MULTIPLE)
+	if level.height <= 0.0 or level.height < deepest:
+		return null
+	level.regime = Condensation.Regime.LEVEL
+	level.pressure = pressure_at(level.height, atmosphere.surface_pressure, air_height)
+	# **A solid with no `latent_heat` gets no thickness**, the table's standing reading of *not stated*.
+	if solid.latent_heat > 0.0:
+		level.thickness = maxf((GAS_CONSTANT / solid.latent_heat) * ceiling * ceiling / lapse, 0.0)
+	return level
 
 
 ## **The air's own reflection** — the term the albedo derivation was missing, and it is DERIVED rather
