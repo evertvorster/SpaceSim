@@ -31,6 +31,9 @@ const float CLOUD_EDDY_STRETCH = 3.0;
 // `SpacesimCloudField.MEANDER_SECOND`, `MEANDER_SECOND_SHARE`
 const float CLOUD_MEANDER_SECOND = 0.618;
 const float CLOUD_MEANDER_SECOND_SHARE = 0.6;
+// `SpacesimCloudField.BROAD_DIVISOR` and `BROAD_FLOOR` — both A GUESS, see the GDScript.
+const float CLOUD_BROAD_DIVISOR = 2.0;
+const float CLOUD_BROAD_FLOOR = 0.5;
 // `SpacesimCloudField.FINE_SHARE`
 const float CLOUD_FINE_SHARE = 0.55;
 // `SpacesimCloudField.SOFT_KNEE`
@@ -71,6 +74,18 @@ float cloud_condensation_favouring(float latitude, float cells) {
 }
 
 
+// `SpacesimCloudField.broad_at()`: the second, coarser band scale — a zone or a belt several cells wide.
+float cloud_broad_at(float latitude, float cells, float phase) {
+	if (cells <= 0.0) {
+		return 1.0;
+	}
+	float broad_cells = max(cells / CLOUD_BROAD_DIVISOR, 1.0);
+	float span = (CLOUD_PI * 0.5) / broad_cells;
+	float turn = CLOUD_PI * abs(latitude) / span + phase;
+	return CLOUD_BROAD_FLOOR + (1.0 - CLOUD_BROAD_FLOOR) * (1.0 + cos(turn)) * 0.5;
+}
+
+
 // `SpacesimCloudField._harmonics()`: one whole wavenumber's meander profile — two integer waves, the second
 // offset so they do not line up. Only whole waves close round a planet, which is a physical constraint and
 // not a tidy-up: the seam test is what found it, twice.
@@ -90,8 +105,10 @@ float cloud_bands_at(vec3 direction, float cells, float ratio, float phase, floa
 	if (cells <= 0.0) {
 		return 1.0;
 	}
+	// Two scales of banding, multiplied — see `SpacesimCloudField.bands_at`.
+	float broad = cloud_broad_at(latitude, cells, phase);
 	if (ratio <= 0.0 || meander <= 0.0) {
-		return cloud_condensation_favouring(latitude, cells);
+		return cloud_condensation_favouring(latitude, cells) * broad;
 	}
 	float longitude = atan(direction.z, direction.x);
 	float band_width = (CLOUD_PI * 0.5) / cells;
@@ -100,14 +117,14 @@ float cloud_bands_at(vec3 direction, float cells, float ratio, float phase, floa
 	// meander profiles between thresholds); both harmonics must be integers or the field does not close.
 	float derived = max(cos(latitude), 0.0) / ratio;
 	if (derived <= 0.0) {
-		return cloud_condensation_favouring(latitude, cells);
+		return cloud_condensation_favouring(latitude, cells) * broad;
 	}
 	float low = max(1.0, floor(derived));
 	float share = clamp(derived - floor(derived), 0.0, 1.0);
 	float amplitude = meander * band_width / (1.0 + CLOUD_MEANDER_SECOND_SHARE);
 	float offset = amplitude * mix(
 		cloud_harmonics(low, longitude, phase), cloud_harmonics(low + 1.0, longitude, phase), share);
-	return cloud_condensation_favouring(latitude + offset, cells);
+	return cloud_condensation_favouring(latitude + offset, cells) * broad;
 }
 
 

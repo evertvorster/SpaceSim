@@ -76,6 +76,8 @@ uniform float ramp_gain : hint_range(0.0, 1.0) = 1.0;
 uniform float tau_full = 0.0;
 // **The light a base shows that did not come straight through**: multiple scattering inside the slab, which
 // has no model here. Enough that a thick cloud reads as the underside of a cloud rather than as a hole.
+// A GUESS: the light a base shows that did not come straight through, standing in for the multiple scattering
+// inside the slab that nothing here models. Settled by a multiple-scattering term.
 const float UNDERSIDE_FLOOR = 0.12;
 
 // ===== THE SLAB, AND ITS TWO SIDES ==================================================

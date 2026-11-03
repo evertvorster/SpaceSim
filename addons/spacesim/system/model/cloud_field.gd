@@ -40,7 +40,10 @@ extends RefCounted
 ## Bands stay dominant but are not stencils at 0.25; at 0.85 the weather is what you see. The gap between
 ## them is the whole visual difference between a gas giant and a wet world, and it comes from the model's
 ## verdict rather than from a threshold here.
+## A GUESS: how hard the eddies break a `BANDED` body's bands. Settled by a fiducial cloud-resolving run,
+## or by fitting Jupiter's own albedo map's belt/zone contrast.
 const MIXING_BANDED := 0.25
+## A GUESS: the same, for a `SHREDDED` body. Settled the same way, against a real Earth cloud map.
 const MIXING_SHREDDED := 0.85
 const MIXING_NONE := 0.0 ## both `FEATURELESS` and `UNKNOWN`: a uniform field
 
@@ -50,10 +53,14 @@ const MIXING_NONE := 0.0 ## both `FEATURELESS` and `UNKNOWN`: a uniform field
 ## cylinder parameterisation — `(cos lon, sin lon, latitude)` — pinwheels at the poles, because the
 ## longitude circulates through a full turn over a vanishing distance. Squeezing latitude in the
 ## *direction* instead keeps the sampling continuous everywhere, since the direction is.
+## A GUESS: how much longer an eddy is than it is wide. Settled by the observed aspect ratio of Jupiter's
+## eddies — the deformation radius gives the SIZE and nothing gives the SHAPE.
 const EDDY_STRETCH := 3.0
 
 ## The feature size used when the body has no eddy scale to give — no `N`, no `f`, or no air. One
 ## circulation cell, since without a deformation radius the finest structure the flow offers is a band.
+## A GUESS: one band's width, used only where the body gives no eddy scale at all. Settled by deriving an
+## eddy scale from something a starless rotating body still carries.
 const FALLBACK_FEATURE_ANGLE := PI / 8.0
 
 ## The noise generator's character.
@@ -80,6 +87,9 @@ const NOISE_GAIN := 0.8
 ## weather: `Cloud Layers` §10 called this before it was seen — *"the vortices advect the coarse field and
 ## the fine octaves are sampled unwarped"* — and it is the only way to have a vortex that closes its arm
 ## and detail down to the texel at the same time.
+## NOT a guess about the physics — measured against a real Earth cloud map's power spectrum (`Cloud Layers`
+## §2) — but the split into coarse and fine halves is: `COARSE_OCTAVES` and `FINE_SHARE` are where the
+## vortices stop folding, and no measurement says exactly where.
 const COARSE_OCTAVES := 4
 ## Where the fine half starts, as a frequency multiple of the coarse half — `2^COARSE_OCTAVES`, because
 ## lacunarity is 2 and octave `n` sits at `2^n`.
@@ -93,6 +103,8 @@ const FINE_SHARE := 0.55
 ##
 ## A look constant, of the same kind as [constant EDDY_STRETCH] — but its *shape* is derived, see
 ## [method bands_at]. Zero gives straight circles, which is what the field drew until 2026-10-17.
+## A GUESS: how far a band's edge wanders, as a fraction of a band width. The wavenumber is derived;
+## the AMPLITUDE is not. Settled by the observed meander amplitude in Jupiter's belt boundaries.
 const MEANDER := 0.18
 
 ## **A second component of the meander**, as a fraction of the first wave's number.
@@ -108,7 +120,30 @@ const MEANDER := 0.18
 ## Earth, 10.9x an ordinary step on Jupiter's smooth belts, until it was seen in flight (2026-11-03). See
 ## [method bands_at].
 const MEANDER_SECOND := 0.618
+## A GUESS: the second harmonic's weight against the first. Settled by fitting a real band-edge track.
 const MEANDER_SECOND_SHARE := 0.6
+
+## A GUESS: **how many of the circulation cells one BROAD zone spans.**
+##
+## Jupiter has two scales of banding and the model had one. The fine bands are the circulation cells; the
+## broad, diffuse WHITE zones cover several of them at once — Evert, 2026-10-17: *"the white bands I am
+## talking about on Jupiter seem to cover multiple of the darker cream and brown bands"*, and again flying on
+## 2026-11-03: *"In pictures of Jupiter, I see white bands that are missing."*
+##
+## GUESSED because the model has no second scale to derive it from. The three candidates, from `Cloud Layers`
+## §3: a low overtone of the same circulation (`cells / k`, which is this one, and is a calibration); the
+## convecting layer's depth over the radius (`H_conv / a`, the only one with a physical form, and it needs a
+## convecting depth the model does not carry); or a low spherical-harmonic mode of the abundance, which would
+## also make the zones asymmetric between hemispheres — this does not, because `broad_at()` is even in
+## latitude. **Settled by** a convecting depth, or by fitting Jupiter's own albedo map's power spectrum.
+const BROAD_DIVISOR := 2.0
+
+## A GUESS: **how much fainter a broad belt is than a broad zone**, as a multiplier's floor.
+##
+## 1.0 would make the broad scale invisible and 0.0 would erase the cloud in a broad belt; 0.5 leaves the fine
+## bands legible inside both, which is the point — a zone is *brighter over several bands*, not a band of its
+## own. GUESSED, and settled by the same fit as `BROAD_DIVISOR`. Evert tunes this by flight.
+const BROAD_FLOOR := 0.5
 
 
 ## **Where the bands are, allowing for the meander.** This is the function the field reads instead of
@@ -143,11 +178,14 @@ static func bands_at(
 	var latitude := asin(clampf(direction.y, -1.0, 1.0))
 	if cells <= 0.0:
 		return 1.0
+	# **Two scales of banding, multiplied** — the cells, and the broad zones that span several of them.
+	# Evert, 2026-11-03: *"In pictures of Jupiter, I see white bands that are missing."* See `broad_at()`.
+	var broad := broad_at(latitude, cells, phase)
 	if ratio <= 0.0 or meander <= 0.0:
-		return SpacesimCloudModel.condensation_favouring(latitude, cells)
+		return SpacesimCloudModel.condensation_favouring(latitude, cells) * broad
 	return SpacesimCloudModel.condensation_favouring(
 		latitude + meander_offset(direction, ratio, phase, meander, cells), cells
-	)
+	) * broad
 
 
 ## **How far the bands wander, in RADIANS OF LATITUDE** — the whole of `bands_at`'s meander, in one place so
@@ -194,6 +232,28 @@ static func meander_offset(
 	)
 
 
+## **The BROAD scale: how far this latitude sits inside a broad zone (1) or a broad belt (BROAD_FLOOR).**
+##
+## A second cosine in latitude at `cells / BROAD_DIVISOR` — the same shape as one circulation cell's
+## favouring, counted over several cells — so a zone lifts every fine band inside it and a belt dims them,
+## and the fine structure stays legible through both.
+##
+## **It is EVEN in latitude, and the two hemispheres therefore match.** Real Jupiter's do not (its broad zones
+## are not mirror images), and the candidate that would give that asymmetry — a low spherical-harmonic mode of
+## the abundance — is the one that is not built. Named rather than hidden: this is the cheap version.
+##
+## `phase` comes from the body's seed, so two bodies' broad zones are not in the same places. Unlike the
+## meander it is NOT meandered itself: the feature is already several bands wide, and offsetting it would cost
+## a second `sin` to move something nobody could see move.
+static func broad_at(latitude: float, cells: float, phase: float) -> float:
+	if cells <= 0.0:
+		return 1.0
+	var broad_cells := maxf(cells / BROAD_DIVISOR, 1.0)
+	var span := (PI * 0.5) / broad_cells
+	var turn := PI * absf(latitude) / span + phase
+	return BROAD_FLOOR + (1.0 - BROAD_FLOOR) * (1.0 + cos(turn)) * 0.5
+
+
 ## One whole wavenumber's meander profile — two integer waves, the second offset so they do not line up.
 static func _harmonics(wavenumber: float, longitude: float, phase: float) -> float:
 	var second := maxf(1.0, roundf(wavenumber * MEANDER_SECOND))
@@ -205,6 +265,9 @@ static func _harmonics(wavenumber: float, longitude: float, phase: float) -> flo
 
 ## **How many vortices one map carries.** A budget, because every centre costs a dot product per pixel —
 ## and it is the only number here that is not a derivation. The *sizes* and the *count distribution* are.
+## A GUESS, and a COST budget rather than a physical count: the derived spectrum fits thousands on Jupiter
+## and a static warp cannot carry them, so this caps the placed count. Settled by the cost of a warp, which
+## is measured, or by a warp that is not static.
 const VORTEX_BUDGET := 96
 
 ## **The exponent of the size distribution**: `N(s) ∝ s^-p`.
@@ -213,9 +276,13 @@ const VORTEX_BUDGET := 96
 ## the science."* A power law is what makes "usually small, occasionally big" true without choosing the
 ## counts by hand — and `p` is a calibration, named as one. It is the same kind of constant as
 ## `CELLS_PER_RHINES_BAND`: the shape is physics, the number in front of it is a fit.
+## A GUESS: `N(s) ∝ s^-p`. A −5/3 cascade suggests something, but the mapping from an energy spectrum to a
+## COUNT of discrete vortices is not obvious. Settled by that mapping being derived.
 const VORTEX_EXPONENT := 2.0
 
 ## How many distinct sizes the spectrum is sampled at, log-spaced between the two derived scales.
+## A GUESS: how many size classes the spectrum is sampled at. A resolution of the placed stack rather than
+## a physical number.
 const VORTEX_GENERATIONS := 6
 
 ## **How much less each smaller generation winds**, per generation.
@@ -225,6 +292,8 @@ const VORTEX_GENERATIONS := 6
 ## multiple bands, and the smaller ones just perturb the boundaries between the layers."* So the largest
 ## generation turns once and each smaller one turns `VORTEX_WINDING_DECAY` of the one above it, which makes
 ## the big spirals the structure and the small ones the roughness on it.
+## A GUESS: how fast a smaller generation winds less than a larger one. Settled by `winding = rotation ×
+## lifetime`, which needs a lifetime the model does not carry.
 const VORTEX_WINDING_DECAY := 0.55
 
 ## **The differential rotation across a vortex, in RADIANS — and this corrects an error.**
@@ -239,6 +308,8 @@ const VORTEX_WINDING_DECAY := 0.55
 ## map can only show the instantaneous differential, and what reads as a spiral arm is that differential
 ## sweeping the texture through a radian or two. So the honest quantity is the differential, and its
 ## derived size is ~1 rad, with the sweep below to see what an arm actually needs.
+## A GUESS: the largest generation's turn, in radians. One turn is the FLOOR (`Cloud Layers` §10: a
+## vortex that does not close an arm is not a vortex); how much more than one is a look judgement.
 const VORTEX_TWIST := 2.0
 
 
@@ -419,6 +490,9 @@ static func intensity_at(
 ##
 ## This does neither: below the knee nothing changes, and above it the excess is mapped *asymptotically*
 ## into the remaining range, so the top stays ordered and spread instead of collapsed onto one value.
+## A GUESS: where the soft ceiling starts. It exists because a hard clamp piled ~30% of texels onto the top
+## byte and broke the percentile; 0.85 was chosen so the excess is spread, and any value in 0.8..0.9 does
+## the same job. Settled by a field that does not need a ceiling at all.
 const SOFT_KNEE := 0.85
 
 static func _soft_ceiling(value: float) -> float:

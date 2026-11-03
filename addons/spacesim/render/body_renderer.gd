@@ -68,6 +68,9 @@ const POINT_TRIANGLES := 2
 ## **How wide the deck's coverage edge is, in field units** — the `smoothstep` around `threshold`. Published
 ## rather than left to the shader's own default: it was a `hint_range` uniform nobody set, which reads as a
 ## knob and is a constant. Named here and handed over, so the host owns it like every other look number.
+## A GUESS: how wide a cloud's edge is, in field units. Real edge width is a residence-time proxy the model
+## does not carry (`Cloud Layers` §3); this is one number for every deck, where cirrus should be softer than
+## cumulus. Settled by a per-layer widths from residence time.
 const DECK_SOFTNESS := 0.05
 
 ## The wireframe view's one material — see [method wireframe_material].
