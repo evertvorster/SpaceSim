@@ -103,7 +103,7 @@ vec2 deck_shadow_uv(vec3 direction) {
 // evaluations; a beam's attenuation is decided by the coarse field, and the surface shaders already run a
 // ladder of their own. The shadow keeps it, because there the ladder is what makes the shadow's edge belong to
 // the cloud that casts it.
-float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_detail) {
+float deck_column_path(vec3 p, vec3 direction, float radius_of_body, bool with_detail) {
     float mu = dot(p, direction);
     if (mu <= 0.0) {
         return -1.0;
@@ -114,7 +114,7 @@ float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_de
     // **Straight up**: the crossing point is the point itself, and there is no offset to divide by.
     vec3 crossing = p;
     if (across_length > 1.0e-6) {
-        float arc = (deck_height * (across_length / mu)) / max(planet_radius, 1.0);
+        float arc = (deck_height * (across_length / mu)) / max(radius_of_body, 1.0);
         crossing = normalize(p + (across / across_length) * arc);
     }
     vec2 cover_texel = vec2(1.0, 2.0) / float(max(deck_cover_width, 1));
@@ -131,8 +131,8 @@ float deck_column_path(vec3 p, vec3 direction, float planet_radius, bool with_de
 
 
 // How much of the star's light reaches a point whose unit direction is `p`: `exp(-tau · path)`.
-float deck_transmittance(vec3 p, float planet_radius) {
-    float path = deck_column_path(p, body_sun, planet_radius, true);
+float deck_transmittance(vec3 p, float radius_of_body) {
+    float path = deck_column_path(p, body_sun, radius_of_body, true);
     // The star is at or below this point's horizon: there is no direct light to shadow.
     if (path < 0.0) {
         return 1.0;
@@ -155,8 +155,8 @@ float deck_transmittance(vec3 p, float planet_radius) {
 // is a correction to *which* transmittance applies, not a second law about the cloud.
 //
 // The result is `exp(-x)·(1 + x)`, which is ≤ 1 for every `x ≥ 0`: the glint can only be dimmed.
-float deck_specular_share(vec3 p, vec3 to_eye, float planet_radius) {
-    float path = deck_column_path(p, to_eye, planet_radius, false);
+float deck_specular_share(vec3 p, vec3 to_eye, float radius_of_body) {
+    float path = deck_column_path(p, to_eye, radius_of_body, false);
     if (path < 0.0) {
         return 1.0;
     }
@@ -167,9 +167,9 @@ float deck_specular_share(vec3 p, vec3 to_eye, float planet_radius) {
 // How much of the star's light reaches a point whose unit direction is `p`, **after the floor** — the number
 // the caller writes into `AO`. The transmittance itself is the return of `deck_transmittance()` below, kept
 // separate so the concession and the physics are not the same expression.
-float deck_shadow_factor(vec3 p, float planet_radius, float altitude) {
+float deck_shadow_factor(vec3 p, float radius_of_body, float altitude) {
 	// **The ground's own height decides whether there is a shadow to cast on it.** Above the base there is none;
 	// below it, the deck's transmittance stands, faded in over `DECK_BASE_FADE` so the crossing is not a line.
 	float under = 1.0 - smoothstep(deck_base - DECK_BASE_FADE, deck_base, altitude);
-	return mix(1.0, mix(deck_shadow_floor, 1.0, deck_transmittance(p, planet_radius)), under);
+	return mix(1.0, mix(deck_shadow_floor, 1.0, deck_transmittance(p, radius_of_body)), under);
 }

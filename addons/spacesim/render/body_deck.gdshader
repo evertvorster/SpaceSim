@@ -157,6 +157,16 @@ uniform vec3 patch_origin = vec3(0.0);
 // **The coverage, reconstructed rather than interpolated** — shared with the ground shadow, so the shadow is the
 // image of the same cloud.
 #include "res://addons/spacesim/render/cloud_coverage.gdshaderinc"
+// **The shared shadow law, for the sun's crossing of this same map.** Evert, 2026-11-03: *"One idea I had was to
+// apply the shadow map the clouds make over the clouds from below… that might be a cheap trick to get the same
+// effect?"* It is the right instinct and it is cheaper than a second expression: `deck_column_path()` already
+// walks the star's ray to the crossing, reconstructs the coverage with the deck's own kernel and divides by the
+// sun's zenith — so the base and the shadow on the water are the same cloud at the same texel, by construction.
+//
+// **`deck_transmittance()` is not used, and this is why**: it returns `exp(-x)·(1 + x)`, the BEAM/diffuse ratio
+// struck for specular — it is above 1 for a thin slab, which is right for a reflection and wrong for a base.
+// A base is a diffuse source, so what it shows is plain `exp(-x)`, monotone in tau.
+#include "res://addons/spacesim/render/deck_shadow.gdshaderinc"
 
 // **The offset from the body's centre, in PLANET RADII** — captured in `vertex()` because **`VERTEX` inside
 // `fragment()` is in VIEW space**.
@@ -283,8 +293,8 @@ void fragment() {
 	// inside the slab, which this project has no model for and which is what keeps a thick cloud from reading as a
 	// hole in the sky.
 	if (eye_radius < 1.0) {
-		float mu_sun = clamp(dot(p, body_sun), 0.10, 1.0);
-		float sun_through = exp(-tau_full * thickness / mu_sun);
+		float sun_path = deck_column_path(p, body_sun, planet_radius, true);
+		float sun_through = sun_path < 0.0 ? 1.0 : exp(-max(deck_tau * sun_path, 0.0));
 		radiance = cloud_color * ramp_gain * air_through * (sun_through + UNDERSIDE_FLOOR);
 	}
 

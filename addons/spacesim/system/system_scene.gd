@@ -1766,7 +1766,12 @@ func _publish_deck_shadow(
 	# casting shadows on land, but not on the ocean."* The include is in both shaders and both compute
 	# `deck_shadow_present()`, but this publish handed the map to `body.mesh_material` alone — so the sea asked a
 	# question whose answer was never set, and drew in full sun under the same cloud as the shore beside it.
-	for material in [body.mesh_material, body.ocean_material]:
+	# **And the deck itself**, which is the point: the base of a cloud is lit by what the SLAB transmits, and the
+	# only honest way to know that is the same map, sampled at the same crossing the ground's shadow is.
+	var targets: Array = [body.mesh_material, body.ocean_material]
+	for other in body.decks:
+		targets.append(other.material)
+	for material in targets:
 		if material == null:
 			continue
 		SpacesimBodyRenderer.apply_deck_shadow(
