@@ -573,6 +573,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
 	_build_decks(body)
+	_build_interior(body)
 	_publish_air(body)
 	# **After `_derive_air`, because the shell is made of what that derives** — its optics and the band's
 	# outer radius (`sky_top`). Before it, `body.air` is empty and this silently builds nothing, which is a
@@ -940,6 +941,46 @@ func _build_decks(body: SpacesimSceneBody) -> void:
 		body.decks.append(deck)
 
 
+## **An opaque interior, so a body with no surface cannot be seen through.**
+##
+## Evert, 2026-11-03: *"the planet does not have any core, so the see-through parts of the cloud deck you can see
+## right through the planet. We need something to be opaque there under the clouds, even if it's a shell deep in
+## the planet or something."*
+##
+## **A giant's interior IS opaque**, so this is not a patch over a hole in the geometry — it is the fact that the
+## hole was showing. The deep envelope is optically thick long before anything anyone would call a surface, so a
+## gap between two decks should show DARKNESS and never stars. (This is also what the old hidden reference sphere
+## was doing by accident: `update_lod`'s note records it filling the gaps "in a colour derived from the body's own
+## gases", which on Saturn made a pale blue faceted ball. The note's own prescribed fallback — "put it back at the
+## DEEPEST deck's radius in that deck's own `cloud_color` — an interior, not a surface" — is what this is, with
+## the depth derived rather than borrowed.)
+##
+## **Its radius is DERIVED, and below every deck by construction.** The model stops claiming to know the
+## troposphere at `MODELLED_PRESSURE_MULTIPLE` bars (`Condensation.Regime.DEEP` is defined as below that depth), so
+## that is where the floor goes: `-H * ln(20)`, which is −65 km on Jupiter against its water deck's −43 km. A deck
+## can therefore never z-fight with it, and the body below that depth is exactly what this model does not model.
+##
+## **Only for a body with no surface content.** A body with a ground has its ground; a floor under it would be
+## geometry nothing can ever see.
+func _build_interior(body: SpacesimSceneBody) -> void:
+	if body.content == null or body.content.surface != null or body.decks.is_empty():
+		return
+	if body.air.is_empty():
+		return
+	var scale_height: float = body.air.get("rayleigh_scale_height", 0.0)
+	if scale_height <= 0.0:
+		return
+	body.interior_depth = -scale_height * log(SpacesimAtmosphereModel.MODELLED_PRESSURE_MULTIPLE)
+	# **The DEEPEST deck's colour**, because that is the layer this floor is seen *through* — the brown of a
+	# belt is the deep cloud, and the interior is the same substance further down.
+	var deepest: SpacesimSceneBody.Deck = body.decks[0]
+	for deck in body.decks:
+		if deck.height < deepest.height:
+			deepest = deck
+	body.interior_material = SpacesimBodyRenderer.interior_material(body, deepest.palette)
+	body.interior = _add_body_mesh(body.node, body.interior_material, "%sInterior" % body.name)
+
+
 ## **The level a content layer is made of**, taken out of the unclaimed pool so two layers cannot land on
 ## the same altitude — which on a body with one level would otherwise draw the same deck twice.
 func _claim_level(
@@ -1149,6 +1190,8 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			body.sphere.visible = not is_point and wireframe and wire_sphere
 		if body.ocean != null:
 			body.ocean.visible = not is_point
+		if body.interior != null:
+			body.interior.visible = not is_point
 		if body.air_shell != null:
 			# **The gate is the AIR's own resolution, not the size of its disc.** The deleted shell had
 			# `shell_ring_pixels`; the march inherited the job and not the gate, and it took a flight 13.5 Gm
@@ -1445,6 +1488,10 @@ func _build_patch_arrays(
 	if body.ocean != null:
 		body.ocean_arrays = base.duplicate(true)
 		body.ocean_arrays_origin = origin
+	if body.interior != null:
+		var floor_ratio: float = (radius + body.interior_depth) / maxf(radius, 1.0)
+		body.interior_arrays_origin = origin * floor_ratio
+		body.interior_arrays = _scaled_copy(base, floor_ratio)
 	for deck in body.decks:
 		var ratio: float = (radius + deck.height) / maxf(radius, 1.0)
 		deck.origin = origin * ratio
@@ -1567,6 +1614,9 @@ func _publish_air(body: SpacesimSceneBody) -> void:
 		SpacesimBodyRenderer.apply_air(body.ocean_material, body.air, 0.0)
 	for deck in body.decks:
 		SpacesimBodyRenderer.apply_air(deck.material, body.air, deck.height)
+	if body.interior_material != null:
+		# The air above the floor is the whole column down to it — it is the deepest thing on the body.
+		SpacesimBodyRenderer.apply_air(body.interior_material, body.air, body.interior_depth)
 
 
 ## **The air's shell, per frame: where the eye is, where the star is, and how the frame is turned.**
@@ -1634,6 +1684,8 @@ func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angl
 	var materials := [body.mesh_material]
 	if body.ocean_material != null:
 		materials.append(body.ocean_material)
+	if body.interior_material != null:
+		materials.append(body.interior_material)
 	# **A deck is lit by the same star**, and its own shader does its own air and occlusion maths, so it needs
 	# the direction and the width as well as the ground does.
 	for deck in body.decks:
@@ -1857,6 +1909,16 @@ func _poll_patch_builds() -> void:
 				_teleport(body.ocean, body.ocean_arrays_origin)
 				(body.ocean_material as ShaderMaterial).set_shader_parameter(
 					"patch_origin", body.ocean_arrays_origin
+				)
+		# **The interior floor**, from the same walk and scaled to its own radius — the same lattice as the decks
+		# above it, so the two cannot disagree about where the body is.
+		if body.interior != null:
+			body.interior.mesh = SpacesimPatches.mesh_from(body.interior_arrays)
+			body.interior_arrays = []
+			if body.interior.mesh != null:
+				_teleport(body.interior, body.interior_arrays_origin)
+				(body.interior_material as ShaderMaterial).set_shader_parameter(
+					"patch_origin", body.interior_arrays_origin
 				)
 		# **The datum lattice's lines**, published beside the rest from the same walk — same points, same origin, nothing
 		# translated. Unlike a deck this is never "kept from the last build": a stale sphere would be a different

@@ -55,6 +55,15 @@ var ocean: MeshInstance3D
 var ocean_material: ShaderMaterial
 var ocean_arrays: Array = []
 var ocean_arrays_origin := Vector3.ZERO
+## **The opaque floor under a body with no surface**: a gas giant's interior, drawn so a gap between two decks
+## shows darkness rather than stars. Empty on every body that has a ground — its own surface is the floor.
+var interior: MeshInstance3D
+var interior_material: ShaderMaterial
+var interior_arrays: Array = []
+var interior_arrays_origin := Vector3.ZERO
+## Metres BELOW the datum, derived from where the model stops claiming to know the troposphere — see
+## `SpacesimSystemScene._build_interior`.
+var interior_depth := 0.0
 ## **The air, as one shell per band** — the atmosphere's top boundary for now (2026-11-02), a deck's base once
 ## the stack is split. Its own icosphere at the band's outer radius, NOT the patch walk: a surface that must be
 ## visible everywhere cannot borrow a mesh whose coverage was selected for the ground.

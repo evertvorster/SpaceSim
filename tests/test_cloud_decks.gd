@@ -30,6 +30,7 @@ func run(h, root: Node) -> void:
 	_test_a_stack(h, scene)
 	_test_who_gets_no_deck(h, scene)
 	_test_a_deck_below_its_datum(h, scene)
+	_test_a_surface_less_body_has_a_floor(h, scene)
 	_test_the_deck_goes_live(h, scene, root)
 	_test_the_deck_casts_a_shadow(h, scene)
 	_test_the_cameras_own_column(h, scene)
@@ -145,6 +146,41 @@ func _test_who_gets_no_deck(h, scene: SpacesimSystemScene) -> void:
 ## four giants author no `surface` block, so nothing occludes a deck inside the datum. **A body with both a
 ## reference sphere and a negative base would draw its weather inside its own ground**, and the pair is
 ## asserted here rather than assumed, because the failure is a silently missing layer.
+## **A body with no surface is opaque under its clouds.** Evert, 2026-11-03: *"the planet does not have any core,
+## so the see-through parts of the cloud deck you can see right through the planet. We need something to be opaque
+## there under the clouds."* A giant's interior IS opaque, so a gap between two decks must show darkness and never
+## stars — and the floor has to sit BELOW every deck, or it z-fights with one.
+func _test_a_surface_less_body_has_a_floor(h, scene: SpacesimSystemScene) -> void:
+	for id in ["planet:jupiter", "planet:saturn", "planet:uranus", "planet:neptune"]:
+		var body := scene.body_by_id(id)
+		h.check(body != null and body.interior != null and body.interior_material != null,
+			"%s has no surface, so it draws an opaque floor under the cloud stack" % id)
+		if body == null or body.interior == null:
+			continue
+		var scale_height: float = body.air.get("rayleigh_scale_height", 0.0)
+		var derived := -scale_height * log(SpacesimAtmosphereModel.MODELLED_PRESSURE_MULTIPLE)
+		h.check_near(body.interior_depth, derived,
+			"at the depth the model stops claiming to know the troposphere (%.0f m, 20 bar)" % body.interior_depth,
+			1.0e-6)
+		var lowest := 0.0
+		for deck in body.decks:
+			lowest = minf(lowest, deck.height)
+		h.check(body.interior_depth < lowest,
+			"which is below the deepest deck (%.0f m against %.0f), so the two cannot z-fight"
+				% [body.interior_depth, lowest])
+		h.check(body.interior_material.shader != null
+			and body.interior_material.get_shader_parameter("interior_color") != null,
+			"and it has an opaque material with a colour of its own")
+	# **A body with a ground has a floor already**: a second one would be geometry nothing can see.
+	var earth := scene.body_by_id("planet:earth")
+	h.check(earth != null and earth.interior == null,
+		"while a body with a surface draws none, because its ground IS the floor")
+	# And a body the model gives no deck at all has nothing to be seen through.
+	var venus := scene.body_by_id("planet:venus")
+	h.check(venus != null and venus.interior == null,
+		"and a FEATURELESS body has no stack to draw a floor under")
+
+
 func _test_a_deck_below_its_datum(h, scene: SpacesimSystemScene) -> void:
 	var found := false
 	for body in scene.bodies:

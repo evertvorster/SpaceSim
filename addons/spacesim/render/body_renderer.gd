@@ -21,6 +21,7 @@ const DECK_SHADER := preload("res://addons/spacesim/render/body_deck.gdshader")
 const STAR_SHADER := preload("res://addons/spacesim/render/body_star.gdshader")
 const OCEAN_SHADER := preload("res://addons/spacesim/render/body_ocean.gdshader")
 const AIR_SHELL_SHADER := preload("res://addons/spacesim/render/air_shell.gdshader")
+const INTERIOR_SHADER := preload("res://addons/spacesim/render/body_interior.gdshader")
 ## How far past the environment's `glow_hdr_threshold` (1.0) a star sits. This is the bloom knob: a
 ## star at 1.0 is a bright dot, and a star is supposed to glare. **Also what a star's point of light is
 ## emitted at**, so the two cannot disagree.
@@ -68,6 +69,14 @@ const POINT_TRIANGLES := 2
 ## **How wide the deck's coverage edge is, in field units** — the `smoothstep` around `threshold`. Published
 ## rather than left to the shader's own default: it was a `hint_range` uniform nobody set, which reads as a
 ## knob and is a constant. Named here and handed over, so the host owns it like every other look number.
+## A GUESS: **how dark the interior of a surface-less body is**, as a fraction of the deepest deck's colour.
+##
+## A giant's interior is opaque, but it is lit only by what reaches it through the gas — at 20 bar that is very
+## little, so the floor under the clouds should read as a deep, dark brown rather than as the water deck's own
+## brightness. GUESSED: nothing here derives the extinction of 65 km of H2/He. **Settled by** the observed
+## brightness of a belt gap in Jupiter's own photometry — a belt is not black, and it is not the zone either.
+const INTERIOR_DIM := 0.2
+
 ## A GUESS: how wide a cloud's edge is, in field units. Real edge width is a residence-time proxy the model
 ## does not carry (`Cloud Layers` §3); this is one number for every deck, where cirrus should be softer than
 ## cumulus. Settled by a per-layer widths from residence time.
@@ -399,6 +408,21 @@ static func deck_material(
 	# to be stated. The deepest composites first (lower priority is drawn earlier), leaving the highest deck
 	# over the top of it, which is what a belt *is*: a thin bright deck over a browner one.
 	material.render_priority = -seed_layer
+	return material
+
+
+## **The opaque interior of a body with no surface** — see `SpacesimSystemScene._build_interior`.
+##
+## The deck shader's simplest case with no map at all: one colour, lit by the star through the same air and the
+## same occlusion every other layer uses. **It carries no map and no alpha** — it is the floor, and a floor that
+## could become transparent would put the stars back.
+static func interior_material(body: SpacesimSceneBody, palette: Color) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = INTERIOR_SHADER
+	material.set_shader_parameter("planet_radius", body.radius)
+	# Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing — the same rule the
+	# deck's `cloud_color` follows.
+	material.set_shader_parameter("interior_color", palette.srgb_to_linear() * INTERIOR_DIM)
 	return material
 
 
