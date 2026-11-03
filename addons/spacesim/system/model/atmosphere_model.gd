@@ -37,10 +37,13 @@ const MIE_COEFFICIENT := 21.0e-6
 const MIE_SCALE_HEIGHT := 1.2e3
 const MIE_ANISOTROPY := 0.758
 
-## **The optical depth an ordinary deck is worth, as the reference the aerosol scales from.** Earth's authored
-## cloud is the one the constant above was fitted to, so a body whose own layers state the same thickness keeps
-## exactly the haze it had, and a body whose shroud is thicker gets more.
-const AEROSOL_TAU_REFERENCE := 0.7
+## **The deck the constant above was calibrated against, as an AUTHORED OPACITY rather than a tau.**
+##
+## Earth's own cloud is `opacity = 0.9` in `sol.tres`, and `−ln(1 − 0.9)` is the tau the same law gives it — so
+## anchoring here makes Earth's aerosol **exactly** the constant, by construction rather than by a fitted number.
+## That matters: a first version anchored at `0.7`, which silently tripled Earth's Mie and turned the sunset black —
+## `tests/test_render.gd` caught it ("a sunset's red is dim but present" measured 0.000).
+const AEROSOL_OPACITY_REFERENCE := 0.9
 
 
 ## **The body's own aerosol, scaled from that reference — never a second, Earth-shaped one.**
@@ -67,7 +70,8 @@ static func aerosol_coefficient(clouds: SpacesimClouds) -> float:
 			tau += stated
 			continue
 		tau += -log(maxf(1.0 - clouds.opacity_at(index), 1.0e-3))
-	return MIE_COEFFICIENT * maxf(1.0, tau / AEROSOL_TAU_REFERENCE)
+	var reference := -log(maxf(1.0 - AEROSOL_OPACITY_REFERENCE, 1.0e-3))
+	return MIE_COEFFICIENT * maxf(1.0, tau / reference)
 
 ## **The sky's scale is the star's own light, converted — there is no free constant in it.**
 ##

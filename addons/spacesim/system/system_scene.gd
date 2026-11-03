@@ -1148,9 +1148,13 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# under the clouds. If the gaps read badly with it gone, the fallback is to put it back at the DEEPEST deck's
 		# radius in that deck's own `cloud_color` — an interior, not a surface.
 		var has_surface: bool = body.content != null and body.content.surface != null
+		# **A star's mesh is not a surface: it is the photosphere, and hiding it erases the Sun.** The distinction is
+		# the one `material_for` already makes — a star is a SOURCE and everything else is a reflector — and this rule
+		# was written for the reflector case only, which is how Sol stopped drawing on 2026-11-03.
+		var is_star: bool = body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR
 		if body.mesh != null:
 			body.mesh.visible = not is_point and (
-				(wireframe and wire_surface) or (not wireframe and has_surface)
+				(wireframe and wire_surface) or (not wireframe and (has_surface or is_star))
 			)
 		if body.sphere != null:
 			body.sphere.visible = not is_point and wireframe and wire_sphere
