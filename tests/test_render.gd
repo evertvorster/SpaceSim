@@ -130,6 +130,21 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 			% code.count("surface_height("))
 	h.check(code.contains("MAP_MAX_TILT / lean"),
 		"with the lean clamped, so a slope steeper than the map's ceiling cannot tip the normal")
+	# **AND THE BAND-LIMITED SUM'S DIVISOR CARRIES THE FADE.** `surface_ridged3_banded` is *normalised*, so a weight
+	# that ignored the fade made the normalised height a discontinuous function of the pixel's footprint: while an
+	# octave tapered out its contribution shrank but its weight did not, so the height sagged, and when the fade
+	# reached zero the loop broke and the weight lost that octave in one step. The footprint is the only
+	# camera-DIRECTION quantity in this shader, so rotating on the spot stepped the octave count across the frame —
+	# and the height feeds `dFdx(height)`, which is the gradient the normal leans by. Evert, 2026-11-03: *"Keeping
+	# stationary, and just adjusting the camera angle, there is a line that sweeps through the images that seems to
+	# invert the shadow direction"* — seen on Luna, where the ground is grey and the shading is all there is.
+	var field_source := FileAccess.get_file_as_string(
+		"res://addons/spacesim/system/model/surface_field.gdshaderinc"
+	)
+	h.check(field_source.contains("weight += amplitude * fade"),
+		"the band-limited sum's divisor tapers with each octave's fade, so the height cannot step")
+	h.check(not field_source.contains("weight += amplitude;"),
+		"and not the bare amplitude, which renormalised every octave that was fading out")
 	h.check(code.contains("NORMAL = unit_position"),
 		"which is set in `vertex()` from the direction, because the mesh carries no normal array")
 	# **Absences, each one a mechanism that existed only to work around a raster.**

@@ -192,7 +192,21 @@ float surface_ridged3_banded(
 		float rung = fnl_fbm3(p, seed + octave, frequency, 1, gain, lacunarity, 1.0);
 		float ridge = 1.0 - abs(rung);
 		sum += amplitude * ridge * ridge * fade;
-		weight += amplitude;
+		// **The divisor carries the fade TOO, and it did not until 2026-11-03.** This sum is NORMALISED, so a
+		// weight that ignored the fade made the normalised height a *discontinuous* function of the pixel's
+		// footprint: while an octave tapered out its contribution shrank but its weight did not, so the whole
+		// height sagged toward zero; and the moment that octave's fade reached 0 the loop broke and the weight
+		// lost it in one step, so the height jumped back UP.
+		//
+		// Evert, 2026-11-03: *"Keeping stationary, and just adjusting the camera angle, there is a line that
+		// sweeps through the images that seems to invert the shadow direction."* That is exactly it, and the
+		// footprint is the only camera-DIRECTION-dependent quantity in the ground shader: `pixel_angle /
+		// max(dot(up, eye_direction), 0.02)`, so rotating on the spot walks the octave count across the frame.
+		// The height feeds the colour ramp AND `dFdx(height)`/`dFdy(height)`, which is the relief gradient the
+		// normal leans by — so a step in the height flips the shading of every slope it crosses, along the
+		// locus where the count changes. Seen on Luna, where the ground is grey and the shading is all there is;
+		// Earth's ramp hides it.
+		weight += amplitude * fade;
 		amplitude *= gain;
 		frequency *= lacunarity;
 		feature /= lacunarity;
