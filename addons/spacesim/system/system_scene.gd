@@ -1682,7 +1682,6 @@ func _update_decks(
 	# **No level to pick any more**: the deck's sphere IS the ground's mesh, so it is refined by the same walk that
 	# refines the surface under it, and there is no second tessellation to size (see `_build_decks`).
 	var to_eye := observer - body.node.global_position
-	var shadowing := _shadowing_deck(body)
 	for deck in body.decks:
 		# **Divided by the radius the deck's OWN points sit at**, because `eye_local` is compared against
 		# `length(p)` where `p` is a direction: `eye_radius < 1` is the test for being inside the deck's sphere. That
@@ -1711,8 +1710,7 @@ func _update_decks(
 			)
 			# **A uniform veil casts a uniform shadow**: a one-texel white map with `threshold = 0` is a single
 			# thickness everywhere, which is what a deck the model calls FEATURELESS actually is.
-			if deck == shadowing:
-				_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, 0)
+			_publish_deck_shadow(body, deck, SpacesimBodyRenderer.white_texel(), 0.0, 0)
 			continue
 		# **One mean for every layer**: the gain is fitted to the mean of what the deck actually draws, `R(tau)`.
 		# There used to be two paths — a tau layer fitted to its mean opacity and a ramp layer to its mean
@@ -1723,8 +1721,7 @@ func _update_decks(
 		SpacesimBodyRenderer.apply_cloud_map(
 			deck.material, texture, width, threshold, gain.value, 1.0, _deck_tau_full(body, deck)
 		)
-		if deck == shadowing:
-			_publish_deck_shadow(body, deck, texture, threshold, width)
+		_publish_deck_shadow(body, deck, texture, threshold, width)
 
 
 ## **The deck nearest the ground is the one that shadows it** — the LOWEST layer, not the highest.
@@ -1749,9 +1746,12 @@ func _shadowing_deck(body: SpacesimSceneBody) -> SpacesimSceneBody.Deck:
 	return lowest
 
 
-## **One shadow, from the deck nearest the ground** — and it goes to the one material the ground draws with. It
-## used to reach the land and the sea separately, which is what the "both layers or the coast comes apart" rule was
-## about; there is one layer now.
+## **One deck's own light, and — for the deck nearest the ground — the surface's shadow.**
+##
+## Two targets and two currencies, and which deck they belong to is the whole of it:
+##
+## - **the deck itself**, always, lit by its own slab: its own map, its own `_deck_tau_full`;
+## - **the ground and the sea**, from the SHADOWING deck only, in `deck.shadow_tau`.
 ##
 ## The lever arm is the deck's **top** above the surface: a shadow's offset is `height · tan(zenith)`, and
 ## using the base would put every shadow a slab's thickness too close to its cloud.
@@ -1762,16 +1762,28 @@ func _publish_deck_shadow(
 	# **No seed and no feature any more**: they existed for the shadow's own noise ladder, which is deleted — the
 	# shadow now thresholds the same map the deck draws, so it cannot be a different cloud from the one overhead.
 	#
+	# **EVERY deck is lit by ITS OWN slab** (2026-11-03), with its own map and its own column depth. This used to
+	# hand the shadowing deck's numbers to every deck material, which was invisible while a body had one deck and
+	# wrong the moment it had two: Earth's ice sheet — its own tau 0.2, 82% of the star transmitted — was darkened by
+	# the WATER deck's 2.30 and read as a heavy shadow it was not casting. Jupiter's and Saturn's ammonia decks were
+	# lit at their water decks' tau for the same reason, from the day their stacks existed.
+	#
+	# **The deck's own number is `_deck_tau_full`, not `deck.shadow_tau`, and the difference is the point**: the base
+	# must transmit what the top's alpha withholds, so both come from one law on one texel. `shadow_tau` is the
+	# layer's OPACITY read as a tau, which is the right currency for the ground and the wrong one for a slab.
+	SpacesimBodyRenderer.apply_deck_shadow(
+		deck.material, texture, width, threshold, _deck_tau_full(body, deck),
+		deck.height + deck.thickness, deck.height
+	)
+	# **The ground and the sea take the deck NEAREST THE GROUND, and only that one** — see `_shadowing_deck`. One
+	# shadow for the surface, because a star's penumbra widens with the lever arm and the deck overhead casts it.
+	if deck != _shadowing_deck(body):
+		return
 	# **Every material that draws this body's surface, not just the land.** Evert, 2026-11-03: *"Cloud decks are
 	# casting shadows on land, but not on the ocean."* The include is in both shaders and both compute
 	# `deck_shadow_present()`, but this publish handed the map to `body.mesh_material` alone — so the sea asked a
 	# question whose answer was never set, and drew in full sun under the same cloud as the shore beside it.
-	# **And the deck itself**, which is the point: the base of a cloud is lit by what the SLAB transmits, and the
-	# only honest way to know that is the same map, sampled at the same crossing the ground's shadow is.
-	var targets: Array = [body.mesh_material, body.ocean_material]
-	for other in body.decks:
-		targets.append(other.material)
-	for material in targets:
+	for material in [body.mesh_material, body.ocean_material]:
 		if material == null:
 			continue
 		SpacesimBodyRenderer.apply_deck_shadow(

@@ -324,6 +324,18 @@ func _test_the_deck_casts_a_shadow(h, scene: SpacesimSystemScene) -> void:
 	h.check_near(float(land.get_shader_parameter("deck_tau")), deck.shadow_tau,
 		"and the frame walk has already given the land that depth", 1.0e-9)
 
+	# **And each deck is lit by ITS OWN slab**, which is the fault this fixed (2026-11-03): every deck material used
+	# to be handed the SHADOWING deck's map and tau, so Earth's ice sheet — its own 0.2 — was darkened by the water
+	# deck's 2.30 and read as a heavy shadow it was not casting. `tau_full`, not `shadow_tau`: the base must
+	# transmit what the top's alpha withholds, so both come from one law on one texel.
+	var ice: SpacesimSceneBody.Deck = earth.decks[0]
+	for other in earth.decks:
+		var own := scene._deck_tau_full(earth, other)
+		h.check_near(float((other.material as ShaderMaterial).get_shader_parameter("deck_tau")), own,
+			"%s is lit by its own column depth (%.3f)" % [other.level.species, own], 1.0e-9)
+	h.check(float((ice.material as ShaderMaterial).get_shader_parameter("deck_tau")) < 1.0,
+		"so the ice sheet is not wearing the water deck's %0.2f" % deck.shadow_tau)
+
 	# Publish what a landed map would publish, and check the surface took it. **One surface now**: the sea's layer is
 	# gone (2026-10-28) and with it the "both layers" half of this contract — the deck's shadow reaches the ground,
 	# which is the only thing drawn below it.
