@@ -231,12 +231,21 @@ void fragment() {
 	// with the map's structure invisible inside it — Evert's two screenshots, top and bottom of one cloud.
 	// The slab is crossed at the same angle from either face, so the magnitude is the right cosine.
 	float mu = clamp(abs(dot(p, to_eye)), 0.03, 1.0);
-	// **Opacity is `R(tau)`, the complement of what the base transmits.** The old form was a reflectance ramp —
-	// the column's normalised thickness — which saturated at 1, so this face hid everything while the base let a
-	// fifth of the sky through at the same texel. Evert: *"there is a lot of alpha applied that seems to be
-	// missing from the bottom up."* One law, one texel, both faces: `alpha + transmit = 1`.
+	// **Opacity is `R(tau)`, the complement of what the base transmits**, and the transmittance is **Beer–Lambert**
+	// rather than the diffusion approximation `1/(1 + tau)`.
+	//
+	// Evert, 2026-11-03: *"at full cloud thickness, I can still see the glare of the sun poking through."* He could,
+	// and by exactly the amount the approximation says: Earth's authored `opacity = 0.9` is `tau = 2.30`, and
+	// `1/(1 + 2.30)` leaves **30%** of whatever is behind the deck — the star's own disc and its glow among it —
+	// drawn through a layer the same content calls 0.9 opaque. `exp(-tau)` gives 0.10, which is the number the layer
+	// stated.
+	//
+	// **The complement relation survives** (`alpha + transmit = 1`) — what changes is which transmittance: this face
+	// composites what is *behind* it, and what is behind it is a beam (the star's own light), not the diffuse flux
+	// through a scattering slab. The project already draws that distinction explicitly for specular — *"a specular
+	// highlight is a BEAM, not a diffuse one"* — and this is the same quantity.
 	float column_tau = tau_full * thickness / mu;
-	float transmit = 1.0 / (1.0 + max(column_tau, 0.0));
+	float transmit = exp(-max(column_tau, 0.0));
 	float alpha = covered * veil * (1.0 - transmit);
 	// **The inside-the-slab branch is GONE, and deleting it is what removes the flash at the deck's top.** It
 	// used to set `alpha = covered` for an eye between the base and the top — a step by construction, where
