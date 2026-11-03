@@ -145,34 +145,62 @@ static func bands_at(
 		return 1.0
 	if ratio <= 0.0 or meander <= 0.0:
 		return SpacesimCloudModel.condensation_favouring(latitude, cells)
+	return SpacesimCloudModel.condensation_favouring(
+		latitude + meander_offset(direction, ratio, phase, meander, cells), cells
+	)
+
+
+## **How far the bands wander, in RADIANS OF LATITUDE** — the whole of `bands_at`'s meander, in one place so
+## that its two continuity properties can be tested without re-deriving it.
+##
+## ## Why it is a BLEND of two whole waves rather than a rounded one
+##
+## The derived wavenumber `cos(lat)/ratio` is not an integer, and a wave round a planet must be **whole** —
+## `sin(9.6·lon)` does not meet itself at ±180°, which is a seam down a meridian. So it is rounded… and
+## **rounding it is a step function of latitude**, which the eye reads as a straight line ACROSS the belts:
+## Jupiter goes 22 → 21 → 19, and at each threshold the meander's longitude profile is replaced by a different
+## one. Evert, 2026-11-03: *"There are straight horizontal discrepancies between the belts"* and *"it looks like
+## the same texture is repeated in horizontal passes"* — the second is the same fault seen from the other side,
+## because between two thresholds the wavenumber is CONSTANT, so every band in that plateau carries the
+## identical meander shape.
+##
+## So the two whole waves either side of the derived number are blended by its fractional part: at
+## `cos(lat)/ratio = 20.3` the profile is 70 % of twenty waves and 30 % of twenty-one. Both are integers, so both
+## close at the antimeridian, the weight does not depend on longitude so the blend cannot break that, and the
+## result is **continuous in latitude** — at an integer crossing one wave's weight reaches 1 exactly as the
+## other's leaves 0, which is the same profile from both sides.
+##
+## **Both harmonics are whole waves.** The second one was `wavenumber * MEANDER_SECOND` with 0.618 — not an
+## integer — so it did not close either, and the field stepped at the antimeridian: invisible on a SHREDDED body
+## (Earth, 0.85 mixing, where the step drowns in its own weather) and 10.9x an ordinary step on a BANDED one
+## (Jupiter, 0.25). The golden ratio was chosen so the two never repeat, but a planet admits only integers, so
+## the two waves are made different integers instead.
+static func meander_offset(
+	direction: Vector3, ratio: float, phase: float, meander: float, cells: float
+) -> float:
+	if ratio <= 0.0 or meander <= 0.0 or cells <= 0.0:
+		return 0.0
+	var latitude := asin(clampf(direction.y, -1.0, 1.0))
 	var longitude := atan2(direction.z, direction.x)
 	var band_width := (PI * 0.5) / cells
-	# **An INTEGER wave number, because a wave has to close.** `cos(lat)/ratio` is the derived stationary
-	# wavenumber but it is not a whole number, and `sin(m*lon)` only meets itself at the seam when `m` is an
-	# integer — with 9.6 the discontinuity was 32.5 levels at the wrap against 7.5 at every other column
-	# boundary, which is the seam test catching exactly what it exists for. Only whole waves fit round a
-	# planet, so the derived number is rounded; **that is a physical constraint rather than a tidy-up.**
-	var wavenumber := maxf(1.0, roundf(maxf(cos(latitude), 0.0) / ratio))
-	# **THE SECOND HARMONIC HAS TO CLOSE TOO, and it did not from the day it was written** (Evert, 2026-11-03:
-	# *"I see some stitching errors on the cloud texture of jupiter"*). `wavenumber * MEANDER_SECOND` is 3.708 at
-	# Jupiter's 6 and `sin` of it does not meet itself round the planet, so the meander's offset stepped at the
-	# antimeridian: a coherent vertical line down a whole meridian, which no field should have at any resolution.
-	#
-	# **It was invisible on Earth and obvious on Jupiter, and that is why it survived.** Earth is SHREDDED, so the
-	# envelope is `0.85 + 0.15 * bands` and the step is attenuated to nothing against a ragged field's own
-	# variation; Jupiter is BANDED, `0.25 + 0.75 * bands`, and smooth, so the same step is **10.9x** an ordinary
-	# step at 50 degrees. `tests/test_cloud_field.gd` measures that ratio directly now, for both bodies.
-	#
-	# So the ratio is rounded as well — **two different whole waves**, which is what "incommensurate" has to mean
-	# on a sphere: the golden ratio is a number, and a planet only admits integers.
-	var second_wavenumber := maxf(1.0, roundf(wavenumber * MEANDER_SECOND))
-	if is_equal_approx(second_wavenumber, wavenumber):
-		second_wavenumber += 1.0
-	var first := sin(wavenumber * longitude + phase)
-	var second := sin(second_wavenumber * longitude + phase * 1.7)
-	var offset := meander * band_width * (first + MEANDER_SECOND_SHARE * second) \
-		/ (1.0 + MEANDER_SECOND_SHARE)
-	return SpacesimCloudModel.condensation_favouring(latitude + offset, cells)
+	var derived := maxf(cos(latitude), 0.0) / ratio
+	if derived <= 0.0:
+		return 0.0
+	var low := maxf(1.0, floorf(derived))
+	var share := clampf(derived - floorf(derived), 0.0, 1.0)
+	var amplitude := meander * band_width / (1.0 + MEANDER_SECOND_SHARE)
+	return amplitude * lerpf(
+		_harmonics(low, longitude, phase), _harmonics(low + 1.0, longitude, phase), share
+	)
+
+
+## One whole wavenumber's meander profile — two integer waves, the second offset so they do not line up.
+static func _harmonics(wavenumber: float, longitude: float, phase: float) -> float:
+	var second := maxf(1.0, roundf(wavenumber * MEANDER_SECOND))
+	if is_equal_approx(second, wavenumber):
+		second += 1.0
+	return sin(wavenumber * longitude + phase) \
+		+ MEANDER_SECOND_SHARE * sin(second * longitude + phase * 1.7)
 
 
 ## **How many vortices one map carries.** A budget, because every centre costs a dot product per pixel —

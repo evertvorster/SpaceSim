@@ -223,6 +223,38 @@ func _test_it_is_continuous_where_the_seam_is(
 		"%s: the field closes at ±180 (worst seam step %.2fx an ordinary step, at %.0f degrees)"
 			% [body_id, worst_ratio, worst_latitude])
 
+	# **And the LATITUDE direction, on the MEANDER ITSELF.** The field-level version below cannot see this one:
+	# a wave number that changes with latitude does not make the field *jump* in brightness, it makes the belt
+	# **kink** — the longitude profile above a parallel differs from the one below it, which the eye reads as a
+	# straight line across the belts (Evert, 2026-11-03: *"straight horizontal discrepancies between the
+	# belts"*). And between two thresholds the wavenumber was constant, so every band in that plateau carried
+	# the identical profile — *"the same texture is repeated in horizontal passes"*.
+	var offset_worst := 0.0
+	var offset_at := 0.0
+	var band_width := (PI * 0.5) / maxf(morphology.cells, 1.0)
+	var delta_latitude := 0.0005
+	for degrees in range(-85, 86, 1):
+		var latitude := deg_to_rad(float(degrees))
+		for index in 24:
+			var lon := -PI + TAU * float(index) / 24.0
+			var here := SpacesimCloudField.meander_offset(
+				_direction(latitude, lon), morphology.ratio, closure.phase, SpacesimCloudField.MEANDER,
+				morphology.cells
+			)
+			var there := SpacesimCloudField.meander_offset(
+				_direction(latitude + delta_latitude, lon), morphology.ratio, closure.phase,
+				SpacesimCloudField.MEANDER, morphology.cells
+			)
+			var jump := absf(there - here) / band_width
+			if jump > offset_worst:
+				offset_worst = jump
+				offset_at = float(degrees)
+	# A meander that moves a twentieth of a band width over half a milliradian of latitude is continuous;
+	# a wavenumber step moves a third of one in a single step.
+	h.check(offset_worst < 0.05,
+		"%s: the meander is continuous in latitude (worst %.4f of a band width, at %.0f degrees)"
+			% [body_id, offset_worst, offset_at])
+
 	# The pole is the other place a parameterised field goes wrong — a cylinder would pinwheel here.
 	# Sampling a cap around it must stay finite, in range, and continuous with the pole itself.
 	# **Through `plan()`, because that is what the bake reads** — the pole has to be right in the shipped

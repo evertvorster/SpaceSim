@@ -71,9 +71,20 @@ float cloud_condensation_favouring(float latitude, float cells) {
 }
 
 
-// `SpacesimCloudField.bands_at()`: the bands, with the meander that makes them weather rather than a
-// valance. The wavenumber is **rounded to a whole number** because only whole waves close round a
-// planet — that is a physical constraint, not a tidy-up, and the seam test is what found it.
+// `SpacesimCloudField._harmonics()`: one whole wavenumber's meander profile — two integer waves, the second
+// offset so they do not line up. Only whole waves close round a planet, which is a physical constraint and
+// not a tidy-up: the seam test is what found it, twice.
+float cloud_harmonics(float wavenumber, float longitude, float phase) {
+	float second = max(1.0, round(wavenumber * CLOUD_MEANDER_SECOND));
+	if (abs(second - wavenumber) < 0.5) {
+		second += 1.0;
+	}
+	return sin(wavenumber * longitude + phase)
+		+ CLOUD_MEANDER_SECOND_SHARE * sin(second * longitude + phase * 1.7);
+}
+
+
+// `SpacesimCloudField.bands_at()`: the bands, with the meander that makes them weather rather than a valance.
 float cloud_bands_at(vec3 direction, float cells, float ratio, float phase, float meander) {
 	float latitude = asin(clamp(direction.y, -1.0, 1.0));
 	if (cells <= 0.0) {
@@ -84,17 +95,18 @@ float cloud_bands_at(vec3 direction, float cells, float ratio, float phase, floa
 	}
 	float longitude = atan(direction.z, direction.x);
 	float band_width = (CLOUD_PI * 0.5) / cells;
-	float wavenumber = max(1.0, round(max(cos(latitude), 0.0) / ratio));
-	// **Both harmonics are whole waves**: `wavenumber * CLOUD_MEANDER_SECOND` is not an integer, so `sin` of it
-	// did not meet itself at the antimeridian and drew a seam down a meridian. See `SpacesimCloudField.bands_at`.
-	float second_wavenumber = max(1.0, round(wavenumber * CLOUD_MEANDER_SECOND));
-	if (abs(second_wavenumber - wavenumber) < 0.5) {
-		second_wavenumber += 1.0;
+	// **Two whole waves blended by the fractional part** — see `SpacesimCloudField.meander_offset`, which this
+	// mirrors. Rounding to one wave was a step function of latitude (a line across the belts, and identical
+	// meander profiles between thresholds); both harmonics must be integers or the field does not close.
+	float derived = max(cos(latitude), 0.0) / ratio;
+	if (derived <= 0.0) {
+		return cloud_condensation_favouring(latitude, cells);
 	}
-	float first = sin(wavenumber * longitude + phase);
-	float second = sin(second_wavenumber * longitude + phase * 1.7);
-	float offset = meander * band_width * (first + CLOUD_MEANDER_SECOND_SHARE * second)
-		/ (1.0 + CLOUD_MEANDER_SECOND_SHARE);
+	float low = max(1.0, floor(derived));
+	float share = clamp(derived - floor(derived), 0.0, 1.0);
+	float amplitude = meander * band_width / (1.0 + CLOUD_MEANDER_SECOND_SHARE);
+	float offset = amplitude * mix(
+		cloud_harmonics(low, longitude, phase), cloud_harmonics(low + 1.0, longitude, phase), share);
 	return cloud_condensation_favouring(latitude + offset, cells);
 }
 
