@@ -308,7 +308,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		# draw air through terrain again, and it cannot be seen in a picture (a pass with no depth looks like a pass
 		# that is working). The fallback is a far texel, so the failure mode is "the old behaviour" rather than black.
 		var depth_res: RID = buffers.get_depth_texture(false)
-		print("ATMO: size=%s radii=(%.0f, %.0f, %.0f) blend=%.1f deck_weight=%.2f deck_ext=%.5f depth=%s"
+		SpacesimDebug.say("ATMO: size=%s radii=(%.0f, %.0f, %.0f) blend=%.1f deck_weight=%.2f deck_ext=%.5f depth=%s"
 			% [size, _values[24], _values[25], _values[26], _values[23], _values[27], _values[29],
 				"yes" if depth_res.is_valid() else "NO — the march cannot see the ground"])
 	# **The frame's depth texture**, which is where the real surface is. `msaa = false` because the pass reads the

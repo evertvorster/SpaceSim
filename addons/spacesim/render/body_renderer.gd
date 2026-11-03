@@ -578,7 +578,14 @@ static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
 	# makes water draw over land. The double attenuation Evert describes then falls out for free: the deck's shadow
 	# already takes the light on the way down (`deck_shadow.gdshaderinc`), and the deck's own alpha now takes it on
 	# the way back up, because the sea is behind it.
-	material.render_priority = -1000
+	#
+	# **`RENDER_PRIORITY_MIN` is −128**, and a priority outside that range is *refused outright*
+	# (`material.cpp:71`: "Condition p_priority < RENDER_PRIORITY_MIN is true") — the material then keeps 0, which is
+	# exactly the tie this line exists to break. Measured 2026-11-03: `-1000` printed that error twice per body and
+	# changed no pixel. Eight is below any deck this engine can have (one per condensed species) and leaves the rest
+	# of the range alone.
+	const OCEAN_RENDER_PRIORITY := -8
+	material.render_priority = OCEAN_RENDER_PRIORITY
 	material.set_shader_parameter("ocean_color", SpacesimSurfaceModel.band_color(liquid))
 	var shading := SpacesimSurfaceModel.band_shading(liquid)
 	material.set_shader_parameter("ocean_roughness", shading.x)

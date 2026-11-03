@@ -465,6 +465,14 @@ func _update_fog(observer: Vector3) -> void:
 	if deck.is_empty():
 		_clear_fog()
 		return
+	# **Above the deck's top there is no fog, and the pass should not be dispatched to discover that.** The ramp is
+	# full at the base and zero at the top, so a camera above it draws nothing; the pass still built a uniform set and
+	# ran a full-frame dispatch every frame to composite an identity. Measured 2026-11-03 in flight: `blend=1.0
+	# deck_weight=0.00`.
+	var top_radius := float(deck.get("top_radius", 0.0))
+	if top_radius <= 0.0 or observer.distance_to(air["centre"]) >= top_radius:
+		_clear_fog()
+		return
 	_atmosphere_pass.prepare(
 		_camera, air["centre"], float(air["planet_radius"]), float(air["atmosphere_radius"]),
 		air["sun_direction"], air["air"], 1.0, deck
