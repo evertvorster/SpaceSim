@@ -568,6 +568,17 @@ static func air_shell_material(
 static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = OCEAN_SHADER
+	# **The sea is UNDER the cloud, so it must be drawn before every deck.** Evert, 2026-11-03, over a solid deck:
+	# *"There is the reflection off of the ocean showing through the clouds… the sunlight should have been attenuated
+	# and scattered twice."* It was not, because `render_priority` was left at 0 while the decks run 0 to −N: on Earth
+	# the sea and the single deck **tied**, and a tie falls to the distance sort — which cannot separate two meshes at
+	# the body's own origin. The sea's glint then composited straight over the deck.
+	#
+	# **Below every deck** (they are `-seed_layer`, so 0 and down), and still after the opaque ground, which is what
+	# makes water draw over land. The double attenuation Evert describes then falls out for free: the deck's shadow
+	# already takes the light on the way down (`deck_shadow.gdshaderinc`), and the deck's own alpha now takes it on
+	# the way back up, because the sea is behind it.
+	material.render_priority = -1000
 	material.set_shader_parameter("ocean_color", SpacesimSurfaceModel.band_color(liquid))
 	var shading := SpacesimSurfaceModel.band_shading(liquid)
 	material.set_shader_parameter("ocean_roughness", shading.x)
