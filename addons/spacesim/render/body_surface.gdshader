@@ -252,7 +252,19 @@ void fragment() {
 		// screen derivatives into a gradient *on the surface* — no tangent attribute, and no second sampling of the
 		// field. Length-clamped, because a slope steeper than `MAP_MAX_TILT` is one the geometry is already showing.
 		if (relief_exaggeration > 0.0) {
-			vec3 n = NORMAL;
+			// **The tangent basis is `up`, the BODY-space direction, and it was `NORMAL` until 2026-11-03.**
+			// `NORMAL` inside `fragment()` is in VIEW space — this file says so two hundred lines up — while
+			// `dFdx(up)` and `dFdx(height)` are body space. So every dot product below was between two vectors
+			// in DIFFERENT FRAMES: a meaningless scalar that moves only when the camera's orientation does.
+			// `det` is a signed quantity built from those scalars, so it crosses zero on a curve of the screen
+			// as the camera turns, and the reconstructed gradient blows up and FLIPS across it.
+			//
+			// Evert, 2026-11-03, and it is a perfect description of that: *"Keeping stationary, and just
+			// adjusting the camera angle, there is a line that sweeps through the images that seems to invert
+			// the shadow direction… The texture is the same, the rendered shadow seems to invert direction
+			// after the effect."* The texture is the same because `ALBEDO` never sees this; the shading inverts
+			// because `NORMAL` does. Seen on Luna, where grey ground leaves shading as the only signal.
+			vec3 n = up;
 			vec3 t1 = normalize(cross(n, abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
 			vec3 t2 = cross(n, t1);
 			vec3 dux = dFdx(up);
@@ -270,7 +282,9 @@ void fragment() {
 				if (lean > MAP_MAX_TILT) {
 					gradient *= MAP_MAX_TILT / lean;
 				}
-				NORMAL = normalize(n - relief_exaggeration * gradient);
+				// **Body space -> view space, once, at the end** — the same transform the sea does for its wave
+				// normal, and the only reason the solve above can stay in one frame throughout.
+				NORMAL = normalize(mat3(VIEW_MATRIX * MODEL_MATRIX) * normalize(n - relief_exaggeration * gradient));
 			}
 		}
 

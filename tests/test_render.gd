@@ -147,6 +147,18 @@ func _test_the_ground_is_the_field(h, earth: SpacesimSceneBody) -> void:
 		"and not the bare amplitude, which renormalised every octave that was fading out")
 	h.check(code.contains("NORMAL = unit_position"),
 		"which is set in `vertex()` from the direction, because the mesh carries no normal array")
+	# **AND THE RELIEF SOLVE STAYS IN ONE FRAME.** `NORMAL` in `fragment()` is VIEW space while `dFdx(up)` and
+	# `dFdx(height)` are BODY space, so a tangent basis built from `NORMAL` made every dot product in the 2x2 solve a
+	# mix of two frames — a meaningless scalar, whose signed determinant crosses zero on a curve of the screen as the
+	# camera TURNS, flipping the reconstructed gradient and inverting the shading on one side of it. Evert, 2026-11-03:
+	# *"the texture is the same, the rendered shadow seems to invert direction after the effect"*, with the angle
+	# alone changed. The basis is `up`, and the leaned normal is rotated into view space once, at the end.
+	h.check(code.contains("vec3 n = up;"),
+		"the relief basis is the body-space direction, not the view-space `NORMAL`")
+	h.check(not code.contains("vec3 n = NORMAL;"),
+		"and never `NORMAL`, which would mix the two frames in every term of the solve")
+	h.check(code.contains("mat3(VIEW_MATRIX * MODEL_MATRIX) * normalize(n - relief_exaggeration * gradient)"),
+		"with the leaned normal rotated into view space once, where the light loop reads it")
 	# **Absences, each one a mechanism that existed only to work around a raster.**
 	for gone in [
 		"height_map", "tile_map", "tile_count", "height_smooth(", "banded_detail(",
