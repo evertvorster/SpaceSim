@@ -95,12 +95,18 @@ const FINE_SHARE := 0.55
 ## [method bands_at]. Zero gives straight circles, which is what the field drew until 2026-10-17.
 const MEANDER := 0.18
 
-## **A second, incommensurate component of the meander**, as a fraction of the first.
+## **A second component of the meander**, as a fraction of the first wave's number.
 ##
 ## One sine is perfectly periodic, so a band meanders identically all the way round and reads as a
-## decorative valance rather than as weather. Two harmonics whose wavenumbers are in the golden ratio never
-## repeat, so the lobes vary in size the way a real wave train does — at the cost of one `sin`. **The
-## fraction is a calibration**; the *first* wavenumber is the derived one and stays the primary.
+## decorative valance rather than as weather. A second harmonic at a different frequency makes the lobes
+## vary in size the way a real wave train does — at the cost of one `sin`. **The fraction is a calibration**;
+## the *first* wavenumber is the derived one and stays the primary.
+##
+## **The product is ROUNDED to a whole wave, and that is a correctness requirement rather than a tidy-up.**
+## The golden ratio was chosen so the two never repeat, but a planet admits only integers: at 0.618 the
+## second harmonic did not meet itself at the antimeridian and drew a seam down a meridian — invisible on
+## Earth, 10.9x an ordinary step on Jupiter's smooth belts, until it was seen in flight (2026-11-03). See
+## [method bands_at].
 const MEANDER_SECOND := 0.618
 const MEANDER_SECOND_SHARE := 0.6
 
@@ -147,8 +153,23 @@ static func bands_at(
 	# boundary, which is the seam test catching exactly what it exists for. Only whole waves fit round a
 	# planet, so the derived number is rounded; **that is a physical constraint rather than a tidy-up.**
 	var wavenumber := maxf(1.0, roundf(maxf(cos(latitude), 0.0) / ratio))
+	# **THE SECOND HARMONIC HAS TO CLOSE TOO, and it did not from the day it was written** (Evert, 2026-11-03:
+	# *"I see some stitching errors on the cloud texture of jupiter"*). `wavenumber * MEANDER_SECOND` is 3.708 at
+	# Jupiter's 6 and `sin` of it does not meet itself round the planet, so the meander's offset stepped at the
+	# antimeridian: a coherent vertical line down a whole meridian, which no field should have at any resolution.
+	#
+	# **It was invisible on Earth and obvious on Jupiter, and that is why it survived.** Earth is SHREDDED, so the
+	# envelope is `0.85 + 0.15 * bands` and the step is attenuated to nothing against a ragged field's own
+	# variation; Jupiter is BANDED, `0.25 + 0.75 * bands`, and smooth, so the same step is **10.9x** an ordinary
+	# step at 50 degrees. `tests/test_cloud_field.gd` measures that ratio directly now, for both bodies.
+	#
+	# So the ratio is rounded as well — **two different whole waves**, which is what "incommensurate" has to mean
+	# on a sphere: the golden ratio is a number, and a planet only admits integers.
+	var second_wavenumber := maxf(1.0, roundf(wavenumber * MEANDER_SECOND))
+	if is_equal_approx(second_wavenumber, wavenumber):
+		second_wavenumber += 1.0
 	var first := sin(wavenumber * longitude + phase)
-	var second := sin(wavenumber * MEANDER_SECOND * longitude + phase * 1.7)
+	var second := sin(second_wavenumber * longitude + phase * 1.7)
 	var offset := meander * band_width * (first + MEANDER_SECOND_SHARE * second) \
 		/ (1.0 + MEANDER_SECOND_SHARE)
 	return SpacesimCloudModel.condensation_favouring(latitude + offset, cells)

@@ -85,8 +85,14 @@ float cloud_bands_at(vec3 direction, float cells, float ratio, float phase, floa
 	float longitude = atan(direction.z, direction.x);
 	float band_width = (CLOUD_PI * 0.5) / cells;
 	float wavenumber = max(1.0, round(max(cos(latitude), 0.0) / ratio));
+	// **Both harmonics are whole waves**: `wavenumber * CLOUD_MEANDER_SECOND` is not an integer, so `sin` of it
+	// did not meet itself at the antimeridian and drew a seam down a meridian. See `SpacesimCloudField.bands_at`.
+	float second_wavenumber = max(1.0, round(wavenumber * CLOUD_MEANDER_SECOND));
+	if (abs(second_wavenumber - wavenumber) < 0.5) {
+		second_wavenumber += 1.0;
+	}
 	float first = sin(wavenumber * longitude + phase);
-	float second = sin(wavenumber * CLOUD_MEANDER_SECOND * longitude + phase * 1.7);
+	float second = sin(second_wavenumber * longitude + phase * 1.7);
 	float offset = meander * band_width * (first + CLOUD_MEANDER_SECOND_SHARE * second)
 		/ (1.0 + CLOUD_MEANDER_SECOND_SHARE);
 	return cloud_condensation_favouring(latitude + offset, cells);

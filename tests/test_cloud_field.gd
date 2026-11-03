@@ -39,7 +39,12 @@ func run(h, root: Node) -> void:
 	_test_determinism(h, earth)
 	_test_a_featureless_body_costs_nothing(h, venus)
 	_test_the_bands_are_bands(h, jupiter, earth)
-	_test_it_is_continuous_where_the_seam_is(h, earth)
+	# **Every body, not just the softest one.** Earth is SHREDDED, so a meander discontinuity hides under its
+	# own weather: the step across the wrap is compared against the biggest step the field takes anywhere, and a
+	# ragged field's interior steps are large. Jupiter is BANDED — 75 % envelope, smooth belts — which is where
+	# the same seam stands out (Evert, 2026-11-03: *"I see some stitching errors on the cloud texture of jupiter"*).
+	_test_it_is_continuous_where_the_seam_is(h, earth, "planet:earth")
+	_test_it_is_continuous_where_the_seam_is(h, jupiter, "planet:jupiter")
 	_test_the_values_are_sane(h, jupiter, earth, venus)
 	_test_what_a_bake_costs(h, earth)
 
@@ -144,9 +149,11 @@ func _test_the_bands_are_bands(h, jupiter: SpacesimCloudModel.Morphology, earth:
 ## side are close" is a check that passes or fails on how far apart the samples happened to be. What the
 ## seam has to look like is *every other column boundary* — the wrap pair is one column step apart, the
 ## same as the interior pairs — so the comparison is between two distributions of the same quantity.
-func _test_it_is_continuous_where_the_seam_is(h, earth: SpacesimCloudModel.Morphology) -> void:
+func _test_it_is_continuous_where_the_seam_is(
+	h, morphology: SpacesimCloudModel.Morphology, body_id: String
+) -> void:
 	var map := SpacesimCloudField.bake(
-		SpacesimCloudField.seed_for("planet:earth", 0), earth, TEST_WIDTH, TEST_HEIGHT
+		SpacesimCloudField.seed_for(body_id, 0), morphology, TEST_WIDTH, TEST_HEIGHT
 	)
 	var data := map.get_data()
 	var width := map.get_width()
@@ -183,14 +190,44 @@ func _test_it_is_continuous_where_the_seam_is(h, earth: SpacesimCloudModel.Morph
 			seam_max = seam
 			worst_row = row
 	h.check(seam_max <= interior_max * 1.2,
-		"no step across the wrap is bigger than the biggest the field takes elsewhere (%.0f against %.0f at row %d)"
-			% [seam_max, interior_max, worst_row])
+		"%s: no step across the wrap is bigger than the biggest the field takes elsewhere (%.0f against %.0f at row %d)"
+			% [body_id, seam_max, interior_max, worst_row])
+
+	# **And the sharper version of the same question: the FIELD, not the map.** A max-step statistic over a
+	# raster is coarse — a coherent offset along a whole meridian can sit under a ragged field's largest
+	# interior step and still read as a line. So: approach the same direction from either side of the wrap,
+	# and compare that step with the step the field takes over the SAME angular distance anywhere else at
+	# that latitude. If the field closes, the two are the same order.
+	var closure := SpacesimCloudField.plan(SpacesimCloudField.seed_for(body_id, 0), morphology)
+	var worst_ratio := 0.0
+	var worst_latitude := 0.0
+	for degrees in range(-70, 71, 10):
+		var latitude := deg_to_rad(float(degrees))
+		var epsilon := 0.0001
+		var before := _direction(latitude, PI - epsilon)
+		var after := _direction(latitude, -PI + epsilon)
+		var seam_step := absf(_field_at(after, closure) - _field_at(before, closure))
+		# The same angular step, taken at a hundred longitudes of that latitude, as the yardstick.
+		var typical := 0.0
+		for index in 100:
+			var lon := -PI + TAU * float(index) / 100.0
+			typical = maxf(typical, absf(
+				_field_at(_direction(latitude, lon + 2.0 * epsilon), closure)
+					- _field_at(_direction(latitude, lon), closure)
+			))
+		var ratio := seam_step / maxf(typical, 1.0e-6)
+		if ratio > worst_ratio:
+			worst_ratio = ratio
+			worst_latitude = float(degrees)
+	h.check(worst_ratio < 2.0,
+		"%s: the field closes at ±180 (worst seam step %.2fx an ordinary step, at %.0f degrees)"
+			% [body_id, worst_ratio, worst_latitude])
 
 	# The pole is the other place a parameterised field goes wrong — a cylinder would pinwheel here.
 	# Sampling a cap around it must stay finite, in range, and continuous with the pole itself.
 	# **Through `plan()`, because that is what the bake reads** — the pole has to be right in the shipped
 	# field, not in a simplified copy of it that no longer exists.
-	var plan := SpacesimCloudField.plan(SpacesimCloudField.seed_for("planet:earth", 0), earth)
+	var plan := SpacesimCloudField.plan(SpacesimCloudField.seed_for(body_id, 0), morphology)
 	var pole := _field_at(Vector3(0.0, 1.0, 0.0), plan)
 	var bad := 0
 	var worst := 0.0
@@ -204,6 +241,13 @@ func _test_it_is_continuous_where_the_seam_is(h, earth: SpacesimCloudModel.Morph
 	h.check(bad == 0, "and 64 samples in a cap at the pole are all finite and in range")
 	h.check(worst < 0.5,
 		"and the cap is continuous with the pole itself (worst %.3f of the field's range)" % worst)
+
+
+## A direction from a latitude and a longitude, in the bake's own convention.
+func _direction(latitude: float, longitude: float) -> Vector3:
+	return Vector3(
+		cos(latitude) * cos(longitude), sin(latitude), cos(latitude) * sin(longitude)
+	).normalized()
 
 
 ## One direction through the real field, with the plan the bake would have used.
