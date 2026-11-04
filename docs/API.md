@@ -985,9 +985,9 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 | Tab | Holds |
 |---|---|
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
+| **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
 | **Bindings** | the sixteen keys and `mouse.sensitivity` |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
-| **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
 
 **A tab with nothing filed into it is not built**, because an empty page is a promise of settings that
@@ -1041,7 +1041,7 @@ scenes: `configure(settings)`, and the `closed` signal. The buttons drive the ed
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
-| `static TABS` | the tabs the settings screen shows, in order: `display`, `bindings`, `troubleshooting`, `hud`, `rest` |
+| `static TABS` | the tabs the settings screen shows, in order: `display`, `hud`, `bindings`, `troubleshooting`, `rest` |
 | `static tab_title(tab) -> String` | what a tab is called on screen — its key capitalised, except `hud`, which is an acronym |
 | `static tab_of(key) -> String` | which tab a row is filed in; **a row that names none is in `rest`** |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |

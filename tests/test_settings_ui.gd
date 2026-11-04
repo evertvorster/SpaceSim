@@ -194,8 +194,8 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	for index in tabs.get_tab_count():
 		titles.append(tabs.get_tab_title(index))
 	h.check(
-		titles == ["Display", "Bindings", "Troubleshooting", "HUD"],
-		"the tabs are Display, Bindings, Troubleshooting and HUD, in that order (%s)"
+		titles == ["Display", "HUD", "Bindings", "Troubleshooting"],
+		"the tabs are Display, HUD, Bindings and Troubleshooting, in that order (%s)"
 			% str(titles)
 	)
 
