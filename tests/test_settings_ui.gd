@@ -14,8 +14,6 @@ var _fixture := Fixture.new()
 func run(h, root: Node) -> void:
 	print("  bindings and the settings screen")
 	Fixture.clean()
-	_test_binding_text(h)
-	_test_binding_matching(h)
 	_test_registry_is_sound(h)
 	_test_edits_are_staged_not_applied(h)
 	_test_reset_and_discard(h)
@@ -26,58 +24,21 @@ func run(h, root: Node) -> void:
 	_fixture.release()
 
 
-func _test_binding_text(h) -> void:
-	h.check(Binding.is_valid("W"), "a plain key is a binding")
-	h.check(Binding.is_valid("Alt+C"), "so is a modified one")
-	h.check(Binding.is_valid("BracketLeft"), "and a key named for its position")
-	h.check(not Binding.is_valid("Nonsense"), "a word that is not a key is not")
-	h.check(not Binding.is_valid(""), "and neither is nothing")
-
-	# Formatting normalises the modifier order, so two spellings of one binding agree.
-	h.check(
-		Binding.to_text(Binding.parse("Alt+Shift+BracketLeft")) == "Shift+Alt+BracketLeft",
-		"a binding survives a round trip, order normalised"
-	)
-	h.check(Binding.keycode_of("W") == KEY_W, "and yields the key it names")
-
-
-func _test_binding_matching(h) -> void:
-	var event := InputEventKey.new()
-	event.physical_keycode = KEY_C
-	event.alt_pressed = true
-	event.pressed = true
-	h.check(Binding.matches(event, "Alt+C"), "the event matches its own binding")
-	h.check(not Binding.matches(event, "C"), "but not the bare key: modifiers must match exactly")
-	h.check(not Binding.matches(event, "Ctrl+C"), "nor a different modifier")
-
-	event.pressed = false
-	h.check(not Binding.matches(event, "Alt+C"), "a release is not a press")
-	event.pressed = true
-	event.echo = true
-	h.check(not Binding.matches(event, "Alt+C"), "nor is a key repeat")
-	event.echo = false
-	h.check(Binding.from_event(event) == "Alt+C", "and an event reads back as its binding")
-
-
+## **A registry row that cannot be what it says it is** would fail silently somewhere far away, so the
+## shape is checked here: a dotted key, a validator the code knows, choices that include the row's own
+## default.
 func _test_registry_is_sound(h) -> void:
-	# A row naming a validator that does not exist would silently skip its check, so the names are
-	# checked against the list the code knows.
 	var unknown: Array[String] = []
-	var bad_defaults: Array[String] = []
 	var undotted: Array[String] = []
+	var bad_choices: Array[String] = []
 	for key in Settings.declared_keys():
 		var row: Dictionary = Settings.REGISTRY[key]
 		if not String(key).contains("."):
 			undotted.append(key)
 		if row.has("validator") and not Settings.KNOWN_VALIDATORS.has(row["validator"]):
 			unknown.append(key)
-		if row.get("validator", "") == "key_binding" and not Binding.is_valid(String(row["default"])):
-			bad_defaults.append(key)
-	# A row offering choices that does not include its own default would open showing nothing, and a
-	# row that offers a list but names one we cannot build would fall back to a text box silently.
-	var bad_choices: Array[String] = []
-	for key in Settings.declared_keys():
-		var row: Dictionary = Settings.REGISTRY[key]
+		# A row offering choices that does not include its own default would open showing nothing, and a
+		# row that offers a list but names one we cannot build would fall back to a text box silently.
 		var listed: Variant = row.get("choices", null)
 		if listed is Array and not listed.has(row["default"]):
 			bad_choices.append(key)
@@ -88,16 +49,7 @@ func _test_registry_is_sound(h) -> void:
 		"every row that offers choices offers its own default%s" % Fixture.detail(bad_choices)
 	)
 	h.check(unknown.is_empty(), "every declared validator exists%s" % Fixture.detail(unknown))
-	h.check(bad_defaults.is_empty(), "every binding default is a valid binding%s" % Fixture.detail(bad_defaults))
 	h.check(undotted.is_empty(), "every key is sectioned%s" % Fixture.detail(undotted))
-	h.check(
-		Settings.is_acceptable("bindings.throttle_up", "Alt+W"),
-		"a valid binding is acceptable"
-	)
-	h.check(
-		not Settings.is_acceptable("bindings.throttle_up", "Nonsense"),
-		"and an unparseable one is not"
-	)
 
 
 func _test_edits_are_staged_not_applied(h) -> void:
@@ -221,7 +173,11 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 		display.all(func(key: String) -> bool: return key.begins_with("video.")),
 		"and they are the video ones (%s)" % str(display)
 	)
-	h.check(bindings.size() == 17, "Bindings holds the sixteen keys and the mouse (%d)" % bindings.size())
+	h.check(
+		bindings.size() == 1,
+		"Bindings holds only the mouse's sensitivity: the sixteen keys left for their own store (%d)"
+			% bindings.size()
+	)
 	h.check(
 		trouble.has("render.mode") and trouble.has("lod.error_budget") and trouble.has("sky.star_gain"),
 		"Troubleshooting holds the drawing switches, the LOD knobs and the sky's calibration (%d)"
@@ -251,6 +207,11 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 		total == Edit.editable_keys().size(),
 		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
 	)
+	h.check(
+		Edit.editable_keys().size() == 35,
+		"there are thirty-five settings, the sixteen bindings having left (%d)"
+			% Edit.editable_keys().size()
+	)
 
 	layer.free()
 
@@ -270,5 +231,4 @@ func _test_bad_values_are_not_staged(h) -> void:
 	var settings := _fixture.open()
 	var edit = Edit.new(settings)
 	h.check(not edit.stage("camera.fov", 10000.0), "an out-of-range edit is not staged")
-	h.check(not edit.stage("bindings.throttle_up", "Nonsense"), "an unparseable binding is not staged")
 	h.check(not edit.has_changes(), "so there is nothing to apply")

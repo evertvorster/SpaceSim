@@ -27,11 +27,13 @@ extends Node
 ## value is a decision and not something left over.
 enum Scope { PLAYER }
 
-const Binding := preload("res://addons/spacesim/input/binding.gd")
 
 ## The named checks [method _passes_validator] knows. A row naming anything else is a mistake in
 ## the registry, not a silently skipped check.
-const KNOWN_VALIDATORS := ["key_binding"]
+## Named checks the bounds cannot express. **Empty since the bindings left**: the only validator was
+## `key_binding`, and a binding is no longer a setting — `SpacesimBindingsStore.stage` refuses a text it
+## cannot parse, at the point where it is edited.
+const KNOWN_VALIDATORS := []
 
 ## Every setting the engine knows, with the single declaration of its default.
 ##
@@ -238,47 +240,15 @@ const REGISTRY := {
 	# The selected target's own colour, against the one colour everything else is drawn in. A colour
 	# rather than a flag so the target can be made to stand out against whatever it is seen against.
 	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER, "tab": "hud"},
-	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
 	# **The throttle is signed and goes to zero on a key of its own** (2026-10-20), because flying a
 	# cloud backwards at the same speed as forwards is how its two faces get compared. `+` is the
 	# shifted `Equal` key, which is what the physical key in that position is called.
-	"bindings.throttle_up": {"default": "Shift+Equal", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.throttle_down": {"default": "Minus", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.throttle_stop": {"default": "Backspace", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
 	# **The six view directions**, so a scene can be inspected from anywhere without turning the ship. The
 	# camera looks along the chosen direction in the SHIP's frame, so mouse look still steers and the view
 	# stays where it was put.
-	"bindings.view_forward": {"default": "1", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.view_back": {"default": "2", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.view_left": {"default": "3", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
 	# **The brackets roll, and they used to step the mesh error budget** — which is a value flown once and
 	# now left at its best setting (`lod.error_budget` stays in the registry, hot, and the HUD keeps showing
 	# the triangle count). A trim nobody adjusts does not need two keys; flying sideways does.
-	"bindings.roll_left": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
-	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding",
-		"tab": "bindings"},
 }
 
 ## Emitted after a value changes, with the value that now stands.
@@ -469,11 +439,10 @@ static func _acceptable_row(row: Dictionary, value: Variant) -> bool:
 
 ## Named checks the bounds cannot express — and the extension point for the relational ones that
 ## min/max cannot either, such as a near plane having to stay below a far plane.
-static func _passes_validator(row: Dictionary, value: Variant) -> bool:
+static func _passes_validator(row: Dictionary, _value: Variant) -> bool:
 	match String(row.get("validator", "")):
-		"key_binding":
-			return typeof(value) == TYPE_STRING and Binding.is_valid(value)
-	return true
+		_:
+			return true
 
 
 ## A value from a file or the world, made safe: coerced when it is merely a whole number stored
