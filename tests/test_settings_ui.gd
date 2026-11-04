@@ -346,8 +346,10 @@ func _test_the_devices_tab(h, root: Node) -> void:
 		)
 		var bar: AxisBar = rows[0][2]
 		h.check(
-			is_equal_approx(bar.centre, profile.centre) and is_equal_approx(bar.deadband, profile.deadband),
-			"with the bar drawing the profile's deadband"
+			is_equal_approx(bar.profile.centre, profile.centre)
+			and is_equal_approx(bar.profile.deadband, profile.deadband)
+			and is_equal_approx(bar.value, raw),
+			"with the bar drawing the profile's deadband and the axis's raw reading"
 		)
 
 		# **The numbers live above the bar**: the centre and the travel are shown, never typed; only the
@@ -373,8 +375,15 @@ func _test_the_devices_tab(h, root: Node) -> void:
 			"and it is that axis's profile that changed"
 		)
 
-		# **Centred takes the reading**, which is the one number a player cannot type accurately.
+		# **Centred takes the reading**, which is the one number a player cannot type accurately — and then
+		# the dot is in the middle of the deadband box, because both are drawn in travel units.
 		(rows[0][8] as Button).pressed.emit()
+		panel._refresh_devices()
+		var box_centre: float = bar.profile.centre
+		h.check(
+			is_equal_approx(bar.value, box_centre),
+			"and the bar puts the dot at the centre of the band (%f vs %f)" % [bar.value, box_centre]
+		)
 		h.check(
 			is_equal_approx(
 				store.axis_profile(Devices.name_of(device), Devices.AXIS_NAMES[0]).centre,

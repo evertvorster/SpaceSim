@@ -284,7 +284,7 @@ func _axis_row(device: int, index: int) -> VBoxContainer:
 
 	var bar := AxisBar.new()
 	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.set_state(0.0, profile.centre, profile.deadband)
+	bar.set_state(Devices.axis(device, index), profile)
 	row.add_child(bar)
 
 	var value_label := Label.new()
@@ -381,7 +381,7 @@ func _stage_axis(device: int, index: int) -> void:
 		_set_axis_status(entry, "that does not fit the axis")
 		return
 	_set_axis_status(entry, "")
-	(entry[2] as AxisBar).set_state(Devices.axis(device, index), profile.centre, profile.deadband)
+	(entry[2] as AxisBar).set_state(Devices.axis(device, index), profile)
 
 
 ## **A complaint, not a report**: the travel is always on screen now, so anything written here is
@@ -490,7 +490,8 @@ func _refresh_devices() -> void:
 		var raw: float = Devices.axis(device, index)
 		var profile: SpacesimAxisProfile = _profile_of(device, index)
 		var shaped: float = profile.shape(raw)
-		(entry[2] as AxisBar).set_state(shaped, profile.centre, profile.deadband)
+		# **Raw, with the profile**: the bar draws in travel units, so the dot and the box agree.
+		(entry[2] as AxisBar).set_state(raw, profile)
 		var value_label: Label = entry[3]
 		value_label.text = "%+.2f" % shaped
 		value_label.modulate = (

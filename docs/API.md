@@ -1222,9 +1222,17 @@ numbers are stored, shown and calibrated but change no behaviour.
 
 ### `SpacesimAxisBar` — `Control`
 
-`addons/spacesim/ui/axis_bar.gd`. One axis drawn as a line: the travel, the deadband **boxed in red** at
-`centre ± deadband`, a tick where it rests, and a dot where it is now. `set_state(value, centre,
-deadband)` from a per-frame refresh; it draws and nothing else.
+`addons/spacesim/ui/axis_bar.gd`. One axis drawn as a line: the **profile's travel** across the full
+width, the deadband **boxed in red**, a tick where it rests, and a dot where it is now — all in the
+travel's own units, so the dot lands in the middle of the box the moment **Centred** has been pressed.
+`set_state(raw, profile)` from a per-frame refresh; it draws and nothing else.
+
+**The unit matters and was wrong once**: drawing the box from the raw centre and the dot from the *shaped*
+value puts them in two coordinate spaces, and a centred axis then showed a dot that was not in the middle
+of its own deadband. The line spans `low … high` rather than `−1 … +1` for the same reason — a trigger that
+runs `0 … +1` gets a line it can actually fill. The band's half-width is converted per side
+(`deadband · (centre − low)` and `deadband · (high − centre)`), so an asymmetric axis gets a box that means
+the same thing either side of its rest.
 
 ### `SpacesimBindingsStore` — `RefCounted`
 
