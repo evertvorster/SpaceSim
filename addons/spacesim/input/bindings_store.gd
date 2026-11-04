@@ -31,10 +31,21 @@ extends RefCounted
 ## other route** — no auto-save, no write-back.
 
 const Actions := preload("res://addons/spacesim/input/actions.gd")
+const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 
 const DEFAULT_SECTION := "bindings"
 const DEVICE_PREFIX := "bindings."
+## **The axis profiles, one section per device**, keyed by the axis's name:
+##
+## ```ini
+## [axes.PS4 Controller]
+## LEFT_X = "-1.000, 1.000, 0.000, 0.150"
+## ```
+##
+## They live here because they are staged and written by the same edits as the bindings, not because they
+## are bindings: a profile belongs to the device's axis.
+const AXES_PREFIX := "axes."
 ## What separates two bindings on one action in the file. A comma cannot appear in a binding, so the
 ## split is unambiguous.
 const SEPARATOR := ","
@@ -43,6 +54,8 @@ var _file := ConfigFile.new()
 var _path := ""
 ## action id → Array of texts, for the actions the player has edited and not yet applied.
 var _staged := {}
+## `"<device>|<axis>"` → `SpacesimAxisProfile`, for the axis profiles the player has edited.
+var _staged_axes := {}
 
 ## Anything the one-time import could not read, as `["<action>: <text>", …]`. Shown by the screen
 ## rather than swallowed: a binding that silently reverted to its default is the fault nobody reports.
@@ -55,6 +68,7 @@ func open(path := "", legacy_path := "") -> void:
 	_path = path if not path.is_empty() else SpacesimXdg.bindings_path()
 	_file = ConfigFile.new()
 	_staged.clear()
+	_staged_axes.clear()
 	problems.clear()
 
 	if FileAccess.file_exists(_path):
@@ -146,11 +160,47 @@ func has_changes() -> bool:
 	for id in _staged:
 		if _clean(_staged[id]) != _clean(_stored(id)):
 			return true
+	for key in _staged_axes:
+		var staged: SpacesimAxisProfile = _staged_axes[key]
+		if staged.to_text() != _stored_axis_profile(key).to_text():
+			return true
 	return false
 
 
 func discard() -> void:
 	_staged.clear()
+	_staged_axes.clear()
+
+
+## **One axis's profile**: staged if edited, else the device's section, else the defaults.
+func axis_profile(device: String, axis: String) -> SpacesimAxisProfile:
+	var key := _axis_key(device, axis)
+	if _staged_axes.has(key):
+		return (_staged_axes[key] as SpacesimAxisProfile).duplicate_profile()
+	return _stored_axis_profile(key)
+
+
+## Stage a profile. **A profile that cannot make sense is refused**, so a centre outside the travel or a
+## band wide enough to swallow the whole axis never reaches the file.
+func stage_axis_profile(device: String, axis: String, profile: SpacesimAxisProfile) -> bool:
+	if not profile.is_sane():
+		return false
+	_staged_axes[_axis_key(device, axis)] = profile.duplicate_profile()
+	return true
+
+
+func _stored_axis_profile(key: String) -> SpacesimAxisProfile:
+	var split := key.split("|", true, 1)
+	if split.size() != 2:
+		return AxisProfile.new()
+	var section := AXES_PREFIX + String(split[0])
+	if not _file.has_section_key(section, String(split[1])):
+		return AxisProfile.new()
+	return AxisProfile.from_text(String(_file.get_value(section, String(split[1]), "")))
+
+
+static func _axis_key(device: String, axis: String) -> String:
+	return "%s|%s" % [device, axis]
 
 
 ## Write the whole table and clear the staging. Returns the number of actions written, or -1 when the
@@ -160,12 +210,25 @@ func apply() -> int:
 	var fresh := ConfigFile.new()
 	for id in Actions.ids():
 		fresh.set_value(DEFAULT_SECTION, id, _join(written[id]))
-	# A device section that was read in is carried across untouched; nothing here writes one.
+
+	# A device's binding overrides and every axis profile are carried across untouched — nothing here
+	# writes one — so a section this screen does not know about survives an Apply.
 	for section in _file.get_sections():
-		if not section.begins_with(DEVICE_PREFIX):
+		if not (section.begins_with(DEVICE_PREFIX) or section.begins_with(AXES_PREFIX)):
 			continue
 		for key in _file.get_section_keys(section):
 			fresh.set_value(section, key, _file.get_value(section, key))
+
+	# The staged axis profiles go over the top of that.
+	for key in _staged_axes:
+		var parts := String(key).split("|", true, 1)
+		if parts.size() != 2:
+			continue
+		fresh.set_value(
+			AXES_PREFIX + String(parts[0]),
+			String(parts[1]),
+			(_staged_axes[key] as SpacesimAxisProfile).to_text()
+		)
 
 	if not SpacesimXdg.ensure_directory(_path.get_base_dir()):
 		push_warning("bindings: cannot create '%s'" % _path.get_base_dir())
@@ -177,6 +240,7 @@ func apply() -> int:
 
 	_file = fresh
 	_staged.clear()
+	_staged_axes.clear()
 	return Actions.ids().size()
 
 

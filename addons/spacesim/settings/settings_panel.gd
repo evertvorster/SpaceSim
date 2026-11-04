@@ -13,6 +13,9 @@ extends SpacesimScreen
 const SettingsScript := preload("res://addons/spacesim/settings/settings.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
+const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
+const AxisBar := preload("res://addons/spacesim/ui/axis_bar.gd")
+const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const EditScript := preload("res://addons/spacesim/settings/settings_edit.gd")
@@ -47,6 +50,15 @@ var _button_labels: Array = []
 ## events so it reaches this screen and nothing else — see [method configuring_device].
 var _configuring := ""
 var _configure_boxes: Array = []
+
+## One entry per axis of every device:
+## `[device, axis index, bar, value label, centre field, deadband field, calibrate button, status label]`.
+var _axis_rows: Array = []
+var _dialog: SpacesimDialog
+## The axis being calibrated as `[device, axis index]`, or empty.
+var _calibrating: Array = []
+var _calibrated_low := 0.0
+var _calibrated_high := 0.0
 var _apply_button: Button
 var _close_button: Button
 var _updating := false
@@ -59,6 +71,11 @@ func configure(settings: Node, bindings: SpacesimBindingsStore) -> void:
 	_build()
 	_edit.changed.connect(_refresh)
 	_refresh()
+
+	_dialog = Dialog.new()
+	_dialog.visible = false
+	_dialog.answered.connect(_on_dialog_answered)
+	add_child(_dialog)
 
 
 func _build() -> void:
@@ -181,23 +198,10 @@ func _build_devices(column: VBoxContainer) -> void:
 		detail.modulate = Color(1.0, 1.0, 1.0, 0.55)
 		box.add_child(detail)
 
-		# **One axis per line**, name then value: a row of six numbers across the panel is a table to
-		# decode, and what a player is doing here is watching one stick move.
-		var axes_grid := _grid()
-		axes_grid.columns = 2
+		# **One axis per line**: the name, the line the axis moves along, the shaped value, and the two
+		# numbers that decide what "moved" means — then the button that measures its travel.
 		for index in Devices.AXIS_NAMES.size():
-			var name_label := Label.new()
-			name_label.text = Devices.AXIS_NAMES[index]
-			name_label.add_theme_font_size_override("font_size", 13)
-			name_label.modulate = Color(1.0, 1.0, 1.0, 0.6)
-			axes_grid.add_child(name_label)
-			var value_label := Label.new()
-			value_label.name = "Axis%d" % index
-			value_label.add_theme_font_size_override("font_size", 13)
-			value_label.custom_minimum_size = Vector2(56.0, 0.0)
-			axes_grid.add_child(value_label)
-			_axis_labels.append([device, index, value_label])
-		box.add_child(axes_grid)
+			box.add_child(_axis_row(device, index))
 
 		# **Every button, laid out**, rather than only the one held: the point of the tab is to see what
 		# the device *has*, and a button you cannot find is one you cannot bind. Lit when it is down.
@@ -218,6 +222,160 @@ func _build_devices(column: VBoxContainer) -> void:
 	_refresh_devices()
 
 
+## One axis: `LEFT_X  ──●────▭▭▭──  +0.32  [0.000] [0.150] [Calibrate]`.
+func _axis_row(device: int, index: int) -> HBoxContainer:
+	var profile: SpacesimAxisProfile = _profile_of(device, index)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+
+	var name_label := Label.new()
+	name_label.text = Devices.AXIS_NAMES[index]
+	name_label.custom_minimum_size = Vector2(88.0, 0.0)
+	name_label.add_theme_font_size_override("font_size", 13)
+	name_label.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	row.add_child(name_label)
+
+	var bar := AxisBar.new()
+	bar.set_state(0.0, profile.centre, profile.deadband)
+	row.add_child(bar)
+
+	var value_label := Label.new()
+	value_label.name = "Value%d" % index
+	value_label.custom_minimum_size = Vector2(52.0, 0.0)
+	value_label.add_theme_font_size_override("font_size", 13)
+	row.add_child(value_label)
+
+	var centre_field := _profile_field(profile.centre, "centre")
+	var deadband_field := _profile_field(profile.deadband, "deadband")
+	centre_field.text_changed.connect(func(_text: String) -> void: _stage_axis(device, index))
+	deadband_field.text_changed.connect(func(_text: String) -> void: _stage_axis(device, index))
+	row.add_child(centre_field)
+	row.add_child(deadband_field)
+
+	var calibrate := Button.new()
+	calibrate.name = "Calibrate"
+	calibrate.text = "Calibrate"
+	calibrate.tooltip_text = "Measure this axis's travel: fully deflect it both ways, then Save."
+	calibrate.pressed.connect(func() -> void: _start_calibration(device, index))
+	row.add_child(calibrate)
+
+	var status := Label.new()
+	status.name = "Status"
+	status.add_theme_font_size_override("font_size", 12)
+	status.modulate = INVALID_COLOR
+	row.add_child(status)
+
+	_axis_rows.append([device, index, bar, value_label, centre_field, deadband_field, calibrate, status])
+	return row
+
+
+## A text field for one number of a profile, sized for three decimals and a sign.
+func _profile_field(value: float, named: String) -> LineEdit:
+	var field := LineEdit.new()
+	field.name = named
+	field.text = "%.3f" % value
+	field.custom_minimum_size = Vector2(62.0, 0.0)
+	field.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	return field
+
+
+func _profile_of(device: int, index: int) -> SpacesimAxisProfile:
+	return _bindings.axis_profile(
+		Devices.name_of(device), String(Devices.AXIS_NAMES[index])
+	)
+
+
+## Stage what the two fields say. **A profile that cannot make sense is coloured and not staged** — a
+## centre outside the travel, or a band that leaves no room to reach full deflection.
+func _stage_axis(device: int, index: int) -> void:
+	var entry := _axis_entry(device, index)
+	if entry.is_empty():
+		return
+	var centre_text: String = (entry[4] as LineEdit).text.strip_edges()
+	var band_text: String = (entry[5] as LineEdit).text.strip_edges()
+	if not centre_text.is_valid_float() or not band_text.is_valid_float():
+		_set_axis_status(entry, "a number, please")
+		return
+	var profile: SpacesimAxisProfile = _profile_of(device, index).duplicate_profile()
+	profile.centre = centre_text.to_float()
+	profile.deadband = band_text.to_float()
+	if not _bindings.stage_axis_profile(
+		Devices.name_of(device), String(Devices.AXIS_NAMES[index]), profile
+	):
+		_set_axis_status(entry, "that does not fit the axis")
+		return
+	_set_axis_status(entry, "")
+	(entry[2] as AxisBar).set_state(Devices.axis(device, index), profile.centre, profile.deadband)
+
+
+func _set_axis_status(entry: Array, text: String) -> void:
+	var status: Label = entry[7]
+	status.text = text
+	for at in [4, 5]:
+		(entry[at] as LineEdit).modulate = INVALID_COLOR if not text.is_empty() else IDLE_COLOR
+
+
+func _axis_entry(device: int, index: int) -> Array:
+	for entry in _axis_rows:
+		if int(entry[0]) == device and int(entry[1]) == index:
+			return entry
+	return []
+
+
+## **Calibrate this axis**: listen to it while the player deflects it both ways, and take the two
+## extremes as its travel.
+##
+## The device is routed away from the menus for the duration — waving a stick to calibrate it would
+## otherwise also walk the tab bar — and the dialog's hint line carries the running extremes, which is
+## what makes it visible that something is being measured.
+func _start_calibration(device: int, index: int) -> void:
+	_calibrating = [device, index]
+	_calibrated_low = INF
+	_calibrated_high = -INF
+	_set_configuring(Devices.name_of(device))
+	_dialog.ask(
+		"Calibrate %s" % Devices.AXIS_NAMES[index],
+		(
+			"Fully deflect the axis both ways, then press Save.\n\n"
+			+ "The device is taken away from the game and its menus while this is open."
+		),
+		["Save", "Cancel"]
+	)
+	_dialog.hint.text = "waiting for the axis to move"
+
+
+func _on_dialog_answered(action: String) -> void:
+	if _calibrating.is_empty():
+		return
+	var device := int(_calibrating[0])
+	var index := int(_calibrating[1])
+	var entry := _axis_entry(device, index)
+	_calibrating = []
+	_set_configuring("")
+	_calibrating = []
+	if _dialog != null:
+		_dialog.visible = false
+
+	if action != "Save":
+		return
+	if _calibrated_high - _calibrated_low < AxisProfile.MIN_CALIBRATED_TRAVEL:
+		# **Refused rather than stored**: `±0.0` would make a healthy control dead, and the usual cause is
+		# that the axis never spoke.
+		if not entry.is_empty():
+			_set_axis_status(entry, "the axis did not move")
+		return
+
+	var profile: SpacesimAxisProfile = _profile_of(device, index)
+	profile = profile.with_travel(_calibrated_low, _calibrated_high)
+	if not _bindings.stage_axis_profile(Devices.name_of(device), String(Devices.AXIS_NAMES[index]), profile):
+		if not entry.is_empty():
+			_set_axis_status(entry, "calibrated travel does not fit the band")
+		return
+	if not entry.is_empty():
+		_set_axis_status(entry, "travel %.2f … %.2f" % [_calibrated_low, _calibrated_high])
+	_refresh()
+
+
 ## **Which device is being set up**, by name, or `""` for none. `main.gd` asks this for every joypad
 ## event: while a device is named here, its events are consumed before the GUI sees them, so it cannot
 ## steer a menu or fire a game action while the player is binding it.
@@ -236,13 +394,24 @@ func _set_configuring(device_name: String) -> void:
 ## The live half: called every frame while a screen is up, and it is six axis reads and twenty button
 ## reads per device — nothing.
 func _refresh_devices() -> void:
-	for entry in _axis_labels:
-		var label: Label = entry[2]
-		var value: float = Devices.axis(int(entry[0]), int(entry[1]))
-		label.text = "%+.2f" % value
-		label.modulate = (
-			Color(1.0, 0.9, 0.3) if absf(value) > Devices.SHOWN_AS_MOVED else Color(1.0, 1.0, 1.0, 0.45)
+	for entry in _axis_rows:
+		var device := int(entry[0])
+		var index := int(entry[1])
+		var raw: float = Devices.axis(device, index)
+		var profile: SpacesimAxisProfile = _profile_of(device, index)
+		var shaped: float = profile.shape(raw)
+		(entry[2] as AxisBar).set_state(shaped, profile.centre, profile.deadband)
+		var value_label: Label = entry[3]
+		value_label.text = "%+.2f" % shaped
+		value_label.modulate = (
+			Color(1.0, 0.9, 0.3) if absf(shaped) > 0.0 else Color(1.0, 1.0, 1.0, 0.45)
 		)
+		# A calibration in flight takes the raw extremes, not the shaped ones.
+		if not _calibrating.is_empty() and int(_calibrating[0]) == device and int(_calibrating[1]) == index:
+			_calibrated_low = minf(_calibrated_low, raw)
+			_calibrated_high = maxf(_calibrated_high, raw)
+			if _dialog != null:
+				_dialog.hint.text = "so far   %.2f … %.2f" % [_calibrated_low, _calibrated_high]
 	for entry in _button_labels:
 		var label: Label = entry[2]
 		var down := Input.is_joy_button_pressed(int(entry[0]), int(entry[1]))
@@ -651,6 +820,16 @@ func _refresh() -> void:
 		var field: LineEdit = _binding_fields[action]
 		field.text = _bindings_text(action)
 		field.modulate = IDLE_COLOR
+
+	# The axis fields come back to what stands, which is how a discarded edit disappears — but **not
+	# while one of them is being typed into**, or the text would be rewritten under the cursor.
+	for entry in _axis_rows:
+		var profile: SpacesimAxisProfile = _profile_of(int(entry[0]), int(entry[1]))
+		for at in [[4, profile.centre], [5, profile.deadband]]:
+			var field: LineEdit = entry[at[0]]
+			if not field.has_focus():
+				field.text = "%.3f" % float(at[1])
+				field.modulate = IDLE_COLOR
 
 	var pending := _edit.has_changes() or _bindings.has_changes()
 	_apply_button.modulate = PENDING_COLOR if pending else IDLE_COLOR

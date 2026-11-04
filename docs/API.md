@@ -964,7 +964,7 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
 | **Bindings** | `mouse.sensitivity`, plus **the sixteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
-| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **each axis on its own line** with its live deflection, and **every button laid out** (21 of them, lit when held) — a button you cannot find is one you cannot bind. Plus a **Configure** box per device (below) |
+| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **one line per axis** — a bar with the deadband boxed, the shaped value, the centre and deadband fields, and Calibrate — every button laid out (21, lit when held), and a **Configure** box per device (below) |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
 
@@ -1193,6 +1193,38 @@ knowing an enumeration, and so the capture dialog has one place to read a contro
 reports named controls in `[-1, 1]`, an unknown one reports raw indices. The screen prints that
 distinction beside the device's name.
 
+### `SpacesimAxisProfile` — `RefCounted`
+
+`addons/spacesim/input/axis_profile.gd`. **One physical axis, shaped**: where its travel ends, where it
+rests, and how much of the middle is nothing.
+
+| | from | default | |
+|---|---|---|---|
+| `low`, `high` | **calibration** | −1, +1 | the axis's real travel |
+| `centre` | the player | 0 | where it rests — **not** forced to the midpoint, because a worn stick's rest is not its middle |
+| `deadband` | the player | 0.15 | the **half-width** around `centre` that reads as nothing; a box spanning ±0.15 is *deadband 0.15* |
+
+| Member | |
+|---|---|
+| `normalise(raw) -> float` | symmetric about the profile's own centre and scaled by its **two** spans, so an asymmetric axis (`−0.95 … +0.88`) maps onto −1…+1 exactly |
+| `shape(raw) -> float` | after the deadband, **rescaled by `1 − deadband`** so full deflection stays full and the response does not step at the edge of the band |
+| `is_sane() -> bool` | travel that runs forwards, a centre inside it, a band under 1.0. **A band of 0.9 is silly and legal** — the bar shows the red box swallowing the line, and that is the feedback |
+| `from_text` / `to_text` | `"-0.950, 0.880, 0.030, 0.150"`; one unreadable number falls back to that field's default alone |
+| `with_travel(low, high)` | a calibration replaces the travel and keeps what was typed |
+
+`low`/`high` rather than `min`/`max`, which are GDScript's own functions — a member that shadows them is
+a trap for the first line in that file that wants the function.
+
+**A profile belongs to the device's axis, not to a binding**: two bindings on one stick would otherwise
+have two deadbands for it. **Nothing consumes a profile yet** — there are no axis bindings, so these
+numbers are stored, shown and calibrated but change no behaviour.
+
+### `SpacesimAxisBar` — `Control`
+
+`addons/spacesim/ui/axis_bar.gd`. One axis drawn as a line: the travel, the deadband **boxed in red** at
+`centre ± deadband`, a tick where it rests, and a dot where it is now. `set_state(value, centre,
+deadband)` from a per-frame refresh; it draws and nothing else.
+
 ### `SpacesimBindingsStore` — `RefCounted`
 
 `addons/spacesim/input/bindings_store.gd`. **The player's bindings, in a file of their own** —
@@ -1209,7 +1241,8 @@ throttle_up = "Joy:PS4 Controller/Button:A"
 ```
 
 `[bindings]` is the default table; `[bindings.<device name>]` overrides it for one device, keyed by the
-device's **name**. **An empty value means unbound**, which is a different thing from an absent key
+device's **name**. **`[axes.<device name>]` holds that device's axis profiles**, one line per axis —
+they live in this file because the same edits stage and write them, not because they are bindings. **An empty value means unbound**, which is a different thing from an absent key
 (absent = use the registry's default) — that is what lets a player clear an action rather than only
 change it.
 

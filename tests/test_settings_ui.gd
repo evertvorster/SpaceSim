@@ -7,6 +7,8 @@ const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Ui := preload("res://tests/ui_fixture.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
+const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
+const AxisBar := preload("res://addons/spacesim/ui/axis_bar.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
@@ -296,8 +298,9 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 func _test_the_devices_tab(h, root: Node) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
+	var store := _fixture.bindings()
 	var panel := SettingsPanel.new()
-	panel.configure(_fixture.open(), _fixture.bindings())
+	panel.configure(_fixture.open(), store)
 	layer.add_child(panel)
 
 	var tabs: TabContainer = panel.find_children("*", "TabContainer", true, false)[0]
@@ -316,12 +319,11 @@ func _test_the_devices_tab(h, root: Node) -> void:
 		"it says so when nothing is connected, and does not when something is (%d)" % pads.size()
 	)
 
-	# Every axis of every device gets a readout, whether or not a pad is attached.
-	var axis_labels: Array = panel.get("_axis_labels")
+	# Every axis of every device gets its own line, whether or not a pad is attached.
+	var rows: Array = panel.get("_axis_rows")
 	h.check(
-		axis_labels.size() == pads.size() * Devices.AXIS_NAMES.size(),
-		"and one readout per axis, per device (%d for %d device(s))"
-			% [axis_labels.size(), pads.size()]
+		rows.size() == pads.size() * Devices.AXIS_NAMES.size(),
+		"and one line per axis, per device (%d for %d device(s))" % [rows.size(), pads.size()]
 	)
 	var buttons: Array = panel.get("_button_labels")
 	h.check(
@@ -330,16 +332,69 @@ func _test_the_devices_tab(h, root: Node) -> void:
 			% [buttons.size(), pads.size()]
 	)
 
-	# **The readout follows the device**, which is the whole point of the tab: whatever an axis reports
-	# is what the label shows, to two decimals.
+	# **The readout follows the device**, and it is the *shaped* value: the bar, the number and the
+	# profile's centre and band all come from the same place.
 	if not pads.is_empty():
 		panel._refresh_devices()
-		var shown := false
-		for entry in axis_labels:
-			var label: Label = entry[2]
-			if label.text == "%+.2f" % Devices.axis(int(entry[0]), int(entry[1])):
-				shown = true
-		h.check(shown, "and each readout shows what that axis reports")
+		var device := int(pads[0])
+		var raw: float = Devices.axis(device, 0)
+		var profile: SpacesimAxisProfile = panel._profile_of(device, 0)
+		var value_label: Label = rows[0][3]
+		h.check(
+			value_label.text == "%+.2f" % profile.shape(raw),
+			"and each line shows the shaped value of that axis (%s)" % value_label.text
+		)
+		var bar: AxisBar = rows[0][2]
+		h.check(
+			is_equal_approx(bar.centre, profile.centre) and is_equal_approx(bar.deadband, profile.deadband),
+			"with the bar drawing the profile's deadband"
+		)
+
+		# The two fields are the profile, and typing into them stages it.
+		var centre: LineEdit = rows[0][4]
+		var band: LineEdit = rows[0][5]
+		h.check(
+			centre.text == "%.3f" % profile.centre and band.text == "%.3f" % profile.deadband,
+			"the fields show the centre and the deadband (%s, %s)" % [centre.text, band.text]
+		)
+		centre.text = "0.250"
+		centre.text_changed.emit("0.250")
+		h.check(store.has_changes(), "typing a centre stages it")
+		h.check(
+			is_equal_approx(store.axis_profile(Devices.name_of(device), Devices.AXIS_NAMES[0]).centre, 0.25),
+			"and it is that axis's profile that changed"
+		)
+		# **A profile that cannot make sense is refused**, and says so: a centre outside the travel, and a
+		# band of 1.0 where nothing could ever be deflected.
+		var status: Label = rows[0][7]
+		centre.text = "1.500"
+		centre.text_changed.emit("1.500")
+		h.check(not status.text.is_empty(), "a centre outside the travel is refused (%s)" % status.text)
+		centre.text = "0.250"
+		centre.text_changed.emit("0.250")
+		band.text = "1.000"
+		band.text_changed.emit("1.000")
+		h.check(not status.text.is_empty(), "and so is a band that would swallow everything")
+		band.text = "0.900"
+		band.text_changed.emit("0.900")
+		h.check(
+			status.text.is_empty(),
+			"while a silly but legal band is allowed, because the bar is the feedback (%s)" % status.text
+		)
+
+		# Apply writes the profile, and a second open reads it back.
+		centre.text = "0.100"
+		centre.text_changed.emit("0.100")
+		band.text = "0.200"
+		band.text_changed.emit("0.200")
+		panel._apply_button.pressed.emit()
+		var saved: SpacesimAxisProfile = _fixture.bindings().axis_profile(
+			Devices.name_of(device), Devices.AXIS_NAMES[0]
+		)
+		h.check(
+			is_equal_approx(saved.centre, 0.1) and is_equal_approx(saved.deadband, 0.2),
+			"and Apply writes it to the store (%s)" % saved.to_text()
+		)
 
 	# --- **Configure routes one device away from everything else**, and one at a time
 	if not pads.is_empty():

@@ -6,6 +6,7 @@ const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
+const Profile := preload("res://addons/spacesim/input/axis_profile.gd")
 
 const TEST_DIR := "/tmp/spacesim-input-test"
 
@@ -19,6 +20,7 @@ func run(h, _root: Node) -> void:
 	_test_the_store(h)
 	_test_the_legacy_import(h)
 	_test_the_runtime(h)
+	_test_the_axis_profile(h)
 
 
 ## **Every action declares the three things the screen and the runtime need**, and its defaults are
@@ -330,6 +332,89 @@ func _test_the_runtime(h) -> void:
 		"and the first binding is used when there is no keyboard one"
 	)
 	_clean()
+
+
+## **Shaping an axis**: the ends of its travel, where it rests, and what the middle is worth.
+func _test_the_axis_profile(h) -> void:
+	var profile := Profile.new()
+	h.check(
+		is_equal_approx(profile.shape(-1.0), -1.0) and is_equal_approx(profile.shape(1.0), 1.0),
+		"with no changes, the ends of the travel are −1 and +1"
+	)
+	h.check(
+		is_equal_approx(profile.shape(0.0), 0.0),
+		"and the middle is zero, because the deadband swallows it"
+	)
+
+	# **The rescale is the part worth checking**: just outside the band the value is small but not a step,
+	# and full deflection is still full deflection.
+	h.check(
+		profile.shape(0.15) == 0.0 and profile.shape(0.1501) < 0.01,
+		"an axis in the deadband reads zero (%f)" % profile.shape(0.1501)
+	)
+	h.check(
+		is_equal_approx(profile.shape(1.0), 1.0),
+		"and full deflection is still 1, not 1 − deadband (%f)" % profile.shape(1.0)
+	)
+	h.check(
+		is_equal_approx(Profile.new().shape(0.575), 0.5),
+		"the band is rescaled into the rest of the travel (%f)" % Profile.new().shape(0.575)
+	)
+
+	# A band of zero leaves the axis linear.
+	var sharp := Profile.new()
+	sharp.deadband = 0.0
+	h.check(is_equal_approx(sharp.shape(0.25), 0.25), "with no band the axis is linear (%f)" % sharp.shape(0.25))
+
+	# **An asymmetric axis maps onto −1 … +1 exactly**: its own ends are the ends, and its own centre is the
+	# centre, even though they are not a midpoint's worth apart.
+	var worn := Profile.new()
+	worn.low = -0.95
+	worn.high = 0.88
+	worn.centre = 0.03
+	worn.deadband = 0.0
+	h.check(
+		is_equal_approx(worn.shape(-0.95), -1.0) and is_equal_approx(worn.shape(0.88), 1.0),
+		"a worn, asymmetric stick reaches both ends (%f, %f)" % [worn.shape(-0.95), worn.shape(0.88)]
+	)
+	h.check(
+		is_equal_approx(worn.shape(0.03), 0.0),
+		"and rests where it was told it rests (%f)" % worn.shape(0.03)
+	)
+
+	# The text form round-trips, and a bad number falls back to that field alone.
+	var text := worn.to_text()
+	var back := Profile.from_text(text)
+	h.check(back.to_text() == text, "the profile round-trips through its text (%s)" % text)
+	var half := Profile.from_text("-0.5, nonsense, 0.0, 0.15")
+	h.check(
+		is_equal_approx(half.low, -0.5) and is_equal_approx(half.high, 1.0),
+		"one unreadable number keeps the default for that field alone (%s)" % half.to_text()
+	)
+
+	# What cannot make sense is refused.
+	var bad := Profile.new()
+	bad.low = 0.5
+	bad.high = -0.5
+	h.check(not bad.is_sane(), "travel that runs backwards is refused")
+	var outside := Profile.new()
+	outside.centre = 1.5
+	outside._clamp()
+	h.check(not outside.is_sane(), "a centre clamped onto the end of the travel is refused")
+	var band := Profile.new()
+	band.deadband = 1.0
+	h.check(not band.is_sane(), "and a band of one, where nothing could be deflected")
+
+	# A calibration keeps the typed centre and band, and takes only the travel.
+	var calibrated: Profile = Profile.new()
+	calibrated.centre = 0.2
+	calibrated.deadband = 0.1
+	calibrated = calibrated.with_travel(-0.92, 0.97)
+	h.check(
+		is_equal_approx(calibrated.low, -0.92) and is_equal_approx(calibrated.high, 0.97)
+		and is_equal_approx(calibrated.centre, 0.2) and is_equal_approx(calibrated.deadband, 0.1),
+		"and a calibration replaces the travel without touching what was typed"
+	)
 
 
 static func _released(event: InputEventKey) -> InputEventKey:
