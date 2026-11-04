@@ -3,7 +3,7 @@ extends RefCounted
 
 const Settings := preload("res://addons/spacesim/settings/settings.gd")
 const Edit := preload("res://addons/spacesim/settings/settings_edit.gd")
-const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
+const Binding := preload("res://addons/spacesim/input/binding.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
@@ -27,18 +27,18 @@ func run(h, root: Node) -> void:
 
 
 func _test_binding_text(h) -> void:
-	h.check(Bindings.is_valid("W"), "a plain key is a binding")
-	h.check(Bindings.is_valid("Alt+C"), "so is a modified one")
-	h.check(Bindings.is_valid("BracketLeft"), "and a key named for its position")
-	h.check(not Bindings.is_valid("Nonsense"), "a word that is not a key is not")
-	h.check(not Bindings.is_valid(""), "and neither is nothing")
+	h.check(Binding.is_valid("W"), "a plain key is a binding")
+	h.check(Binding.is_valid("Alt+C"), "so is a modified one")
+	h.check(Binding.is_valid("BracketLeft"), "and a key named for its position")
+	h.check(not Binding.is_valid("Nonsense"), "a word that is not a key is not")
+	h.check(not Binding.is_valid(""), "and neither is nothing")
 
 	# Formatting normalises the modifier order, so two spellings of one binding agree.
 	h.check(
-		Bindings.format(Bindings.parse("Alt+Shift+BracketLeft")) == "Shift+Alt+BracketLeft",
+		Binding.to_text(Binding.parse("Alt+Shift+BracketLeft")) == "Shift+Alt+BracketLeft",
 		"a binding survives a round trip, order normalised"
 	)
-	h.check(Bindings.keycode_of("W") == KEY_W, "and yields the key it names")
+	h.check(Binding.keycode_of("W") == KEY_W, "and yields the key it names")
 
 
 func _test_binding_matching(h) -> void:
@@ -46,17 +46,17 @@ func _test_binding_matching(h) -> void:
 	event.physical_keycode = KEY_C
 	event.alt_pressed = true
 	event.pressed = true
-	h.check(Bindings.matches(event, "Alt+C"), "the event matches its own binding")
-	h.check(not Bindings.matches(event, "C"), "but not the bare key: modifiers must match exactly")
-	h.check(not Bindings.matches(event, "Ctrl+C"), "nor a different modifier")
+	h.check(Binding.matches(event, "Alt+C"), "the event matches its own binding")
+	h.check(not Binding.matches(event, "C"), "but not the bare key: modifiers must match exactly")
+	h.check(not Binding.matches(event, "Ctrl+C"), "nor a different modifier")
 
 	event.pressed = false
-	h.check(not Bindings.matches(event, "Alt+C"), "a release is not a press")
+	h.check(not Binding.matches(event, "Alt+C"), "a release is not a press")
 	event.pressed = true
 	event.echo = true
-	h.check(not Bindings.matches(event, "Alt+C"), "nor is a key repeat")
+	h.check(not Binding.matches(event, "Alt+C"), "nor is a key repeat")
 	event.echo = false
-	h.check(Bindings.from_event(event) == "Alt+C", "and an event reads back as its binding")
+	h.check(Binding.from_event(event) == "Alt+C", "and an event reads back as its binding")
 
 
 func _test_registry_is_sound(h) -> void:
@@ -71,7 +71,7 @@ func _test_registry_is_sound(h) -> void:
 			undotted.append(key)
 		if row.has("validator") and not Settings.KNOWN_VALIDATORS.has(row["validator"]):
 			unknown.append(key)
-		if row.get("validator", "") == "key_binding" and not Bindings.is_valid(String(row["default"])):
+		if row.get("validator", "") == "key_binding" and not Binding.is_valid(String(row["default"])):
 			bad_defaults.append(key)
 	# A row offering choices that does not include its own default would open showing nothing, and a
 	# row that offers a list but names one we cannot build would fall back to a text box silently.

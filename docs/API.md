@@ -917,46 +917,20 @@ see § Scope. **This is the current, complete list.**
 
 ### Bindings
 
-Input bindings live in the same file, under `[bindings]`, declared in the registry like any other
-setting — a string with the `key_binding` validator:
-
-```
-[bindings]
-settings_screen=Alt+C
-throttle_up=Shift+Equal
-throttle_stop=Backspace
-roll_left=BracketLeft
-```
-
-**There is no ship key, because there is no ship hull** (2026-10-28). The placeholder was an 18 m box floating in
-front of the camera: deep space's 100 m near plane clipped it away, and `_update_camera` pulled that plane inside the
-hull once it was drawn, so it appeared as a plate on the ground on approach — Evert: *"There is some sort of landing
-pad that pops up when I am close to the surface. Strip that out, and clear out the mechanism that makes it."* The
-camera's offset is a constant in `player_ship.gd`, and `camera.ship_distance` and `ship.visible` went with it.
-
-The **wireframe toggle** (`bindings.wireframe_toggle`, `L`) draws the body meshes as wireframes and takes
-the air and the deck out of the frame. It asks a different question from the picture: what the level
-policy actually did. A shaded sphere looks the same at every level, so whether the tessellation is where
-the eye is cannot be answered from a render — see `main.gd`'s `set_wireframe()`, and `SHOT_WIREFRAME=1`
-for the same view from the screenshot rig.
-
-Text rather than a raw keycode, so the file stays readable and hand-editable: the key name is
-whatever `OS.get_keycode_string` produces, which `OS.find_keycode_from_string` parses back, so the
-two agree by construction. Modifiers are prefixes and are **normalised** on write — `Alt+Shift+X`
-comes back as `Shift+Alt+X`.
+A setting may be a key binding: `bindings.settings_screen` is `Alt+C` by default. The text is stored
+rather than a raw keycode so the file stays readable and hand-editable; the name is whatever
+`OS.get_keycode_string` produces and `OS.find_keycode_from_string` parses back, so the two agree by
+construction. Modifiers are prefixes and are **normalised** on write — `Alt+Shift+X` comes back as
+`Shift+Alt+X`.
 
 Matching uses the **physical** key, so WASD stays under the same fingers on a layout that puts A
 somewhere else — which is why a binding stores a key rather than a character. Modifiers must match
 exactly, so `W` does not fire while Alt is held.
 
-| `SpacesimBindings` (static) | |
-|---|---|
-| `parse(text) -> Dictionary` | parts, or empty when the text is not a binding |
-| `is_valid(text) -> bool` | |
-| `keycode_of(text) -> int` | or `KEY_NONE`; for asking whether it is held |
-| `matches(event, text) -> bool` | |
-| `from_event(event) -> String` | for capturing a key press |
-| `format(binding) -> String` | |
+**The parser is `SpacesimBinding`** (`addons/spacesim/input/binding.gd`, documented below) — the
+`settings/bindings.gd` type of that name is gone, and its one remaining caller was the registry's
+`key_binding` validator, which now asks the new type. Everything that *consumes* a binding reads the
+store through `SpacesimInput`; nothing reads a `bindings.*` setting any more.
 
 ### The settings screen
 

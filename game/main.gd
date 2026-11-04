@@ -1,11 +1,11 @@
 extends Node3D
 ## Fly **Sol** and land on planets.
 ##
-## **The controls are the registry's, not this file's.** Every key but Esc is a `bindings.*` setting with a
-## default in `SpacesimSettings`, and the bottom line of the HUD is generated from whatever is bound — so a
-## list written here would be a second copy that drifts. It did: the version of this paragraph before
-## 2026-10-25 had throttle on `W`/`S`, roll on `A`/`D`, and the error budget on the brackets, all three of
-## which had moved. Read the defaults in the registry, or the HUD.
+## **The controls are the action registry's, not this file's.** Every key but Esc is an action declared in
+## `SpacesimActions` with its bindings in `SpacesimBindingsStore`, and the bottom line of the HUD is
+## generated from whatever is bound — so a list written here would be a second copy that drifts. It did:
+## the version of this paragraph before 2026-10-25 had throttle on `W`/`S`, roll on `A`/`D`, and the error
+## budget on the brackets, all three of which had moved. Read the registry, or the HUD.
 ##
 ## Esc is the one exception, because it is not a binding: it releases the mouse, and a click takes it back.
 ##
@@ -16,7 +16,9 @@ const PlayerShip := preload("res://game/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
-const Bindings := preload("res://addons/spacesim/settings/bindings.gd")
+const Actions := preload("res://addons/spacesim/input/actions.gd")
+const BindingsStore := preload("res://addons/spacesim/input/bindings_store.gd")
+const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
 const Session := preload("res://addons/spacesim/save/session.gd")
 
 const SYSTEM_PATH := "res://systems/sol.tres"
@@ -59,6 +61,11 @@ var _player: SpacesimPlayer
 var _settings_screen: SpacesimSettingsPanel
 var _player_screen: SpacesimPlayerPanel
 var _saved_games_screen: SpacesimSavedGamesPanel
+
+## The player's bindings and what they are doing. Built after the session, because the store's first open
+## is where an old `settings.cfg`'s keys are imported.
+var _bindings: SpacesimBindingsStore
+var _input_map: SpacesimInput
 
 ## The screen that is open, or null. Having one open *is* being paused.
 var _screen: SpacesimScreen
@@ -142,6 +149,12 @@ func _ready() -> void:
 	_player = _session.player
 	_place_observer_from_session()
 
+	# **The bindings are their own store**, beside the settings file; `open()` is where the sixteen old
+	# `bindings.*` settings keys are imported, in memory, on the first run after this change.
+	_bindings = BindingsStore.new()
+	_bindings.open()
+	_input_map = InputMapScript.new(_bindings)
+
 	_settings_screen = SpacesimSettingsPanel.new()
 	_settings_screen.configure(SpacesimSettings)
 	_register_screen(_settings_screen, "Settings")
@@ -175,12 +188,17 @@ func _ready() -> void:
 ## UI's focus key and the UI system would consume it first. Handled here, Tab always toggles, and
 ## keyboard focus navigation still works for everything else.
 func _input(event: InputEvent) -> void:
+	# **Every key and button event is fed, released ones too**: a release is what clears a held source,
+	# and a screen that swallows it is why `release_all()` exists.
+	if event is InputEventKey or event is InputEventMouseButton:
+		_input_map.feed(event)
+
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.settings_screen"))):
+	if _triggered(event, "settings_screen"):
 		_toggle(_settings_screen)
 		get_viewport().set_input_as_handled()
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.player_screen"))):
+	elif _triggered(event, "player_screen"):
 		_toggle(_player_screen)
 		get_viewport().set_input_as_handled()
 
@@ -201,7 +219,7 @@ func _handle_key(event: InputEventKey) -> void:
 	if _screen != null:
 		return
 
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.bodies_toggle"))):
+	if _triggered(event, "bodies_toggle"):
 		_bodies_visible = not _bodies_visible
 		# **On each body's own node, not on its meshes.** `update_lod` now decides a mesh's or a point's
 		# visibility once a frame, and two writers of one flag is a flicker — so the key sets the
@@ -209,11 +227,11 @@ func _handle_key(event: InputEventKey) -> void:
 		for body in _system.bodies:
 			if body.node != null:
 				body.node.visible = _bodies_visible
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.cycle_target"))):
+	elif _triggered(event, "cycle_target"):
 		_cycle_target()
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.throttle_stop"))):
+	elif _triggered(event, "throttle_stop"):
 		_throttle_stop = true
-	elif Bindings.matches(event, String(SpacesimSettings.get_value("bindings.wireframe_toggle"))):
+	elif _triggered(event, "wireframe_toggle"):
 		set_wireframe(not _wireframe)
 	elif _view_for(event) != null:
 		# **The camera looks along a direction in the SHIP's frame**, so mouse look still steers and the
@@ -261,17 +279,17 @@ func set_wireframe(on: bool) -> void:
 ## The ship looks along `-Z`, `+Y` is up and `+X` is right, so a rotation about `Y` swings the view
 ## horizontally and one about `X` swings it vertically.
 func _view_for(event: InputEventKey) -> Variant:
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_forward"))):
+	if _triggered(event, "view_forward"):
 		return Basis.IDENTITY
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_back"))):
+	if _triggered(event, "view_back"):
 		return Basis(Vector3.UP, PI)
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_left"))):
+	if _triggered(event, "view_left"):
 		return Basis(Vector3.UP, PI * 0.5)
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_right"))):
+	if _triggered(event, "view_right"):
 		return Basis(Vector3.UP, -PI * 0.5)
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_up"))):
+	if _triggered(event, "view_up"):
 		return Basis(Vector3.RIGHT, PI * 0.5)
-	if Bindings.matches(event, String(SpacesimSettings.get_value("bindings.view_down"))):
+	if _triggered(event, "view_down"):
 		return Basis(Vector3.RIGHT, -PI * 0.5)
 	return null
 
@@ -297,6 +315,8 @@ func _toggle(screen: SpacesimScreen) -> void:
 
 
 func _open_screen(screen: SpacesimScreen) -> void:
+	# **The game stops watching while a menu is open**, so nothing may be left held when it resumes.
+	_input_map.release_all()
 	if _screen != null:
 		_screen.visible = false
 		_screen.dismissed()
@@ -352,9 +372,14 @@ func _on_exit_requested() -> void:
 
 ## Whether a binding's key is held. Read per frame rather than cached, so rebinding one takes
 ## effect without anything having to notice.
-func _held(binding_key: String) -> bool:
-	var code := Bindings.keycode_of(String(SpacesimSettings.get_value(binding_key)))
-	return code != KEY_NONE and Input.is_physical_key_pressed(code)
+func _held(action: String) -> bool:
+	return _input_map.held(action)
+
+
+## Whether this event is an action's edge. **One line, so the call sites read as actions** rather than as
+## a chain of settings lookups.
+func _triggered(event: InputEvent, action: String) -> bool:
+	return _input_map.triggered(event, action)
 
 
 ## Selection is the input half of targeting, and the smallest stand-in for the navigation we
@@ -426,15 +451,15 @@ func _physics_process(delta: float) -> void:
 	# **The stop key is edge-triggered**, so it puts the throttle at zero now rather than winding it down.
 	var throttle: float = 0.0 if _throttle_stop else _ship.throttle
 	_throttle_stop = false
-	if _held("bindings.throttle_up"):
+	if _held("throttle_up"):
 		throttle += THROTTLE_RATE * delta
-	if _held("bindings.throttle_down"):
+	if _held("throttle_down"):
 		throttle -= THROTTLE_RATE * delta
 
 	var roll := 0.0
-	if _held("bindings.roll_left"):
+	if _held("roll_left"):
 		roll -= TURN_RATE * delta
-	if _held("bindings.roll_right"):
+	if _held("roll_right"):
 		roll += TURN_RATE * delta
 
 	# Read per frame rather than held, so it is hot without anything having to react to a change.
@@ -766,31 +791,31 @@ func _update_hud() -> void:
 				(
 					"%s/%s throttle    %s stop    mouse look    %s/%s roll    Esc release mouse"
 					% [
-						_binding("bindings.throttle_up"),
-						_binding("bindings.throttle_down"),
-						_binding("bindings.throttle_stop"),
-						_binding("bindings.roll_left"),
-						_binding("bindings.roll_right"),
+						_hint("throttle_up"),
+						_hint("throttle_down"),
+						_hint("throttle_stop"),
+						_hint("roll_left"),
+						_hint("roll_right"),
 					]
 				),
 				(
 					"view: %s fwd  %s back  %s left  %s right  %s up  %s down"
 					% [
-						_binding("bindings.view_forward"),
-						_binding("bindings.view_back"),
-						_binding("bindings.view_left"),
-						_binding("bindings.view_right"),
-						_binding("bindings.view_up"),
-						_binding("bindings.view_down"),
+						_hint("view_forward"),
+						_hint("view_back"),
+						_hint("view_left"),
+						_hint("view_right"),
+						_hint("view_up"),
+						_hint("view_down"),
 					]
 				),
 				(
 					"%s personal data    %s settings    %s cycle target    %s bodies on/off"
 					% [
-						_binding("bindings.player_screen"),
-						_binding("bindings.settings_screen"),
-						_binding("bindings.cycle_target"),
-						_binding("bindings.bodies_toggle"),
+						_hint("player_screen"),
+						_hint("settings_screen"),
+						_hint("cycle_target"),
+						_hint("bodies_toggle"),
 					]
 				),
 			]
@@ -808,13 +833,14 @@ func _apply_hud_visibility() -> void:
 	_fps.visible = bool(SpacesimSettings.get_value("hud.fps"))
 
 
-## The key a binding currently names, for the readout.
+## The key an action currently names, for the readout.
 ##
 ## **The hints used to be hardcoded text beside a rebindable setting**, which meant changing a binding
 ## left the HUD telling the player to press a key that no longer did anything. Reading them from the
-## registry is what keeps the two in step.
-static func _binding(key: String) -> String:
-	return String(SpacesimSettings.get_value(key))
+## bindings is what keeps the two in step — and `hint()` prefers a keyboard binding, because the hints
+## are read at a keyboard.
+func _hint(action: String) -> String:
+	return _input_map.hint(action)
 
 
 static func _speed(metres_per_second: float) -> String:

@@ -27,7 +27,7 @@ extends Node
 ## value is a decision and not something left over.
 enum Scope { PLAYER }
 
-const BindingsScript := preload("res://addons/spacesim/settings/bindings.gd")
+const Binding := preload("res://addons/spacesim/input/binding.gd")
 
 ## The named checks [method _passes_validator] knows. A row naming anything else is a mistake in
 ## the registry, not a silently skipped check.
@@ -472,7 +472,7 @@ static func _acceptable_row(row: Dictionary, value: Variant) -> bool:
 static func _passes_validator(row: Dictionary, value: Variant) -> bool:
 	match String(row.get("validator", "")):
 		"key_binding":
-			return typeof(value) == TYPE_STRING and BindingsScript.is_valid(value)
+			return typeof(value) == TYPE_STRING and Binding.is_valid(value)
 	return true
 
 

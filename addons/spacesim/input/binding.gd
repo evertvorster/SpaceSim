@@ -106,6 +106,34 @@ static func to_text(binding: Dictionary) -> String:
 	return "+".join(parts)
 
 
+## The text for an event — **the inverse of [method matches]**, so a capture can store what it saw.
+##
+## Empty for anything that is not a key or a mouse button: the two directions of one conversion belong
+## together, and a text that cannot come back must not be produced here.
+static func from_event(event: InputEvent) -> String:
+	if event is InputEventKey:
+		var key: InputEventKey = event
+		return to_text({
+			"device": "keyboard",
+			"keycode": key.physical_keycode,
+			"alt": key.alt_pressed,
+			"ctrl": key.ctrl_pressed,
+			"shift": key.shift_pressed,
+			"meta": key.meta_pressed,
+		})
+	if event is InputEventMouseButton:
+		var mouse: InputEventMouseButton = event
+		return to_text({
+			"device": "mouse",
+			"button": mouse.button_index,
+			"alt": mouse.alt_pressed,
+			"ctrl": mouse.ctrl_pressed,
+			"shift": mouse.shift_pressed,
+			"meta": mouse.meta_pressed,
+		})
+	return ""
+
+
 ## The key a keyboard binding uses, or `KEY_NONE`. For asking whether it is held down.
 static func keycode_of(text: String) -> int:
 	var binding := parse(text)
