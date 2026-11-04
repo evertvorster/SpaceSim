@@ -16,6 +16,7 @@ const Devices := preload("res://addons/spacesim/input/devices.gd")
 const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
 const AxisBar := preload("res://addons/spacesim/ui/axis_bar.gd")
 const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
+const Debug := preload("res://addons/spacesim/system/debug.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const EditScript := preload("res://addons/spacesim/settings/settings_edit.gd")
@@ -962,6 +963,7 @@ func _stage_rows(action: String) -> void:
 func flush_rows() -> void:
 	if not _rows_dirty:
 		return
+	Debug.say("bindings: flushing rows (extras %s)" % str(_extra_rows))
 	_rows_dirty = false
 	_rebuild_binding_rows()
 	if not _focus_row.is_empty():
@@ -972,6 +974,7 @@ func flush_rows() -> void:
 
 
 func _add_binding(action: String) -> void:
+	Debug.say("bindings: Add pressed on %s" % action)
 	_stage_rows(action)
 	var opened := int(_extra_rows.get(action, 0)) + 1
 	_extra_rows[action] = opened
@@ -1167,7 +1170,9 @@ func _conflicts_with(text: String, except_action: String) -> Array:
 
 ## Commit the detection into its row, having been told what to do about a conflict.
 func _apply_detected(remove_from: bool) -> void:
+	Debug.say("bindings: apply_detected(%s) detect=%s detected='%s'" % [remove_from, str(_detect), _detected])
 	if _detect.is_empty() or _detected.is_empty():
+		Debug.say("bindings: nothing to apply, bail")
 		return
 	var action := String(_detect["action"])
 	var index := int(_detect["index"])
@@ -1185,7 +1190,8 @@ func _apply_detected(remove_from: bool) -> void:
 	while texts.size() <= index:
 		texts.append("")
 	texts[index] = _detected
-	_bindings.stage(action, texts)
+	var staged := _bindings.stage(action, texts)
+	Debug.say("bindings: staged %s -> %s (%s)" % [action, str(texts), staged])
 	_extra_rows[action] = 0
 	_finish_detect()
 
@@ -1203,6 +1209,7 @@ func _finish_detect() -> void:
 ## The detection's answers: **confirm, re-detect, both, or take it away** — and Cancel keeps everything as
 ## it was.
 func _handle_detect_answer(answer: String) -> void:
+	Debug.say("bindings: dialog answer '%s'" % answer)
 	if answer.begins_with("Cancel"):
 		_finish_detect()
 	elif answer.begins_with("Detect again"):
