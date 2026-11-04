@@ -268,6 +268,7 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 	h.check(_fixture.bindings().of("throttle_up") == ["W"], "applying writes the file")
 
 	# --- **Add opens a row; Remove on the last one clears the binding rather than the row**
+	# The panel rebuilds its rows from `_process`; a test asks for it directly.
 	var before := _rows_named(panel, "throttle_up").size()
 	var add: Button = _row_button(panel, "throttle_up", 0, "Add")
 	h.check(add != null, "the first row can add another")
@@ -301,6 +302,22 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 	h.check(not panel._detected.is_empty(), "a pressed key is caught (%s)" % panel._detected)
 	h.check(panel._dialog.visible, "and shown before it is committed")
 	h.check(not store.has_changes(), "with nothing staged yet")
+	# **The mouse has a square of its own**: a click inside it is a binding, and clicks anywhere else stay
+	# the dialog's, which is what lets the Bind button be pressed at all.
+	var square := panel._dialog.content.get_node_or_null("Capture")
+	h.check(square != null, "the detection dialog draws somewhere to click")
+	if square != null:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_MIDDLE
+		click.pressed = true
+		square.gui_input.emit(click)
+		panel.flush_capture()
+		h.check(
+			panel._detected == "Mouse:Middle",
+			"and a click inside it is the binding that was caught (%s)" % panel._detected
+		)
+		# put the key back for the conflict test below
+		panel.feed_capture(press)
 	var caught: String = panel._detected
 	panel._dialog.answered.emit("Bind")
 	h.check(not panel.is_detecting(), "confirming ends the detection")

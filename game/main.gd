@@ -200,9 +200,12 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	# **A binding being detected presses nothing.** The settings screen listens, the menus stay deaf, and
-	# the game does not act on the control the player is using to bind.
-	if _settings_screen.is_detecting():
+	# **A binding being detected presses nothing** — but only for keys and pad buttons. A mouse click is
+	# **not** intercepted here: the screen has a square of its own for that, and taking every click would
+	# catch the one that presses the dialog's own buttons.
+	if _settings_screen.is_detecting() and (
+		event is InputEventKey or event is InputEventJoypadButton
+	):
 		_settings_screen.feed_capture(event)
 		get_viewport().set_input_as_handled()
 		return

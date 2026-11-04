@@ -528,6 +528,11 @@ func _process(_delta: float) -> void:
 	if not is_visible_in_tree():
 		return
 	_refresh_devices()
+	_poll_detection()
+	flush_capture()
+	# **Rows are rebuilt here, not in a button's own signal**: freeing the control that is emitting is the
+	# error this codebase already has a note about.
+	flush_rows()
 
 
 ## A grid of rows, three columns, as every table on this screen is.
@@ -979,15 +984,63 @@ func _start_detect(action: String, index: int) -> void:
 	_detect_previous.clear()
 	for device in Devices.connected():
 		_detect_previous[int(device)] = _axis_readings(int(device))
-	_dialog.ask(
+	_ask_detect(
 		"Detect a binding for %s" % Actions.label_of(action),
 		(
-			"Press a key, a mouse button or a gamepad button — or move one axis of a gamepad.\n\n"
-			+ "The device is taken away from the game and its menus while this is open."
+			"Press a key or a gamepad button, move one axis of a gamepad, or click inside the square "
+			+ "below.\n\nThe device is taken away from the game and its menus while this is open."
 		),
 		["Cancel"]
 	)
+
+
+## Ask, and **put the mouse's square back**: the dialog rebuilds its content on every ask, so the region
+## that takes a click has to be added after each one.
+func _ask_detect(title: String, message: String, buttons: Array) -> void:
+	_dialog.ask(title, message, buttons)
 	_dialog.hint.text = "listening…"
+
+	# **Only inside this square is a click a binding.** Everywhere else the mouse belongs to the dialog —
+	# otherwise the click that presses *Bind* is caught as the control being bound, and there is no way to
+	# press the button at all.
+	var square := Panel.new()
+	square.name = "Capture"
+	square.custom_minimum_size = Vector2(280.0, 88.0)
+	square.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	square.mouse_filter = Control.MOUSE_FILTER_STOP
+	square.gui_input.connect(_on_capture_input)
+	_dialog.content.add_child(square)
+
+	var caption := Label.new()
+	caption.text = "click here to bind a mouse button"
+	caption.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	caption.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	square.add_child(caption)
+
+
+## A click inside the square is **deferred to the next frame**: catching it rebuilds the dialog, and the
+## square cannot be freed while it is the control emitting its own `gui_input` — the same trap as a button
+## that frees its own row.
+var _pending_capture: InputEvent = null
+
+
+## A click inside the square. **Mouse events are not intercepted anywhere else** — `main.gd` forwards only
+## keys and pad buttons while detecting — so the dialog's own buttons still work.
+func _on_capture_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		_pending_capture = event
+
+
+## Take the pending click now. Called every frame, and by a test that cannot wait for one.
+func flush_capture() -> void:
+	if _pending_capture == null:
+		return
+	var event := _pending_capture
+	_pending_capture = null
+	feed_capture(event)
 
 
 ## Whether a detection is in progress: `main.gd` forwards events here and marks them handled while it is.
@@ -1061,7 +1114,7 @@ func _on_detected(text: String) -> void:
 	var action := String(_detect["action"])
 	var conflicts := _conflicts_with(text, action)
 	if conflicts.is_empty():
-		_dialog.ask(
+		_ask_detect(
 			"Detected",
 			"%s\n\nBind it to %s?" % [text, Actions.label_of(action)],
 			["Bind", "Detect again", "Cancel"]
@@ -1071,7 +1124,7 @@ func _on_detected(text: String) -> void:
 	var names := PackedStringArray()
 	for entry in conflicts:
 		names.append(Actions.label_of(String(entry[0])))
-	_dialog.ask(
+	_ask_detect(
 		"Already bound",
 		(
 			"%s is already bound to %s.\n\n"

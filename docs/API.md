@@ -1021,18 +1021,22 @@ has **Add**.
 - **Add** opens another row for that action; **Remove** deletes that binding, and on the last row it
   **clears the binding rather than the row** — an action always needs somewhere to be bound. An empty row
   is not a binding: Apply writes nothing for it.
-- **Detect** listens. Keys, mouse buttons and pad buttons arrive as events (the panel is fed them while
-  `is_detecting()`), and **axes are polled** with `SpacesimDevices.most_moved` — the biggest change since
-  the last look, outside that axis's own deadband, and only while no button is pressed. What is caught is
-  **shown before it is committed**: *Bind* / *Detect again* / *Cancel*.
+- **Detect** listens. **Keys and pad buttons arrive as events** — `main.gd` forwards them while
+  `is_detecting()` and marks them handled — and **axes are polled** with `SpacesimDevices.most_moved`: the
+  biggest change since the last look, outside that axis's own deadband, and only while no button is
+  pressed. What is caught is **shown before it is committed**: *Bind* / *Detect again* / *Cancel*.
+- **A mouse click is only a binding inside the dialog's square.** Mouse events are *not* intercepted
+  globally: doing that would catch the click that presses the dialog's own buttons, and there would be no
+  way to confirm a capture. The click is also **deferred to the next frame** (`flush_capture()`), because
+  catching it rebuilds the dialog and a control cannot be freed while it is emitting its own `gui_input`.
 - **A control already bound elsewhere is a warning, never an override**: the dialog names the actions it
   belongs to and offers *Bind to both*, *Take it from …*, *Detect again*, or *Cancel*.
 - While a detection is open `main.gd` marks the events handled, so nothing pressed in order to bind a
   control also presses it in the game or walks a menu.
 
-**Rows are rebuilt at the next frame**, never inside the button's own `pressed` signal — freeing the
-control that is emitting is the error the codebase already has a note about. `flush_rows()` is how a test
-asks for it immediately.
+**Rows are rebuilt at the next frame** (`_process` → `flush_rows()`), never inside the button's own
+`pressed` signal — freeing the control that is emitting is the error the codebase already has a note
+about. `flush_rows()` and `flush_capture()` are how a test asks for either immediately.
 
 An edit that does not parse is **coloured and staged nowhere**, so a typo cannot reach the file.
 
