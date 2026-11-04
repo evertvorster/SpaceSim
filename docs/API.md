@@ -964,6 +964,7 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
 | **Bindings** | `mouse.sensitivity`, plus **the sixteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
+| **Devices** | **nothing from the registry**: the attached gamepads, their identity, their axes' live deflection and the buttons held. Read-only — binding a pad is the next rung |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
 
@@ -1029,7 +1030,7 @@ deferred follow-up.
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
-| `static TABS` | the tabs the settings screen shows, in order: `display`, `hud`, `bindings`, `troubleshooting`, `rest` — **Bindings holds one setting now**: the sixteen key bindings are `SpacesimBindingsStore`'s, not settings |
+| `static TABS` | the tabs the settings screen shows, in order: `display`, `hud`, `bindings`, `devices`, `troubleshooting`, `rest`. **`bindings` and `devices` hold no settings** — the actions and the gamepads are drawn by the screen itself |
 | `static tab_title(tab) -> String` | what a tab is called on screen — its key capitalised, except `hud`, which is an acronym |
 | `static tab_of(key) -> String` | which tab a row is filed in; **a row that names none is in `rest`** |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |
@@ -1162,6 +1163,24 @@ Three things `parse` refuses, each of which the old parser accepted: an **empty 
 bind `W`), a **modifier as the key** (`Alt` alone parses as the Alt keycode — `find_keycode_from_string`
 does not distinguish, so it is refused explicitly), and **any joypad form** — `Joy:<device>/Button:A`
 is reserved grammar for the pad work and must not silently bind something else.
+
+### `SpacesimDevices` — `RefCounted` (static)
+
+`addons/spacesim/input/devices.gd`. **What the operating system's gamepads look like through Godot —
+for looking at, not for binding.** It exists so a screen can show what a device is doing without
+knowing an enumeration, and so the capture dialog has one place to read a control's name from.
+
+| Member | |
+|---|---|
+| `AXIS_NAMES`, `BUTTON_NAMES` | the six axes and the buttons, in Godot's own order |
+| `SHOWN_AS_MOVED` | 0.1 — a **display** threshold, not a binding's deadband, so a stick resting at 0.02 does not look deflected |
+| `connected() -> Array` | device indices — **enumeration order**, never stored |
+| `name_of`, `guid_of`, `raw_name_of`, `is_known` | identity; `raw_name_of` is the OS's pre-database name, a diagnostic |
+| `axis(device, index) -> float`, `pressed(device) -> Array`, `axes(device) -> Array` | the readings |
+
+**Whether the engine knows a device is the fact that changes what its numbers mean**: a recognised pad
+reports named controls in `[-1, 1]`, an unknown one reports raw indices. The screen prints that
+distinction beside the device's name.
 
 ### `SpacesimBindingsStore` — `RefCounted`
 

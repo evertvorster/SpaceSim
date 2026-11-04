@@ -6,6 +6,7 @@ const Edit := preload("res://addons/spacesim/settings/settings_edit.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Ui := preload("res://tests/ui_fixture.gd")
+const Devices := preload("res://addons/spacesim/input/devices.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
@@ -23,6 +24,7 @@ func run(h, root: Node) -> void:
 	_test_every_setting_gets_a_control(h, root)
 	_test_the_tabs_group_the_registry(h, root)
 	_test_the_bindings_tab(h, root)
+	_test_the_devices_tab(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -149,8 +151,8 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	for index in tabs.get_tab_count():
 		titles.append(tabs.get_tab_title(index))
 	h.check(
-		titles == ["Display", "HUD", "Bindings", "Troubleshooting"],
-		"the tabs are Display, HUD, Bindings and Troubleshooting, in that order (%s)"
+		titles == ["Display", "HUD", "Bindings", "Devices", "Troubleshooting"],
+		"the tabs are Display, HUD, Bindings, Devices and Troubleshooting, in that order (%s)"
 			% str(titles)
 	)
 
@@ -285,6 +287,55 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 	h.check(store.of("throttle_up") == Actions.defaults_of("throttle_up"), "which restores the default")
 	h.check(store.has_changes(), "as a staged edit, not a silent write")
 
+	layer.free()
+
+
+## **The devices tab shows what the machine has**, whatever that is — so the count is checked against the
+## engine rather than against a number this test would have to guess. Headless detects a gamepad when one
+## is attached, which is why this is a real check and not a skipped one.
+func _test_the_devices_tab(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var panel := SettingsPanel.new()
+	panel.configure(_fixture.open(), _fixture.bindings())
+	layer.add_child(panel)
+
+	var tabs: TabContainer = panel.find_children("*", "TabContainer", true, false)[0]
+	var at := -1
+	for index in tabs.get_tab_count():
+		if tabs.get_tab_title(index) == "Devices":
+			at = index
+	h.check(at >= 0, "the screen has a Devices tab")
+	if at < 0:
+		layer.free()
+		return
+
+	var pads := Devices.connected()
+	h.check(
+		Ui.shows(panel, "No joystick or gamepad") == pads.is_empty(),
+		"it says so when nothing is connected, and does not when something is (%d)" % pads.size()
+	)
+
+	# Every axis of every device gets a readout, whether or not a pad is attached.
+	var axis_labels: Array = panel.get("_axis_labels")
+	h.check(
+		axis_labels.size() == pads.size() * Devices.AXIS_NAMES.size(),
+		"and one readout per axis, per device (%d for %d device(s))"
+			% [axis_labels.size(), pads.size()]
+	)
+	var buttons: Array = panel.get("_button_labels")
+	h.check(buttons.size() == pads.size(), "with one button line per device (%d)" % buttons.size())
+
+	# **The readout follows the device**, which is the whole point of the tab: whatever an axis reports
+	# is what the label shows, to two decimals.
+	if not pads.is_empty():
+		panel._refresh_devices()
+		var shown := false
+		for entry in axis_labels:
+			var label: Label = entry[2]
+			if label.text == "%+.2f" % Devices.axis(int(entry[0]), int(entry[1])):
+				shown = true
+		h.check(shown, "and each readout shows what that axis reports")
 	layer.free()
 
 

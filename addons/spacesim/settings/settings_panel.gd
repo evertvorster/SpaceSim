@@ -12,14 +12,16 @@ extends SpacesimScreen
 
 const SettingsScript := preload("res://addons/spacesim/settings/settings.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
+const Devices := preload("res://addons/spacesim/input/devices.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const EditScript := preload("res://addons/spacesim/settings/settings_edit.gd")
 const DisplayScript := preload("res://addons/spacesim/settings/display.gd")
 
-## The tab the actions are shown on. Not a settings tab: the sixteen bindings left the registry, and
-## this is where their replacements are drawn.
+## The tabs the screen draws itself, because what is on them is not settings: the actions' bindings
+## (which left the registry) and the attached gamepads.
 const BINDINGS_TAB := "bindings"
+const DEVICES_TAB := "devices"
 
 const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
@@ -30,6 +32,10 @@ var _edit: SpacesimSettingsEdit
 var _fields: Dictionary = {} ## key -> the controls that edit it
 var _bindings: SpacesimBindingsStore
 var _binding_fields: Dictionary = {} ## action id -> the field that shows its bindings
+
+## The devices tab's live readouts: `[device, axis index, Label]` and `[device, Label]`.
+var _axis_labels: Array = []
+var _button_labels: Array = []
 var _apply_button: Button
 var _close_button: Button
 var _updating := false
@@ -59,9 +65,11 @@ func _build() -> void:
 	for tab in SettingsScript.TABS:
 		var keys := _keys_in(tab)
 		var actions := _actions_in(tab)
+		var is_devices: bool = tab == DEVICES_TAB
 		# A tab nothing was filed into is not built: an empty page is a promise of settings that are
-		# somewhere else.
-		if keys.is_empty() and actions.is_empty():
+		# somewhere else. The devices tab is the exception — **an empty device list is worth showing**,
+		# because "nothing is connected" is the answer to the question the tab asks.
+		if keys.is_empty() and actions.is_empty() and not is_devices:
 			continue
 		var page := ScrollContainer.new()
 		page.name = SettingsScript.tab_title(tab)
@@ -77,6 +85,8 @@ func _build() -> void:
 			column.add_child(grid)
 			for key in keys:
 				_add_row(grid, key)
+		if is_devices:
+			_build_devices(column)
 		# **The actions are not settings**, so they get their own grid per category rather than a row
 		# among the settings — and this is the only tab that has any.
 		for category in Actions.CATEGORIES:
@@ -94,6 +104,98 @@ func _build() -> void:
 
 	_apply_button = add_button("Apply", _on_apply)
 	_close_button = add_button("Close", _on_close)
+
+
+## **What the attached gamepads are doing**, live: each device's name and identity, its axes with
+## their current deflection, and the buttons held right now.
+##
+## Read-only on purpose. Binding a pad is the next rung, and the two ways of doing it — typing the text or
+## pressing the control — both need this list to exist first, because a player has to see what the
+## device is reporting before they can bind it.
+func _build_devices(column: VBoxContainer) -> void:
+	_axis_labels.clear()
+	_button_labels.clear()
+	var pads := Devices.connected()
+	if pads.is_empty():
+		var none := Label.new()
+		none.text = "No joystick or gamepad is connected."
+		none.modulate = Color(1.0, 1.0, 1.0, 0.7)
+		column.add_child(none)
+		return
+
+	var summary := Label.new()
+	summary.text = "%d device%s" % [pads.size(), "" if pads.size() == 1 else "s"]
+	summary.modulate = Color(1.0, 1.0, 1.0, 0.7)
+	column.add_child(summary)
+
+	for device in pads:
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", 4)
+		column.add_child(box)
+
+		var title := Label.new()
+		title.text = Devices.name_of(device)
+		title.add_theme_font_size_override("font_size", 16)
+		box.add_child(title)
+
+		# **Whether the engine knows the device is the one fact that changes what its numbers mean**: a
+		# known pad reports named controls in −1…1, an unknown one reports raw indices.
+		var detail := Label.new()
+		var raw := Devices.raw_name_of(device)
+		detail.text = "guid %s   ·   %s" % [
+			Devices.guid_of(device),
+			"mapped" if Devices.is_known(device) else "NO MAPPING — raw indices",
+		]
+		if not raw.is_empty() and raw != Devices.name_of(device):
+			detail.text += "   ·   os calls it '%s'" % raw
+		detail.modulate = Color(1.0, 1.0, 1.0, 0.55)
+		box.add_child(detail)
+
+		var axes_grid := _grid()
+		axes_grid.columns = 6
+		for index in Devices.AXIS_NAMES.size():
+			var name_label := Label.new()
+			name_label.text = Devices.AXIS_NAMES[index]
+			name_label.add_theme_font_size_override("font_size", 13)
+			name_label.modulate = Color(1.0, 1.0, 1.0, 0.6)
+			axes_grid.add_child(name_label)
+			var value_label := Label.new()
+			value_label.name = "Axis%d" % index
+			value_label.add_theme_font_size_override("font_size", 13)
+			value_label.custom_minimum_size = Vector2(56.0, 0.0)
+			axes_grid.add_child(value_label)
+			_axis_labels.append([device, index, value_label])
+		box.add_child(axes_grid)
+
+		var buttons := Label.new()
+		buttons.name = "Buttons"
+		box.add_child(buttons)
+		_button_labels.append([device, buttons])
+
+	_refresh_devices()
+
+
+## The live half: called every frame while a screen is up, and it is six axis reads and twenty button
+## reads per device — nothing.
+func _refresh_devices() -> void:
+	for entry in _axis_labels:
+		var label: Label = entry[2]
+		var value: float = Devices.axis(int(entry[0]), int(entry[1]))
+		label.text = "%+.2f" % value
+		label.modulate = (
+			Color(1.0, 0.9, 0.3) if absf(value) > Devices.SHOWN_AS_MOVED else Color(1.0, 1.0, 1.0, 0.45)
+		)
+	for entry in _button_labels:
+		var label: Label = entry[1]
+		var down: Array = Devices.pressed(int(entry[0]))
+		label.text = "buttons   %s" % ("none" if down.is_empty() else ", ".join(down))
+		label.modulate = Color(1.0, 0.9, 0.3) if not down.is_empty() else Color(1.0, 1.0, 1.0, 0.45)
+
+
+func _process(_delta: float) -> void:
+	if not is_visible_in_tree():
+		return
+	_refresh_devices()
 
 
 ## A grid of rows, three columns, as every table on this screen is.
