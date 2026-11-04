@@ -51,7 +51,7 @@ func _test_the_registry(h) -> void:
 	h.check(no_category.is_empty(), "every action is in a category the screen shows%s"
 		% _detail(no_category))
 	h.check(bad_default.is_empty(), "and every default binding parses%s" % _detail(bad_default))
-	h.check(Actions.ids().size() == 16, "there are sixteen actions (%d)" % Actions.ids().size())
+	h.check(Actions.ids().size() == 20, "there are twenty actions (%d)" % Actions.ids().size())
 
 	# **Every category has something in it**, or the Bindings tab shows a heading over nothing.
 	var empty: Array = []
@@ -68,7 +68,11 @@ func _test_the_registry(h) -> void:
 	var levels := Actions.ids().filter(
 		func(id: String) -> bool: return Actions.kind_of(id) == "level"
 	)
-	h.check(rates.size() == 4, "four rates: throttle up/down and roll left/right (%d)" % rates.size())
+	h.check(
+		rates.size() == 8,
+		"eight rates: throttle up/down, roll and the four turning actions a stick needs (%d)"
+			% rates.size()
+	)
 	h.check(levels.is_empty(), "and no levels yet: a level is what a stick sets directly%s"
 		% _detail(levels))
 

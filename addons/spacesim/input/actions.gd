@@ -114,6 +114,33 @@ const REGISTRY := {
 		"category": "Flight",
 		"defaults": ["BracketRight"],
 	},
+	# **Turning had no action**: pitch and yaw came from the mouse's own motion, so a stick had nothing to
+	# bind to and no key ever shipped for them. These four start with **no default binding**, which is why
+	# adding them changes nothing for a keyboard and mouse player.
+	"pitch_up": {
+		"label": "Pitch up",
+		"kind": "rate",
+		"category": "Flight",
+		"defaults": [],
+	},
+	"pitch_down": {
+		"label": "Pitch down",
+		"kind": "rate",
+		"category": "Flight",
+		"defaults": [],
+	},
+	"yaw_left": {
+		"label": "Yaw left",
+		"kind": "rate",
+		"category": "Flight",
+		"defaults": [],
+	},
+	"yaw_right": {
+		"label": "Yaw right",
+		"kind": "rate",
+		"category": "Flight",
+		"defaults": [],
+	},
 	"cycle_target": {
 		"label": "Cycle target",
 		"kind": "trigger",

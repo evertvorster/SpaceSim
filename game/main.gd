@@ -26,6 +26,10 @@ const SYSTEM_PATH := "res://systems/sol.tres"
 
 const MOUSE_SENSITIVITY_FALLBACK := 0.0015
 const TURN_RATE := 1.2 ## rad/s from the roll keys
+## **How fast a full stick deflection turns the ship**, in rad/s. The mouse contributes an angle per frame
+## as it always has; a stick contributes a *rate*, which is why these are separate numbers.
+const PITCH_RATE := 0.8
+const YAW_RATE := 0.8
 ## **Ten seconds from zero to full**, which over the +-10 range is one unit a second — slow enough to stop
 ## inside a deck and to watch a surface go past, and astern is reached in the same time.
 const THROTTLE_RATE := 1.0
@@ -486,11 +490,19 @@ func _physics_process(delta: float) -> void:
 
 	# Read per frame rather than held, so it is hot without anything having to react to a change.
 	var sensitivity: float = SpacesimSettings.get_value("mouse.sensitivity")
+	# **The mouse gives an angle per frame and a stick gives a rate**, so the two are added rather than
+	# mixed: with nothing bound to the pitch and yaw actions their contribution is exactly zero, and the
+	# mouse is unchanged.
+	var pitch := -_look.y * sensitivity
+	pitch -= PITCH_RATE * delta * (_value("pitch_up") - _value("pitch_down"))
+	var yaw := _look.x * sensitivity
+	yaw += YAW_RATE * delta * (_value("yaw_right") - _value("yaw_left"))
+
 	var input := {
 		# The controller clamps to its own range; one place for the limit.
 		"throttle": throttle,
-		"pitch": -_look.y * sensitivity,
-		"yaw": _look.x * sensitivity,
+		"pitch": pitch,
+		"yaw": yaw,
 		"roll": roll,
 	}
 	_look = Vector2.ZERO
