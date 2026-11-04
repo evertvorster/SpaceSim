@@ -198,7 +198,7 @@ func _input(event: InputEvent) -> void:
 
 	# **Every key and button event is fed, released ones too**: a release is what clears a held source,
 	# and a screen that swallows it is why `release_all()` exists.
-	if event is InputEventKey or event is InputEventMouseButton:
+	if event is InputEventKey or event is InputEventMouseButton or event is InputEventJoypadButton:
 		_input_map.feed(event)
 
 	if not (event is InputEventKey) or not event.pressed or event.echo:
@@ -396,8 +396,10 @@ func _on_exit_requested() -> void:
 
 ## Whether a binding's key is held. Read per frame rather than cached, so rebinding one takes
 ## effect without anything having to notice.
-func _held(action: String) -> bool:
-	return _input_map.held(action)
+## The action's value, −1 … +1 — see `SpacesimInput.value`. Everything the flight model reads that can be
+## driven by a stick is read this way; **a key gives ±1, so nothing about a keyboard changes**.
+func _value(action: String) -> float:
+	return _input_map.value(action)
 
 
 ## Whether this event is an action's edge. **One line, so the call sites read as actions** rather than as
@@ -475,16 +477,12 @@ func _physics_process(delta: float) -> void:
 	# **The stop key is edge-triggered**, so it puts the throttle at zero now rather than winding it down.
 	var throttle: float = 0.0 if _throttle_stop else _ship.throttle
 	_throttle_stop = false
-	if _held("throttle_up"):
-		throttle += THROTTLE_RATE * delta
-	if _held("throttle_down"):
-		throttle -= THROTTLE_RATE * delta
+	throttle += THROTTLE_RATE * delta * _value("throttle_up")
+	throttle -= THROTTLE_RATE * delta * _value("throttle_down")
 
-	var roll := 0.0
-	if _held("roll_left"):
-		roll -= TURN_RATE * delta
-	if _held("roll_right"):
-		roll += TURN_RATE * delta
+	# **Multiplied, not gated.** A key contributes ±1 and behaves exactly as it always did; a stick
+	# contributes its shaped deflection, so the same two actions give a proportional rate.
+	var roll := TURN_RATE * delta * (_value("roll_right") - _value("roll_left"))
 
 	# Read per frame rather than held, so it is hot without anything having to react to a change.
 	var sensitivity: float = SpacesimSettings.get_value("mouse.sensitivity")

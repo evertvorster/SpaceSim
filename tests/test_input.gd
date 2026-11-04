@@ -7,6 +7,7 @@ const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
 const Profile := preload("res://addons/spacesim/input/axis_profile.gd")
+const Devices := preload("res://addons/spacesim/input/devices.gd")
 
 const TEST_DIR := "/tmp/spacesim-input-test"
 
@@ -21,6 +22,7 @@ func run(h, _root: Node) -> void:
 	_test_the_legacy_import(h)
 	_test_the_runtime(h)
 	_test_the_axis_profile(h)
+	_test_joypad_matching(h)
 
 
 ## **Every action declares the three things the screen and the runtime need**, and its defaults are
@@ -155,22 +157,37 @@ func _test_what_is_not_a_binding(h) -> void:
 			accepted.append(text)
 	h.check(accepted.is_empty(), "nonsense is not a binding%s" % _detail(accepted))
 
-	# **The joypad forms are reserved and rejected.** A file written for a pad must not silently bind
-	# something else on a keyboard, and the grammar is fixed before the device arrives.
-	var joypad := [
-		"Joy:PS4 Controller/Button:A",
-		"Joy:PS4 Controller/Axis:LEFT_X",
-		"Joy:/Button:A",
-	]
-	var taken: Array = []
-	for text in joypad:
-		if Binding.is_valid(text):
-			taken.append(text)
-	h.check(taken.is_empty(), "a joypad binding is refused until pads land%s" % _detail(taken))
+	# **A joypad form names a control Godot knows**, so an unknown name is not a binding — and the names
+	# come from `SpacesimDevices`, the only place the engine's own vocabulary exists.
+	var pad := Binding.parse("Joy:PS4 Controller/Button:A")
+	h.check(
+		String(pad.get("device", "")) == "joypad" and String(pad.get("pad", "")) == "PS4 Controller",
+		"a pad button parses to its device and button (%s)" % str(pad)
+	)
+	h.check(
+		Binding.to_text(pad) == "Joy:PS4 Controller/Button:A",
+		"and round-trips even though the device name has a space (%s)" % Binding.to_text(pad)
+	)
+	h.check(
+		int(Binding.parse("Joy:PS4 Controller/Axis:LEFT_X").get("axis", -1)) == 0,
+		"an axis parses to its index, by Godot's own name"
+	)
+	h.check(
+		Binding.parse("Joy:PS4 Controller/Button:Nonsense").is_empty(),
+		"a button name Godot does not have is not a binding"
+	)
+	h.check(
+		Binding.parse("Joy:PS4 Controller/Axis:SIDEWAYS").is_empty(),
+		"and neither is an axis that does not exist"
+	)
+	h.check(Binding.parse("Joy:/Button:A").is_empty(), "nor a binding with no device")
+
+	h.check(Devices.axis_index("LEFT_X") == 0 and Devices.axis_index("nope") == -1, "axis names resolve")
+	h.check(Devices.button_index("A") == 0 and Devices.button_index("nope") == -1, "button names resolve")
 
 
-## **The store stages and writes, and never writes anything else.** Its file is the only place a
-## binding is kept.
+
+
 func _test_the_store(h) -> void:
 	_clean()
 	var path := TEST_DIR.path_join("bindings.cfg")
@@ -419,6 +436,59 @@ func _test_the_axis_profile(h) -> void:
 		is_equal_approx(calibrated.low, -0.92) and is_equal_approx(calibrated.high, 0.97)
 		and is_equal_approx(calibrated.centre, 0.2) and is_equal_approx(calibrated.deadband, 0.1),
 		"and a calibration replaces the travel without touching what was typed"
+	)
+
+
+## A pad's button matches its binding — checked against the pad that is attached, or not exercised at all,
+## because a test cannot conjure hardware and should not pretend to.
+func _test_joypad_matching(h) -> void:
+	var pads := Devices.connected()
+	if pads.is_empty():
+		h.check(true, "(no gamepad attached: pad matching is not exercised)")
+		return
+	var device := int(pads[0])
+	var named := Devices.name_of(device)
+	var event := InputEventJoypadButton.new()
+	event.device = device
+	event.button_index = JOY_BUTTON_A
+	event.pressed = true
+	h.check(Binding.matches(event, "Joy:%s/Button:A" % named), "a pad button matches its own binding")
+	h.check(
+		not Binding.matches(event, "Joy:Some Other Pad/Button:A"),
+		"and not one that names another device"
+	)
+	event.pressed = false
+	h.check(not Binding.matches(event, "Joy:%s/Button:A" % named), "a release is not a press")
+
+	# **Detecting an axis is watching for the biggest change**, outside its deadband — there is no event to
+	# catch, so the reading itself has to be the evidence.
+	var profile := Profile.default_for("LEFT_X")
+	var previous := {
+		"LEFT_X": 0.0, "LEFT_Y": 0.0, "RIGHT_X": 0.0, "RIGHT_Y": 0.0,
+		"TRIGGER_LEFT": 0.0, "TRIGGER_RIGHT": 0.0,
+	}
+	# Whatever the stick is doing now, it is not what it was a moment ago unless it moved by that much.
+	var moved: Array = Devices.most_moved(device, previous, func(_named: String) -> Profile: return profile)
+	h.check(moved.size() == 2, "most_moved answers an axis and a size (%s)" % str(moved))
+	h.check(
+		int(moved[0]) == -1 or absf(float(moved[1])) >= Devices.MOVED_ENOUGH,
+		"and only reports an axis that moved by more than the delta threshold (%s)" % str(moved)
+	)
+	# A reading that has not changed reports nothing, whatever the stick is held at.
+	var still := {}
+	for index in Devices.AXIS_NAMES.size():
+		still[Devices.AXIS_NAMES[index]] = Devices.axis(device, index)
+	var quiet: Array = Devices.most_moved(device, still, func(_named: String) -> Profile: return profile)
+	h.check(int(quiet[0]) == -1, "an unchanged axis is not a movement (%s)" % str(quiet))
+
+	# **An axis is a position, not an event**: nothing matches it, and `value()` is where it is read.
+	var motion := InputEventJoypadMotion.new()
+	motion.device = device
+	motion.axis = JOY_AXIS_LEFT_X
+	motion.axis_value = 0.8
+	h.check(
+		not Binding.matches(motion, "Joy:%s/Axis:LEFT_X" % named),
+		"an axis never matches an event"
 	)
 
 

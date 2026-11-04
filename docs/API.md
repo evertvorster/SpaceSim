@@ -1161,11 +1161,17 @@ optional modifier prefixes on either.
 
 | Member | |
 |---|---|
-| `parse(text) -> Dictionary` | `{"device": "keyboard", "keycode": int, "alt"/"ctrl"/"shift"/"meta": bool}` or `{"device": "mouse", "button": int, …}`; `{}` when the text is not a binding |
+| `parse(text) -> Dictionary` | `{"device": "keyboard", "keycode": int, "alt"/"ctrl"/"shift"/"meta": bool}`, `{"device": "mouse", "button": int, …}`, or `{"device": "joypad", "pad": name, "button"/"axis": int}`; `{}` when the text is not a binding |
 | `to_text(binding) -> String` | the inverse, so a round trip is identity |
 | `is_valid(text) -> bool` | |
 | `keycode_of(text) -> int`, `button_of(text) -> int` | for asking whether it is held |
 | `matches(event, text) -> bool` | exact on the whole chord, by **physical** keycode |
+
+**A pad's control names are Godot's own** — `Joy:<device name>/Button:A`, `Joy:<device name>/Axis:LEFT_X`
+— because the engine exposes no name-to-index helper, so `SpacesimDevices`' tables are the only vocabulary
+there is. The device part is the device's **name**, which is what the store keys its sections by, and the
+split is at the last `/` so a name with spaces works. **An axis binding is `relative`** — a deflection is a
+rate; `absolute` is refused until a `level` action and `step(dt)` exist behind it.
 
 **`WheelUp` and `WheelDown` are buttons to Godot** (`MOUSE_BUTTON_WHEEL_UP` is 4), which is how a
 scroll can be bound at all.
@@ -1188,6 +1194,9 @@ knowing an enumeration, and so the capture dialog has one place to read a contro
 | `connected() -> Array` | device indices — **enumeration order**, never stored |
 | `name_of`, `guid_of`, `raw_name_of`, `is_known` | identity; `raw_name_of` is the OS's pre-database name, a diagnostic |
 | `axis(device, index) -> float`, `pressed(device) -> Array`, `axes(device) -> Array` | the readings |
+| `axis_index(name)`, `button_index(name)`, `device_index(name)` | **the reverse table** — a binding stores names, the engine takes indices |
+| `most_moved(device, previous, profile_of) -> [axis, change]` | **the axis being moved**, or `-1`: the biggest change since the last look, only if it is `MOVED_ENOUGH` and outside the axis's own deadband |
+| `MOVED_ENOUGH` | 0.15 — a threshold on the **change between looks**, not a deadband, so a slow drift is not an intention and a flick is |
 
 **Whether the engine knows a device is the fact that changes what its numbers mean**: a recognised pad
 reports named controls in `[-1, 1]`, an unknown one reports raw indices. The screen prints that
@@ -1287,9 +1296,16 @@ and the raw text for the HUD's hints.
 | `store: SpacesimBindingsStore` | assigned at construction |
 | `feed(event) -> bool` | take one event, pressed **or released**; returns whether it belonged to any action |
 | `triggered(event, action) -> bool` | an edge: a press, never a release and never a key repeating |
-| `held(action) -> bool` | whether any of its sources is down right now |
+| `held(action) -> bool` | whether any **bang** source is down right now |
+| `value(action) -> float` | **−1 … +1**: bang sources at ±1 while down, axis sources shaped by their profile, summed and clamped — so one stick bound to `roll_right` reads `−1` pushed left, and the consumer multiplies rather than gating on "is it held" |
 | `release_all()` | forget every held source — what the screen pause uses |
 | `hint(action) -> String` | the first **keyboard** binding, else the first binding |
+
+**`value()` is what a stick needed and a key already had**: a key contributes `+1` while down; an axis
+contributes its *shaped* deflection through that axis's profile, so the deadband and the travel are
+respected without the flight model knowing they exist. `held()` deliberately stays about **bang** sources
+only — a level accumulated in the flight controller is not a key, and asking `held()` about an axis
+conflates the two.
 
 **Held state is tracked from what `feed` has seen, not polled from `Input`.** That is what makes it
 testable — a test cannot press a key — and it is what a stick will need anyway, where "down" is a

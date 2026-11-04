@@ -15,6 +15,17 @@ extends RefCounted
 ## while the game is not looking**: without it a key pressed and released behind a menu could leave an
 ## action held for ever.
 ##
+## ## A value, not just a press
+##
+## **`value(action)` is what a stick needs and a key already had**: a key contributes `+1` while it is down,
+## a mouse or pad button the same, and an axis contributes its **shaped** deflection — through that axis's
+## profile, so the deadband and the travel are respected. The contributions **sum and clamp to −1 … +1**,
+## which is why one axis can drive both directions of a paired action: a stick bound to `roll_right` reads
+## `−1` when it is pushed left, and the consumer multiplies rather than gating on "is it held".
+##
+## `held()` stays what it was — *is a bang source down right now* — because a level accumulated in the
+## flight controller is not a key, and asking `held()` about an axis would conflate the two.
+##
 ## ## No integration, yet
 ##
 ## There is no `step(dt)` in this slice on purpose. The one level in the game — the ship's throttle —
@@ -23,7 +34,9 @@ extends RefCounted
 ## the pad work, and `step` arrives with it.
 
 const Actions := preload("res://addons/spacesim/input/actions.gd")
+const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
+const Devices := preload("res://addons/spacesim/input/devices.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 
 var store: SpacesimBindingsStore
@@ -68,7 +81,36 @@ func triggered(event: InputEvent, action: String) -> bool:
 	return false
 
 
-## Whether any of the action's sources is down right now.
+## **The action's value right now**, −1 … +1: bang sources at ±1 while down, axis sources shaped by their
+## profile, summed and clamped.
+func value(action: String) -> float:
+	var total := 0.0
+	for text in store.of(action):
+		var binding := Binding.parse(String(text))
+		if binding.is_empty():
+			continue
+		match String(binding["device"]):
+			"keyboard", "mouse":
+				if _down.has(_key(action, String(text))):
+					total += 1.0
+			"joypad":
+				var device := Devices.device_index(String(binding["pad"]))
+				if device < 0:
+					continue
+				if binding.has("button"):
+					if Input.is_joy_button_pressed(device, int(binding["button"])):
+						total += 1.0
+				else:
+					var axis_name := String(Devices.AXIS_NAMES[int(binding["axis"])])
+					var profile: SpacesimAxisProfile = store.axis_profile(
+						String(binding["pad"]), axis_name
+					)
+					total += profile.shape(Devices.axis(device, int(binding["axis"])))
+	return clampf(total, -1.0, 1.0)
+
+
+## Whether any of the action's **bang** sources is down right now. An axis is not a bang source: it is a
+## position, and [method value] is where it belongs.
 func held(action: String) -> bool:
 	for text in store.of(action):
 		if _down.has(_key(action, String(text))):
@@ -101,6 +143,14 @@ func _is_source(event: InputEvent, text: String) -> bool:
 	var binding := Binding.parse(text)
 	if binding.is_empty():
 		return false
+	if String(binding["device"]) == "joypad":
+		var pad := event as InputEventJoypadButton
+		if pad == null or not binding.has("button"):
+			return false
+		return (
+			pad.button_index == int(binding["button"])
+			and Devices.name_of(pad.device) == String(binding["pad"])
+		)
 	if String(binding["device"]) == "keyboard":
 		var key := event as InputEventKey
 		return key != null and key.physical_keycode == int(binding["keycode"])

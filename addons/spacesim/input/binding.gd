@@ -11,15 +11,21 @@ extends RefCounted
 ## produces and [method OS.find_keycode_from_string] parses back, so the two agree by construction
 ## rather than by a table we would have to maintain.
 ##
-## ## What is not here yet
+## ## Pads
 ##
-## A joypad form is **reserved and rejected**: `Joy:<device>/Button:A` and `Joy:<device>/Axis:LEFT_X`
-## parse to nothing, so a file written for a pad can never silently bind something else. The grammar
-## they will use — including `abs`, `min=`, `max=` and `dead=` for an axis — is in the vault's
-## *Input — Actions and Bindings* §3; nothing here needs changing to accept it, because an unrecognised
-## text is simply not a binding.
+## `Joy:<device name>/Button:A` and `Joy:<device name>/Axis:LEFT_X`, where **the control names are
+## Godot's own** — the engine exposes no name-to-index helper, so `SpacesimDevices`' tables are the only
+## vocabulary there is, and using them here makes a control that can be seen on the Devices tab one that
+## can be written in a binding.
+##
+## **An axis binding is `relative`**, which is the default and the safe one: a deflection is a rate, and an
+## accidental absolute binding on a throttle would pin the engine. `absolute` is not accepted yet — it
+## needs a `level` action and `step(dt)` behind it, and a suffix that is parsed but ignored would be a lie.
+
+const Devices := preload("res://addons/spacesim/input/devices.gd")
 
 const MODIFIER_ORDER := ["Meta", "Ctrl", "Shift", "Alt"]
+const JOYPAD_PREFIX := "Joy:"
 
 ## The mouse's buttons, by the names the file uses. **`WheelUp` and `WheelDown` are buttons to Godot**
 ## (`MOUSE_BUTTON_WHEEL_UP` is 4), which is how a scroll can be bound to an action at all.
@@ -55,7 +61,11 @@ static func parse(text: String) -> Dictionary:
 
 	var source := parts[parts.size() - 1].strip_edges()
 	var binding := {}
-	if source.begins_with(MOUSE_PREFIX):
+	if source.begins_with(JOYPAD_PREFIX):
+		binding = _parse_joypad(source)
+		if binding.is_empty():
+			return {}
+	elif source.begins_with(MOUSE_PREFIX):
 		var named := source.substr(MOUSE_PREFIX.length())
 		if not MOUSE_BUTTONS.has(named):
 			return {}
@@ -85,6 +95,37 @@ static func parse(text: String) -> Dictionary:
 	return binding
 
 
+## `Joy:<device name>/Button:A` or `Joy:<device name>/Axis:LEFT_X`. The device name may contain spaces, so
+## the split is at the **last** slash.
+static func _parse_joypad(source: String) -> Dictionary:
+	var body := source.substr(JOYPAD_PREFIX.length())
+	var slash := body.rfind("/")
+	if slash <= 0 or slash >= body.length() - 1:
+		return {}
+	var pad := body.substr(0, slash).strip_edges()
+	var control := body.substr(slash + 1).strip_edges()
+	if pad.is_empty():
+		return {}
+
+	var colon := control.find(":")
+	if colon <= 0:
+		return {}
+	var kind := control.substr(0, colon)
+	var named := control.substr(colon + 1).strip_edges()
+	match kind:
+		"Button":
+			var button := Devices.button_index(named)
+			if button < 0:
+				return {}
+			return {"device": "joypad", "pad": pad, "button": button}
+		"Axis":
+			var axis := Devices.axis_index(named)
+			if axis < 0:
+				return {}
+			return {"device": "joypad", "pad": pad, "axis": axis}
+	return {}
+
+
 static func is_valid(text: String) -> bool:
 	return not parse(text).is_empty()
 
@@ -101,6 +142,16 @@ static func to_text(binding: Dictionary) -> String:
 			if int(MOUSE_BUTTONS[name]) == int(binding.get("button", -1)):
 				parts.append(MOUSE_PREFIX + name)
 				break
+	elif String(binding.get("device", "")) == "joypad":
+		var pad := String(binding.get("pad", ""))
+		if binding.has("button"):
+			parts.append("%s%s/Button:%s" % [
+				JOYPAD_PREFIX, pad, Devices.BUTTON_NAMES[int(binding["button"])]
+			])
+		else:
+			parts.append("%s%s/Axis:%s" % [
+				JOYPAD_PREFIX, pad, Devices.AXIS_NAMES[int(binding.get("axis", 0))]
+			])
 	else:
 		parts.append(OS.get_keycode_string(int(binding.get("keycode", KEY_NONE))))
 	return "+".join(parts)
@@ -156,6 +207,17 @@ static func matches(event: InputEvent, text: String) -> bool:
 	var binding := parse(text)
 	if binding.is_empty():
 		return false
+
+	if String(binding["device"]) == "joypad":
+		var pad_button := event as InputEventJoypadButton
+		if pad_button == null or not pad_button.pressed:
+			return false
+		if not binding.has("button"):
+			# An axis has no event to match: it is a position, and `SpacesimInput.value` reads it.
+			return false
+		if pad_button.button_index != int(binding["button"]):
+			return false
+		return Devices.name_of(pad_button.device) == String(binding["pad"])
 
 	if String(binding["device"]) == "keyboard":
 		var key := event as InputEventKey
