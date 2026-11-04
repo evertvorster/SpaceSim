@@ -12,8 +12,9 @@ extends SpacesimScreen
 ## is where a value is edited and throwing the edits away is Close's job; leaving the game is about
 ## the player, and this is the screen that is about the player.
 ##
-## **Configuration is here as well as on its key.** This screen is where a player looks when they are
-## not sure where something lives; the hotkey stays for the times they are.
+## **Settings is here as well as on its key**, and the button says the word the screen's own title and
+## its binding use. This screen is where a player looks when they are not sure where something lives;
+## the hotkey stays for the times they are.
 ##
 ## ## Only names are editable
 ##
@@ -50,7 +51,7 @@ func configure(player: SpacesimPlayer, session: SpacesimSession, system: Spacesi
 	_system = system
 	build_screen("Personal data")
 	add_button("Saved Games", func() -> void: saved_games_requested.emit())
-	add_button("Configuration", func() -> void: settings_requested.emit())
+	add_button("Settings", func() -> void: settings_requested.emit())
 	add_button("Close", func() -> void: closed.emit())
 	add_button("Exit Game", func() -> void: exit_requested.emit())
 

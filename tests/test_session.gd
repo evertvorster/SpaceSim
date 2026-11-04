@@ -209,8 +209,8 @@ func _test_the_player_screen(h, root: Node, system: SpacesimSystemScene) -> void
 	for button in panel.actions.get_children():
 		labels.append(String(button.text))
 	h.check(
-		labels == ["Saved Games", "Configuration", "Close", "Exit Game"],
-		"the screen has Saved Games, Configuration, Close and Exit Game (%s)" % str(labels)
+		labels == ["Saved Games", "Settings", "Close", "Exit Game"],
+		"the screen has Saved Games, Settings, Close and Exit Game (%s)" % str(labels)
 	)
 	h.check(
 		not Ui.shows(panel.content, "Histories") and not Ui.shows(panel.content, "Saves"),

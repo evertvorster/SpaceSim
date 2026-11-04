@@ -957,7 +957,7 @@ exactly, so `W` does not fire while Alt is held.
 
 ### The settings screen
 
-**Alt+C** pauses the game and opens it — a binding, so it is rebindable — and the **Configuration**
+**Alt+C** pauses the game and opens it — a binding, so it is rebindable — and the **Settings**
 button on the personal-data screen opens the same screen, because that is where a player looks when
 they are not sure where something lives. Entered by the key it closes to the world; entered from the
 button it closes back to the personal-data screen. Modelled on the vegastrike config screen:
@@ -1135,7 +1135,7 @@ screen is still one thing.
 ### `SpacesimPlayerPanel`
 
 The personal-data screen, on Tab: what the player is, what they carry, and the doors out of it. Saved
-Games, Configuration, Close and Exit Game; the attributes, the assets and where each of them is:
+Games, Settings, Close and Exit Game; the attributes, the assets and where each of them is:
 
 | Member | |
 |---|---|

@@ -91,8 +91,8 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	for button in player_panel.actions.get_children():
 		labels.append(String(button.text))
 	h.check(
-		labels == ["Saved Games", "Configuration", "Close", "Exit Game"],
-		"the player screen has Saved Games, Configuration, Close and Exit Game (%s)" % str(labels)
+		labels == ["Saved Games", "Settings", "Close", "Exit Game"],
+		"the player screen has Saved Games, Settings, Close and Exit Game (%s)" % str(labels)
 	)
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
 	h.check(
