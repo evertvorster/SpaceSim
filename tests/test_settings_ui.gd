@@ -4,6 +4,8 @@ extends RefCounted
 const Settings := preload("res://addons/spacesim/settings/settings.gd")
 const Edit := preload("res://addons/spacesim/settings/settings_edit.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
+const Actions := preload("res://addons/spacesim/input/actions.gd")
+const Ui := preload("res://tests/ui_fixture.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
@@ -20,6 +22,7 @@ func run(h, root: Node) -> void:
 	_test_bad_values_are_not_staged(h)
 	_test_every_setting_gets_a_control(h, root)
 	_test_the_tabs_group_the_registry(h, root)
+	_test_the_bindings_tab(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -112,7 +115,7 @@ func _test_every_setting_gets_a_control(h, root: Node) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
 	var panel := SettingsPanel.new()
-	panel.configure(_fixture.open())
+	panel.configure(_fixture.open(), _fixture.bindings())
 	layer.add_child(panel)
 
 	var fields: Dictionary = panel.get("_fields")
@@ -133,7 +136,7 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
 	var panel := SettingsPanel.new()
-	panel.configure(_fixture.open())
+	panel.configure(_fixture.open(), _fixture.bindings())
 	layer.add_child(panel)
 
 	var found := panel.find_children("*", "TabContainer", true, false)
@@ -225,6 +228,75 @@ static func _rows_label(tabs: TabContainer, index: int, key: String) -> bool:
 		if (child as Label).text == key:
 			return true
 	return false
+
+
+## **The actions are not settings**, so what this tab has to prove is different: every action appears,
+## the field shows what stands, an edit stages, a typo is coloured and staged nowhere, Apply writes the
+## file, and Reset puts the default back.
+func _test_the_bindings_tab(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var store := _fixture.bindings()
+	var panel := SettingsPanel.new()
+	panel.configure(_fixture.open(), store)
+	layer.add_child(panel)
+
+	var missing: Array[String] = []
+	for id in Actions.ids():
+		if not Ui.shows(panel, Actions.label_of(id)):
+			missing.append(String(id))
+	h.check(missing.is_empty(), "every action is on the bindings tab%s" % Fixture.detail(missing))
+
+	var fields: Dictionary = panel.get("_binding_fields")
+	h.check(fields.size() == Actions.ids().size(), "with one field each (%d)" % fields.size())
+
+	var throttle: LineEdit = fields.get("throttle_up")
+	h.check(throttle != null and throttle.text == "Shift+Equal", "showing the binding that stands")
+
+	# --- a typo is coloured and goes nowhere
+	throttle.text = "Nonsense"
+	throttle.text_changed.emit("Nonsense")
+	h.check(throttle.modulate == panel.INVALID_COLOR, "a binding that does not parse is coloured")
+	h.check(not store.has_changes(), "and is not staged")
+
+	# --- a real edit stages, and Apply writes it
+	throttle.text = "W"
+	throttle.text_changed.emit("W")
+	h.check(throttle.modulate == panel.IDLE_COLOR, "a valid one is not coloured")
+	h.check(store.has_changes(), "and is staged")
+	h.check(not panel._apply_button.disabled, "so Apply is available")
+	panel._apply_button.pressed.emit()
+	h.check(not store.has_changes(), "applying clears the staging")
+	var reread := _fixture.bindings()
+	h.check(reread.of("throttle_up") == ["W"], "and the file has the new binding")
+
+	# --- several bindings in one field, which is what the comma is for
+	throttle.text = "W, Mouse:Left"
+	throttle.text_changed.emit("W, Mouse:Left")
+	panel._apply_button.pressed.emit()
+	var two := _fixture.bindings()
+	h.check(two.of("throttle_up") == ["W", "Mouse:Left"], "and a field can hold more than one")
+
+	# --- Reset is staged, and says the default
+	var reset := _button_named(panel, "Reset", "throttle_up")
+	h.check(reset != null, "the row has a Reset")
+	if reset != null:
+		reset.pressed.emit()
+	h.check(store.of("throttle_up") == Actions.defaults_of("throttle_up"), "which restores the default")
+	h.check(store.has_changes(), "as a staged edit, not a silent write")
+
+	layer.free()
+
+
+## The Reset on one action's row.
+static func _button_named(panel: Node, text: String, action: String) -> Button:
+	var field: LineEdit = panel.get("_binding_fields").get(action)
+	if field == null or field.get_parent() == null:
+		return null
+	for child in field.get_parent().get_children():
+		if child is Button and child.text == text:
+			return child
+	return null
 
 
 func _test_bad_values_are_not_staged(h) -> void:

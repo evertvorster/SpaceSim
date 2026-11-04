@@ -149,7 +149,7 @@ func _test_the_picker_stages_and_apply_commits(h, root: Node) -> void:
 	root.add_child(layer)
 	var settings := _fixture.open()
 	var panel := SettingsPanel.new()
-	panel.configure(settings)
+	panel.configure(settings, _fixture.bindings())
 	layer.add_child(panel)
 
 	var menus := _menu_buttons(panel, [])

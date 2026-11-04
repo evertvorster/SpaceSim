@@ -995,7 +995,17 @@ like any other: it changes nothing until **Apply**, and **Close** throws it away
 | `changed` | emitted on any staging change |
 
 `SpacesimSettingsPanel` — `Control` — is built in code, since the project has no editor-authored
-scenes: `configure(settings)`, and the `closed` signal. The buttons drive the edit directly.
+scenes: `configure(settings, bindings)`, and the `closed` signal. The buttons drive the edits directly.
+
+**Apply is two edits now** — the settings and the bindings — and the button only goes idle when both
+have committed; a bindings file that cannot be written leaves it amber, which is the one signal the
+player has. `dismissed()` discards both.
+
+**The Bindings tab is the one tab with rows that are not settings.** Below `mouse.sensitivity` it draws
+`SpacesimActions` grouped by category: a label, the action's bindings as comma-separated text, and a
+Reset. An edit that does not parse is **coloured and staged nowhere**, so a typo cannot reach the file;
+Reset is staged like every other edit, not a silent write. Capture — pressing the key you want — is the
+deferred follow-up.
 
 ### `SpacesimXdg` — `RefCounted` (static)
 

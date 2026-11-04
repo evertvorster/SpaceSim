@@ -11,8 +11,15 @@ extends SpacesimScreen
 ## changing. Editing a *binding* is text for now; capturing a key press is the next step.
 
 const SettingsScript := preload("res://addons/spacesim/settings/settings.gd")
+const Actions := preload("res://addons/spacesim/input/actions.gd")
+const Binding := preload("res://addons/spacesim/input/binding.gd")
+const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const EditScript := preload("res://addons/spacesim/settings/settings_edit.gd")
 const DisplayScript := preload("res://addons/spacesim/settings/display.gd")
+
+## The tab the actions are shown on. Not a settings tab: the sixteen bindings left the registry, and
+## this is where their replacements are drawn.
+const BINDINGS_TAB := "bindings"
 
 const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
@@ -21,13 +28,16 @@ const INVALID_COLOR := Color(1.0, 0.35, 0.3)
 var _settings: Node
 var _edit: SpacesimSettingsEdit
 var _fields: Dictionary = {} ## key -> the controls that edit it
+var _bindings: SpacesimBindingsStore
+var _binding_fields: Dictionary = {} ## action id -> the field that shows its bindings
 var _apply_button: Button
 var _close_button: Button
 var _updating := false
 
 
-func configure(settings: Node) -> void:
+func configure(settings: Node, bindings: SpacesimBindingsStore) -> void:
 	_settings = settings
+	_bindings = bindings
 	_edit = EditScript.new(settings)
 	_build()
 	_edit.changed.connect(_refresh)
@@ -48,26 +58,67 @@ func _build() -> void:
 
 	for tab in SettingsScript.TABS:
 		var keys := _keys_in(tab)
+		var actions := _actions_in(tab)
 		# A tab nothing was filed into is not built: an empty page is a promise of settings that are
 		# somewhere else.
-		if keys.is_empty():
+		if keys.is_empty() and actions.is_empty():
 			continue
 		var page := ScrollContainer.new()
 		page.name = SettingsScript.tab_title(tab)
 		page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-		var grid := GridContainer.new()
-		grid.name = "Settings"
-		grid.columns = 3
-		grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		grid.add_theme_constant_override("h_separation", 12)
-		grid.add_theme_constant_override("v_separation", 6)
-		page.add_child(grid)
 		tabs.add_child(page)
-		for key in keys:
-			_add_row(grid, key)
 
-	_apply_button = add_button("Apply", func() -> void: _edit.apply())
+		var column := VBoxContainer.new()
+		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.add_theme_constant_override("separation", 12)
+		page.add_child(column)
+		if not keys.is_empty():
+			var grid := _grid()
+			column.add_child(grid)
+			for key in keys:
+				_add_row(grid, key)
+		# **The actions are not settings**, so they get their own grid per category rather than a row
+		# among the settings — and this is the only tab that has any.
+		for category in Actions.CATEGORIES:
+			var ids := _actions_in(tab, category)
+			if ids.is_empty():
+				continue
+			var heading := Label.new()
+			heading.text = category
+			heading.add_theme_font_size_override("font_size", 16)
+			column.add_child(heading)
+			var action_grid := _grid()
+			column.add_child(action_grid)
+			for id in ids:
+				_add_binding_row(action_grid, id)
+
+	_apply_button = add_button("Apply", _on_apply)
 	_close_button = add_button("Close", _on_close)
+
+
+## A grid of rows, three columns, as every table on this screen is.
+static func _grid() -> GridContainer:
+	var grid := GridContainer.new()
+	grid.name = "Settings"
+	grid.columns = 3
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 6)
+	return grid
+
+
+## The actions shown on a tab, in registry order, optionally within one category. **Only the bindings
+## tab has any**, and that is decided by `Settings.tab_of` on the *settings* side: an action belongs
+## wherever its category is shown, which today is the one tab called `bindings`.
+static func _actions_in(tab: String, category := "") -> Array:
+	if tab != BINDINGS_TAB:
+		return []
+	var found: Array = []
+	for id in Actions.ids():
+		if not category.is_empty() and Actions.category_of(id) != category:
+			continue
+		found.append(id)
+	return found
 
 
 ## The editable keys filed under one tab, in registry order.
@@ -332,6 +383,69 @@ func _stage_text(key: String, field: LineEdit, new_text: String) -> void:
 		_edit.stage(key, new_text)
 
 
+## **One row per action**: its label, its bindings as text, and a Reset.
+##
+## Text editing, not capture — pressing the key you want is the follow-up, and it needs the dialog the
+## design note describes. What this row already gets right is the staging: an edit that does not parse is
+## **coloured and not staged**, so a typo cannot reach the file.
+func _add_binding_row(grid: GridContainer, action: String) -> void:
+	var label := Label.new()
+	label.text = Actions.label_of(action)
+	label.custom_minimum_size = Vector2(300.0, 0.0)
+	grid.add_child(label)
+
+	var field := LineEdit.new()
+	field.name = "Bindings"
+	field.text = _bindings_text(action)
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	field.tooltip_text = "One or more bindings, separated by commas: W, Alt+C, Mouse:Left"
+	field.text_changed.connect(func(text: String) -> void: _stage_bindings(action, text))
+	grid.add_child(field)
+	_binding_fields[action] = field
+
+	var reset := Button.new()
+	reset.name = "Reset"
+	reset.text = "Reset"
+	reset.tooltip_text = "Back to the engine's default. Nothing is committed until you apply."
+	reset.pressed.connect(
+		func() -> void:
+			_bindings.reset(action)
+			_refresh()
+	)
+	grid.add_child(reset)
+
+
+## Stage what was typed, or colour it and stage nothing. **The field is the whole chord list**, so a
+## half-typed binding fails here rather than becoming a key that fires nothing.
+func _stage_bindings(action: String, text: String) -> void:
+	if _updating:
+		return
+	var parts: Array = []
+	for part in text.split(Store.SEPARATOR, false):
+		if not part.strip_edges().is_empty():
+			parts.append(part.strip_edges())
+	for part in parts:
+		if not Binding.is_valid(String(part)):
+			_binding_fields[action].modulate = INVALID_COLOR
+			return
+	_binding_fields[action].modulate = IDLE_COLOR
+	if not _bindings.stage(action, parts):
+		_binding_fields[action].modulate = INVALID_COLOR
+
+
+func _bindings_text(action: String) -> String:
+	return Store.SEPARATOR.join(PackedStringArray(_bindings.of(action)))
+
+
+## Apply is **two** edits now, and it only goes idle when both have committed. A file that cannot be
+## written leaves the button amber, which is the one signal the player has.
+func _on_apply() -> void:
+	_edit.apply()
+	if _bindings.apply() < 0:
+		push_warning("settings: the bindings could not be written")
+	_refresh()
+
+
 func _on_close() -> void:
 	closed.emit()
 
@@ -340,6 +454,8 @@ func _on_close() -> void:
 ## warns about. It holds whichever route the screen is left by, not only the Close button.
 func dismissed() -> void:
 	_edit.discard()
+	if _bindings != null:
+		_bindings.discard()
 
 
 ## Pull every control back to what the staging area holds — which is how a Reset shows up, and how
@@ -369,7 +485,12 @@ func _refresh() -> void:
 			editors[0].button_pressed = bool(value)
 	_updating = false
 
-	var pending := _edit.has_changes()
+	for action in _binding_fields:
+		var field: LineEdit = _binding_fields[action]
+		field.text = _bindings_text(action)
+		field.modulate = IDLE_COLOR
+
+	var pending := _edit.has_changes() or _bindings.has_changes()
 	_apply_button.modulate = PENDING_COLOR if pending else IDLE_COLOR
 	_close_button.modulate = PENDING_COLOR if pending else IDLE_COLOR
 

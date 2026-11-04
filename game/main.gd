@@ -156,7 +156,7 @@ func _ready() -> void:
 	_input_map = InputMapScript.new(_bindings)
 
 	_settings_screen = SpacesimSettingsPanel.new()
-	_settings_screen.configure(SpacesimSettings)
+	_settings_screen.configure(SpacesimSettings, _bindings)
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
 	_player_screen.configure(_player, _session, _system)
