@@ -55,6 +55,9 @@ var _detect_previous := {}
 ## `pressed` signal** — freeing the button that is emitting is the error the codebase already has a note
 ## about — so it is done at the next frame, and [method flush_rows] is how a test asks for it now.
 var _rows_dirty := false
+## The row to put the cursor in after the next rebuild, so **Add is visibly an Add**: the new row takes
+## the focus, the scroll container brings it into view, and its empty field says what to do next.
+var _focus_row: Array = []
 
 ## The devices tab's live readouts: `[device, axis index, Label]` and `[device, button index, Label]`.
 var _axis_labels: Array = []
@@ -870,6 +873,7 @@ func _add_binding_row(
 	var field := LineEdit.new()
 	field.name = "Binding%d" % index
 	field.text = text
+	field.placeholder_text = "press Detect, or type a binding"
 	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	field.tooltip_text = (
 		"One binding — type it, or press Detect and use the control you want.\n"
@@ -911,6 +915,14 @@ func _row_texts(action: String) -> Array:
 
 
 ## One row's binding, or `""` for a row that is waiting to be detected into.
+## One row's field control, by action and index.
+func _row_field(action: String, index: int) -> LineEdit:
+	for entry in _binding_rows:
+		if String(entry[0]) == action and int(entry[1]) == index:
+			return entry[2]
+	return null
+
+
 func _binding_text_of(action: String, index: int) -> String:
 	var texts := _row_texts(action)
 	return "" if index >= texts.size() else String(texts[index])
@@ -952,11 +964,18 @@ func flush_rows() -> void:
 		return
 	_rows_dirty = false
 	_rebuild_binding_rows()
+	if not _focus_row.is_empty():
+		var field := _row_field(String(_focus_row[0]), int(_focus_row[1]))
+		_focus_row = []
+		if field != null:
+			field.grab_focus()
 
 
 func _add_binding(action: String) -> void:
 	_stage_rows(action)
-	_extra_rows[action] = int(_extra_rows.get(action, 0)) + 1
+	var opened := int(_extra_rows.get(action, 0)) + 1
+	_extra_rows[action] = opened
+	_focus_row = [action, _row_texts(action).size() + opened - 1]
 	_rows_dirty = true
 
 
