@@ -10,13 +10,22 @@ extends RefCounted
 ## ## `kind` — what the control *is*
 ##
 ## - **trigger** — edge-triggered. It fires and holds nothing: cycle target, bodies on/off.
-## - **rate** — a value produced every frame and self-centering to zero: roll, and later a stick.
-## - **level** — a value that *persists* and is changed by its inputs: throttle. A key winds it up
-##   while held and releasing it leaves the level where it got to.
+## - **rate** — a value produced every frame and self-centering to zero: roll, and throttle up/down.
+## - **level** — a value that *persists* and is set by its inputs: **nothing uses this yet.**
 ##
 ## The distinction is what makes a key and a stick the same action: a key into a `rate` is ±1 (full
-## rate, instantly); a stick into a `rate` is its deflection; a key into a `level` winds it at full
-## rate. See `SpacesimBinding` for how a binding declares which of those it is.
+## rate, instantly), and a stick into a `rate` is its deflection. See `SpacesimBinding` for how a
+## binding declares which of those it is.
+##
+## ## Why throttle is a pair of rates and not a level
+##
+## `throttle_up` and `throttle_down` are **rates**: each says "+1 while I am held" or "-1", and the
+## level they wind is the ship's own `throttle` field, integrated and clamped in `FlightController`
+## where the rest of the flight model lives. Modelling throttle as one `level` action would need a
+## direction per binding, which is a bigger change than the swap deserved.
+##
+## **`level` is reserved for the day a stick sets a value directly** — absolute or relative — which is
+## the pad work, and it is why the kind exists in the vocabulary before anything uses it.
 ##
 ## ## `category` — where it is shown
 ##
@@ -41,13 +50,13 @@ const REGISTRY := {
 	},
 	"throttle_up": {
 		"label": "Throttle up",
-		"kind": "level",
+		"kind": "rate",
 		"category": "Flight",
 		"defaults": ["Shift+Equal"],
 	},
 	"throttle_down": {
 		"label": "Throttle down",
-		"kind": "level",
+		"kind": "rate",
 		"category": "Flight",
 		"defaults": ["Minus"],
 	},

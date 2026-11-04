@@ -1219,6 +1219,35 @@ throws them away, and nothing is ever written by any other route.
 first appears at the player's first Apply. A value that does not parse leaves the registry's default in
 place and is reported in `problems` rather than swallowed.
 
+### `SpacesimInput` — `RefCounted`
+
+`addons/spacesim/input/input_map.gd`. **What an action's bindings are doing right now** — the one place
+that knows an event is a press of an action. It replaces the three shapes the game used to call
+directly: `Bindings.matches(event, get_value("bindings.x"))`, a poll of `Input.is_physical_key_pressed`,
+and the raw text for the HUD's hints.
+
+| Member | |
+|---|---|
+| `store: SpacesimBindingsStore` | assigned at construction |
+| `feed(event) -> bool` | take one event, pressed **or released**; returns whether it belonged to any action |
+| `triggered(event, action) -> bool` | an edge: a press, never a release and never a key repeating |
+| `held(action) -> bool` | whether any of its sources is down right now |
+| `release_all()` | forget every held source — what the screen pause uses |
+| `hint(action) -> String` | the first **keyboard** binding, else the first binding |
+
+**Held state is tracked from what `feed` has seen, not polled from `Input`.** That is what makes it
+testable — a test cannot press a key — and it is what a stick will need anyway, where "down" is a
+threshold on a value. `release_all()` exists because a screen can swallow events while the game is not
+watching: without it, a key pressed and released behind a menu could leave an action held for ever.
+
+A source is an action's **binding**, not the action, so two bindings on one action are pressed
+independently and releasing one does not unpress the other.
+
+**There is no `step(dt)` in this slice.** The one level in the game — the ship's throttle — is
+integrated and clamped in `FlightController`, where the rest of the flight model lives, and the two
+throttle actions are `rate`s that say "+1 while held". A stick that sets a level directly is the pad
+work, and `step` arrives with it.
+
 ### `SpacesimDialog` — a `SpacesimScreen`
 
 `addons/spacesim/ui/dialog.gd` — a modal *inside* another screen: the same chrome, smaller and

@@ -5,6 +5,7 @@ extends RefCounted
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
+const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
 
 const TEST_DIR := "/tmp/spacesim-input-test"
 
@@ -17,6 +18,7 @@ func run(h, _root: Node) -> void:
 	_test_what_is_not_a_binding(h)
 	_test_the_store(h)
 	_test_the_legacy_import(h)
+	_test_the_runtime(h)
 
 
 ## **Every action declares the three things the screen and the runtime need**, and its defaults are
@@ -54,16 +56,17 @@ func _test_the_registry(h) -> void:
 			empty.append(category)
 	h.check(empty.is_empty(), "and no category is empty%s" % _detail(empty))
 
-	# The four held actions are the only levels and rates; everything else is an edge. If that ever
-	# changes, the per-frame path changes with it.
-	var levels := Actions.in_category("Flight").filter(
-		func(id: String) -> bool: return Actions.kind_of(id) == "level"
-	)
+	# **The four held actions are the only four that are read every frame**; everything else is an
+	# edge. If that ever changes, what `_physics_process` reads changes with it.
 	var rates := Actions.in_category("Flight").filter(
 		func(id: String) -> bool: return Actions.kind_of(id) == "rate"
 	)
-	h.check(levels.size() == 2, "two levels: throttle up and down (%d)" % levels.size())
-	h.check(rates.size() == 2, "two rates: roll left and right (%d)" % rates.size())
+	var levels := Actions.ids().filter(
+		func(id: String) -> bool: return Actions.kind_of(id) == "level"
+	)
+	h.check(rates.size() == 4, "four rates: throttle up/down and roll left/right (%d)" % rates.size())
+	h.check(levels.is_empty(), "and no levels yet: a level is what a stick sets directly%s"
+		% _detail(levels))
 
 
 ## **The text format round-trips**, which is what makes the file hand-editable: a value read from
@@ -266,6 +269,72 @@ func _test_the_legacy_import(h) -> void:
 	h.check(reread.of("throttle_up") == ["W"], "with the imported value in it")
 	h.check(reread.problems.is_empty(), "and no problem re-reported, because nothing is re-imported")
 	_clean()
+
+
+## The runtime: edges, held state, and the hint text.
+func _test_the_runtime(h) -> void:
+	_clean()
+	var store := Store.new()
+	store.open(TEST_DIR.path_join("bindings.cfg"))
+	var runtime = InputMapScript.new(store)
+
+	# --- an edge fires once, on the press
+	var press := _key_event("Equal", true, false, false, false)
+	h.check(runtime.triggered(press, "throttle_up"), "a chord matches its action")
+	h.check(not runtime.triggered(press, "throttle_down"), "and not another one")
+	var release := _key_event("Equal", true, false, false, false)
+	release.pressed = false
+	h.check(not runtime.triggered(release, "throttle_up"), "a release is not a trigger")
+
+	# --- held state is tracked from what it has been fed
+	h.check(not runtime.held("throttle_up"), "nothing is held to begin with")
+	runtime.feed(press)
+	h.check(runtime.held("throttle_up"), "a press holds the action")
+	h.check(not runtime.held("throttle_down"), "and only that action")
+	runtime.feed(release)
+	h.check(not runtime.held("throttle_up"), "a release lets it go")
+
+	# Two bindings on one action are independent sources: letting one go does not release the other.
+	store.stage("roll_left", ["BracketLeft", "Q"])
+	runtime.feed(_key_event("BracketLeft"))
+	runtime.feed(_key_event("Q"))
+	h.check(runtime.held("roll_left"), "either of two bindings holds the action")
+	runtime.feed(_released(_key_event("Q")))
+	h.check(runtime.held("roll_left"), "and releasing one leaves the other held")
+	runtime.feed(_released(_key_event("BracketLeft")))
+	h.check(not runtime.held("roll_left"), "releasing both lets it go")
+
+	# **A screen that swallows a release must not leave a key held for ever.**
+	runtime.feed(_key_event("BracketLeft"))
+	h.check(runtime.held("roll_left"), "held again")
+	runtime.release_all()
+	h.check(not runtime.held("roll_left"), "and release_all forgets everything")
+
+	# --- the floor is a button, and it can be fed like a key
+	var floor_binding := InputEventMouseButton.new()
+	floor_binding.button_index = MOUSE_BUTTON_LEFT
+	floor_binding.pressed = true
+	store.stage("cycle_target", ["Mouse:Left"])
+	h.check(runtime.triggered(floor_binding, "cycle_target"), "a mouse button triggers an action")
+	runtime.feed(floor_binding)
+	h.check(runtime.held("cycle_target"), "and holds it like a key")
+
+	# --- the hint text, which the HUD prints
+	h.check(runtime.hint("throttle_up") == "Shift+Equal", "the hint is the action's binding text")
+	h.check(runtime.hint("no_such_action").is_empty(), "and empty for an action that does not exist")
+	store.stage("bodies_toggle", ["Mouse:Middle", "P"])
+	h.check(runtime.hint("bodies_toggle") == "P", "a keyboard binding is preferred for a hint")
+	store.stage("bodies_toggle", ["Mouse:Middle"])
+	h.check(
+		runtime.hint("bodies_toggle") == "Mouse:Middle",
+		"and the first binding is used when there is no keyboard one"
+	)
+	_clean()
+
+
+static func _released(event: InputEventKey) -> InputEventKey:
+	event.pressed = false
+	return event
 
 
 static func _clean() -> void:
