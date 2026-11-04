@@ -1,10 +1,18 @@
 class_name SpacesimDevices
 extends RefCounted
-## What the operating system's gamepads look like through Godot — **for looking at, not for binding**.
+## What the operating system's gamepads look like through Godot: **the names of their controls, and
+## readers for them**.
 ##
-## The names of the axes and buttons in Godot's own order, and a reader for each, so a screen can show
-## what a device is doing without knowing an enumeration. Nothing here binds anything; the bindings are
-## `SpacesimBinding`'s and `SpacesimBindingsStore`'s.
+## `AXIS_NAMES` and `BUTTON_NAMES` are **Godot's own order and Godot's own names** — the engine exposes no
+## name-to-index helper at all (no `get_joy_button_string`, nothing joypad-related on `OS`), so this table
+## is the only form the names have. That makes it two things at once, deliberately:
+##
+## - what the Devices tab labels its rows with;
+## - **the vocabulary the binding text uses** — `Joy:<device>/Button:A`, `Joy:<device>/Axis:LEFT_X` — so a
+##   control that can be seen can be written, and there is no second list to drift.
+##
+## Nothing here binds anything yet: the grammar that would use these names is reserved and rejected by
+## `SpacesimBinding` until the pad work lands.
 ##
 ## **Godot normalises a recognised pad and does not for an unknown one**: a device with a mapping reports
 ## named buttons and axes in `[-1, 1]`, and one without reports raw indices. `is_known()` is that
