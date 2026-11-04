@@ -77,6 +77,13 @@ func build_screen(title: String) -> void:
 	content = VBoxContainer.new()
 	content.name = "Content"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# **Vertical expansion, so a screen can give its sections the room the window has instead of
+	# scrolling as soon as they are taller than their minimums.** A `ScrollContainer` gives a child
+	# with `SIZE_EXPAND` on an axis `max(its own size, the child's minimum)` (4.7.2,
+	# `scene/gui/scroll_container.cpp`, `_reposition_children`) — without the flag the column is
+	# pinned to its minimum and the extra height is lost. A column whose rows are all minimum-sized
+	# looks the same either way, which is why this went unnoticed while every screen was a list.
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 12)
 	scroll.add_child(content)
 
@@ -95,6 +102,54 @@ func add_button(label: String, on_pressed: Callable) -> Button:
 	button.pressed.connect(on_pressed)
 	actions.add_child(button)
 	return button
+
+
+## A section heading in the column.
+func _add_heading(text: String) -> void:
+	content.add_child(_title_label(text))
+
+
+func _title_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 16)
+	return label
+
+
+## A name, editable, with the button that commits it. The button is **disabled until the text
+## differs**, so a control never offers to do nothing, and it says what it does: *Apply* stages a
+## change that Save writes, *Rename* does it now.
+##
+## Enter in the field is the same as pressing it, when there is something to do.
+##
+## Here because both screens edit names and neither should own the widget: the personal-data screen
+## edits the player's and its assets', the saved-games screen a history's.
+func _name_field(current: String, on_apply: Callable, action := "Apply") -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+
+	var field := LineEdit.new()
+	field.text = current
+	field.custom_minimum_size = Vector2(240.0, 0.0)
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(field)
+
+	var button := Button.new()
+	button.name = "NameAction"
+	button.text = action
+	button.disabled = true
+	row.add_child(button)
+
+	field.text_changed.connect(
+		func(text: String) -> void: button.disabled = text.strip_edges() == current
+	)
+	field.text_submitted.connect(
+		func(_text: String) -> void:
+			if not button.disabled:
+				button.pressed.emit()
+	)
+	button.pressed.connect(func() -> void: on_apply.call(field.text.strip_edges()))
+	return row
 
 
 ## Called just before the screen is shown. Rebuild anything that could be stale here.

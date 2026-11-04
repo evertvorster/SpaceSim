@@ -7,6 +7,7 @@ const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd
 const Session := preload("res://addons/spacesim/save/session.gd")
 const Repo := preload("res://addons/spacesim/save/world_repo.gd")
 const Fixture := preload("res://tests/settings_fixture.gd")
+const Ui := preload("res://tests/ui_fixture.gd")
 
 const SYSTEM_PATH := "res://systems/playground.tres"
 
@@ -80,9 +81,18 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	var player_panel := PlayerPanel.new()
 	player_panel.configure(Player.new(), Session.new(Repo.new(TEST_ROOT)), _system(root))
 	layer.add_child(player_panel)
-	h.check(player_panel.actions.get_child_count() == 3, "the player screen has Save, New Story and Close")
+	var labels: Array = []
+	for button in player_panel.actions.get_children():
+		labels.append(String(button.text))
+	h.check(
+		labels == ["Save", "Saved Games", "Close"],
+		"the player screen has Save, Saved Games and Close (%s)" % str(labels)
+	)
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
-	h.check(player_panel.has_signal("session_reloaded"), "and tells whoever is flying that a load moved the player")
+	h.check(
+		player_panel.has_signal("saved_games_requested"),
+		"and asks for the browser of what has been played, rather than holding it"
+	)
 
 	layer.free()
 
@@ -105,7 +115,7 @@ func _test_player_screen_shows_the_player(h, root: Node) -> void:
 		panel.content.get_child_count() == sections,
 		"opening it again rebuilds rather than stacking sections"
 	)
-	h.check(_shows(panel.content, "999"), "and shows the value that changed while it was hidden")
+	h.check(Ui.shows(panel.content, "999"), "and shows the value that changed while it was hidden")
 
 	layer.free()
 
@@ -117,11 +127,3 @@ static func _system(root: Node) -> SpacesimSystemScene:
 	return system
 
 
-## Whether anything under `node` displays exactly this text.
-static func _shows(node: Node, text: String) -> bool:
-	if node is Label and node.text == text:
-		return true
-	for child in node.get_children():
-		if _shows(child, text):
-			return true
-	return false

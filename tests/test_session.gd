@@ -11,6 +11,7 @@ const PlayerPanel := preload("res://addons/spacesim/player/player_panel.gd")
 const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const PlayerShip := preload("res://game/player_ship.gd")
+const Ui := preload("res://tests/ui_fixture.gd")
 
 const SYSTEM_PATH := "res://systems/playground.tres"
 const TEST_ROOT := "/tmp/spacesim-session-test"
@@ -32,8 +33,7 @@ func run(h, root: Node) -> void:
 	_test_deleting_a_save(h, system)
 	_test_the_clock_moves_on(h, system)
 	_test_putting_the_ship_back(h, system, ship)
-	_test_the_browser(h, root, system)
-	_test_the_saves_list_ignores_the_wheel(h, root, system)
+	_test_the_player_screen(h, root, system)
 	_test_editing_a_name(h, root, system)
 	_test_the_dialog(h, root)
 
@@ -189,14 +189,14 @@ func _test_putting_the_ship_back(h, system: SpacesimSystemScene, ship: Node3D) -
 	h.check(ship != null, "and the ship is still the observer")
 
 
-## The two lists, with something in them — a browser that cannot be opened proves nothing.
-func _test_the_browser(h, root: Node, system: SpacesimSystemScene) -> void:
+## What the personal-data screen is now: what the player is and what they carry, and two buttons that
+## lead elsewhere. **The browser of histories and saves is not here** — it is the Saved Games screen,
+## behind a button, and the check that it is gone is that its sections cannot be found.
+func _test_the_player_screen(h, root: Node, system: SpacesimSystemScene) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
 	var session := _session()
 	session.start(system)
-	# Save something, so the lists have something in them: a browser that cannot be opened proves
-	# nothing, and by this point in the suite the earlier saves have been loaded over and deleted.
 	session.player.attributes["Credits"] = 7
 	session.save(system)
 
@@ -205,63 +205,44 @@ func _test_the_browser(h, root: Node, system: SpacesimSystemScene) -> void:
 	layer.add_child(panel)
 	panel.opened()
 
-	h.check(panel.actions.get_child_count() == 3, "the screen has Save, New Story and Close")
-	h.check(_shows(panel, "Histories") and _shows(panel, "Saves"), "and both lists")
+	var labels: Array = []
+	for button in panel.actions.get_children():
+		labels.append(String(button.text))
+	h.check(
+		labels == ["Save", "Saved Games", "Close"],
+		"the screen has Save, Saved Games and Close (%s)" % str(labels)
+	)
+	h.check(
+		not Ui.shows(panel.content, "Histories") and not Ui.shows(panel.content, "Saves"),
+		"and neither list: browsing moved to the screen behind the button"
+	)
 
 	# **Nothing is hidden behind a right-click.** What a row can do is on the screen, in words.
-	h.check(_menus(panel).is_empty(), "with no menus behind a right-click")
-	h.check(
-		_buttons(panel, "Play").size() == 1 and _buttons(panel, "Delete").size() == 1,
-		"the history's actions are buttons beside it"
-	)
-	# The word says what commits it: a history's name is a branch rename, so it is not an Apply.
-	h.check(_buttons(panel, "Rename").size() == 1, "and renaming one says Rename, because it happens now")
+	h.check(Ui.menus(panel).is_empty(), "with no menus behind a right-click")
 
 	# Only names are editable, and an inactive button is how a control says there is nothing to do.
-	var applies := _buttons(panel, "Apply")
+	var applies := Ui.buttons(panel, "Apply")
 	h.check(applies.size() == 2, "the player's name and each asset's have an Apply (%d)" % applies.size())
 	var active := 0
 	for button in applies:
 		if not button.disabled:
 			active += 1
 	h.check(active == 0, "each inactive until its field differs (%d active)" % active)
-	# One field for the player's name, one for the history's, one per asset — and no others, because
-	# credits and condition are the game's to change.
-	var fields := _fields(panel)
+	# One field for the player's name, one per asset — and no others, because credits and condition are
+	# the game's to change and a history's name is renamed on the other screen.
+	var fields := Ui.fields(panel)
 	h.check(
-		fields.size() == 3,
-		"and three fields in all: a name each, and nothing to type into (%d)" % fields.size()
+		fields.size() == 2,
+		"and two fields in all: a name each, and nothing to type into (%d)" % fields.size()
 	)
 	h.check(
-		not _shows(panel, "Change my values"),
+		not Ui.shows(panel, "Change my values"),
 		"with no way to type into the values the game owns"
 	)
-
 	h.check(
-		_shows(panel, "Assets") and _shows(panel, "Playground Lander"),
+		Ui.shows(panel, "Assets") and Ui.shows(panel, "Playground Lander"),
 		"and what the player holds, by name"
 	)
-
-	# **A dialog is inside the screen it is over.** Its panel is centred on the dialog's own rect, so
-	# a dialog that has collapsed to nothing puts its panel off the corner of the window — which is
-	# what happened while `build_screen` used `set_anchors_preset`, whose default is to keep the rect
-	# a control already has, and a control that has just been made has none.
-	panel._show_save(0)
-	var dialog = panel._dialog
-	h.check(
-		dialog.size == panel.size,
-		"a dialog covers the screen it is over (%s against %s)" % [str(dialog.size), str(panel.size)]
-	)
-	var box: Control = dialog.get_node("Panel")
-	h.check(
-		box.get_global_rect().get_center().distance_to(dialog.get_global_rect().get_center()) < 1.0,
-		"and its panel is centred on it (%s in %s)" % [str(box.get_global_rect()), str(dialog.get_global_rect())]
-	)
-	h.check(_shows(panel, Session.FIRST_HISTORY), "the history being played is listed")
-	h.check(_shows(panel, "(playing)"), "and marked as the one being played")
-	# The whole label, not a fragment of it — "in space" also appears in the header and the date on
-	# its own appears twice, so a fragment would pass without the save row existing at all.
-	h.check(_shows(panel, session.label(system)), "and the save in it is listed by its whole label")
 
 	var sections := panel.content.get_child_count()
 	panel.opened()
@@ -269,35 +250,6 @@ func _test_the_browser(h, root: Node, system: SpacesimSystemScene) -> void:
 	layer.free()
 
 
-## The wheel is a scroll, not a choice. **`ItemList` emits `item_clicked` for a wheel notch over an
-## item** — whatever the button — so scrolling a long list opened the save under the cursor. What is
-## emitted here is the signal Godot's own `gui_input` emits, with the button it puts in it.
-func _test_the_saves_list_ignores_the_wheel(h, root: Node, system: SpacesimSystemScene) -> void:
-	var layer := CanvasLayer.new()
-	root.add_child(layer)
-	var session := _session()
-	session.start(system)
-	session.save(system)
-
-	var panel := PlayerPanel.new()
-	panel.configure(session.player, session, system)
-	layer.add_child(panel)
-	panel.opened()
-
-	var saves: ItemList = panel._saves
-	h.check(saves.item_count > 0, "the saves list has a row to scroll over")
-	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_WHEEL_DOWN)
-	h.check(not panel._dialog.visible, "a wheel notch over a save does not open it")
-	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_WHEEL_UP)
-	h.check(not panel._dialog.visible, "and scrolling back does not either")
-	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_LEFT)
-	h.check(panel._dialog.visible, "while a left click still does")
-
-	layer.free()
-
-
-## The dialog is generic on purpose — a confirmation, a name prompt, a details view — so what is
-## worth checking is that it asks, collects and answers.
 ## The rule the screen is built on: **names are the only thing a person types**, and the word on the
 ## button says what commits it.
 func _test_editing_a_name(h, root: Node, system: SpacesimSystemScene) -> void:
@@ -312,7 +264,7 @@ func _test_editing_a_name(h, root: Node, system: SpacesimSystemScene) -> void:
 
 	# --- the player's name is player state: Apply stages it, Save writes it.
 	var saves_before := session.saves().size()
-	var named: LineEdit = _field_holding(panel, session.player.display_name())
+	var named: LineEdit = Ui.field_holding(panel, session.player.display_name())
 	h.check(named != null, "the player's name is in a field, not behind a menu")
 	var apply: Button = named.get_parent().get_node("NameAction")
 	h.check(apply.text == "Apply", "and its button says Apply, because this one waits for Save")
@@ -331,7 +283,7 @@ func _test_editing_a_name(h, root: Node, system: SpacesimSystemScene) -> void:
 	# --- an asset's name, the same way, and the id still finds it.
 	var asset_name := String(session.player.assets[0].get("name", ""))
 	var asset_id := String(session.player.assets[0].get("id", ""))
-	var asset_field: LineEdit = _field_holding(panel, asset_name)
+	var asset_field: LineEdit = Ui.field_holding(panel, asset_name)
 	h.check(asset_field != null, "so is an asset's name")
 	asset_field.text = "Renamed Lander"
 	asset_field.text_changed.emit("Renamed Lander")
@@ -341,37 +293,11 @@ func _test_editing_a_name(h, root: Node, system: SpacesimSystemScene) -> void:
 		"and renaming one keeps its id, which is what a location points at"
 	)
 
-	# --- a history's name is a branch name: it happens now, and says so.
-	var history_name := session.repo.current_history()
-	var history_field: LineEdit = _field_holding(panel, history_name)
-	h.check(history_field != null, "and a history's name is a field too")
-	var rename: Button = history_field.get_parent().get_node("NameAction")
-	h.check(
-		rename.text == "Rename",
-		"whose button says Rename, because a branch rename does not wait for anything"
-	)
-	h.check(rename.disabled, "and is inactive until the name differs")
-
-	history_field.text = "mankind"
-	history_field.text_changed.emit("mankind")
-	rename.pressed.emit()
-	h.check(session.repo.has_history("mankind"), "renaming it takes effect at once")
-	h.check(not session.repo.has_history(history_name), "and the old name is gone")
-
 	layer.free()
 
 
-## The field holding this text, so a test can find one the way a person does — by what is in it.
-static func _field_holding(node: Node, text: String) -> LineEdit:
-	if node is LineEdit and node.text == text:
-		return node
-	for child in node.get_children():
-		var found := _field_holding(child, text)
-		if found != null:
-			return found
-	return null
-
-
+## The dialog is generic on purpose — a confirmation, a name prompt, a details view — so what is
+## worth checking is that it asks, collects and answers.
 func _test_the_dialog(h, root: Node) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
@@ -384,64 +310,13 @@ func _test_the_dialog(h, root: Node) -> void:
 
 	h.check(dialog.content != null and dialog.actions.get_child_count() == 2, "a dialog opens with its answers")
 	h.check(dialog.value("History name") == "", "and its field starts empty")
-	h.check(_shows(dialog, "What should it be called?"), "and shows what it is asking")
+	h.check(Ui.shows(dialog, "What should it be called?"), "and shows what it is asking")
 
 	# Answering hides it and reports which button was pressed, which is the whole contract.
 	dialog.actions.get_child(0).pressed.emit()
 	h.check(answers == ["Rename"], "pressing an answer reports which one (%s)" % str(answers))
 	h.check(not dialog.visible, "and closes it")
 	layer.free()
-
-
-## Whether anything under `node` shows this text, as part of a longer line. Menus count: what you
-## can do to a row lives in them, so a test that cannot see them cannot see the affordances.
-static func _shows(node: Node, fragment: String) -> bool:
-	if node is Label and node.text.contains(fragment):
-		return true
-	if node is Button and node.text.contains(fragment):
-		return true
-	# A field shows what it holds as much as a label does.
-	if node is LineEdit and node.text.contains(fragment):
-		return true
-	if node is ItemList:
-		for index in node.item_count:
-			if node.get_item_text(index).contains(fragment):
-				return true
-	if node is PopupMenu:
-		for index in node.item_count:
-			if node.get_item_text(index).contains(fragment):
-				return true
-	for child in node.get_children():
-		if _shows(child, fragment):
-			return true
-	return false
-
-
-func _menus(node: Node) -> Array:
-	var found: Array = []
-	if node is PopupMenu:
-		found.append(node)
-	for child in node.get_children():
-		found.append_array(_menus(child))
-	return found
-
-
-func _fields(node: Node) -> Array:
-	var found: Array = []
-	if node is LineEdit:
-		found.append(node)
-	for child in node.get_children():
-		found.append_array(_fields(child))
-	return found
-
-
-func _buttons(node: Node, label: String) -> Array:
-	var found: Array = []
-	if node is Button and node.text == label:
-		found.append(node)
-	for child in node.get_children():
-		found.append_array(_buttons(child, label))
-	return found
 
 
 func _session() -> SpacesimSession:

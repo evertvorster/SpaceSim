@@ -1098,8 +1098,16 @@ same chrome would drift apart, so there is one.
 | `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed |
 | `closed` | signal, emitted to ask the scene to hide the screen |
 
-`SpacesimSettingsPanel` and `SpacesimPlayerPanel` are the two subclasses. The settings panel uses
-`dismissed()` to throw staged edits away, which is what its amber Close button warns about.
+`SpacesimSettingsPanel`, `SpacesimPlayerPanel` and `SpacesimSavedGamesPanel` are the subclasses. The
+settings panel uses `dismissed()` to throw staged edits away, which is what its amber Close button
+warns about.
+
+The chrome also holds the pieces both screens share — `_name_field` (a name, a field and the button
+that commits it), `_add_heading` and `_title_label` — and a **`content` column with vertical
+expansion**, so a screen can give its sections the room the window has. A `ScrollContainer` gives an
+expanding child `max(its own size, the child's minimum)` (4.7.2, `scroll_container.cpp`,
+`_reposition_children`); without the flag the column is pinned to its minimum and the extra height is
+lost, which no screen noticed while every screen was a list of minimum-sized rows.
 
 ### `SpacesimDialog` — a `SpacesimScreen`
 
@@ -1123,22 +1131,39 @@ screen is still one thing.
 ### `SpacesimPlayerPanel`
 
 The personal-data screen, on Tab, and **the only way a save happens** — there is no save key, because
-a save is a deliberate act. Save, New Story, and Close; the attributes, the assets and where each of
-them is; and the browser:
+a save is a deliberate act. Save, Saved Games and Close; the attributes, the assets and where each of
+them is:
 
 | Member | |
 |---|---|
 | `configure(player, session, system)` | it hosts saving, so it needs all three |
-| `session_reloaded` | signal: a load, a switch or a new story moved the player, so whoever is flying the ship has to be told |
+| `saved_games_requested` | signal: the player asked for the browser, so whoever hosts this screen opens it |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
-**Histories** and **Saves** are two scrolling `ItemList`s side by side. Selecting a history shows
-its saves and is what the controls under the lists act on; **a left click** on a save shows what it
-holds — the wheel scrolls the list and does nothing else, which it does not do of its own accord
-(see `_on_save_clicked`).
+**The browser is not here.** A list you browse and a value you have are different things, and one
+screen holding both made the lists scroll inside a screen that was already scrolling; the histories
+and their saves are the Saved Games screen, one button away. Nothing on this screen can move the
+player, which is why it has no `session_reloaded`.
+
+### `SpacesimSavedGamesPanel`
+
+`addons/spacesim/save/saved_games_panel.gd`. **The histories above, the saves in them below** — a
+history is a branch and a save a commit on it, so it is one browser with two levels, and choosing a
+history is what the saves list below is about. Stacked rather than side by side because a save's label
+is a date and a place, and it needs the whole width to be one readable line.
+
+| Member | |
+|---|---|
+| `configure(player, session, system)` | it loads, switches and starts stories, so it needs all three |
+| `session_reloaded` | signal: a load, a switch or a new story moved the player |
+| `opened()` | rebuilds everything, so the lists cannot show a save that is gone |
+| `New Story` / `Close` | in the button bar; renaming, playing and deleting a history are beside the histories list |
+
+**A left click** on a save shows what it holds — the wheel scrolls the list and does nothing else,
+which it does not do of its own accord (see `_on_save_clicked`).
 
 **Nothing is behind a right-click.** What a row can do is written on the screen: Play, Delete and
-the history's name field sit under the Histories list, and a save's Load and Delete are in the
+the history's name field sit above the histories list, and a save's Load and Delete are in the
 dialog its own row opens — a menu beside a save could only repeat them. Entries that do not apply
 are **disabled rather than absent**: the current history cannot be played or deleted, and the trunk
 can be neither.

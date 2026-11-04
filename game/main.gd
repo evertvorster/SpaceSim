@@ -58,6 +58,7 @@ var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
 var _settings_screen: SpacesimSettingsPanel
 var _player_screen: SpacesimPlayerPanel
+var _saved_games_screen: SpacesimSavedGamesPanel
 
 ## The screen that is open, or null. Having one open *is* being paused.
 var _screen: SpacesimScreen
@@ -143,9 +144,17 @@ func _ready() -> void:
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
 	_player_screen.configure(_player, _session, _system)
-	# A load, a switch or a new story all move the player, and the ship is where the player is.
-	_player_screen.session_reloaded.connect(_place_observer_from_session)
 	_register_screen(_player_screen, "Player")
+
+	# The browser of what has been played, behind a button on the personal-data screen rather than a
+	# key of its own. It is the one screen that can move the player, so it is the one that reports it.
+	_saved_games_screen = SpacesimSavedGamesPanel.new()
+	_saved_games_screen.configure(_player, _session, _system)
+	# Opening it from the player screen closes that one on the way through: one screen open is what
+	# being paused means, and `_open_screen` is where that rule lives.
+	_player_screen.saved_games_requested.connect(_open_screen.bind(_saved_games_screen))
+	_saved_games_screen.session_reloaded.connect(_place_observer_from_session)
+	_register_screen(_saved_games_screen, "SavedGames")
 
 	_capture_mouse()
 
