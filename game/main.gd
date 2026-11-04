@@ -157,7 +157,10 @@ func _ready() -> void:
 	# being paused means, and `_open_screen` is where that rule lives.
 	_player_screen.saved_games_requested.connect(_open_screen.bind(_saved_games_screen))
 	_saved_games_screen.session_reloaded.connect(_place_observer_from_session)
-	_register_screen(_saved_games_screen, "SavedGames")
+	# **Close goes back, not out.** The browser was opened from the personal-data screen, so closing it
+	# returns there; dropping the player into the world from a screen they entered sideways is a
+	# surprise, and the way out of both is the player screen's own Close.
+	_register_screen(_saved_games_screen, "SavedGames", _open_screen.bind(_player_screen))
 
 	_capture_mouse()
 
@@ -307,11 +310,16 @@ func _close_screen() -> void:
 
 
 ## Put a screen in the UI layer, hidden, with its close wired.
-func _register_screen(screen: SpacesimScreen, screen_name: String) -> void:
+##
+## `on_closed` is where that screen's Close goes: `_close_screen` — back to the world — unless the
+## screen was opened *from* another one, in which case it names the screen to return to.
+func _register_screen(
+	screen: SpacesimScreen, screen_name: String, on_closed: Callable = Callable()
+) -> void:
 	screen.name = screen_name
 	screen.visible = false
 	_ui_layer.add_child(screen)
-	screen.closed.connect(_close_screen)
+	screen.closed.connect(on_closed if on_closed.is_valid() else _close_screen)
 
 
 func _on_exit_requested() -> void:

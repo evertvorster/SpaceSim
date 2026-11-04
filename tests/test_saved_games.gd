@@ -25,6 +25,7 @@ func run(h, root: Node) -> void:
 	_test_renaming_a_history(h, root, system)
 	_test_the_saves_list_ignores_the_wheel(h, root, system)
 	_test_saving_from_this_screen(h, root, system)
+	_test_a_dialog_close_only_closes_the_dialog(h, root, system)
 	_test_the_player_screen_opens_it(h, root, system)
 
 	system.container.free()
@@ -192,6 +193,51 @@ func _test_saving_from_this_screen(h, root: Node, system: SpacesimSystemScene) -
 			% [panel._saves.item_count, rows_before]
 	)
 	h.check(Ui.shows(panel, "saved"), "with the message saying it was written")
+	layer.free()
+
+
+## **Closing a dialog closes the dialog and nothing else.** A dialog sits over the screen it belongs
+## to, and a Close that also shut the screen would make dismissing a question cost the list the player
+## was browsing.
+func _test_a_dialog_close_only_closes_the_dialog(h, root: Node, system: SpacesimSystemScene) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var session := _session()
+	session.start(system)
+	session.player.attributes["Credits"] = 7
+	session.save(system)
+	var panel := _panel(layer, session, system)
+	panel.visible = true
+
+	# An array rather than a counter: a lambda captures by value.
+	var closes: Array = []
+	panel.closed.connect(func() -> void: closes.append(1))
+
+	panel._show_save(0)
+	var dialog: SpacesimDialog = panel._dialog
+	h.check(dialog.visible, "a save opens a dialog over the screen")
+	var closers: Array = Ui.buttons(dialog, "Close")
+	h.check(closers.size() == 1, "the dialog has one Close (%d)" % closers.size())
+	if not closers.is_empty():
+		closers[0].pressed.emit()
+	h.check(not dialog.visible, "pressing it closes the dialog")
+	h.check(closes.is_empty(), "and does not ask the scene to close the screen (%d)" % closes.size())
+	h.check(panel.visible, "which is still up")
+
+	# The screen's own Close is what changes screens, and it is a separate button.
+	var screen_closers: Array = []
+	for button in panel.actions.get_children():
+		if String(button.text) == "Close":
+			screen_closers.append(button)
+	h.check(screen_closers.size() == 1, "the screen has its own Close")
+	if not screen_closers.is_empty():
+		screen_closers[0].pressed.emit()
+	h.check(closes.size() == 1, "and that one asks the scene to change screens (%d)" % closes.size())
+
+	# Closing the screen by any other route must not leave a dialog standing inside it.
+	panel._show_save(0)
+	panel.dismissed()
+	h.check(not dialog.visible, "a screen closed underneath a dialog takes the dialog with it")
 	layer.free()
 
 

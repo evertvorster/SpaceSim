@@ -90,6 +90,16 @@ func opened() -> void:
 	_add_browser()
 
 
+## **A dialog is not left standing over a screen that was closed underneath it.** Closing the screen
+## by any route — its own Close, Tab, another hotkey — runs this first, so a re-open cannot show a
+## question about a save the player stopped asking about.
+func dismissed() -> void:
+	_pending = ""
+	_pending_history = ""
+	_pending_hash = ""
+	_dialog.visible = false
+
+
 ## Rebuild the screen, but not while a control inside [member content] is still emitting the signal
 ## that asked for it: [method opened] frees everything in there, and a control cannot be freed from
 ## inside its own signal.

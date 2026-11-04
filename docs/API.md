@@ -1097,7 +1097,7 @@ same chrome would drift apart, so there is one.
 | `title_label: Label` | the heading, so a reused dialog can change what it is asking |
 | `add_button(label, on_pressed) -> Button` | add and connect a button in one line |
 | `opened()` | called just before the screen is shown; rebuild anything stale here |
-| `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed |
+| `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed (a dialog it still has open, its pending action) |
 | `closed` | signal, emitted to ask the scene to hide the screen |
 
 `SpacesimSettingsPanel`, `SpacesimPlayerPanel` and `SpacesimSavedGamesPanel` are the subclasses. The
@@ -1164,6 +1164,16 @@ is a date and a place, and it needs the whole width to be one readable line.
 **Save is here because the row it writes appears in the list underneath it** — saving where you can
 see the result. It is still the only way a save happens: no key, no autosave. The confirmation that
 asks before a save removes the ones after it is this screen's `confirm_save` dialog, unchanged.
+
+**Closing a dialog closes the dialog, and nothing else.** A dialog's Close emits `answered("Close")`
+and hides itself; what the *screen* does with that answer is its own business, and in this screen it
+is nothing. Only the screen's own Close button emits `closed`.
+
+**Close goes back, not out.** This screen is opened from the personal-data screen, so `main.gd`
+registers it with `_open_screen.bind(_player_screen)` as its close target — closing the browser
+returns to the personal-data screen rather than dropping the player into the world. `dismissed()`
+clears any open dialog and its pending action, so a screen closed underneath a dialog cannot leave it
+standing for the next open.
 
 **A left click** on a save shows what it holds — the wheel scrolls the list and does nothing else,
 which it does not do of its own accord (see `_on_save_clicked`).
