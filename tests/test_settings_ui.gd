@@ -324,7 +324,11 @@ func _test_the_devices_tab(h, root: Node) -> void:
 			% [axis_labels.size(), pads.size()]
 	)
 	var buttons: Array = panel.get("_button_labels")
-	h.check(buttons.size() == pads.size(), "with one button line per device (%d)" % buttons.size())
+	h.check(
+		buttons.size() == pads.size() * Devices.BUTTON_NAMES.size(),
+		"and every button laid out, per device (%d for %d device(s))"
+			% [buttons.size(), pads.size()]
+	)
 
 	# **The readout follows the device**, which is the whole point of the tab: whatever an axis reports
 	# is what the label shows, to two decimals.

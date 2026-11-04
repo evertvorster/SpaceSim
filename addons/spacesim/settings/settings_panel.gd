@@ -23,6 +23,12 @@ const DisplayScript := preload("res://addons/spacesim/settings/display.gd")
 const BINDINGS_TAB := "bindings"
 const DEVICES_TAB := "devices"
 
+## A button of a pad that is up, and one that is held. The resting colour is dim enough that a lit
+## button is visible from across the room, which is the point of the tab.
+const BUTTON_UP_COLOR := Color(1.0, 1.0, 1.0, 0.35)
+const BUTTON_DOWN_COLOR := Color(1.0, 0.9, 0.3)
+const BUTTON_COLUMNS := 7
+
 const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
 const INVALID_COLOR := Color(1.0, 0.35, 0.3)
@@ -151,8 +157,10 @@ func _build_devices(column: VBoxContainer) -> void:
 		detail.modulate = Color(1.0, 1.0, 1.0, 0.55)
 		box.add_child(detail)
 
+		# **One axis per line**, name then value: a row of six numbers across the panel is a table to
+		# decode, and what a player is doing here is watching one stick move.
 		var axes_grid := _grid()
-		axes_grid.columns = 6
+		axes_grid.columns = 2
 		for index in Devices.AXIS_NAMES.size():
 			var name_label := Label.new()
 			name_label.text = Devices.AXIS_NAMES[index]
@@ -167,10 +175,21 @@ func _build_devices(column: VBoxContainer) -> void:
 			_axis_labels.append([device, index, value_label])
 		box.add_child(axes_grid)
 
-		var buttons := Label.new()
-		buttons.name = "Buttons"
-		box.add_child(buttons)
-		_button_labels.append([device, buttons])
+		# **Every button, laid out**, rather than only the one held: the point of the tab is to see what
+		# the device *has*, and a button you cannot find is one you cannot bind. Lit when it is down.
+		var button_grid := GridContainer.new()
+		button_grid.columns = BUTTON_COLUMNS
+		button_grid.add_theme_constant_override("h_separation", 10)
+		button_grid.add_theme_constant_override("v_separation", 2)
+		box.add_child(button_grid)
+		for index in Devices.BUTTON_NAMES.size():
+			var button_label := Label.new()
+			button_label.name = "Button%d" % index
+			button_label.text = Devices.BUTTON_NAMES[index]
+			button_label.add_theme_font_size_override("font_size", 12)
+			button_label.custom_minimum_size = Vector2(84.0, 0.0)
+			button_grid.add_child(button_label)
+			_button_labels.append([device, index, button_label])
 
 	_refresh_devices()
 
@@ -186,10 +205,9 @@ func _refresh_devices() -> void:
 			Color(1.0, 0.9, 0.3) if absf(value) > Devices.SHOWN_AS_MOVED else Color(1.0, 1.0, 1.0, 0.45)
 		)
 	for entry in _button_labels:
-		var label: Label = entry[1]
-		var down: Array = Devices.pressed(int(entry[0]))
-		label.text = "buttons   %s" % ("none" if down.is_empty() else ", ".join(down))
-		label.modulate = Color(1.0, 0.9, 0.3) if not down.is_empty() else Color(1.0, 1.0, 1.0, 0.45)
+		var label: Label = entry[2]
+		var down := Input.is_joy_button_pressed(int(entry[0]), int(entry[1]))
+		label.modulate = BUTTON_DOWN_COLOR if down else BUTTON_UP_COLOR
 
 
 func _process(_delta: float) -> void:
