@@ -211,9 +211,7 @@ func _add_saves(row: HBoxContainer) -> void:
 	right.add_child(_saves)
 	# item_clicked, not item_selected: clicking the same save twice should open it twice, and a
 	# selection that has not changed emits nothing.
-	_saves.item_clicked.connect(
-		func(index: int, _at: Vector2, _button: int) -> void: _show_save_at(index)
-	)
+	_saves.item_clicked.connect(_on_save_clicked)
 
 
 func _fill_browser() -> void:
@@ -260,6 +258,17 @@ func _on_history_chosen(index: int) -> void:
 	# Everything below the lists is about what is selected, so the screen is rebuilt rather than
 	# patched in four places.
 	_rebuild()
+
+
+## **The wheel is a click to this item list, so the button is what decides.** `ItemList::gui_input`
+## emits `item_clicked` for a press over an item whatever the button, and it emits it from the branch
+## a button that cannot select lands in — so a wheel notch while scrolling the saves opened the save
+## under the cursor. (4.7.2, `scene/gui/item_list.cpp`, the `else if (closest != -1)` case. The
+## histories list is safe because the wheel cannot reach `item_selected`.)
+func _on_save_clicked(index: int, _at: Vector2, button: int) -> void:
+	if button != MOUSE_BUTTON_LEFT:
+		return
+	_show_save_at(index)
 
 
 func _show_save_at(index: int) -> void:

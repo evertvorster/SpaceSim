@@ -1133,7 +1133,9 @@ them is; and the browser:
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
 **Histories** and **Saves** are two scrolling `ItemList`s side by side. Selecting a history shows
-its saves and is what the controls under the lists act on; clicking a save shows what it holds.
+its saves and is what the controls under the lists act on; **a left click** on a save shows what it
+holds — the wheel scrolls the list and does nothing else, which it does not do of its own accord
+(see `_on_save_clicked`).
 
 **Nothing is behind a right-click.** What a row can do is written on the screen: Play, Delete and
 the history's name field sit under the Histories list, and a save's Load and Delete are in the

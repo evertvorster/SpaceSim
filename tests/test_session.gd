@@ -33,6 +33,7 @@ func run(h, root: Node) -> void:
 	_test_the_clock_moves_on(h, system)
 	_test_putting_the_ship_back(h, system, ship)
 	_test_the_browser(h, root, system)
+	_test_the_saves_list_ignores_the_wheel(h, root, system)
 	_test_editing_a_name(h, root, system)
 	_test_the_dialog(h, root)
 
@@ -265,6 +266,33 @@ func _test_the_browser(h, root: Node, system: SpacesimSystemScene) -> void:
 	var sections := panel.content.get_child_count()
 	panel.opened()
 	h.check(panel.content.get_child_count() == sections, "opening again rebuilds rather than stacking")
+	layer.free()
+
+
+## The wheel is a scroll, not a choice. **`ItemList` emits `item_clicked` for a wheel notch over an
+## item** — whatever the button — so scrolling a long list opened the save under the cursor. What is
+## emitted here is the signal Godot's own `gui_input` emits, with the button it puts in it.
+func _test_the_saves_list_ignores_the_wheel(h, root: Node, system: SpacesimSystemScene) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var session := _session()
+	session.start(system)
+	session.save(system)
+
+	var panel := PlayerPanel.new()
+	panel.configure(session.player, session, system)
+	layer.add_child(panel)
+	panel.opened()
+
+	var saves: ItemList = panel._saves
+	h.check(saves.item_count > 0, "the saves list has a row to scroll over")
+	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_WHEEL_DOWN)
+	h.check(not panel._dialog.visible, "a wheel notch over a save does not open it")
+	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_WHEEL_UP)
+	h.check(not panel._dialog.visible, "and scrolling back does not either")
+	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_LEFT)
+	h.check(panel._dialog.visible, "while a left click still does")
+
 	layer.free()
 
 
