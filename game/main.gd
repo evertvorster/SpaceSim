@@ -62,6 +62,9 @@ var _saved_games_screen: SpacesimSavedGamesPanel
 
 ## The screen that is open, or null. Having one open *is* being paused.
 var _screen: SpacesimScreen
+
+## Where closing the open screen goes, when it was opened *from* another screen. Null means the world.
+var _back_to: SpacesimScreen
 var _selected_index := -1
 var _look := Vector2.ZERO
 var _hud: Label
@@ -155,12 +158,14 @@ func _ready() -> void:
 	_saved_games_screen.configure(_player, _session, _system)
 	# Opening it from the player screen closes that one on the way through: one screen open is what
 	# being paused means, and `_open_screen` is where that rule lives.
-	_player_screen.saved_games_requested.connect(_open_screen.bind(_saved_games_screen))
+	_player_screen.saved_games_requested.connect(
+		_open_from.bind(_saved_games_screen, _player_screen)
+	)
+	# The settings screen has a key of its own, so this is a second way in rather than the only one:
+	# entered here, it closes back here; entered by Alt+C, it closes to the world.
+	_player_screen.settings_requested.connect(_open_from.bind(_settings_screen, _player_screen))
 	_saved_games_screen.session_reloaded.connect(_place_observer_from_session)
-	# **Close goes back, not out.** The browser was opened from the personal-data screen, so closing it
-	# returns there; dropping the player into the world from a screen they entered sideways is a
-	# surprise, and the way out of both is the player screen's own Close.
-	_register_screen(_saved_games_screen, "SavedGames", _open_screen.bind(_player_screen))
+	_register_screen(_saved_games_screen, "SavedGames")
 
 	_capture_mouse()
 
@@ -295,9 +300,18 @@ func _open_screen(screen: SpacesimScreen) -> void:
 		_screen.visible = false
 		_screen.dismissed()
 	_screen = screen
+	_back_to = null
 	screen.opened()
 	screen.visible = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+## Open a screen that belongs to another one, so its Close goes back there instead of dropping the
+## player into the world. The browser and the configuration screen are reached this way from the
+## personal-data screen; a screen opened by its own hotkey has no way back and closes to the world.
+func _open_from(screen: SpacesimScreen, back: SpacesimScreen) -> void:
+	_open_screen(screen)
+	_back_to = back
 
 
 func _close_screen() -> void:
@@ -306,20 +320,21 @@ func _close_screen() -> void:
 	_screen.visible = false
 	_screen.dismissed()
 	_screen = null
-	_capture_mouse()
+	var back := _back_to
+	_back_to = null
+	# Back the way the player came, not out into the world — one Close, one step.
+	if back != null:
+		_open_screen(back)
+	else:
+		_capture_mouse()
 
 
 ## Put a screen in the UI layer, hidden, with its close wired.
-##
-## `on_closed` is where that screen's Close goes: `_close_screen` — back to the world — unless the
-## screen was opened *from* another one, in which case it names the screen to return to.
-func _register_screen(
-	screen: SpacesimScreen, screen_name: String, on_closed: Callable = Callable()
-) -> void:
+func _register_screen(screen: SpacesimScreen, screen_name: String) -> void:
 	screen.name = screen_name
 	screen.visible = false
 	_ui_layer.add_child(screen)
-	screen.closed.connect(on_closed if on_closed.is_valid() else _close_screen)
+	screen.closed.connect(_close_screen)
 
 
 func _on_exit_requested() -> void:

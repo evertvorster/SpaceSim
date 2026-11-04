@@ -91,8 +91,8 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	for button in player_panel.actions.get_children():
 		labels.append(String(button.text))
 	h.check(
-		labels == ["Saved Games", "Close", "Exit Game"],
-		"the player screen has Saved Games, Close and Exit Game (%s)" % str(labels)
+		labels == ["Saved Games", "Configuration", "Close", "Exit Game"],
+		"the player screen has Saved Games, Configuration, Close and Exit Game (%s)" % str(labels)
 	)
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
 	h.check(
@@ -100,6 +100,10 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 		"and asks for the browser of what has been played, rather than holding it"
 	)
 	h.check(player_panel.has_signal("exit_requested"), "and asks to leave, which settings no longer does")
+	h.check(
+		player_panel.has_signal("settings_requested"),
+		"and offers a way into the configuration, as a second way in beside its key"
+	)
 
 	layer.free()
 

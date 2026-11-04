@@ -957,8 +957,10 @@ exactly, so `W` does not fire while Alt is held.
 
 ### The settings screen
 
-**Alt+C** pauses the game and opens it — a binding, so it is rebindable. Modelled on the vegastrike
-config screen:
+**Alt+C** pauses the game and opens it — a binding, so it is rebindable — and the **Configuration**
+button on the personal-data screen opens the same screen, because that is where a player looks when
+they are not sure where something lives. Entered by the key it closes to the world; entered from the
+button it closes back to the personal-data screen. Modelled on the vegastrike config screen:
 
 - a control edits a **staging area**, not the live settings;
 - **Reset** puts a setting back to its engine default, also staged;
@@ -1132,13 +1134,14 @@ screen is still one thing.
 
 ### `SpacesimPlayerPanel`
 
-The personal-data screen, on Tab: what the player is, what they carry, and the way out. Saved Games,
-Close and Exit Game; the attributes, the assets and where each of them is:
+The personal-data screen, on Tab: what the player is, what they carry, and the doors out of it. Saved
+Games, Configuration, Close and Exit Game; the attributes, the assets and where each of them is:
 
 | Member | |
 |---|---|
 | `configure(player, session, system)` | it reads where each asset is, so it needs all three |
 | `saved_games_requested` | signal: the player asked for the browser, so whoever hosts this screen opens it |
+| `settings_requested` | signal: the player asked for the configuration, which otherwise has its own key |
 | `exit_requested` | signal: the player asked to leave, so whoever hosts this screen tears the game down |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
@@ -1169,11 +1172,12 @@ asks before a save removes the ones after it is this screen's `confirm_save` dia
 and hides itself; what the *screen* does with that answer is its own business, and in this screen it
 is nothing. Only the screen's own Close button emits `closed`.
 
-**Close goes back, not out.** This screen is opened from the personal-data screen, so `main.gd`
-registers it with `_open_screen.bind(_player_screen)` as its close target — closing the browser
-returns to the personal-data screen rather than dropping the player into the world. `dismissed()`
-clears any open dialog and its pending action, so a screen closed underneath a dialog cannot leave it
-standing for the next open.
+**Close goes back, not out.** This screen is opened *from* the personal-data screen through
+`main.gd`'s `_open_from(screen, back)`, which records the screen to return to; closing the browser
+returns there rather than dropping the player into the world. A screen opened by its own hotkey has no
+way back and closes to the world, which is the same rule from the other side. `dismissed()` clears any
+open dialog and its pending action, so a screen closed underneath a dialog cannot leave it standing
+for the next open.
 
 **A left click** on a save shows what it holds — the wheel scrolls the list and does nothing else,
 which it does not do of its own accord (see `_on_save_clicked`).
