@@ -1030,6 +1030,7 @@ scenes: `configure(settings)`, and the `closed` signal. The buttons drive the ed
 | `config_home()`, `data_home()` | XDG base directories, with fallbacks applied |
 | `config_dir()`, `data_dir()` | those, plus `spacesim` |
 | `settings_path()` | `config_dir()/settings.cfg` |
+| `bindings_path()` | `config_dir()/bindings.cfg` — **beside** the settings, in its own file, because a different store writes it |
 | `ensure_directory(path)` | create it, recursively |
 
 ### `SpacesimSettings` — `Node`, registered as the `SpacesimSettings` autoload
@@ -1177,6 +1178,46 @@ Three things `parse` refuses, each of which the old parser accepted: an **empty 
 bind `W`), a **modifier as the key** (`Alt` alone parses as the Alt keycode — `find_keycode_from_string`
 does not distinguish, so it is refused explicitly), and **any joypad form** — `Joy:<device>/Button:A`
 is reserved grammar for the pad work and must not silently bind something else.
+
+### `SpacesimBindingsStore` — `RefCounted`
+
+`addons/spacesim/input/bindings_store.gd`. **The player's bindings, in a file of their own** —
+`bindings.cfg`, beside `settings.cfg` — because the settings registry declares its keys statically and
+the suite asserts every declared setting has a control, which a bindings table cannot satisfy.
+
+```ini
+[bindings]
+throttle_up = "Shift+Equal"
+roll_left = "BracketLeft, Q"
+
+[bindings.PS4 Controller]
+throttle_up = "Joy:PS4 Controller/Button:A"
+```
+
+`[bindings]` is the default table; `[bindings.<device name>]` overrides it for one device, keyed by the
+device's **name**. **An empty value means unbound**, which is a different thing from an absent key
+(absent = use the registry's default) — that is what lets a player clear an action rather than only
+change it.
+
+| Member | |
+|---|---|
+| `open(path := "", legacy_path := "")` | empty paths mean the XDG locations; `legacy_path` is only read by the import |
+| `of(action, device := "") -> Array` | staged if edited, else the device's section, else the default section, else the registry's |
+| `table(device := "") -> Dictionary` | every action's bindings, defaults filled in |
+| `stage(action, texts) -> bool` | false when the action is unknown or any text does not parse |
+| `reset(action)`, `discard()`, `has_changes()` | |
+| `apply() -> int` | writes the **whole table**; `-1` when the file cannot be written; device sections carried across untouched |
+| `problems: Array` | what the one-time import could not read, as `"<action>: <text>"` |
+
+**Staged like the settings screen**: edits accumulate in memory, `apply()` writes them, `discard()`
+throws them away, and nothing is ever written by any other route.
+
+**The one-time import** (`_import_legacy`): when `bindings.cfg` does not exist, the sixteen
+`bindings.*` keys in `settings.cfg` are read into memory — `SpacesimSettings` stores them as
+`[bindings] throttle_up = "Shift+Equal"`, which is why the import reads that section and those keys.
+**It writes nothing**, so a first run cannot overwrite anything and the import is idempotent; the file
+first appears at the player's first Apply. A value that does not parse leaves the registry's default in
+place and is reported in `problems` rather than swallowed.
 
 ### `SpacesimDialog` — a `SpacesimScreen`
 

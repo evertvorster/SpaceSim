@@ -4,6 +4,9 @@ extends RefCounted
 
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Binding := preload("res://addons/spacesim/input/binding.gd")
+const Store := preload("res://addons/spacesim/input/bindings_store.gd")
+
+const TEST_DIR := "/tmp/spacesim-input-test"
 
 
 func run(h, _root: Node) -> void:
@@ -12,6 +15,8 @@ func run(h, _root: Node) -> void:
 	_test_binding_text(h)
 	_test_binding_matching(h)
 	_test_what_is_not_a_binding(h)
+	_test_the_store(h)
+	_test_the_legacy_import(h)
 
 
 ## **Every action declares the three things the screen and the runtime need**, and its defaults are
@@ -157,6 +162,114 @@ func _test_what_is_not_a_binding(h) -> void:
 		if Binding.is_valid(text):
 			taken.append(text)
 	h.check(taken.is_empty(), "a joypad binding is refused until pads land%s" % _detail(taken))
+
+
+## **The store stages and writes, and never writes anything else.** Its file is the only place a
+## binding is kept.
+func _test_the_store(h) -> void:
+	_clean()
+	var path := TEST_DIR.path_join("bindings.cfg")
+
+	var store := Store.new()
+	store.open(path)
+	h.check(store.of("throttle_up") == ["Shift+Equal"], "with no file, an action is its registry default")
+	h.check(not store.has_changes(), "and nothing is staged")
+	h.check(not FileAccess.file_exists(path), "opening writes nothing")
+
+	h.check(store.stage("throttle_up", ["W"]), "a valid binding stages")
+	h.check(store.of("throttle_up") == ["W"], "and is what the action now reads")
+	h.check(store.has_changes(), "which counts as a change")
+	h.check(not FileAccess.file_exists(path), "and is still not written")
+	store.discard()
+	h.check(not store.has_changes(), "discarding clears it")
+	h.check(store.of("throttle_up") == ["Shift+Equal"], "and restores what stood")
+
+	# A typo is refused at the store, not discovered at the next keypress.
+	h.check(not store.stage("throttle_up", ["Nonsense"]), "an unparseable binding is refused")
+	h.check(not store.stage("no_such_action", ["W"]), "and so is an action that does not exist")
+
+	# **An empty list unbinds**, which is different from an absent key — that is what lets a player
+	# clear an action rather than only change it.
+	store.stage("cycle_target", [])
+	h.check(store.of("cycle_target").is_empty(), "an empty list unbinds the action")
+
+	store.stage("roll_left", ["BracketLeft", "Q"])
+	h.check(store.of("roll_left") == ["BracketLeft", "Q"], "and an action can have several bindings")
+
+	var written := store.apply()
+	h.check(written == Actions.ids().size(), "applying writes every action (%d)" % written)
+	h.check(FileAccess.file_exists(path), "and creates the file")
+	h.check(not store.has_changes(), "with nothing left staged")
+
+	var reread := Store.new()
+	reread.open(path)
+	h.check(reread.of("roll_left") == ["BracketLeft", "Q"], "a second open reads the two bindings back")
+	h.check(reread.of("cycle_target").is_empty(), "including an action that was unbound")
+	h.check(reread.of("throttle_up") == ["Shift+Equal"], "and the ones that were never touched")
+
+	# A device's own section overrides the default table, and survives an apply untouched.
+	var file := ConfigFile.new()
+	file.load(path)
+	file.set_value("bindings.PS4 Controller", "throttle_up", "W")
+	file.save(path)
+	var with_pad := Store.new()
+	with_pad.open(path)
+	h.check(with_pad.of("throttle_up") == ["Shift+Equal"], "the default table still stands")
+	h.check(
+		with_pad.of("throttle_up", "PS4 Controller") == ["W"],
+		"and a device's section overrides it for that device"
+	)
+	with_pad.stage("roll_right", ["E"])
+	with_pad.apply()
+	var after := ConfigFile.new()
+	after.load(path)
+	h.check(
+		after.has_section_key("bindings.PS4 Controller", "throttle_up"),
+		"applying carries a device section across untouched"
+	)
+	_clean()
+
+
+## **The one-time import from `settings.cfg`**, where an action's binding was a settings key of the same
+## name under a `bindings.` prefix. It writes nothing: the imported values live in memory until Apply.
+func _test_the_legacy_import(h) -> void:
+	_clean()
+	var settings_path := TEST_DIR.path_join("settings.cfg")
+	var bindings_path := TEST_DIR.path_join("bindings.cfg")
+
+	var legacy := ConfigFile.new()
+	legacy.set_value("bindings", "throttle_up", "W")
+	legacy.set_value("bindings", "roll_left", "Nonsense")
+	legacy.set_value("video", "mode", "windowed")
+	SpacesimXdg.ensure_directory(TEST_DIR)
+	legacy.save(settings_path)
+
+	var store := Store.new()
+	store.open(bindings_path, settings_path)
+	h.check(store.of("throttle_up") == ["W"], "a legacy binding is imported")
+	h.check(
+		store.of("roll_left") == Actions.defaults_of("roll_left"),
+		"an unparseable one leaves the registry's default in place"
+	)
+	h.check(
+		store.problems.size() == 1 and String(store.problems[0]).begins_with("roll_left"),
+		"and is reported rather than swallowed (%s)" % str(store.problems)
+	)
+	h.check(store.of("cycle_target") == Actions.defaults_of("cycle_target"),
+		"an action the legacy file never had keeps its default")
+	h.check(not FileAccess.file_exists(bindings_path), "and the import writes nothing")
+
+	store.apply()
+	h.check(FileAccess.file_exists(bindings_path), "the first Apply creates the file")
+	var reread := Store.new()
+	reread.open(bindings_path, settings_path)
+	h.check(reread.of("throttle_up") == ["W"], "with the imported value in it")
+	h.check(reread.problems.is_empty(), "and no problem re-reported, because nothing is re-imported")
+	_clean()
+
+
+static func _clean() -> void:
+	OS.execute("rm", PackedStringArray(["-rf", TEST_DIR]))
 
 
 ## A key event, by the name the binding text uses. A fresh instance each call, so a caller can mutate
