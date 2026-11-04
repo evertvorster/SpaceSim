@@ -144,11 +144,14 @@ func _build() -> void:
 		if is_devices:
 			_build_devices(column)
 		# **The actions are not settings**, so they get their own grid per category rather than a row
-		# among the settings — and this is the only tab that has any.
-		_bindings_vbox = VBoxContainer.new()
-		_bindings_vbox.add_theme_constant_override("separation", 4)
-		column.add_child(_bindings_vbox)
-		_rebuild_binding_rows()
+		# among the settings — and **only the one tab that has any builds this**. Left unguarded, every
+		# tab got a vbox and `_bindings_vbox` ended up pointing at the last one, so every rebuild drew
+		# the rows into Troubleshooting while the player was looking at Bindings.
+		if not actions.is_empty():
+			_bindings_vbox = VBoxContainer.new()
+			_bindings_vbox.add_theme_constant_override("separation", 4)
+			column.add_child(_bindings_vbox)
+			_rebuild_binding_rows()
 
 	_apply_button = add_button("Apply", _on_apply)
 	_close_button = add_button("Close", _on_close)
@@ -839,7 +842,6 @@ func _rebuild_binding_rows() -> void:
 		child.free()
 	_binding_rows.clear()
 
-	Debug.say("bindings[%d]: rebuilt -> %d rows" % [get_instance_id(), _binding_rows.size()])
 	for category in Actions.CATEGORIES:
 		var ids := Actions.in_category(category)
 		if ids.is_empty():
@@ -859,6 +861,9 @@ func _rebuild_binding_rows() -> void:
 					"" if index >= texts.size() else String(texts[index]),
 					index == 0
 				)
+	Debug.say("bindings[%d]: rebuilt -> %d rows, vbox has %d" % [
+		get_instance_id(), _binding_rows.size(), _bindings_vbox.get_child_count()
+	])
 
 
 ## One row: label, the binding as text, and what can be done to it.

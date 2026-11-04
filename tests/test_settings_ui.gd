@@ -251,6 +251,20 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 			missing.append(String(id))
 	h.check(missing.is_empty(), "every action is on the bindings tab%s" % Fixture.detail(missing))
 
+	# **The rows live on the Bindings page and nowhere else.** Every tab used to get a bindings vbox, so
+	# `_bindings_vbox` pointed at the last tab's and every rebuild drew there — invisible to a player on
+	# the Bindings tab, which looked exactly like the buttons doing nothing.
+	var bindings_vbox: VBoxContainer = panel.get("_bindings_vbox")
+	h.check(bindings_vbox != null, "the screen has somewhere to put the rows")
+	if bindings_vbox != null:
+		h.check(bindings_vbox.is_inside_tree(), "and it is in the tree")
+		# vbox → the tab's column → the tab's scroll page → the TabContainer
+		var page: Node = bindings_vbox.get_parent().get_parent()
+		h.check(
+			page != null and page.get_parent() is TabContainer and String(page.name) == "Bindings",
+			"on the Bindings page, not another tab (%s)" % (page.name if page != null else "none")
+		)
+
 	var field: LineEdit = _row_field(panel, "throttle_up", 0)
 	h.check(field != null and field.text == "Shift+Equal", "showing the binding that stands")
 

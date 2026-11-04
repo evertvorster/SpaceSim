@@ -1013,7 +1013,10 @@ scenes: `configure(settings, bindings)`, and the `closed` signal. The buttons dr
 have committed; a bindings file that cannot be written leaves it amber, which is the one signal the
 player has. `dismissed()` discards both.
 
-**The Bindings tab is the one tab with rows that are not settings.** Below `mouse.sensitivity` it draws
+**The Bindings tab is the one tab with rows that are not settings** — and it is the only page that gets a
+container for them. *That guard is load-bearing*: without it every tab page built one, `_bindings_vbox`
+ended up pointing at the last tab's, and every rebuild drew the rows into Troubleshooting while the player
+watched Bindings. The buttons looked dead; the rows were being made correctly, one tab to the right. Below `mouse.sensitivity` it draws
 `SpacesimActions` grouped by category, **one row per binding**: the first row of an action carries its
 label, the rest repeat it dimmed. Each row has its text, **Detect**, **Remove**, and the first row also
 has **Add**.
