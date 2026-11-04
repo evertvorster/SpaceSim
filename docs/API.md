@@ -987,7 +987,8 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **Bindings** | the sixteen keys and `mouse.sensitivity` |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
-| **Rest** | everything not yet filed, which is where a new setting waits — an unmoved setting is visible rather than lost. Today: the six `camera.*` ranges and the four `markers.*`, which are waiting for a **view** tab |
+| **View** | the six `camera.*` settings — the field of view and the five range bands, which are a matched set and are read as one |
+| **Rest** | everything not yet filed, which is where a new setting waits — an unmoved setting is visible rather than lost. Today: the four `markers.*`, which belong with the HUD's own settings once there are any |
 
 **A tab with nothing filed into it is not built**, because an empty page is a promise of settings that
 are somewhere else.
@@ -1040,7 +1041,7 @@ scenes: `configure(settings)`, and the `closed` signal. The buttons drive the ed
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
-| `static TABS` | the tabs the settings screen shows, in order: `display`, `bindings`, `troubleshooting`, `rest` |
+| `static TABS` | the tabs the settings screen shows, in order: `display`, `bindings`, `troubleshooting`, `view`, `rest` |
 | `static tab_of(key) -> String` | which tab a row is filed in; **a row that names none is in `rest`** |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |
 | `KNOWN_VALIDATORS` | the named checks; a row naming anything else is a registry mistake |

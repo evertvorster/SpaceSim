@@ -82,14 +82,17 @@ const REGISTRY := {
 	},
 	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05,
 		"tab": "bindings"},
-	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
+	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0,
+		"tab": "view"},
 	# **`camera.ship_distance` and `ship.visible` went on 2026-10-28 with the placeholder hull.** Both existed for a box
 	# that was clipped at altitude by deep space's 100 m near plane and appeared as a plate on the ground once the plane
 	# was pulled inside it — Evert: *"There is some sort of landing pad that pops up when I am close to the surface. Strip
 	# that out, and clear out the mechanism that makes it."* The camera's offset is a constant in `player_ship.gd` now,
 	# and there is no hull for a key to toggle.
-	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
-	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
+	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0),
+		"tab": "view"},
+	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0),
+		"tab": "view"},
 	# --- the air. **The shells are the only thing that draw the eye's air** (`air_shell.gdshader`, one per band
 	# per body); a material that applied air of its own beside them would draw the same air twice — see
 	# `Atmospheres` §9a. Zero hides every shell, and the frame is then drawn exactly as the rasteriser left it.
@@ -106,13 +109,13 @@ const REGISTRY := {
 	# open. Turn it on to see where the deck's look stands.
 	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	"camera.range_atmosphere": {
-		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
+		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0), "tab": "view"
 	},
 	"camera.range_surface": {
-		"default": Vector2(0.1, 2.0e5), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
+		"default": Vector2(0.1, 2.0e5), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0), "tab": "view"
 	},
 	"camera.range_interior": {
-		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01)
+		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01), "tab": "view"
 	},
 	# --- levels of detail. The geometric error a body's mesh is allowed to show at its **silhouette**,
 	# in pixels on screen. One number decides the whole engine's mesh budget: a body's tessellation
@@ -311,7 +314,7 @@ static func declared_keys() -> Array:
 ## The tabs, in the order they appear. **A row that declares no `tab` is in `rest`, and `rest` is
 ## always last**: a setting nobody has filed yet waits there rather than falling off the screen, and
 ## that list is where the next grouping is decided from.
-const TABS := ["display", "bindings", "troubleshooting", "rest"]
+const TABS := ["display", "bindings", "troubleshooting", "view", "rest"]
 
 
 ## Which tab a setting belongs in. The grouping is a property of the row, not of its key prefix —

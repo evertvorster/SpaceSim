@@ -194,13 +194,14 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	for index in tabs.get_tab_count():
 		titles.append(tabs.get_tab_title(index))
 	h.check(
-		titles == ["Display", "Bindings", "Troubleshooting", "Rest"],
-		"the tabs are Display, Bindings, Troubleshooting and Rest, in that order (%s)" % str(titles)
+		titles == ["Display", "Bindings", "Troubleshooting", "View", "Rest"],
+		"the tabs are Display, Bindings, Troubleshooting, View and Rest, in that order (%s)"
+			% str(titles)
 	)
 
 	# What each tab holds, read off the screen: the display tab is the window, the bindings are the
-	# keys, the troubleshooting tab is what you reach for when the picture is wrong, and the rest is
-	# what nobody has filed yet — the cameras and the markers, waiting for the view tab.
+	# keys, the troubleshooting tab is what you reach for when the picture is wrong, the view tab is the
+	# camera, and the rest is what nobody has filed yet.
 	var pages := {}
 	for index in tabs.get_tab_count():
 		var names: Array = []
@@ -212,6 +213,7 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	var display: Array = pages["Display"]
 	var bindings: Array = pages["Bindings"]
 	var trouble: Array = pages["Troubleshooting"]
+	var view: Array = pages["View"]
 	var rest: Array = pages["Rest"]
 
 	h.check(display.size() == 6, "Display holds the six window settings (%d)" % display.size())
@@ -229,12 +231,18 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 		trouble.size() == 15,
 		"and nothing else has been filed there by accident (%d)" % trouble.size()
 	)
+	h.check(view.size() == 6, "View holds the six camera settings (%d)" % view.size())
 	h.check(
-		rest.size() == 10 and rest.has("camera.fov") and not rest.has("video.mode"),
-		"Rest holds what is still unfiled, with no copy of a filed one (%d)" % rest.size()
+		view.all(func(key: String) -> bool: return key.begins_with("camera.")),
+		"and they are the camera ones (%s)" % str(view)
+	)
+	h.check(
+		rest.size() == 4 and rest.has("markers.font_size") and not rest.has("video.mode"),
+		"Rest holds what is still unfiled — the markers — with no copy of a filed one (%d)"
+			% rest.size()
 	)
 
-	var total := display.size() + bindings.size() + trouble.size() + rest.size()
+	var total := display.size() + bindings.size() + trouble.size() + view.size() + rest.size()
 	h.check(
 		total == Edit.editable_keys().size(),
 		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
