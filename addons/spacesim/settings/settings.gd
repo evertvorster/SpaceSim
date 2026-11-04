@@ -203,6 +203,13 @@ const REGISTRY := {
 	# working, as we might not need it at all."*
 	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0,
 		"tab": "troubleshooting"},
+	# --- the HUD's own three parts. **Each is a separate switch because each is a different annoyance**:
+	# the readout is what a developer reads and a player stops seeing, the frame rate is an instrument, and
+	# the key hints are a reminder that has done its job after the first hour. Off is empty screen, not a
+	# smaller label — the whole point is the room it gives back.
+	"hud.readout": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	"hud.fps": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	"hud.key_hints": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64, "tab": "hud"},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a

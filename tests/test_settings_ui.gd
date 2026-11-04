@@ -231,10 +231,17 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 		trouble.size() == 15,
 		"and nothing else has been filed there by accident (%d)" % trouble.size()
 	)
-	h.check(hud.size() == 10, "HUD holds the camera and the markers (%d)" % hud.size())
+	h.check(
+		hud.size() == 13,
+		"HUD holds the camera, the three HUD switches and the markers (%d)" % hud.size()
+	)
 	var stray := 0
 	for key in hud:
-		if not (String(key).begins_with("camera.") or String(key).begins_with("markers.")):
+		if not (
+			String(key).begins_with("camera.")
+			or String(key).begins_with("markers.")
+			or String(key).begins_with("hud.")
+		):
 			stray += 1
 	h.check(stray == 0, "and nothing else (%d stray)" % stray)
 	h.check(not pages.has("Rest"), "with every setting filed, no empty Rest tab is built")

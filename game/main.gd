@@ -68,6 +68,7 @@ var _back_to: SpacesimScreen
 var _selected_index := -1
 var _look := Vector2.ZERO
 var _hud: Label
+var _hints: Label
 var _fps: Label
 var _skip_next_motion := false
 ## Whether the body nodes are drawn at all — the debug key that hides them.
@@ -392,6 +393,10 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
 		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops", "exposure.adaptation_rate", "fog.gain":
 			_apply_settings()
+		# The HUD's switches are visibility, so they are read by the readout's own refresh — which is
+		# once every `HUD_INTERVAL`, and would otherwise leave a toggle looking broken for a moment.
+		"hud.readout", "hud.fps", "hud.key_hints":
+			_apply_hud_visibility()
 
 
 ## Click to take the mouse back after Esc released it.
@@ -680,12 +685,25 @@ func _build_hud() -> void:
 	add_child(layer)
 	_ui_layer = layer
 
+	# **Two labels in a column, not one block**, because the readout and the key hints are switched off
+	# separately: `hud.readout` and `hud.key_hints`. One label could only be hidden whole.
+	var column := VBoxContainer.new()
+	column.name = "Readouts"
+	column.position = Vector2(24.0, 18.0)
+	column.add_theme_constant_override("separation", 18)
+	layer.add_child(column)
+
 	var label := Label.new()
-	label.name = "Readout"
-	label.position = Vector2(24.0, 18.0)
+	label.name = "Information"
 	_outline(label, 17)
-	layer.add_child(label)
+	column.add_child(label)
 	_hud = label
+
+	var hints := Label.new()
+	hints.name = "KeyHints"
+	_outline(hints, 17)
+	column.add_child(hints)
+	_hints = hints
 
 	# Top right, so a frame-rate change while tuning something else is visible at a glance.
 	var fps := Label.new()
@@ -738,7 +756,13 @@ func _update_hud() -> void:
 				"",
 				"bodies      %s, %d triangles, %d chunks, depth %d"
 					% [bodies, _system.triangles(), _system.chunks(), _system.deepest_level()],
-				"",
+			]
+		)
+	)
+
+	_hints.text = "\n".join(
+		PackedStringArray(
+			[
 				(
 					"%s/%s throttle    %s stop    mouse look    %s/%s roll    Esc release mouse"
 					% [
@@ -772,6 +796,16 @@ func _update_hud() -> void:
 			]
 		)
 	)
+	_apply_hud_visibility()
+
+
+## **Each of the HUD's three parts is switched on its own** — see the registry's `hud.*` rows. Read
+## here rather than cached, so a change on the settings screen is on screen before the player looks
+## back; `_on_setting_changed` calls this for the same reason when a screen is open over the game.
+func _apply_hud_visibility() -> void:
+	_hud.visible = bool(SpacesimSettings.get_value("hud.readout"))
+	_hints.visible = bool(SpacesimSettings.get_value("hud.key_hints"))
+	_fps.visible = bool(SpacesimSettings.get_value("hud.fps"))
 
 
 ## The key a binding currently names, for the readout.
