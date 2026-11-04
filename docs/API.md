@@ -1136,6 +1136,48 @@ expanding child `max(its own size, the child's minimum)` (4.7.2, `scroll_contain
 `_reposition_children`); without the flag the column is pinned to its minimum and the extra height is
 lost, which no screen noticed while every screen was a list of minimum-sized rows.
 
+### `SpacesimActions` — `RefCounted` (static)
+
+`addons/spacesim/input/actions.gd`. **Every action a player can take, declared once.** An action is
+*what* a player can do; a binding is one way to do it — they used to be the same identifier, with the
+settings key *being* the action.
+
+| Member | |
+|---|---|
+| `REGISTRY` | id → `{label, kind, category, defaults}`; sixteen actions, the ids being the old `bindings.*` keys with the prefix dropped |
+| `KINDS` | `trigger`, `rate`, `level` — what the control *is*, not what it is bound to |
+| `CATEGORIES` | `Flight`, `Camera`, `Interface` — where the settings screen shows it |
+| `ids()`, `has(id)`, `row(id)` | |
+| `label_of`, `kind_of`, `category_of`, `defaults_of` | |
+| `in_category(category) -> Array` | the ids in one category, in registry order |
+
+A **trigger** fires on the press and holds nothing. A **rate** is produced every frame and self-centers
+to zero. A **level** persists and is *changed* by its inputs — a key winds the throttle while held, and
+releasing it leaves the level where it got to. That distinction is what makes a key and a stick the
+same action.
+
+### `SpacesimBinding` — `RefCounted` (static)
+
+`addons/spacesim/input/binding.gd`. **One way to press one action, as text**, so the file stays
+readable and hand-editable: `Alt+C`, `W`, `BracketLeft`, `Mouse:Left`, `Mouse:WheelUp`, with the same
+optional modifier prefixes on either.
+
+| Member | |
+|---|---|
+| `parse(text) -> Dictionary` | `{"device": "keyboard", "keycode": int, "alt"/"ctrl"/"shift"/"meta": bool}` or `{"device": "mouse", "button": int, …}`; `{}` when the text is not a binding |
+| `to_text(binding) -> String` | the inverse, so a round trip is identity |
+| `is_valid(text) -> bool` | |
+| `keycode_of(text) -> int`, `button_of(text) -> int` | for asking whether it is held |
+| `matches(event, text) -> bool` | exact on the whole chord, by **physical** keycode |
+
+**`WheelUp` and `WheelDown` are buttons to Godot** (`MOUSE_BUTTON_WHEEL_UP` is 4), which is how a
+scroll can be bound at all.
+
+Three things `parse` refuses, each of which the old parser accepted: an **empty part** (`+W` used to
+bind `W`), a **modifier as the key** (`Alt` alone parses as the Alt keycode — `find_keycode_from_string`
+does not distinguish, so it is refused explicitly), and **any joypad form** — `Joy:<device>/Button:A`
+is reserved grammar for the pad work and must not silently bind something else.
+
 ### `SpacesimDialog` — a `SpacesimScreen`
 
 `addons/spacesim/ui/dialog.gd` — a modal *inside* another screen: the same chrome, smaller and
