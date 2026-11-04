@@ -9,6 +9,7 @@ const Ui := preload("res://tests/ui_fixture.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
 const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
 const AxisBar := preload("res://addons/spacesim/ui/axis_bar.gd")
+const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
@@ -290,6 +291,22 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 	# **Staged, not written**: the file is untouched until Apply.
 	h.check(store.of("throttle_up").is_empty(), "which clears what that row held")
 	h.check(not _rows_named(panel, "throttle_up").is_empty(), "leaving the row, not deleting it")
+
+	# --- **A discarded edit is not left on screen.** The file is right either way; the fields must agree.
+	field = _row_field(panel, "throttle_up", 0)
+	field.text = "G"
+	field.text_changed.emit("G")
+	h.check(store.has_changes(), "an edit is staged")
+	panel.dismissed()
+	panel.opened()
+	panel.flush_rows()
+	field = _row_field(panel, "throttle_up", 0)
+	h.check(
+		not store.has_changes() and field.text == Store.SEPARATOR.join(PackedStringArray(
+			_fixture.bindings().of("throttle_up")
+		)),
+		"closing discards it, and opening again shows what stands (%s)" % field.text
+	)
 
 	# --- **Detect: listen, catch, confirm**
 	panel._apply_button.pressed.emit()

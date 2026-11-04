@@ -1226,12 +1226,22 @@ func _on_close() -> void:
 	closed.emit()
 
 
+## Called just before the screen is shown. **Rebuilt from what stands**, because the bindings are a file
+## that can change while this screen is not looking at it — a hand edit, or a changed `bindings.cfg`.
+func opened() -> void:
+	_rows_dirty = true
+	_refresh()
+
+
 ## Leaving without applying throws the staged edits away — which is what the amber Close button
 ## warns about. It holds whichever route the screen is left by, not only the Close button.
 func dismissed() -> void:
 	_edit.discard()
 	if _bindings != null:
 		_bindings.discard()
+	# **The fields come back to what stands**, or a discarded edit would still be on screen the next time
+	# the screen is opened — the file is right and the screen would lie about it.
+	_refresh()
 	# **A screen that is closed is not configuring anything.** The flag is read live by `main.gd`, so
 	# leaving it set would keep a device deaf to the game with nothing on screen to explain why.
 	_set_configuring("")
