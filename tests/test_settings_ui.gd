@@ -194,54 +194,47 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	for index in tabs.get_tab_count():
 		titles.append(tabs.get_tab_title(index))
 	h.check(
-		titles == ["Bindings", "Display", "Graphics", "Rest"],
-		"the tabs are Bindings, Display, Graphics and Rest, in that order (%s)" % str(titles)
+		titles == ["Display", "Bindings", "Troubleshooting", "Rest"],
+		"the tabs are Display, Bindings, Troubleshooting and Rest, in that order (%s)" % str(titles)
 	)
 
-	# What each tab holds, read off the screen: the display tab is the window, the graphics tab is
-	# what is drawn, and the bindings are the keys.
-	var on_display: Array = []
-	var on_graphics: Array = []
-	var on_rest: Array = []
-	var on_bindings: Array = []
+	# What each tab holds, read off the screen: the display tab is the window, the bindings are the
+	# keys, the troubleshooting tab is what you reach for when the picture is wrong, and the rest is
+	# what nobody has filed yet — the cameras and the markers, waiting for the view tab.
+	var pages := {}
 	for index in tabs.get_tab_count():
 		var names: Array = []
 		for key in Edit.editable_keys():
-			if not _rows_label(tabs, index, String(key)):
-				continue
-			names.append(String(key))
-		match titles[index]:
-			"Bindings":
-				on_bindings = names
-			"Display":
-				on_display = names
-			"Graphics":
-				on_graphics = names
-			"Rest":
-				on_rest = names
+			if _rows_label(tabs, index, String(key)):
+				names.append(String(key))
+		pages[titles[index]] = names
 
-	h.check(on_display.size() == 6, "Display holds the six window settings (%d)" % on_display.size())
+	var display: Array = pages["Display"]
+	var bindings: Array = pages["Bindings"]
+	var trouble: Array = pages["Troubleshooting"]
+	var rest: Array = pages["Rest"]
+
+	h.check(display.size() == 6, "Display holds the six window settings (%d)" % display.size())
 	h.check(
-		on_display.all(func(key: String) -> bool: return key.begins_with("video.")),
-		"and they are the video ones (%s)" % str(on_display)
+		display.all(func(key: String) -> bool: return key.begins_with("video.")),
+		"and they are the video ones (%s)" % str(display)
 	)
-	h.check(on_graphics.size() == 6, "Graphics holds the six drawing switches (%d)" % on_graphics.size())
+	h.check(bindings.size() == 17, "Bindings holds the sixteen keys and the mouse (%d)" % bindings.size())
 	h.check(
-		on_graphics.all(func(key: String) -> bool: return key.begins_with("render.")),
-		"and they are the render ones (%s)" % str(on_graphics)
+		trouble.has("render.mode") and trouble.has("lod.error_budget") and trouble.has("sky.star_gain"),
+		"Troubleshooting holds the drawing switches, the LOD knobs and the sky's calibration (%d)"
+			% trouble.size()
 	)
 	h.check(
-		on_bindings.size() == 17,
-		"Bindings holds the sixteen keys and the mouse (%d)" % on_bindings.size()
+		trouble.size() == 15,
+		"and nothing else has been filed there by accident (%d)" % trouble.size()
 	)
-	# What nobody has filed yet is on `rest`, and the total below proves nothing fell between tabs.
 	h.check(
-		on_rest.size() > 0 and on_rest.has("camera.fov") and not on_rest.has("video.mode"),
-		"Rest holds the settings that have no tab yet, and no copy of a filed one (%d)"
-			% on_rest.size()
+		rest.size() == 10 and rest.has("camera.fov") and not rest.has("video.mode"),
+		"Rest holds what is still unfiled, with no copy of a filed one (%d)" % rest.size()
 	)
 
-	var total := on_display.size() + on_graphics.size() + on_bindings.size() + on_rest.size()
+	var total := display.size() + bindings.size() + trouble.size() + rest.size()
 	h.check(
 		total == Edit.editable_keys().size(),
 		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
