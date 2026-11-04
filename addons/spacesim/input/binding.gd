@@ -172,6 +172,13 @@ static func from_event(event: InputEvent) -> String:
 			"shift": key.shift_pressed,
 			"meta": key.meta_pressed,
 		})
+	if event is InputEventJoypadButton:
+		var pad: InputEventJoypadButton = event
+		if pad.button_index < 0 or pad.button_index >= Devices.BUTTON_NAMES.size():
+			return ""
+		return "%s%s/Button:%s" % [
+			JOYPAD_PREFIX, Devices.name_of(pad.device), Devices.BUTTON_NAMES[pad.button_index]
+		]
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event
 		return to_text({

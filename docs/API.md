@@ -1014,10 +1014,27 @@ have committed; a bindings file that cannot be written leaves it amber, which is
 player has. `dismissed()` discards both.
 
 **The Bindings tab is the one tab with rows that are not settings.** Below `mouse.sensitivity` it draws
-`SpacesimActions` grouped by category: a label, the action's bindings as comma-separated text, and a
-Reset. An edit that does not parse is **coloured and staged nowhere**, so a typo cannot reach the file;
-Reset is staged like every other edit, not a silent write. Capture — pressing the key you want — is the
-deferred follow-up.
+`SpacesimActions` grouped by category, **one row per binding**: the first row of an action carries its
+label, the rest repeat it dimmed. Each row has its text, **Detect**, **Remove**, and the first row also
+has **Add**.
+
+- **Add** opens another row for that action; **Remove** deletes that binding, and on the last row it
+  **clears the binding rather than the row** — an action always needs somewhere to be bound. An empty row
+  is not a binding: Apply writes nothing for it.
+- **Detect** listens. Keys, mouse buttons and pad buttons arrive as events (the panel is fed them while
+  `is_detecting()`), and **axes are polled** with `SpacesimDevices.most_moved` — the biggest change since
+  the last look, outside that axis's own deadband, and only while no button is pressed. What is caught is
+  **shown before it is committed**: *Bind* / *Detect again* / *Cancel*.
+- **A control already bound elsewhere is a warning, never an override**: the dialog names the actions it
+  belongs to and offers *Bind to both*, *Take it from …*, *Detect again*, or *Cancel*.
+- While a detection is open `main.gd` marks the events handled, so nothing pressed in order to bind a
+  control also presses it in the game or walks a menu.
+
+**Rows are rebuilt at the next frame**, never inside the button's own `pressed` signal — freeing the
+control that is emitting is the error the codebase already has a note about. `flush_rows()` is how a test
+asks for it immediately.
+
+An edit that does not parse is **coloured and staged nowhere**, so a typo cannot reach the file.
 
 ### `SpacesimXdg` — `RefCounted` (static)
 

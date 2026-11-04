@@ -40,7 +40,21 @@ var _settings: Node
 var _edit: SpacesimSettingsEdit
 var _fields: Dictionary = {} ## key -> the controls that edit it
 var _bindings: SpacesimBindingsStore
-var _binding_fields: Dictionary = {} ## action id -> the field that shows its bindings
+## The Bindings tab's rows, **one per binding**, as `[action id, index in that action's list, LineEdit]`.
+var _binding_rows: Array = []
+## Empty rows **Add** has opened on an action: rows to detect into, not bindings.
+var _extra_rows := {}
+var _bindings_vbox: VBoxContainer
+## A detection in progress, `{action, index}`, or empty. While it is set `main.gd` forwards events here
+## and marks them handled, so nothing pressed in order to bind a control also presses it in the game.
+var _detect := {}
+var _detected := ""
+## Per device, the axis readings at the last look — what makes "the biggest change" a fact.
+var _detect_previous := {}
+## Set by anything that changes how many rows there are. **The rebuild cannot run inside a button's own
+## `pressed` signal** — freeing the button that is emitting is the error the codebase already has a note
+## about — so it is done at the next frame, and [method flush_rows] is how a test asks for it now.
+var _rows_dirty := false
 
 ## The devices tab's live readouts: `[device, axis index, Label]` and `[device, button index, Label]`.
 var _axis_labels: Array = []
@@ -123,18 +137,10 @@ func _build() -> void:
 			_build_devices(column)
 		# **The actions are not settings**, so they get their own grid per category rather than a row
 		# among the settings — and this is the only tab that has any.
-		for category in Actions.CATEGORIES:
-			var ids := _actions_in(tab, category)
-			if ids.is_empty():
-				continue
-			var heading := Label.new()
-			heading.text = category
-			heading.add_theme_font_size_override("font_size", 16)
-			column.add_child(heading)
-			var action_grid := _grid()
-			column.add_child(action_grid)
-			for id in ids:
-				_add_binding_row(action_grid, id)
+		_bindings_vbox = VBoxContainer.new()
+		_bindings_vbox.add_theme_constant_override("separation", 4)
+		column.add_child(_bindings_vbox)
+		_rebuild_binding_rows()
 
 	_apply_button = add_button("Apply", _on_apply)
 	_close_button = add_button("Close", _on_close)
@@ -228,6 +234,8 @@ func _build_devices(column: VBoxContainer) -> void:
 			_button_labels.append([device, index, button_label])
 
 	_refresh_devices()
+	_poll_detection()
+	flush_rows()
 
 
 ## One axis, in two lines — **the numbers above the bar they belong to**, and the controls below it:
@@ -421,6 +429,9 @@ func _start_calibration(device: int, index: int) -> void:
 
 
 func _on_dialog_answered(action: String) -> void:
+	if not _detect.is_empty():
+		_handle_detect_answer(action)
+		return
 	if _calibrating.is_empty():
 		return
 	var device := int(_calibrating[0])
@@ -429,6 +440,8 @@ func _on_dialog_answered(action: String) -> void:
 	_calibrating = []
 	_set_configuring("")
 	_calibrating = []
+	_detect = {}
+	_detected = ""
 	if _dialog != null:
 		_dialog.visible = false
 
@@ -804,58 +817,328 @@ func _stage_text(key: String, field: LineEdit, new_text: String) -> void:
 		_edit.stage(key, new_text)
 
 
-## **One row per action**: its label, its bindings as text, and a Reset.
+## **A row per binding.** The first row of an action carries its label; the rest repeat it dimmed, so a
+## column reads as one action's list of bindings.
 ##
-## Text editing, not capture — pressing the key you want is the follow-up, and it needs the dialog the
-## design note describes. What this row already gets right is the staging: an edit that does not parse is
-## **coloured and not staged**, so a typo cannot reach the file.
-func _add_binding_row(grid: GridContainer, action: String) -> void:
+## **Add** opens another row, **Remove** deletes that binding — and on the last row it clears the binding
+## instead of the row, because an action always needs somewhere to be bound. An empty row is not a binding:
+## Apply writes nothing for one.
+func _rebuild_binding_rows() -> void:
+	if _bindings_vbox == null:
+		return
+	for child in _bindings_vbox.get_children():
+		_bindings_vbox.remove_child(child)
+		child.free()
+	_binding_rows.clear()
+
+	for category in Actions.CATEGORIES:
+		var ids := Actions.in_category(category)
+		if ids.is_empty():
+			continue
+		var heading := Label.new()
+		heading.text = category
+		heading.add_theme_font_size_override("font_size", 16)
+		_bindings_vbox.add_child(heading)
+		var grid := _grid()
+		_bindings_vbox.add_child(grid)
+		for id in ids:
+			var texts := _row_texts(String(id))
+			var rows: int = maxi(texts.size(), 1 + int(_extra_rows.get(String(id), 0)))
+			for index in rows:
+				_add_binding_row(
+					grid, String(id), index,
+					"" if index >= texts.size() else String(texts[index]),
+					index == 0
+				)
+
+
+## One row: label, the binding as text, and what can be done to it.
+func _add_binding_row(
+	grid: GridContainer, action: String, index: int, text: String, first: bool
+) -> void:
 	var label := Label.new()
-	label.text = Actions.label_of(action)
+	label.text = Actions.label_of(action) if first else ""
 	label.custom_minimum_size = Vector2(300.0, 0.0)
+	label.modulate = Color(1.0, 1.0, 1.0, 0.7) if first else Color(1.0, 1.0, 1.0, 0.3)
 	grid.add_child(label)
 
 	var field := LineEdit.new()
-	field.name = "Bindings"
-	field.text = _bindings_text(action)
+	field.name = "Binding%d" % index
+	field.text = text
 	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	field.tooltip_text = "One or more bindings, separated by commas: W, Alt+C, Mouse:Left"
-	field.text_changed.connect(func(text: String) -> void: _stage_bindings(action, text))
-	grid.add_child(field)
-	_binding_fields[action] = field
-
-	var reset := Button.new()
-	reset.name = "Reset"
-	reset.text = "Reset"
-	reset.tooltip_text = "Back to the engine's default. Nothing is committed until you apply."
-	reset.pressed.connect(
-		func() -> void:
-			_bindings.reset(action)
-			_refresh()
+	field.tooltip_text = (
+		"One binding — type it, or press Detect and use the control you want.\n"
+		+ "W, Alt+C, Mouse:Left, Joy:<device>/Button:A, Joy:<device>/Axis:LEFT_X"
 	)
-	grid.add_child(reset)
+	field.text_changed.connect(func(_t: String) -> void: _stage_rows(action))
+	grid.add_child(field)
+	_binding_rows.append([action, index, field])
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 6)
+	grid.add_child(buttons)
+
+	var detect := Button.new()
+	detect.name = "Detect"
+	detect.text = "Detect"
+	detect.tooltip_text = "Listen for the control to bind: a key, a button, or a gamepad axis."
+	detect.pressed.connect(func() -> void: _start_detect(action, index))
+	buttons.add_child(detect)
+
+	if first:
+		var add := Button.new()
+		add.name = "Add"
+		add.text = "Add"
+		add.tooltip_text = "Another binding for this action."
+		add.pressed.connect(func() -> void: _add_binding(action))
+		buttons.add_child(add)
+
+	var remove := Button.new()
+	remove.name = "Remove"
+	remove.text = "Remove"
+	remove.pressed.connect(func() -> void: _remove_binding(action, index))
+	buttons.add_child(remove)
 
 
-## Stage what was typed, or colour it and stage nothing. **The field is the whole chord list**, so a
-## half-typed binding fails here rather than becoming a key that fires nothing.
-func _stage_bindings(action: String, text: String) -> void:
+## What an action currently holds: staged if edited, else the store's, else the registry's.
+func _row_texts(action: String) -> Array:
+	return _bindings.of(action)
+
+
+## One row's binding, or `""` for a row that is waiting to be detected into.
+func _binding_text_of(action: String, index: int) -> String:
+	var texts := _row_texts(action)
+	return "" if index >= texts.size() else String(texts[index])
+
+
+## Stage every row of one action from its fields. **A half-typed binding is coloured and stages nothing**,
+## so a typo cannot reach the file.
+func _stage_rows(action: String) -> void:
 	if _updating:
 		return
-	var parts: Array = []
-	for part in text.split(Store.SEPARATOR, false):
-		if not part.strip_edges().is_empty():
-			parts.append(part.strip_edges())
-	for part in parts:
-		if not Binding.is_valid(String(part)):
-			_binding_fields[action].modulate = INVALID_COLOR
+	var texts: Array = []
+	var fields: Array = []
+	for entry in _binding_rows:
+		if String(entry[0]) != action:
+			continue
+		var field: LineEdit = entry[2]
+		fields.append(field)
+		var text := field.text.strip_edges()
+		if not text.is_empty():
+			texts.append(text)
+
+	for text in texts:
+		if not Binding.is_valid(String(text)):
+			for field in fields:
+				field.modulate = INVALID_COLOR
 			return
-	_binding_fields[action].modulate = IDLE_COLOR
-	if not _bindings.stage(action, parts):
-		_binding_fields[action].modulate = INVALID_COLOR
+	for field in fields:
+		field.modulate = IDLE_COLOR
+	if not _bindings.stage(action, texts):
+		for field in fields:
+			field.modulate = INVALID_COLOR
 
 
-func _bindings_text(action: String) -> String:
-	return Store.SEPARATOR.join(PackedStringArray(_bindings.of(action)))
+## Rebuild the rows now if something asked for it. Called every frame by [method _process], and by a test
+## that cannot wait for the frame — **a row control cannot free itself from inside its own signal**, so the
+## rebuild never runs there.
+func flush_rows() -> void:
+	if not _rows_dirty:
+		return
+	_rows_dirty = false
+	_rebuild_binding_rows()
+
+
+func _add_binding(action: String) -> void:
+	_stage_rows(action)
+	_extra_rows[action] = int(_extra_rows.get(action, 0)) + 1
+	_rows_dirty = true
+
+
+func _remove_binding(action: String, index: int) -> void:
+	_stage_rows(action)
+	var texts := _row_texts(action)
+	var extras := int(_extra_rows.get(action, 0))
+	if index >= texts.size() and extras > 0:
+		# A row this screen opened and nothing was detected into: close it, store nothing.
+		_extra_rows[action] = extras - 1
+		_rows_dirty = true
+		return
+	if index < texts.size():
+		texts.remove_at(index)
+		_extra_rows[action] = 0
+		_bindings.stage(action, texts)
+	_rows_dirty = true
+
+
+## **Listen for the control to bind.** Nothing is committed until it is confirmed, so a stick nudged while
+## the dialog is open costs one more Detect rather than a lost binding.
+func _start_detect(action: String, index: int) -> void:
+	_detect = {"action": action, "index": index}
+	_detected = ""
+	_detect_previous.clear()
+	for device in Devices.connected():
+		_detect_previous[int(device)] = _axis_readings(int(device))
+	_dialog.ask(
+		"Detect a binding for %s" % Actions.label_of(action),
+		(
+			"Press a key, a mouse button or a gamepad button — or move one axis of a gamepad.\n\n"
+			+ "The device is taken away from the game and its menus while this is open."
+		),
+		["Cancel"]
+	)
+	_dialog.hint.text = "listening…"
+
+
+## Whether a detection is in progress: `main.gd` forwards events here and marks them handled while it is.
+func is_detecting() -> bool:
+	return not _detect.is_empty()
+
+
+## The event half: keys, mouse buttons and pad buttons all arrive as events.
+func feed_capture(event: InputEvent) -> void:
+	if _detect.is_empty() or not event.is_pressed():
+		return
+	if event is InputEventKey and (event as InputEventKey).echo:
+		return
+	var text := Binding.from_event(event)
+	if not text.is_empty():
+		_on_detected(text)
+
+
+## The axis half: **the biggest change since the last look, outside that axis's own deadband**, and only
+## while no button is pressed — a player pressing to bind means a button, and a stick nudged by the same
+## hand should not steal it.
+func _poll_detection() -> void:
+	if _detect.is_empty() or _dialog == null or not _dialog.visible:
+		return
+	if _any_button_down():
+		return
+	for device in Devices.connected():
+		var index := int(device)
+		var previous: Dictionary = _detect_previous.get(index, {})
+		if previous.is_empty():
+			_detect_previous[index] = _axis_readings(index)
+			continue
+		var moved: Array = Devices.most_moved(
+			index, previous, Callable(self, "_detect_profile").bind(index)
+		)
+		_detect_previous[index] = _axis_readings(index)
+		if int(moved[0]) >= 0:
+			_on_detected(
+				"%s%s/Axis:%s" % [
+					Binding.JOYPAD_PREFIX, Devices.name_of(index), Devices.AXIS_NAMES[int(moved[0])]
+				]
+			)
+			return
+
+
+func _detect_profile(axis: String, device: int) -> SpacesimAxisProfile:
+	return _bindings.axis_profile(Devices.name_of(device), axis)
+
+
+static func _axis_readings(device: int) -> Dictionary:
+	var readings := {}
+	for index in Devices.AXIS_NAMES.size():
+		readings[Devices.AXIS_NAMES[index]] = Devices.axis(device, index)
+	return readings
+
+
+static func _any_button_down() -> bool:
+	for device in Devices.connected():
+		if not Devices.pressed(int(device)).is_empty():
+			return true
+	return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+
+
+## A control was caught. **Say what it is and ask**, because confirming is the difference between detecting
+## a binding and losing one to a stray nudge — and a control already bound elsewhere is a warning, never a
+## silent override.
+func _on_detected(text: String) -> void:
+	if _detect.is_empty():
+		return
+	_detected = text
+	var action := String(_detect["action"])
+	var conflicts := _conflicts_with(text, action)
+	if conflicts.is_empty():
+		_dialog.ask(
+			"Detected",
+			"%s\n\nBind it to %s?" % [text, Actions.label_of(action)],
+			["Bind", "Detect again", "Cancel"]
+		)
+		return
+
+	var names := PackedStringArray()
+	for entry in conflicts:
+		names.append(Actions.label_of(String(entry[0])))
+	_dialog.ask(
+		"Already bound",
+		(
+			"%s is already bound to %s.\n\n"
+			+ "Bind it to both, take it away from %s, or leave things as they are."
+		) % [text, ", ".join(names), ", ".join(names)],
+		["Bind to both", "Take it from %s" % ", ".join(names), "Detect again", "Cancel"]
+	)
+
+
+## Every action, other than the one being bound, that already holds this exact binding.
+func _conflicts_with(text: String, except_action: String) -> Array:
+	var found: Array = []
+	for id in Actions.ids():
+		if String(id) == except_action:
+			continue
+		for other in _bindings.of(String(id)):
+			if String(other) == text:
+				found.append([String(id), text])
+	return found
+
+
+## Commit the detection into its row, having been told what to do about a conflict.
+func _apply_detected(remove_from: bool) -> void:
+	if _detect.is_empty() or _detected.is_empty():
+		return
+	var action := String(_detect["action"])
+	var index := int(_detect["index"])
+
+	if remove_from:
+		for entry in _conflicts_with(_detected, action):
+			var victim := String(entry[0])
+			var kept: Array = []
+			for other in _bindings.of(victim):
+				if String(other) != _detected:
+					kept.append(String(other))
+			_bindings.stage(victim, kept)
+
+	var texts := _row_texts(action).duplicate()
+	while texts.size() <= index:
+		texts.append("")
+	texts[index] = _detected
+	_bindings.stage(action, texts)
+	_extra_rows[action] = 0
+	_finish_detect()
+
+
+func _finish_detect() -> void:
+	_detect = {}
+	_detected = ""
+	_detect_previous.clear()
+	if _dialog != null:
+		_dialog.visible = false
+	_rows_dirty = true
+	_refresh()
+
+
+## The detection's answers: **confirm, re-detect, both, or take it away** — and Cancel keeps everything as
+## it was.
+func _handle_detect_answer(answer: String) -> void:
+	if answer.begins_with("Cancel"):
+		_finish_detect()
+	elif answer.begins_with("Detect again"):
+		_start_detect(String(_detect["action"]), int(_detect["index"]))
+	elif answer.begins_with("Take it from"):
+		_apply_detected(true)
+	else:
+		_apply_detected(false)
 
 
 ## Apply is **two** edits now, and it only goes idle when both have committed. A file that cannot be
@@ -909,10 +1192,11 @@ func _refresh() -> void:
 			editors[0].button_pressed = bool(value)
 	_updating = false
 
-	for action in _binding_fields:
-		var field: LineEdit = _binding_fields[action]
-		field.text = _bindings_text(action)
-		field.modulate = IDLE_COLOR
+	for entry in _binding_rows:
+		var field: LineEdit = entry[2]
+		if not field.has_focus():
+			field.text = _binding_text_of(String(entry[0]), int(entry[1]))
+			field.modulate = IDLE_COLOR
 
 	# The axis fields come back to what stands, which is how a discarded edit disappears — but **not
 	# while one of them is being typed into**, or the text would be rewritten under the cursor.

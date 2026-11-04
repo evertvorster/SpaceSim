@@ -234,9 +234,8 @@ static func _rows_label(tabs: TabContainer, index: int, key: String) -> bool:
 	return false
 
 
-## **The actions are not settings**, so what this tab has to prove is different: every action appears,
-## the field shows what stands, an edit stages, a typo is coloured and staged nowhere, Apply writes the
-## file, and Reset puts the default back.
+## **The actions are not settings**, so what this tab proves is different: every action appears, a row is
+## a binding, Add opens one, Remove deletes one, and a detection is confirmed before it lands.
 func _test_the_bindings_tab(h, root: Node) -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
@@ -251,45 +250,118 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 			missing.append(String(id))
 	h.check(missing.is_empty(), "every action is on the bindings tab%s" % Fixture.detail(missing))
 
-	var fields: Dictionary = panel.get("_binding_fields")
-	h.check(fields.size() == Actions.ids().size(), "with one field each (%d)" % fields.size())
-
-	var throttle: LineEdit = fields.get("throttle_up")
-	h.check(throttle != null and throttle.text == "Shift+Equal", "showing the binding that stands")
+	var field: LineEdit = _row_field(panel, "throttle_up", 0)
+	h.check(field != null and field.text == "Shift+Equal", "showing the binding that stands")
 
 	# --- a typo is coloured and goes nowhere
-	throttle.text = "Nonsense"
-	throttle.text_changed.emit("Nonsense")
-	h.check(throttle.modulate == panel.INVALID_COLOR, "a binding that does not parse is coloured")
+	field.text = "Nonsense"
+	field.text_changed.emit("Nonsense")
+	h.check(field.modulate == panel.INVALID_COLOR, "a binding that does not parse is coloured")
 	h.check(not store.has_changes(), "and is not staged")
 
 	# --- a real edit stages, and Apply writes it
-	throttle.text = "W"
-	throttle.text_changed.emit("W")
-	h.check(throttle.modulate == panel.IDLE_COLOR, "a valid one is not coloured")
+	field.text = "W"
+	field.text_changed.emit("W")
+	h.check(field.modulate == panel.IDLE_COLOR, "a valid one is not coloured")
 	h.check(store.has_changes(), "and is staged")
-	h.check(not panel._apply_button.disabled, "so Apply is available")
 	panel._apply_button.pressed.emit()
-	h.check(not store.has_changes(), "applying clears the staging")
-	var reread := _fixture.bindings()
-	h.check(reread.of("throttle_up") == ["W"], "and the file has the new binding")
+	h.check(_fixture.bindings().of("throttle_up") == ["W"], "applying writes the file")
 
-	# --- several bindings in one field, which is what the comma is for
-	throttle.text = "W, Mouse:Left"
-	throttle.text_changed.emit("W, Mouse:Left")
+	# --- **Add opens a row; Remove on the last one clears the binding rather than the row**
+	var before := _rows_named(panel, "throttle_up").size()
+	var add: Button = _row_button(panel, "throttle_up", 0, "Add")
+	h.check(add != null, "the first row can add another")
+	add.pressed.emit()
+	panel.flush_rows()
+	h.check(
+		_rows_named(panel, "throttle_up").size() == before + 1,
+		"which opens one more row for the same action (%d)" % _rows_named(panel, "throttle_up").size()
+	)
+	var extra_field: LineEdit = _row_field(panel, "throttle_up", before)
+	h.check(extra_field != null and extra_field.text.is_empty(), "an empty row to detect into")
 	panel._apply_button.pressed.emit()
-	var two := _fixture.bindings()
-	h.check(two.of("throttle_up") == ["W", "Mouse:Left"], "and a field can hold more than one")
+	h.check(_fixture.bindings().of("throttle_up") == ["W"], "and applying stores nothing for it")
 
-	# --- Reset is staged, and says the default
-	var reset := _button_named(panel, "Reset", "throttle_up")
-	h.check(reset != null, "the row has a Reset")
-	if reset != null:
-		reset.pressed.emit()
-	h.check(store.of("throttle_up") == Actions.defaults_of("throttle_up"), "which restores the default")
-	h.check(store.has_changes(), "as a staged edit, not a silent write")
+	var remove: Button = _row_button(panel, "throttle_up", 0, "Remove")
+	h.check(remove != null, "and remove a binding")
+	remove.pressed.emit()
+	panel.flush_rows()
+	# **Staged, not written**: the file is untouched until Apply.
+	h.check(store.of("throttle_up").is_empty(), "which clears what that row held")
+	h.check(not _rows_named(panel, "throttle_up").is_empty(), "leaving the row, not deleting it")
+
+	# --- **Detect: listen, catch, confirm**
+	panel._apply_button.pressed.emit()
+	var press := InputEventKey.new()
+	press.physical_keycode = KEY_Y
+	press.pressed = true
+	panel._start_detect("cycle_target", 0)
+	h.check(panel.is_detecting(), "Detect starts listening")
+	panel.feed_capture(press)
+	h.check(not panel._detected.is_empty(), "a pressed key is caught (%s)" % panel._detected)
+	h.check(panel._dialog.visible, "and shown before it is committed")
+	h.check(not store.has_changes(), "with nothing staged yet")
+	var caught: String = panel._detected
+	panel._dialog.answered.emit("Bind")
+	h.check(not panel.is_detecting(), "confirming ends the detection")
+	h.check(store.of("cycle_target") == [caught], "and stages the control that was caught")
+
+	# **A control already bound elsewhere is a warning, not an override**
+	panel._start_detect("bodies_toggle", 0)
+	panel.feed_capture(press)
+	h.check(
+		panel._dialog.title_label.text == "Already bound",
+		"a conflict says so (%s)" % panel._dialog.title_label.text
+	)
+	var answers: Array = []
+	for button in panel._dialog.actions.get_children():
+		answers.append(String(button.text))
+	h.check(
+		answers.has("Bind to both") and answers.has("Detect again"),
+		"offering the choices (%s)" % str(answers)
+	)
+	var take := ""
+	for answer in answers:
+		if String(answer).begins_with("Take it from"):
+			take = String(answer)
+	h.check(not take.is_empty(), "including taking it from where it was")
+	panel._dialog.answered.emit(take)
+	h.check(
+		store.of("cycle_target").is_empty() and store.of("bodies_toggle") == [caught],
+		"which moves the binding rather than copying it"
+	)
 
 	layer.free()
+
+
+## One row's field, by action and index.
+static func _row_field(panel: Node, action: String, index: int) -> LineEdit:
+	for entry in panel.get("_binding_rows"):
+		if String(entry[0]) == action and int(entry[1]) == index:
+			return entry[2]
+	return null
+
+
+## Every row belonging to one action.
+static func _rows_named(panel: Node, action: String) -> Array:
+	var found: Array = []
+	for entry in panel.get("_binding_rows"):
+		if String(entry[0]) == action:
+			found.append(entry)
+	return found
+
+
+## The button with this label on one row.
+static func _row_button(panel: Node, action: String, index: int, text: String) -> Button:
+	var field := _row_field(panel, action, index)
+	if field == null:
+		return null
+	for child in field.get_parent().get_children():
+		if child is HBoxContainer:
+			for button in child.get_children():
+				if button is Button and String(button.text) == text:
+					return button
+	return null
 
 
 ## **The devices tab shows what the machine has**, whatever that is — so the count is checked against the

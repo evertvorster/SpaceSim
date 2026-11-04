@@ -200,6 +200,13 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# **A binding being detected presses nothing.** The settings screen listens, the menus stay deaf, and
+	# the game does not act on the control the player is using to bind.
+	if _settings_screen.is_detecting():
+		_settings_screen.feed_capture(event)
+		get_viewport().set_input_as_handled()
+		return
+
 	# **Every key and button event is fed, released ones too**: a release is what clears a held source,
 	# and a screen that swallows it is why `release_all()` exists.
 	if event is InputEventKey or event is InputEventMouseButton or event is InputEventJoypadButton:
