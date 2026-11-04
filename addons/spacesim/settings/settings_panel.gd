@@ -53,7 +53,7 @@ func _build() -> void:
 		if keys.is_empty():
 			continue
 		var page := ScrollContainer.new()
-		page.name = tab.capitalize()
+		page.name = SettingsScript.tab_title(tab)
 		page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 		var grid := GridContainer.new()
 		grid.name = "Settings"
