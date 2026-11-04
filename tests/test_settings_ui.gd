@@ -21,6 +21,7 @@ func run(h, root: Node) -> void:
 	_test_reset_and_discard(h)
 	_test_bad_values_are_not_staged(h)
 	_test_every_setting_gets_a_control(h, root)
+	_test_the_tabs_group_the_registry(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -171,6 +172,93 @@ func _test_every_setting_gets_a_control(h, root: Node) -> void:
 	h.check(bare.is_empty(), "every declared setting gets a control%s" % Fixture.detail(bare))
 
 	layer.free()
+
+
+## **Every setting is on a tab, and the tabs are the ones the registry names.** The failure this
+## guards is a setting silently not appearing: a row with no `tab` files itself under `rest`, which is
+## the point of `rest` existing, but a row naming a tab nobody builds would land nowhere.
+func _test_the_tabs_group_the_registry(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var panel := SettingsPanel.new()
+	panel.configure(_fixture.open())
+	layer.add_child(panel)
+
+	var found := panel.find_children("*", "TabContainer", true, false)
+	h.check(found.size() == 1, "the screen has one tab container (%d)" % found.size())
+	if found.is_empty():
+		layer.free()
+		return
+	var tabs: TabContainer = found[0]
+	var titles: Array = []
+	for index in tabs.get_tab_count():
+		titles.append(tabs.get_tab_title(index))
+	h.check(
+		titles == ["Bindings", "Display", "Graphics", "Rest"],
+		"the tabs are Bindings, Display, Graphics and Rest, in that order (%s)" % str(titles)
+	)
+
+	# What each tab holds, read off the screen: the display tab is the window, the graphics tab is
+	# what is drawn, and the bindings are the keys.
+	var on_display: Array = []
+	var on_graphics: Array = []
+	var on_rest: Array = []
+	var on_bindings: Array = []
+	for index in tabs.get_tab_count():
+		var names: Array = []
+		for key in Edit.editable_keys():
+			if not _rows_label(tabs, index, String(key)):
+				continue
+			names.append(String(key))
+		match titles[index]:
+			"Bindings":
+				on_bindings = names
+			"Display":
+				on_display = names
+			"Graphics":
+				on_graphics = names
+			"Rest":
+				on_rest = names
+
+	h.check(on_display.size() == 6, "Display holds the six window settings (%d)" % on_display.size())
+	h.check(
+		on_display.all(func(key: String) -> bool: return key.begins_with("video.")),
+		"and they are the video ones (%s)" % str(on_display)
+	)
+	h.check(on_graphics.size() == 6, "Graphics holds the six drawing switches (%d)" % on_graphics.size())
+	h.check(
+		on_graphics.all(func(key: String) -> bool: return key.begins_with("render.")),
+		"and they are the render ones (%s)" % str(on_graphics)
+	)
+	h.check(
+		on_bindings.size() == 17,
+		"Bindings holds the sixteen keys and the mouse (%d)" % on_bindings.size()
+	)
+	# What nobody has filed yet is on `rest`, and the total below proves nothing fell between tabs.
+	h.check(
+		on_rest.size() > 0 and on_rest.has("camera.fov") and not on_rest.has("video.mode"),
+		"Rest holds the settings that have no tab yet, and no copy of a filed one (%d)"
+			% on_rest.size()
+	)
+
+	var total := on_display.size() + on_graphics.size() + on_bindings.size() + on_rest.size()
+	h.check(
+		total == Edit.editable_keys().size(),
+		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
+	)
+
+	layer.free()
+
+
+## Whether the page on this tab shows a row labelled with this key.
+static func _rows_label(tabs: TabContainer, index: int, key: String) -> bool:
+	var page: Control = tabs.get_child(index)
+	if page == null:
+		return false
+	for child in page.find_children("*", "Label", true, false):
+		if (child as Label).text == key:
+			return true
+	return false
 
 
 func _test_bad_values_are_not_staged(h) -> void:

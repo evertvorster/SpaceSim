@@ -51,30 +51,37 @@ const REGISTRY := {
 	"video.mode": {
 		"default": "windowed",
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"choices": ["windowed", "fullscreen", "exclusive"],
 	},
-	"video.aspect": {"default": "expand", "scope": Scope.PLAYER, "choices": ["expand", "keep"]},
+	"video.aspect": {"default": "expand", "scope": Scope.PLAYER, "choices": ["expand", "keep"],
+		"tab": "display"},
 	# The list of screens is the machine's, not ours, so the row names a builder rather than a list.
-	"video.screen": {"default": 0, "scope": Scope.PLAYER, "min": 0, "choices": "screens"},
+	"video.screen": {"default": 0, "scope": Scope.PLAYER, "min": 0, "choices": "screens",
+		"tab": "display"},
 	"video.canvas_resolution": {
 		"default": Vector2i(1280, 720),
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"min": Vector2i(320, 240),
 		"max": Vector2i(7680, 4320),
 	},
 	"video.render_resolution": {
 		"default": Vector2i(1280, 720),
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"min": Vector2i(160, 120),
 		"max": Vector2i(7680, 4320),
 	},
 	"video.window_size": {
 		"default": Vector2i(1280, 720),
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"min": Vector2i(320, 240),
 		"max": Vector2i(16384, 16384),
 	},
-	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
+	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05,
+		"tab": "bindings"},
 	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
 	# **`camera.ship_distance` and `ship.visible` went on 2026-10-28 with the placeholder hull.** Both existed for a box
 	# that was clipped at altitude by deep space's 100 m near plane and appeared as a plate on the ground once the plane
@@ -86,7 +93,7 @@ const REGISTRY := {
 	# --- the air. **The shells are the only thing that draw the eye's air** (`air_shell.gdshader`, one per band
 	# per body); a material that applied air of its own beside them would draw the same air twice — see
 	# `Atmospheres` §9a. Zero hides every shell, and the frame is then drawn exactly as the rasteriser left it.
-	"render.atmosphere_volume": {"default": true, "scope": Scope.PLAYER},
+	"render.atmosphere_volume": {"default": true, "scope": Scope.PLAYER, "tab": "graphics"},
 	# --- the cloud decks. **One switch for one mechanism**: it reads no other switch, which is the rule a
 	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
 	# nothing.
@@ -97,7 +104,7 @@ const REGISTRY := {
 	# a deck only ever covered the cap the walk covered.) **Off by default because the clouds rung owns the tuning**,
 	# not because it does not draw: the layer's light (`§D6`), multiple decks (`§D9`) and the near regime are still
 	# open. Turn it on to see where the deck's look stands.
-	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER},
+	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER, "tab": "graphics"},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
 	},
@@ -139,8 +146,8 @@ const REGISTRY := {
 	# decks. The surface should be a copy of the sphere, like the decks are, and then the mesh must be translated. So, I
 	# should be able to see all three, and turn them on and off individually in wireframe mode."* The decks' switch is
 	# `render.cloud_decks`, which already owns them in every mode.
-	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER},
-	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER},
+	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER, "tab": "graphics"},
+	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER, "tab": "graphics"},
 	# **The vertices carry the terrain.** On, the surface's points move radially by their own height either side of the
 	# datum — normalised about it and scaled separately up (`amplitude`) and down (`depth_amplitude`), so land rises through
 	# the decks and basins fall to an ocean floor — the field asked at each point's own direction on the device
@@ -149,13 +156,14 @@ const REGISTRY := {
 	# the heights come from: *"Lets try 1."* — the dispatch, not a texture.
 	#
 	# **It creates no vertices and refines nothing**, and the walk's answer does not depend on it.
-	"render.surface_translation": {"default": false, "scope": Scope.PLAYER},
+	"render.surface_translation": {"default": false, "scope": Scope.PLAYER, "tab": "graphics"},
 	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
 	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
 	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the
 	# real surface**: the whole-body map, its near-field tiles, the detail ladder and the relief. All three are the same
 	# mesh and the same material; the mode is a uniform and a line material, never a second geometry.
-	"render.mode": {"default": "flat", "scope": Scope.PLAYER, "choices": ["wireframe", "flat", "rendered"]},
+	"render.mode": {"default": "flat", "scope": Scope.PLAYER, "choices": ["wireframe", "flat", "rendered"],
+		"tab": "graphics"},
 	# **Tint each patch by its chunk's depth**, so the tree is legible at a glance: where it refines, where it stops, and
 	# whether a boundary is a step or a crack. Off by default, so `flat` stays exactly the picture it was.
 	"render.depth_tint": {"default": false, "scope": Scope.PLAYER},
@@ -213,31 +221,47 @@ const REGISTRY := {
 	# The selected target's own colour, against the one colour everything else is drawn in. A colour
 	# rather than a flag so the target can be made to stand out against whatever it is seen against.
 	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER},
-	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 	# **The throttle is signed and goes to zero on a key of its own** (2026-10-20), because flying a
 	# cloud backwards at the same speed as forwards is how its two faces get compared. `+` is the
 	# shifted `Equal` key, which is what the physical key in that position is called.
-	"bindings.throttle_up": {"default": "Shift+Equal", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.throttle_down": {"default": "Minus", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.throttle_stop": {"default": "Backspace", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.throttle_up": {"default": "Shift+Equal", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.throttle_down": {"default": "Minus", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.throttle_stop": {"default": "Backspace", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 	# **The six view directions**, so a scene can be inspected from anywhere without turning the ship. The
 	# camera looks along the chosen direction in the SHIP's frame, so mouse look still steers and the view
 	# stays where it was put.
-	"bindings.view_forward": {"default": "1", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_back": {"default": "2", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_left": {"default": "3", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_forward": {"default": "1", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_back": {"default": "2", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_left": {"default": "3", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 	# **The brackets roll, and they used to step the mesh error budget** — which is a value flown once and
 	# now left at its best setting (`lod.error_budget` stays in the registry, hot, and the HUD keeps showing
 	# the triangle count). A trim nobody adjusts does not need two keys; flying sideways does.
-	"bindings.roll_left": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.roll_left": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 }
 
 ## Emitted after a value changes, with the value that now stands.
@@ -275,6 +299,19 @@ func path() -> String:
 
 static func declared_keys() -> Array:
 	return REGISTRY.keys()
+
+
+## The tabs, in the order they appear. **A row that declares no `tab` is in `rest`, and `rest` is
+## always last**: a setting nobody has filed yet waits there rather than falling off the screen, and
+## that list is where the next grouping is decided from.
+const TABS := ["bindings", "display", "graphics", "rest"]
+
+
+## Which tab a setting belongs in. The grouping is a property of the row, not of its key prefix —
+## a `video.hdr` added tomorrow must be able to say where it goes.
+static func tab_of(key: String) -> String:
+	var row: Dictionary = REGISTRY.get(key, {})
+	return String(row.get("tab", "rest"))
 
 
 static func scope_of(key: String) -> Variant:

@@ -976,6 +976,22 @@ already Close's job.
 Rows come from the registry, so a newly declared setting appears without the panel changing.
 Bindings are edited as text for now; capturing a key press is the next step.
 
+**The rows are grouped into tabs, and the grouping is a property of the row** — one `"tab"` per
+registry entry, read by `SpacesimSettings.tab_of`. The panel builds one grid per tab from
+`SpacesimSettings.TABS`, so a new setting is filed by declaring where it goes rather than by editing
+the screen; grouping by key prefix in the panel instead would put that knowledge in two places, and a
+`video.hdr` added later would land in whichever tab the prefix rule happened to name.
+
+| Tab | Holds |
+|---|---|
+| **Bindings** | the sixteen keys and `mouse.sensitivity` |
+| **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
+| **Graphics** | the switches that decide what is drawn: `render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks` |
+| **Rest** | everything not yet filed, which is where a new setting waits — an unmoved setting is visible rather than lost |
+
+**A tab with nothing filed into it is not built**, because an empty page is a promise of settings that
+are somewhere else.
+
 **A row that declares `choices` is offered rather than typed into** — an `OptionButton`, whose list
 is the row's own array, or `"screens"` for the one list that is the machine's rather than ours. What
 a choice *is* depends on the setting: an enum's value is its word, a screen's is its number, since
@@ -1024,6 +1040,8 @@ scenes: `configure(settings)`, and the `closed` signal. The buttons drive the ed
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
+| `static TABS` | the tabs the settings screen shows, in order: `bindings`, `display`, `graphics`, `rest` |
+| `static tab_of(key) -> String` | which tab a row is filed in; **a row that names none is in `rest`** |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |
 | `KNOWN_VALIDATORS` | the named checks; a row naming anything else is a registry mistake |
 
