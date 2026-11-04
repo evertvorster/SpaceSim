@@ -17,6 +17,7 @@ const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
 const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
+const Devices := preload("res://addons/spacesim/input/devices.gd")
 const BindingsStore := preload("res://addons/spacesim/input/bindings_store.gd")
 const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
 const Session := preload("res://addons/spacesim/save/session.gd")
@@ -188,6 +189,13 @@ func _ready() -> void:
 ## UI's focus key and the UI system would consume it first. Handled here, Tab always toggles, and
 ## keyboard focus navigation still works for everything else.
 func _input(event: InputEvent) -> void:
+	# **A device being set up presses nothing.** While the settings screen names a device, its events are
+	# consumed here — which is before `Control._gui_input`, so they cannot move a menu either. The screen
+	# reads that device by polling, so what it is being set up with still arrives.
+	if _is_being_configured(event):
+		get_viewport().set_input_as_handled()
+		return
+
 	# **Every key and button event is fed, released ones too**: a release is what clears a held source,
 	# and a screen that swallows it is why `release_all()` exists.
 	if event is InputEventKey or event is InputEventMouseButton:
@@ -201,6 +209,22 @@ func _input(event: InputEvent) -> void:
 	elif _triggered(event, "player_screen"):
 		_toggle(_player_screen)
 		get_viewport().set_input_as_handled()
+
+
+## Whether this event comes from the device the settings screen is configuring.
+##
+## `Viewport.push_input` runs `_input` before `Control._gui_input`, and marking the event handled there
+## stops every later phase — so this one call keeps a pad out of the menus as well as out of the game.
+func _is_being_configured(event: InputEvent) -> bool:
+	var device := -1
+	if event is InputEventJoypadButton:
+		device = (event as InputEventJoypadButton).device
+	elif event is InputEventJoypadMotion:
+		device = (event as InputEventJoypadMotion).device
+	if device < 0:
+		return false
+	var configuring: String = _settings_screen.configuring_device()
+	return not configuring.is_empty() and Devices.name_of(device) == configuring
 
 
 func _unhandled_input(event: InputEvent) -> void:

@@ -340,7 +340,35 @@ func _test_the_devices_tab(h, root: Node) -> void:
 			if label.text == "%+.2f" % Devices.axis(int(entry[0]), int(entry[1])):
 				shown = true
 		h.check(shown, "and each readout shows what that axis reports")
+
+	# --- **Configure routes one device away from everything else**, and one at a time
+	if not pads.is_empty():
+		var boxes: Array = panel.get("_configure_boxes")
+		h.check(boxes.size() == pads.size(), "each device has a Configure box (%d)" % boxes.size())
+		h.check(panel.configuring_device().is_empty(), "and none is on to begin with")
+		var first: CheckBox = boxes[0][1]
+		first.button_pressed = true
+		first.toggled.emit(true)
+		h.check(
+			panel.configuring_device() == Devices.name_of(int(pads[0])),
+			"turning one on names that device (%s)" % panel.configuring_device()
+		)
+		if boxes.size() >= 2:
+			var second: CheckBox = boxes[1][1]
+			second.button_pressed = true
+			second.toggled.emit(true)
+			h.check(
+				panel.configuring_device() == Devices.name_of(int(pads[1])),
+				"and turning another on moves it over (%s)" % panel.configuring_device()
+			)
+			h.check(not first.button_pressed, "leaving exactly one on")
+		# **A closed screen configures nothing**: main reads this live, so a stale name would leave a
+		# device deaf to the game with nothing on screen to explain it.
+		panel.dismissed()
+		h.check(panel.configuring_device().is_empty(), "and closing the screen clears it")
+
 	layer.free()
+
 
 
 ## The Reset on one action's row.

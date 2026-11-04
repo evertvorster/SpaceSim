@@ -39,9 +39,14 @@ var _fields: Dictionary = {} ## key -> the controls that edit it
 var _bindings: SpacesimBindingsStore
 var _binding_fields: Dictionary = {} ## action id -> the field that shows its bindings
 
-## The devices tab's live readouts: `[device, axis index, Label]` and `[device, Label]`.
+## The devices tab's live readouts: `[device, axis index, Label]` and `[device, button index, Label]`.
 var _axis_labels: Array = []
 var _button_labels: Array = []
+
+## **The device being set up, by name**, or `""`. While one is set, `main.gd` consumes that device's
+## events so it reaches this screen and nothing else — see [method configuring_device].
+var _configuring := ""
+var _configure_boxes: Array = []
 var _apply_button: Button
 var _close_button: Button
 var _updating := false
@@ -139,10 +144,29 @@ func _build_devices(column: VBoxContainer) -> void:
 		box.add_theme_constant_override("separation", 4)
 		column.add_child(box)
 
+		var header := HBoxContainer.new()
+		header.add_theme_constant_override("separation", 12)
+		box.add_child(header)
+
 		var title := Label.new()
 		title.text = Devices.name_of(device)
 		title.add_theme_font_size_override("font_size", 16)
-		box.add_child(title)
+		header.add_child(title)
+
+		# **One device at a time**: what is being set up is a single target, and two devices both routed
+		# away from the menus would be a way to bind the wrong pad.
+		var configure := CheckBox.new()
+		configure.text = "Configure"
+		configure.tooltip_text = (
+			"While this is on, this device does not press anything in the game or its menus — "
+			+ "it only reaches this screen."
+		)
+		configure.button_pressed = _configuring == Devices.name_of(device)
+		configure.toggled.connect(
+			func(on: bool) -> void: _set_configuring(Devices.name_of(device) if on else "")
+		)
+		header.add_child(configure)
+		_configure_boxes.append([device, configure])
 
 		# **Whether the engine knows the device is the one fact that changes what its numbers mean**: a
 		# known pad reports named controls in −1…1, an unknown one reports raw indices.
@@ -192,6 +216,21 @@ func _build_devices(column: VBoxContainer) -> void:
 			_button_labels.append([device, index, button_label])
 
 	_refresh_devices()
+
+
+## **Which device is being set up**, by name, or `""` for none. `main.gd` asks this for every joypad
+## event: while a device is named here, its events are consumed before the GUI sees them, so it cannot
+## steer a menu or fire a game action while the player is binding it.
+func configuring_device() -> String:
+	return _configuring
+
+
+## Set it, and keep the checkboxes in step. **One at a time**: turning one on turns the rest off.
+func _set_configuring(device_name: String) -> void:
+	_configuring = device_name
+	for entry in _configure_boxes:
+		var box: CheckBox = entry[1]
+		box.set_pressed_no_signal(device_name != "" and Devices.name_of(int(entry[0])) == device_name)
 
 
 ## The live half: called every frame while a screen is up, and it is six axis reads and twenty button
@@ -576,6 +615,9 @@ func dismissed() -> void:
 	_edit.discard()
 	if _bindings != null:
 		_bindings.discard()
+	# **A screen that is closed is not configuring anything.** The flag is read live by `main.gd`, so
+	# leaving it set would keep a device deaf to the game with nothing on screen to explain why.
+	_set_configuring("")
 
 
 ## Pull every control back to what the staging area holds — which is how a Reset shows up, and how

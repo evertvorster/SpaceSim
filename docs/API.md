@@ -964,12 +964,23 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
 | **Bindings** | `mouse.sensitivity`, plus **the sixteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
-| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **each axis on its own line** with its live deflection, and **every button laid out** (21 of them, lit when held) — a button you cannot find is one you cannot bind. Read-only; binding a pad is the next rung |
+| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **each axis on its own line** with its live deflection, and **every button laid out** (21 of them, lit when held) — a button you cannot find is one you cannot bind. Plus a **Configure** box per device (below) |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
 
 **A tab with nothing filed into it is not built**, because an empty page is a promise of settings that
 are somewhere else.
+
+**Configure, on the Devices tab: one device at a time is routed away from everything else.** While a
+device is named by `SpacesimSettingsPanel.configuring_device()`, `main.gd::_input` marks that device's
+events handled **before `Control._gui_input`** — the documented order is `_input` → `_gui_input` →
+`_shortcut_input` → `_unhandled_*`, and marking handled in an earlier phase skips the later ones, which
+is why one call keeps a pad out of the menus as well as out of the game. The screen reads the device by
+**polling**, so what is being set up still arrives; a consumed event does not stop a poll.
+
+Only one at a time, because what is being set up is a single target. `dismissed()` clears it: the flag is
+read live by `main.gd`, so a stale name would leave a device deaf to the game with nothing on screen to
+explain why.
 
 **A row that declares `choices` is offered rather than typed into** — an `OptionButton`, whose list
 is the row's own array, or `"screens"` for the one list that is the machine's rather than ours. What
