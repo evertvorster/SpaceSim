@@ -443,11 +443,6 @@ func _on_dialog_answered(action: String) -> void:
 	var entry := _axis_entry(device, index)
 	_calibrating = []
 	_set_configuring("")
-	_calibrating = []
-	_detect = {}
-	_detected = ""
-	if _dialog != null:
-		_dialog.visible = false
 
 	if action != "Save":
 		return
@@ -1299,6 +1294,8 @@ func _refresh() -> void:
 		(entry[5] as Label).text = _travel_text(profile)
 
 	var pending := _edit.has_changes() or _bindings.has_changes()
+	Debug.say("bindings: refresh, has_changes=%s, apply button %s"
+		% [pending, "missing" if _apply_button == null else "there"])
 	_apply_button.modulate = PENDING_COLOR if pending else IDLE_COLOR
 	_close_button.modulate = PENDING_COLOR if pending else IDLE_COLOR
 
