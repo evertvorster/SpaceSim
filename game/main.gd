@@ -58,12 +58,17 @@ var _ui_layer: CanvasLayer
 var _player: SpacesimPlayer
 var _settings_screen: SpacesimSettingsPanel
 var _player_screen: SpacesimPlayerPanel
+var _saved_games_screen: SpacesimSavedGamesPanel
 
 ## The screen that is open, or null. Having one open *is* being paused.
 var _screen: SpacesimScreen
+
+## Where closing the open screen goes, when it was opened *from* another screen. Null means the world.
+var _back_to: SpacesimScreen
 var _selected_index := -1
 var _look := Vector2.ZERO
 var _hud: Label
+var _hints: Label
 var _fps: Label
 var _skip_next_motion := false
 ## Whether the body nodes are drawn at all — the debug key that hides them.
@@ -139,13 +144,29 @@ func _ready() -> void:
 
 	_settings_screen = SpacesimSettingsPanel.new()
 	_settings_screen.configure(SpacesimSettings)
-	_settings_screen.exit_requested.connect(_on_exit_requested)
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
 	_player_screen.configure(_player, _session, _system)
-	# A load, a switch or a new story all move the player, and the ship is where the player is.
-	_player_screen.session_reloaded.connect(_place_observer_from_session)
+	# **Exit Game lives here, not on the settings screen.** Settings is where a value is edited and
+	# throwing the edits away is Close's job; leaving the game is about the player, and the screen
+	# that shows them is where it belongs.
+	_player_screen.exit_requested.connect(_on_exit_requested)
 	_register_screen(_player_screen, "Player")
+
+	# The browser of what has been played, behind a button on the personal-data screen rather than a
+	# key of its own. It is the one screen that can move the player, so it is the one that reports it.
+	_saved_games_screen = SpacesimSavedGamesPanel.new()
+	_saved_games_screen.configure(_player, _session, _system)
+	# Opening it from the player screen closes that one on the way through: one screen open is what
+	# being paused means, and `_open_screen` is where that rule lives.
+	_player_screen.saved_games_requested.connect(
+		_open_from.bind(_saved_games_screen, _player_screen)
+	)
+	# The settings screen has a key of its own, so this is a second way in rather than the only one:
+	# entered here, it closes back here; entered by Alt+C, it closes to the world.
+	_player_screen.settings_requested.connect(_open_from.bind(_settings_screen, _player_screen))
+	_saved_games_screen.session_reloaded.connect(_place_observer_from_session)
+	_register_screen(_saved_games_screen, "SavedGames")
 
 	_capture_mouse()
 
@@ -280,9 +301,18 @@ func _open_screen(screen: SpacesimScreen) -> void:
 		_screen.visible = false
 		_screen.dismissed()
 	_screen = screen
+	_back_to = null
 	screen.opened()
 	screen.visible = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+## Open a screen that belongs to another one, so its Close goes back there instead of dropping the
+## player into the world. The browser and the configuration screen are reached this way from the
+## personal-data screen; a screen opened by its own hotkey has no way back and closes to the world.
+func _open_from(screen: SpacesimScreen, back: SpacesimScreen) -> void:
+	_open_screen(screen)
+	_back_to = back
 
 
 func _close_screen() -> void:
@@ -291,7 +321,13 @@ func _close_screen() -> void:
 	_screen.visible = false
 	_screen.dismissed()
 	_screen = null
-	_capture_mouse()
+	var back := _back_to
+	_back_to = null
+	# Back the way the player came, not out into the world — one Close, one step.
+	if back != null:
+		_open_screen(back)
+	else:
+		_capture_mouse()
 
 
 ## Put a screen in the UI layer, hidden, with its close wired.
@@ -357,6 +393,10 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 	match key:
 		"camera.fov", "markers.pool_size", "markers.font_size", "markers.margin", "markers.selected_color", "exposure.range_stops", "exposure.adaptation_rate", "fog.gain":
 			_apply_settings()
+		# The HUD's switches are visibility, so they are read by the readout's own refresh — which is
+		# once every `HUD_INTERVAL`, and would otherwise leave a toggle looking broken for a moment.
+		"hud.readout", "hud.fps", "hud.key_hints":
+			_apply_hud_visibility()
 
 
 ## Click to take the mouse back after Esc released it.
@@ -645,12 +685,25 @@ func _build_hud() -> void:
 	add_child(layer)
 	_ui_layer = layer
 
+	# **Two labels in a column, not one block**, because the readout and the key hints are switched off
+	# separately: `hud.readout` and `hud.key_hints`. One label could only be hidden whole.
+	var column := VBoxContainer.new()
+	column.name = "Readouts"
+	column.position = Vector2(24.0, 18.0)
+	column.add_theme_constant_override("separation", 18)
+	layer.add_child(column)
+
 	var label := Label.new()
-	label.name = "Readout"
-	label.position = Vector2(24.0, 18.0)
+	label.name = "Information"
 	_outline(label, 17)
-	layer.add_child(label)
+	column.add_child(label)
 	_hud = label
+
+	var hints := Label.new()
+	hints.name = "KeyHints"
+	_outline(hints, 17)
+	column.add_child(hints)
+	_hints = hints
 
 	# Top right, so a frame-rate change while tuning something else is visible at a glance.
 	var fps := Label.new()
@@ -703,7 +756,13 @@ func _update_hud() -> void:
 				"",
 				"bodies      %s, %d triangles, %d chunks, depth %d"
 					% [bodies, _system.triangles(), _system.chunks(), _system.deepest_level()],
-				"",
+			]
+		)
+	)
+
+	_hints.text = "\n".join(
+		PackedStringArray(
+			[
 				(
 					"%s/%s throttle    %s stop    mouse look    %s/%s roll    Esc release mouse"
 					% [
@@ -737,6 +796,16 @@ func _update_hud() -> void:
 			]
 		)
 	)
+	_apply_hud_visibility()
+
+
+## **Each of the HUD's three parts is switched on its own** — see the registry's `hud.*` rows. Read
+## here rather than cached, so a change on the settings screen is on screen before the player looks
+## back; `_on_setting_changed` calls this for the same reason when a screen is open over the game.
+func _apply_hud_visibility() -> void:
+	_hud.visible = bool(SpacesimSettings.get_value("hud.readout"))
+	_hints.visible = bool(SpacesimSettings.get_value("hud.key_hints"))
+	_fps.visible = bool(SpacesimSettings.get_value("hud.fps"))
 
 
 ## The key a binding currently names, for the readout.

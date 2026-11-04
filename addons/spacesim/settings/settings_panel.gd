@@ -18,8 +18,6 @@ const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
 const INVALID_COLOR := Color(1.0, 0.35, 0.3)
 
-signal exit_requested
-
 var _settings: Node
 var _edit: SpacesimSettingsEdit
 var _fields: Dictionary = {} ## key -> the controls that edit it
@@ -39,20 +37,46 @@ func configure(settings: Node) -> void:
 func _build() -> void:
 	build_screen("Settings")
 
-	var grid := GridContainer.new()
-	grid.name = "Settings"
-	grid.columns = 3
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 6)
-	content.add_child(grid)
+	# **The grouping comes from the registry**, one `tab` per row, so a setting is filed by declaring
+	# where it goes. Grouping by key prefix here instead would put that knowledge in two places, and a
+	# `video.hdr` added later would land in whichever tab the prefix rule happened to name.
+	var tabs := TabContainer.new()
+	tabs.name = "Tabs"
+	tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(tabs)
 
-	for key in EditScript.editable_keys():
-		_add_row(grid, key)
+	for tab in SettingsScript.TABS:
+		var keys := _keys_in(tab)
+		# A tab nothing was filed into is not built: an empty page is a promise of settings that are
+		# somewhere else.
+		if keys.is_empty():
+			continue
+		var page := ScrollContainer.new()
+		page.name = SettingsScript.tab_title(tab)
+		page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		var grid := GridContainer.new()
+		grid.name = "Settings"
+		grid.columns = 3
+		grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_theme_constant_override("h_separation", 12)
+		grid.add_theme_constant_override("v_separation", 6)
+		page.add_child(grid)
+		tabs.add_child(page)
+		for key in keys:
+			_add_row(grid, key)
 
 	_apply_button = add_button("Apply", func() -> void: _edit.apply())
 	_close_button = add_button("Close", _on_close)
-	add_button("Exit Game", func() -> void: exit_requested.emit())
+
+
+## The editable keys filed under one tab, in registry order.
+static func _keys_in(tab: String) -> Array:
+	var keys: Array = []
+	for key in EditScript.editable_keys():
+		if SettingsScript.tab_of(key) == tab:
+			keys.append(key)
+	return keys
 
 
 func _add_row(grid: GridContainer, key: String) -> void:

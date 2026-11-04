@@ -51,42 +51,52 @@ const REGISTRY := {
 	"video.mode": {
 		"default": "windowed",
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"choices": ["windowed", "fullscreen", "exclusive"],
 	},
-	"video.aspect": {"default": "expand", "scope": Scope.PLAYER, "choices": ["expand", "keep"]},
+	"video.aspect": {"default": "expand", "scope": Scope.PLAYER, "choices": ["expand", "keep"],
+		"tab": "display"},
 	# The list of screens is the machine's, not ours, so the row names a builder rather than a list.
-	"video.screen": {"default": 0, "scope": Scope.PLAYER, "min": 0, "choices": "screens"},
+	"video.screen": {"default": 0, "scope": Scope.PLAYER, "min": 0, "choices": "screens",
+		"tab": "display"},
 	"video.canvas_resolution": {
 		"default": Vector2i(1280, 720),
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"min": Vector2i(320, 240),
 		"max": Vector2i(7680, 4320),
 	},
 	"video.render_resolution": {
 		"default": Vector2i(1280, 720),
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"min": Vector2i(160, 120),
 		"max": Vector2i(7680, 4320),
 	},
 	"video.window_size": {
 		"default": Vector2i(1280, 720),
 		"scope": Scope.PLAYER,
+		"tab": "display",
 		"min": Vector2i(320, 240),
 		"max": Vector2i(16384, 16384),
 	},
-	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05},
-	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0},
+	"mouse.sensitivity": {"default": 0.0015, "scope": Scope.PLAYER, "min": 0.0001, "max": 0.05,
+		"tab": "bindings"},
+	"camera.fov": {"default": 70.0, "scope": Scope.PLAYER, "min": 20.0, "max": 140.0,
+		"tab": "hud"},
 	# **`camera.ship_distance` and `ship.visible` went on 2026-10-28 with the placeholder hull.** Both existed for a box
 	# that was clipped at altitude by deep space's 100 m near plane and appeared as a plate on the ground once the plane
 	# was pulled inside it — Evert: *"There is some sort of landing pad that pops up when I am close to the surface. Strip
 	# that out, and clear out the mechanism that makes it."* The camera's offset is a constant in `player_ship.gd` now,
 	# and there is no hull for a key to toggle.
-	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
-	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)},
+	"camera.range_space": {"default": Vector2(100.0, 1.0e11), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0),
+		"tab": "hud"},
+	"camera.range_orbital": {"default": Vector2(5.0, 1.0e8), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0),
+		"tab": "hud"},
 	# --- the air. **The shells are the only thing that draw the eye's air** (`air_shell.gdshader`, one per band
 	# per body); a material that applied air of its own beside them would draw the same air twice — see
 	# `Atmospheres` §9a. Zero hides every shell, and the frame is then drawn exactly as the rasteriser left it.
-	"render.atmosphere_volume": {"default": true, "scope": Scope.PLAYER},
+	"render.atmosphere_volume": {"default": true, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	# --- the cloud decks. **One switch for one mechanism**: it reads no other switch, which is the rule a
 	# `show_decks = render.cloud_decks and not volume` broke for a whole day. Off hides every deck and bakes
 	# nothing.
@@ -97,15 +107,15 @@ const REGISTRY := {
 	# a deck only ever covered the cap the walk covered.) **Off by default because the clouds rung owns the tuning**,
 	# not because it does not draw: the layer's light (`§D6`), multiple decks (`§D9`) and the near regime are still
 	# open. Turn it on to see where the deck's look stands.
-	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER},
+	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	"camera.range_atmosphere": {
-		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
+		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0), "tab": "hud"
 	},
 	"camera.range_surface": {
-		"default": Vector2(0.1, 2.0e5), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0)
+		"default": Vector2(0.1, 2.0e5), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0), "tab": "hud"
 	},
 	"camera.range_interior": {
-		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01)
+		"default": Vector2(0.05, 1.0e3), "scope": Scope.PLAYER, "min": Vector2(0.001, 0.01), "tab": "hud"
 	},
 	# --- levels of detail. The geometric error a body's mesh is allowed to show at its **silhouette**,
 	# in pixels on screen. One number decides the whole engine's mesh budget: a body's tessellation
@@ -121,7 +131,8 @@ const REGISTRY := {
 	# as thin black lines; at 1.0 they are gone and at 0.5 Evert sees none at all. The cost is 1.2x the
 	# triangles near the ground and 3.2x at 1,000 km, and the flight report at 0.5 was *"performance seems
 	# unaffected"*. Evert, 2026-10-19: *"We can make the default 0.5."*
-	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0},
+	"lod.error_budget": {"default": 0.5, "scope": Scope.PLAYER, "min": 0.25, "max": 32.0,
+		"tab": "troubleshooting"},
 	# **The angle a facet may subtend, in DEGREES** — the one number that sets how finely the ground is cut. Evert,
 	# 2026-11-02: *"I want the viewing angle that set the triangle subdivision size to be a configurable option."*
 	#
@@ -131,7 +142,8 @@ const REGISTRY := {
 	# way `lod.error_budget` already is: the value is read here once a frame, passed down as an argument (a pool
 	# thread may not read settings), and compared in `walk_is_due`, so changing it re-walks immediately and the two
 	# consumers cannot drift apart.
-	"lod.facet_angle": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.25, "max": 16.0},
+	"lod.facet_angle": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.25, "max": 16.0,
+		"tab": "troubleshooting"},
 	# **The wireframe view's two divisions of itself**, so the three things drawn there can be told apart or isolated.
 	# The SUBDIVISION is the datum lattice — the same chunks and the same points, with nothing translated — and it is
 	# only ever drawn in a wireframe. The SURFACE is that lattice as the ground actually sits (translated, once the
@@ -139,8 +151,8 @@ const REGISTRY := {
 	# decks. The surface should be a copy of the sphere, like the decks are, and then the mesh must be translated. So, I
 	# should be able to see all three, and turn them on and off individually in wireframe mode."* The decks' switch is
 	# `render.cloud_decks`, which already owns them in every mode.
-	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER},
-	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER},
+	"render.wireframe_sphere": {"default": true, "scope": Scope.PLAYER, "tab": "troubleshooting"},
+	"render.wireframe_surface": {"default": true, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	# **The vertices carry the terrain.** On, the surface's points move radially by their own height either side of the
 	# datum — normalised about it and scaled separately up (`amplitude`) and down (`depth_amplitude`), so land rises through
 	# the decks and basins fall to an ocean floor — the field asked at each point's own direction on the device
@@ -149,30 +161,33 @@ const REGISTRY := {
 	# the heights come from: *"Lets try 1."* — the dispatch, not a texture.
 	#
 	# **It creates no vertices and refines nothing**, and the walk's answer does not depend on it.
-	"render.surface_translation": {"default": false, "scope": Scope.PLAYER},
+	"render.surface_translation": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	# --- **the testing platform's three modes**, and each answers a different question. `flat` is the workhorse: the
 	# silhouette and the topology with nothing over them — the body's derived albedo and not one texture read, which is
 	# what the ground drew before it had a surface stack. `wireframe` shows the subdivision itself. **`rendered` is the
 	# real surface**: the whole-body map, its near-field tiles, the detail ladder and the relief. All three are the same
 	# mesh and the same material; the mode is a uniform and a line material, never a second geometry.
-	"render.mode": {"default": "flat", "scope": Scope.PLAYER, "choices": ["wireframe", "flat", "rendered"]},
+	"render.mode": {"default": "flat", "scope": Scope.PLAYER, "choices": ["wireframe", "flat", "rendered"],
+		"tab": "troubleshooting"},
 	# **Tint each patch by its chunk's depth**, so the tree is legible at a glance: where it refines, where it stops, and
 	# whether a boundary is a step or a crack. Off by default, so `flat` stays exactly the picture it was.
-	"render.depth_tint": {"default": false, "scope": Scope.PLAYER},
+	"render.depth_tint": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	# **EV compensation, as a switch rather than a replacement.** On is the frame's own metre (a compute pass on the
 	# rendered pixels); off disables it, so the frame is drawn at Godot's reference — 100,000 lux on a white Lambertian
 	# reads 1.0 — and a difference in the picture is a difference in the geometry, not in the exposure.
-	"render.ev_compensation": {"default": true, "scope": Scope.PLAYER},
+	"render.ev_compensation": {"default": true, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	# --- the exposure's ceiling. The metre drives the frame toward middle grey, and a frame of nothing
 	# but stars has almost no mean luminance to answer with, so it drives toward the *top* of the
 	# window — which is what this caps. In STOPS above the light-adapted floor, so 32 is the whole
 	# range a dark-adapted eye has and 0 allows no boost at all. Read every frame by `main.gd` and
 	# handed to `SpacesimExposurePass`; the arithmetic is `SpacesimExposure.max_multiplier_for_stops`.
-	"exposure.range_stops": {"default": 32.0, "scope": Scope.PLAYER, "min": 0.0, "max": 40.0},
+	"exposure.range_stops": {"default": 32.0, "scope": Scope.PLAYER, "min": 0.0, "max": 40.0,
+		"tab": "troubleshooting"},
 	# **Halvings per second.** The exposure's approach is exponential in stops, so this one number sets how
 	# quickly it closes on a change however large: at 2.0 the remaining gap halves every 0.35 s. Evert,
 	# 2026-10-21: close quickly when the difference is large, then fine-tune.
-	"exposure.adaptation_rate": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.1, "max": 20.0},
+	"exposure.adaptation_rate": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.1, "max": 20.0,
+		"tab": "troubleshooting"},
 	# --- the fog inside a cloud deck, and the ONLY free number in it.
 	#
 	# The amount is the cloud map's reading at the camera, and that reading is *relative*: 0 at the coverage
@@ -186,14 +201,23 @@ const REGISTRY := {
 	# setting stays so that a saved settings file does not change shape, and so the parked fog can come back with
 	# its one free number. Evert, 2026-11-02: *"we can cut it out and re-implement it once we have the layers
 	# working, as we might not need it at all."*
-	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0},
-	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64},
+	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0,
+		"tab": "troubleshooting"},
+	# --- the HUD's own three parts. **Each is a separate switch because each is a different annoyance**:
+	# the readout is what a developer reads and a player stops seeing, the frame rate is an instrument, and
+	# the key hints are a reminder that has done its job after the first hour. Off is empty screen, not a
+	# smaller label — the whole point is the room it gives back.
+	"hud.readout": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	"hud.fps": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	"hud.key_hints": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64, "tab": "hud"},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a
 	# rebuild, and going deeper can only ADD stars. The catalogue is a COMPLETE sky to magnitude 8 and
 	# a diminishing fraction beyond (0.99 at 8, 0.69 at 9), so this belongs in 6.5 to 8.0; the
 	# naked-eye limit is 6.5 and 9.5 is a soft ceiling. See `sky/PROVENANCE.md` for the measurements.
-	"sky.star_depth": {"default": 6.5, "scope": Scope.PLAYER, "min": 3.0, "max": 9.5},
+	"sky.star_depth": {"default": 6.5, "scope": Scope.PLAYER, "min": 3.0, "max": 9.5,
+		"tab": "troubleshooting"},
 	# --- the star field's brightness, **in DECADES** (the multiplier is 10^this). A hand tuner, because
 	# settling the absolute level by argument proved slower than settling it by eye. Placed in decades
 	# so a linear slider can cross orders of magnitude; 0 is the derived brightness, and the range runs
@@ -203,41 +227,58 @@ const REGISTRY := {
 	# far from 0, the distance is a fact about the model worth chasing -- the two candidates are the
 	# exposure resting multiplier, and whether the Sun's *illuminance* should ever be used to expose
 	# for a sky at all, since an irradiance is not a scene luminance.
-	"sky.star_gain": {"default": 0.0, "scope": Scope.PLAYER, "min": -6.0, "max": 8.0},
+	"sky.star_gain": {"default": 0.0, "scope": Scope.PLAYER, "min": -6.0, "max": 8.0,
+		"tab": "troubleshooting"},
 	# Sized to the HUD's own 17, so the markers read as part of the screen rather than as something
 	# laid over it.
-	"markers.font_size": {"default": 17, "scope": Scope.PLAYER, "min": 8, "max": 72},
+	"markers.font_size": {"default": 17, "scope": Scope.PLAYER, "min": 8, "max": 72, "tab": "hud"},
 	# Breathing room at the viewport edge. It was 100 when a pointer was clamped there and its own
 	# width decided the clearance; labels are placed inside the bounds now, so it is only a margin.
-	"markers.margin": {"default": 24.0, "scope": Scope.PLAYER, "min": 0.0, "max": 400.0},
+	"markers.margin": {"default": 24.0, "scope": Scope.PLAYER, "min": 0.0, "max": 400.0, "tab": "hud"},
 	# The selected target's own colour, against the one colour everything else is drawn in. A colour
 	# rather than a flag so the target can be made to stand out against whatever it is seen against.
-	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER},
-	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"markers.selected_color": {"default": Color(1.0, 0.9, 0.3), "scope": Scope.PLAYER, "tab": "hud"},
+	"bindings.settings_screen": {"default": "Alt+C", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.player_screen": {"default": "Tab", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 	# **The throttle is signed and goes to zero on a key of its own** (2026-10-20), because flying a
 	# cloud backwards at the same speed as forwards is how its two faces get compared. `+` is the
 	# shifted `Equal` key, which is what the physical key in that position is called.
-	"bindings.throttle_up": {"default": "Shift+Equal", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.throttle_down": {"default": "Minus", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.throttle_stop": {"default": "Backspace", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.throttle_up": {"default": "Shift+Equal", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.throttle_down": {"default": "Minus", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.throttle_stop": {"default": "Backspace", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 	# **The six view directions**, so a scene can be inspected from anywhere without turning the ship. The
 	# camera looks along the chosen direction in the SHIP's frame, so mouse look still steers and the view
 	# stays where it was put.
-	"bindings.view_forward": {"default": "1", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_back": {"default": "2", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_left": {"default": "3", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.view_forward": {"default": "1", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_back": {"default": "2", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_left": {"default": "3", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_right": {"default": "4", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_up": {"default": "5", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.view_down": {"default": "6", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 	# **The brackets roll, and they used to step the mesh error budget** — which is a value flown once and
 	# now left at its best setting (`lod.error_budget` stays in the registry, hot, and the HUD keeps showing
 	# the triangle count). A trim nobody adjusts does not need two keys; flying sideways does.
-	"bindings.roll_left": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding"},
-	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding"},
+	"bindings.roll_left": {"default": "BracketLeft", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.roll_right": {"default": "BracketRight", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.cycle_target": {"default": "T", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.bodies_toggle": {"default": "P", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
+	"bindings.wireframe_toggle": {"default": "L", "scope": Scope.PLAYER, "validator": "key_binding",
+		"tab": "bindings"},
 }
 
 ## Emitted after a value changes, with the value that now stands.
@@ -275,6 +316,27 @@ func path() -> String:
 
 static func declared_keys() -> Array:
 	return REGISTRY.keys()
+
+
+## The tabs, in the order they appear. **A row that declares no `tab` is in `rest`, and `rest` is
+## always last**: a setting nobody has filed yet waits there rather than falling off the screen, and
+## that list is where the next grouping is decided from. A tab nothing was filed into is not built, so
+## `rest` costs nothing while it is empty.
+const TABS := ["display", "hud", "bindings", "troubleshooting", "rest"]
+
+## What a tab is called on screen. Everything but the acronym is its key capitalised.
+const TAB_TITLES := {"hud": "HUD"}
+
+
+static func tab_title(tab: String) -> String:
+	return String(TAB_TITLES.get(tab, tab.capitalize()))
+
+
+## Which tab a setting belongs in. The grouping is a property of the row, not of its key prefix —
+## a `video.hdr` added tomorrow must be able to say where it goes.
+static func tab_of(key: String) -> String:
+	var row: Dictionary = REGISTRY.get(key, {})
+	return String(row.get("tab", "rest"))
 
 
 static func scope_of(key: String) -> Variant:

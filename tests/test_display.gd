@@ -152,7 +152,7 @@ func _test_the_picker_stages_and_apply_commits(h, root: Node) -> void:
 	panel.configure(settings)
 	layer.add_child(panel)
 
-	var menus := _menus(panel, [])
+	var menus := _menu_buttons(panel, [])
 	h.check(menus.size() == 3, "each of the three resolution rows has a menu beside it (%d)" % menus.size())
 	if menus.is_empty():
 		layer.free()
@@ -201,11 +201,11 @@ func _test_the_picker_stages_and_apply_commits(h, root: Node) -> void:
 	layer.free()
 
 
-static func _menus(node: Node, into: Array) -> Array:
+static func _menu_buttons(node: Node, into: Array) -> Array:
 	if node is MenuButton:
 		into.append(node)
 	for child in node.get_children():
-		_menus(child, into)
+		_menu_buttons(child, into)
 	return into
 
 

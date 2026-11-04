@@ -21,6 +21,7 @@ func run(h, root: Node) -> void:
 	_test_reset_and_discard(h)
 	_test_bad_values_are_not_staged(h)
 	_test_every_setting_gets_a_control(h, root)
+	_test_the_tabs_group_the_registry(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -171,6 +172,98 @@ func _test_every_setting_gets_a_control(h, root: Node) -> void:
 	h.check(bare.is_empty(), "every declared setting gets a control%s" % Fixture.detail(bare))
 
 	layer.free()
+
+
+## **Every setting is on a tab, and the tabs are the ones the registry names.** The failure this
+## guards is a setting silently not appearing: a row with no `tab` files itself under `rest`, which is
+## the point of `rest` existing, but a row naming a tab nobody builds would land nowhere.
+func _test_the_tabs_group_the_registry(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var panel := SettingsPanel.new()
+	panel.configure(_fixture.open())
+	layer.add_child(panel)
+
+	var found := panel.find_children("*", "TabContainer", true, false)
+	h.check(found.size() == 1, "the screen has one tab container (%d)" % found.size())
+	if found.is_empty():
+		layer.free()
+		return
+	var tabs: TabContainer = found[0]
+	var titles: Array = []
+	for index in tabs.get_tab_count():
+		titles.append(tabs.get_tab_title(index))
+	h.check(
+		titles == ["Display", "HUD", "Bindings", "Troubleshooting"],
+		"the tabs are Display, HUD, Bindings and Troubleshooting, in that order (%s)"
+			% str(titles)
+	)
+
+	# What each tab holds, read off the screen: the display tab is the window, the bindings are the
+	# keys, the troubleshooting tab is what you reach for when the picture is wrong, and the HUD tab is
+	# what the player looks through: the camera and the markers. **Nothing is left in `rest`, so `rest`
+	# is not built** — a tab with nothing filed into it is a promise of settings that are elsewhere.
+	var pages := {}
+	for index in tabs.get_tab_count():
+		var names: Array = []
+		for key in Edit.editable_keys():
+			if _rows_label(tabs, index, String(key)):
+				names.append(String(key))
+		pages[titles[index]] = names
+
+	var display: Array = pages["Display"]
+	var bindings: Array = pages["Bindings"]
+	var trouble: Array = pages["Troubleshooting"]
+	var hud: Array = pages["HUD"]
+
+	h.check(display.size() == 6, "Display holds the six window settings (%d)" % display.size())
+	h.check(
+		display.all(func(key: String) -> bool: return key.begins_with("video.")),
+		"and they are the video ones (%s)" % str(display)
+	)
+	h.check(bindings.size() == 17, "Bindings holds the sixteen keys and the mouse (%d)" % bindings.size())
+	h.check(
+		trouble.has("render.mode") and trouble.has("lod.error_budget") and trouble.has("sky.star_gain"),
+		"Troubleshooting holds the drawing switches, the LOD knobs and the sky's calibration (%d)"
+			% trouble.size()
+	)
+	h.check(
+		trouble.size() == 15,
+		"and nothing else has been filed there by accident (%d)" % trouble.size()
+	)
+	h.check(
+		hud.size() == 13,
+		"HUD holds the camera, the three HUD switches and the markers (%d)" % hud.size()
+	)
+	var stray := 0
+	for key in hud:
+		if not (
+			String(key).begins_with("camera.")
+			or String(key).begins_with("markers.")
+			or String(key).begins_with("hud.")
+		):
+			stray += 1
+	h.check(stray == 0, "and nothing else (%d stray)" % stray)
+	h.check(not pages.has("Rest"), "with every setting filed, no empty Rest tab is built")
+
+	var total := display.size() + bindings.size() + trouble.size() + hud.size()
+	h.check(
+		total == Edit.editable_keys().size(),
+		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
+	)
+
+	layer.free()
+
+
+## Whether the page on this tab shows a row labelled with this key.
+static func _rows_label(tabs: TabContainer, index: int, key: String) -> bool:
+	var page: Control = tabs.get_child(index)
+	if page == null:
+		return false
+	for child in page.find_children("*", "Label", true, false):
+		if (child as Label).text == key:
+			return true
+	return false
 
 
 func _test_bad_values_are_not_staged(h) -> void:

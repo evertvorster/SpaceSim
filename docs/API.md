@@ -900,6 +900,9 @@ on change (`camera.fov`, the marker pool and font size).
 | `render.ev_compensation` | player | **true** — on, the exposure multiplier is applied by the frame-wide pass (`SpacesimExposurePass`); off disables the pass, so the frame is drawn at Godot's own reference and a difference in the picture is a difference in the geometry |
 | `lod.error_budget` | player | 4.0 — the geometric error a body's mesh may show at its **silhouette**, in pixels on screen. **It is no longer the only limit**: since 2026-10-28 the walk takes the smaller of this curvature bound and `lod.facet_angle` (2 degrees of apparent size by default), because ε bounds a facet's *sagitta* — curvature — which at 1 km altitude permits a facet 5.8 km across, ~17,700 pixels of screen. The apparent-size term binds close in and this one holds the silhouette from about 1.6 Gm out. **And the triangle budget is gone**: the walk refines to the law and the HUD reports the count. Read by `SpacesimSystemScene.update_lod`; small is finer. **The `[` / `]` keys this row used to promise do not exist** — they went with the triangle budget — so it is tuned on the settings screen or in `settings.cfg`. It is a **trim** meant to be tuned by eye and then frozen into `SpacesimLod`, the same shape as the star field's gain |
 | `lod.facet_angle` | player | 2.0 **degrees** — the apparent size a facet may subtend, and therefore the one number that sets how finely the ground is cut. It was `SpacesimPatches.FACET_ANGLE`, a constant with a note arguing it should not be a setting, because two consumers read it: the walk's apparent-size limit and `finest_edge_angle`, which tells the rebuild gate how far the eye may swing. They now take it as an argument and `walk_is_due` compares it, so it is hot and the two cannot disagree — the same arrangement `lod.error_budget` has. Read once a frame in `update_lod`, in degrees there and radians in every law below. Measured at 10 km altitude on Earth: 8 degrees gives 218 chunks, 2 gives 2,262, 0.5 gives 30,580. **The mechanism is always on** — this is its angle, not a switch |
+| `hud.readout` | player | **true** — the information block in the top left: system, player, date, frame, altitude, mode, speed, nearest, local unit, state, target and the mesh's counts. Off hides the label, which is the point — the readout is what a developer reads and a player stops seeing |
+| `hud.fps` | player | **true** — the frame rate, top right |
+| `hud.key_hints` | player | **true** — the three lines of key reminders under the readout. Read from the bindings, so a rebound key is right here without anyone editing text; off is a HUD with no reminders in it |
 | `markers.pool_size` | player | 12 |
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
@@ -957,19 +960,41 @@ exactly, so `W` does not fire while Alt is held.
 
 ### The settings screen
 
-**Alt+C** pauses the game and opens it — a binding, so it is rebindable. Modelled on the vegastrike
-config screen:
+**Alt+C** pauses the game and opens it — a binding, so it is rebindable — and the **Settings**
+button on the personal-data screen opens the same screen, because that is where a player looks when
+they are not sure where something lives. Entered by the key it closes to the world; entered from the
+button it closes back to the personal-data screen. Modelled on the vegastrike config screen:
 
 - a control edits a **staging area**, not the live settings;
 - **Reset** puts a setting back to its engine default, also staged;
 - **Apply** commits everything staged and writes the file;
 - **Close** discards the staged edits;
 - **both Apply and Close change colour while something is staged** — since Close throws the work
-  away, the colour is the warning rather than decoration;
-- **Exit Game** leaves.
+  away, the colour is the warning rather than decoration.
+
+There is **no Exit Game here**: leaving the game is about the player, so it is on the personal-data
+screen (`exit_requested` there). Settings is where a value is edited, and throwing the edits away is
+already Close's job.
 
 Rows come from the registry, so a newly declared setting appears without the panel changing.
 Bindings are edited as text for now; capturing a key press is the next step.
+
+**The rows are grouped into tabs, and the grouping is a property of the row** — one `"tab"` per
+registry entry, read by `SpacesimSettings.tab_of`. The panel builds one grid per tab from
+`SpacesimSettings.TABS`, so a new setting is filed by declaring where it goes rather than by editing
+the screen; grouping by key prefix in the panel instead would put that knowledge in two places, and a
+`video.hdr` added later would land in whichever tab the prefix rule happened to name.
+
+| Tab | Holds |
+|---|---|
+| **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
+| **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
+| **Bindings** | the sixteen keys and `mouse.sensitivity` |
+| **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
+| **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
+
+**A tab with nothing filed into it is not built**, because an empty page is a promise of settings that
+are somewhere else.
 
 **A row that declares `choices` is offered rather than typed into** — an `OptionButton`, whose list
 is the row's own array, or `"screens"` for the one list that is the machine's rather than ours. What
@@ -996,8 +1021,7 @@ like any other: it changes nothing until **Apply**, and **Close** throws it away
 | `changed` | emitted on any staging change |
 
 `SpacesimSettingsPanel` — `Control` — is built in code, since the project has no editor-authored
-scenes: `configure(settings)`, and the `closed` / `exit_requested` signals. The buttons drive the
-edit directly.
+scenes: `configure(settings)`, and the `closed` signal. The buttons drive the edit directly.
 
 ### `SpacesimXdg` — `RefCounted` (static)
 
@@ -1020,6 +1044,9 @@ edit directly.
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
+| `static TABS` | the tabs the settings screen shows, in order: `display`, `hud`, `bindings`, `troubleshooting`, `rest` |
+| `static tab_title(tab) -> String` | what a tab is called on screen — its key capitalised, except `hud`, which is an acronym |
+| `static tab_of(key) -> String` | which tab a row is filed in; **a row that names none is in `rest`** |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |
 | `KNOWN_VALIDATORS` | the named checks; a row naming anything else is a registry mistake |
 
@@ -1095,11 +1122,19 @@ same chrome would drift apart, so there is one.
 | `title_label: Label` | the heading, so a reused dialog can change what it is asking |
 | `add_button(label, on_pressed) -> Button` | add and connect a button in one line |
 | `opened()` | called just before the screen is shown; rebuild anything stale here |
-| `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed |
+| `dismissed()` | called just before it is hidden, **whatever the route** — so tidying up does not depend on which button happened to be pressed (a dialog it still has open, its pending action) |
 | `closed` | signal, emitted to ask the scene to hide the screen |
 
-`SpacesimSettingsPanel` and `SpacesimPlayerPanel` are the two subclasses. The settings panel uses
-`dismissed()` to throw staged edits away, which is what its amber Close button warns about.
+`SpacesimSettingsPanel`, `SpacesimPlayerPanel` and `SpacesimSavedGamesPanel` are the subclasses. The
+settings panel uses `dismissed()` to throw staged edits away, which is what its amber Close button
+warns about.
+
+The chrome also holds the pieces both screens share — `_name_field` (a name, a field and the button
+that commits it), `_add_heading` and `_title_label` — and a **`content` column with vertical
+expansion**, so a screen can give its sections the room the window has. A `ScrollContainer` gives an
+expanding child `max(its own size, the child's minimum)` (4.7.2, `scroll_container.cpp`,
+`_reposition_children`); without the flag the column is pinned to its minimum and the extra height is
+lost, which no screen noticed while every screen was a list of minimum-sized rows.
 
 ### `SpacesimDialog` — a `SpacesimScreen`
 
@@ -1122,21 +1157,56 @@ screen is still one thing.
 
 ### `SpacesimPlayerPanel`
 
-The personal-data screen, on Tab, and **the only way a save happens** — there is no save key, because
-a save is a deliberate act. Save, New Story, and Close; the attributes, the assets and where each of
-them is; and the browser:
+The personal-data screen, on Tab: what the player is, what they carry, and the doors out of it. Saved
+Games, Settings, Close and Exit Game; the attributes, the assets and where each of them is:
 
 | Member | |
 |---|---|
-| `configure(player, session, system)` | it hosts saving, so it needs all three |
-| `session_reloaded` | signal: a load, a switch or a new story moved the player, so whoever is flying the ship has to be told |
+| `configure(player, session, system)` | it reads where each asset is, so it needs all three |
+| `saved_games_requested` | signal: the player asked for the browser, so whoever hosts this screen opens it |
+| `settings_requested` | signal: the player asked for the configuration, which otherwise has its own key |
+| `exit_requested` | signal: the player asked to leave, so whoever hosts this screen tears the game down |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
-**Histories** and **Saves** are two scrolling `ItemList`s side by side. Selecting a history shows
-its saves and is what the controls under the lists act on; clicking a save shows what it holds.
+**Nothing here is written or loaded.** A list you browse and a value you have are different things,
+and one screen holding both made the lists scroll inside a screen that was already scrolling; the
+histories, their saves, **the Save button** and New Story are the Saved Games screen, one button
+away. Nothing on this screen can move the player, which is why it has no `session_reloaded`.
+
+### `SpacesimSavedGamesPanel`
+
+`addons/spacesim/save/saved_games_panel.gd`. **The histories above, the saves in them below** — a
+history is a branch and a save a commit on it, so it is one browser with two levels, and choosing a
+history is what the saves list below is about. Stacked rather than side by side because a save's label
+is a date and a place, and it needs the whole width to be one readable line.
+
+| Member | |
+|---|---|
+| `configure(player, session, system)` | it saves, loads, switches and starts stories, so it needs all three |
+| `session_reloaded` | signal: a load, a switch or a new story moved the player |
+| `opened()` | rebuilds everything, so the lists cannot show a save that is gone |
+| `Save` / `New Story` / `Close` | in the button bar; renaming, playing and deleting a history are beside the histories list |
+
+**Save is here because the row it writes appears in the list underneath it** — saving where you can
+see the result. It is still the only way a save happens: no key, no autosave. The confirmation that
+asks before a save removes the ones after it is this screen's `confirm_save` dialog, unchanged.
+
+**Closing a dialog closes the dialog, and nothing else.** A dialog's Close emits `answered("Close")`
+and hides itself; what the *screen* does with that answer is its own business, and in this screen it
+is nothing. Only the screen's own Close button emits `closed`.
+
+**Close goes back, not out.** This screen is opened *from* the personal-data screen through
+`main.gd`'s `_open_from(screen, back)`, which records the screen to return to; closing the browser
+returns there rather than dropping the player into the world. A screen opened by its own hotkey has no
+way back and closes to the world, which is the same rule from the other side. `dismissed()` clears any
+open dialog and its pending action, so a screen closed underneath a dialog cannot leave it standing
+for the next open.
+
+**A left click** on a save shows what it holds — the wheel scrolls the list and does nothing else,
+which it does not do of its own accord (see `_on_save_clicked`).
 
 **Nothing is behind a right-click.** What a row can do is written on the screen: Play, Delete and
-the history's name field sit under the Histories list, and a save's Load and Delete are in the
+the history's name field sit above the histories list, and a save's Load and Delete are in the
 dialog its own row opens — a menu beside a save could only repeat them. Entries that do not apply
 are **disabled rather than absent**: the current history cannot be played or deleted, and the trunk
 can be neither.
