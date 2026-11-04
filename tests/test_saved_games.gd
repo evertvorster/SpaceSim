@@ -24,6 +24,7 @@ func run(h, root: Node) -> void:
 	_test_the_lists_are_stacked(h, root, system)
 	_test_renaming_a_history(h, root, system)
 	_test_the_saves_list_ignores_the_wheel(h, root, system)
+	_test_saving_from_this_screen(h, root, system)
 	_test_the_player_screen_opens_it(h, root, system)
 
 	system.container.free()
@@ -45,7 +46,10 @@ func _test_the_screen(h, root: Node, system: SpacesimSystemScene) -> void:
 	var labels: Array = []
 	for button in panel.actions.get_children():
 		labels.append(String(button.text))
-	h.check(labels == ["New Story", "Close"], "the screen has New Story and Close (%s)" % str(labels))
+	h.check(
+		labels == ["Save", "New Story", "Close"],
+		"the screen has Save, New Story and Close (%s)" % str(labels)
+	)
 	h.check(Ui.shows(panel, "Histories") and Ui.shows(panel, "Saves"), "and both lists")
 
 	# **Nothing is hidden behind a right-click.** What a row can do is on the screen, in words.
@@ -162,6 +166,32 @@ func _test_the_saves_list_ignores_the_wheel(h, root: Node, system: SpacesimSyste
 	h.check(not panel._dialog.visible, "and scrolling back does not either")
 	saves.item_clicked.emit(0, Vector2.ZERO, MOUSE_BUTTON_LEFT)
 	h.check(panel._dialog.visible, "while a left click still does")
+	layer.free()
+
+
+## **Save lives here, beside the list it writes into.** The world's state is what it writes, and the
+## row appears where the player is looking.
+func _test_saving_from_this_screen(h, root: Node, system: SpacesimSystemScene) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var session := _session()
+	session.start(system)
+	var panel := _panel(layer, session, system)
+	var saves_before := session.saves().size()
+	var rows_before := panel._saves.item_count
+
+	session.player.attributes["Credits"] = 42
+	var buttons: Array = Ui.buttons(panel, "Save")
+	h.check(buttons.size() == 1, "the screen has one Save button")
+	if not buttons.is_empty():
+		buttons[0].pressed.emit()
+	h.check(session.saves().size() == saves_before + 1, "pressing it writes a save")
+	h.check(
+		panel._saves.item_count == rows_before + 1,
+		"and the new save is in the list behind the button (%d, was %d)"
+			% [panel._saves.item_count, rows_before]
+	)
+	h.check(Ui.shows(panel, "saved"), "with the message saying it was written")
 	layer.free()
 
 

@@ -3,7 +3,9 @@ extends SpacesimScreen
 ## The histories the player has played, and the saves in them.
 ##
 ## Reached from a button on the personal-data screen, not by a key of its own: one screen for what
-## the player is, one for what they have played.
+## the player is, one for what they have played. **Saving happens here**, because the row a save
+## writes appears in the list below it — and the personal-data screen keeps the values a save would
+## write, the player's attributes and assets.
 ##
 ## ## Histories above, saves below
 ##
@@ -63,6 +65,9 @@ func configure(player: SpacesimPlayer, session: SpacesimSession, system: Spacesi
 	_session = session
 	_system = system
 	build_screen("Saved Games")
+	# **Save is here, not on the personal-data screen**, because the row it writes appears in the
+	# list underneath it: saving where you can see the result is the whole of why it moved.
+	add_button("Save", _on_save)
 	add_button("New Story", _on_new_story)
 	add_button("Close", func() -> void: closed.emit())
 
@@ -233,6 +238,32 @@ func _delete_browsed_history() -> void:
 	)
 
 
+# --- saving ----------------------------------------------------------------------------------------
+
+func _on_save() -> void:
+	var written := _session.save(_system)
+	# Continuing from an older save is what removes the later ones, so it is asked here — and asked
+	# with their names, before anything is written.
+	if written.get("needs_confirmation", false):
+		_pending = "confirm_save"
+		_dialog.ask("Save from here?", _rewrite_note(written["affected"]), ["Save", "Cancel"])
+		return
+	opened()
+
+
+## What saving from where the story was loaded would remove. The mirror of [method _load_note]:
+## reading is free, and continuing is what costs.
+func _rewrite_note(affected: Array) -> String:
+	var lines := PackedStringArray(
+		["You loaded a save from the past, so the %d save(s) after it are removed:" % affected.size()]
+	)
+	for later in affected:
+		lines.append("     %s" % later["subject"])
+	lines.append("")
+	lines.append("The story continues from where you loaded, and the world is not rewound.")
+	return "\n".join(lines)
+
+
 # --- saves -----------------------------------------------------------------------------------------
 
 ## One dialog per save, holding what it is and what reading it means. **A load discards nothing** —
@@ -340,6 +371,8 @@ func _on_dialog_answered(action: String) -> void:
 				"Delete":
 					_session.delete_save(_pending_hash)
 					_session.message = "deleted a save"
+		"confirm_save":
+			_session.save_confirmed(_system)
 	_pending = ""
 	opened()
 

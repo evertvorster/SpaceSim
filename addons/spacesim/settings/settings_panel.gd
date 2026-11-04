@@ -18,8 +18,6 @@ const IDLE_COLOR := Color(1.0, 1.0, 1.0)
 const PENDING_COLOR := Color(1.0, 0.72, 0.25)
 const INVALID_COLOR := Color(1.0, 0.35, 0.3)
 
-signal exit_requested
-
 var _settings: Node
 var _edit: SpacesimSettingsEdit
 var _fields: Dictionary = {} ## key -> the controls that edit it
@@ -52,7 +50,6 @@ func _build() -> void:
 
 	_apply_button = add_button("Apply", func() -> void: _edit.apply())
 	_close_button = add_button("Close", _on_close)
-	add_button("Exit Game", func() -> void: exit_requested.emit())
 
 
 func _add_row(grid: GridContainer, key: String) -> void:

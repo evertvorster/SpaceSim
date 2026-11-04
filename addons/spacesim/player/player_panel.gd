@@ -1,12 +1,16 @@
 class_name SpacesimPlayerPanel
 extends SpacesimScreen
-## The player's own data: what they are, what they carry, and the button that saves it.
+## The player's own data: what they are, what they carry, and the way out of the game.
 ##
-## **Saving lives here**, because a save is a deliberate act: there is no autosave and no save key,
-## so the button on this screen is the only way one happens. **What has been saved is not here** —
-## the histories and their saves are the Saved Games screen, behind a button on this one. A list you
-## browse and a value you have are different things, and one screen holding both made the browser
-## scroll inside a screen that was already scrolling.
+## **Nothing here is written or loaded.** A value you have belongs on this screen and a list you
+## browse does not: the histories and their saves — and the **Save** button, since a save is a
+## deliberate act and the row it writes appears in that list — are the Saved Games screen, one
+## button away. One screen holding both made the browser scroll inside a screen that was already
+## scrolling.
+##
+## **Exit Game is here rather than on the settings screen**, which is where it used to be. Settings
+## is where a value is edited and throwing the edits away is Close's job; leaving the game is about
+## the player, and this is the screen that is about the player.
 ##
 ## ## Only names are editable
 ##
@@ -17,27 +21,22 @@ extends SpacesimScreen
 ##
 ## ## A name's button says what commits it
 ##
-## The player's name and an asset's name are player state, so their button says **Apply**, it stages
-## the change, and **Save** is what writes it. (A history's name is a repository operation, so it
-## says *Rename* and happens at once — that one is on the saved-games screen, beside the list it
-## renames.)
+## The player's name and an asset's name are player state, so their button says **Apply** and it
+## stages the change; **Save**, on the Saved Games screen, is what writes it. (A history's name is a
+## repository operation, so it says *Rename* and happens at once — that one is there too, beside the
+## list it renames.)
 ##
 ## Every one of those buttons is **disabled until its field differs** from what stands, so a control
 ## never offers to do nothing.
 
 ## The player asked for the saved-games screen. Whoever hosts this one opens it.
 signal saved_games_requested
-
-const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
+## The player asked to leave. Whoever hosts this screen tears the game down.
+signal exit_requested
 
 var _player: SpacesimPlayer
 var _session: SpacesimSession
 var _system: SpacesimSystemScene
-
-var _dialog: SpacesimDialog
-
-## What a dialog was opened about.
-var _pending: String = ""
 
 
 func configure(player: SpacesimPlayer, session: SpacesimSession, system: SpacesimSystemScene) -> void:
@@ -45,14 +44,9 @@ func configure(player: SpacesimPlayer, session: SpacesimSession, system: Spacesi
 	_session = session
 	_system = system
 	build_screen("Personal data")
-	add_button("Save", _on_save)
 	add_button("Saved Games", func() -> void: saved_games_requested.emit())
 	add_button("Close", func() -> void: closed.emit())
-
-	_dialog = Dialog.new()
-	_dialog.visible = false
-	_dialog.answered.connect(_on_dialog_answered)
-	add_child(_dialog)
+	add_button("Exit Game", func() -> void: exit_requested.emit())
 
 
 ## Nothing here is cached: everything is rebuilt every time the screen opens, so a value that changed
@@ -109,7 +103,7 @@ func _set_player_name(named: String) -> void:
 		_rebuild()
 		return
 	_player.attributes[SpacesimPlayer.ATTRIBUTE_NAME] = named
-	_session.message = "changed — press Save"
+	_session.message = "changed — not saved yet"
 	_rebuild()
 
 
@@ -133,7 +127,7 @@ func _rename_asset(named: String, id: String) -> void:
 	if asset.is_empty() or named.is_empty():
 		return
 	asset["name"] = named
-	_session.message = "changed — press Save"
+	_session.message = "changed — not saved yet"
 	_rebuild()
 
 
@@ -141,39 +135,6 @@ func _asset_where(asset: Dictionary) -> String:
 	return _system.describe(
 		SpacesimLocation.from_dictionary(asset.get("location", {})), _player.assets
 	)
-
-
-# --- saving ----------------------------------------------------------------------------------------
-
-func _on_save() -> void:
-	var written := _session.save(_system)
-	# Continuing from an older save is what removes the later ones, so it is asked here — and asked
-	# with their names, before anything is written.
-	if written.get("needs_confirmation", false):
-		_pending = "confirm_save"
-		_dialog.ask("Save from here?", _rewrite_note(written["affected"]), ["Save", "Cancel"])
-		return
-	opened()
-
-
-## What saving from where the story was loaded would remove. Reading a save is free and continuing
-## from one is what costs: the saves after it are named, and the world is not rewound.
-func _rewrite_note(affected: Array) -> String:
-	var lines := PackedStringArray(
-		["You loaded a save from the past, so the %d save(s) after it are removed:" % affected.size()]
-	)
-	for later in affected:
-		lines.append("     %s" % later["subject"])
-	lines.append("")
-	lines.append("The story continues from where you loaded, and the world is not rewound.")
-	return "\n".join(lines)
-
-
-func _on_dialog_answered(action: String) -> void:
-	if _pending == "confirm_save" and not action.begins_with("Cancel"):
-		_session.save_confirmed(_system)
-	_pending = ""
-	opened()
 
 
 # --- rows -----------------------------------------------------------------------------------------

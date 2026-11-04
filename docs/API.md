@@ -965,8 +965,11 @@ config screen:
 - **Apply** commits everything staged and writes the file;
 - **Close** discards the staged edits;
 - **both Apply and Close change colour while something is staged** — since Close throws the work
-  away, the colour is the warning rather than decoration;
-- **Exit Game** leaves.
+  away, the colour is the warning rather than decoration.
+
+There is **no Exit Game here**: leaving the game is about the player, so it is on the personal-data
+screen (`exit_requested` there). Settings is where a value is edited, and throwing the edits away is
+already Close's job.
 
 Rows come from the registry, so a newly declared setting appears without the panel changing.
 Bindings are edited as text for now; capturing a key press is the next step.
@@ -996,8 +999,7 @@ like any other: it changes nothing until **Apply**, and **Close** throws it away
 | `changed` | emitted on any staging change |
 
 `SpacesimSettingsPanel` — `Control` — is built in code, since the project has no editor-authored
-scenes: `configure(settings)`, and the `closed` / `exit_requested` signals. The buttons drive the
-edit directly.
+scenes: `configure(settings)`, and the `closed` signal. The buttons drive the edit directly.
 
 ### `SpacesimXdg` — `RefCounted` (static)
 
@@ -1130,20 +1132,20 @@ screen is still one thing.
 
 ### `SpacesimPlayerPanel`
 
-The personal-data screen, on Tab, and **the only way a save happens** — there is no save key, because
-a save is a deliberate act. Save, Saved Games and Close; the attributes, the assets and where each of
-them is:
+The personal-data screen, on Tab: what the player is, what they carry, and the way out. Saved Games,
+Close and Exit Game; the attributes, the assets and where each of them is:
 
 | Member | |
 |---|---|
-| `configure(player, session, system)` | it hosts saving, so it needs all three |
+| `configure(player, session, system)` | it reads where each asset is, so it needs all three |
 | `saved_games_requested` | signal: the player asked for the browser, so whoever hosts this screen opens it |
+| `exit_requested` | signal: the player asked to leave, so whoever hosts this screen tears the game down |
 | `opened()` | rebuilds everything, so a value that changed while hidden cannot be shown stale |
 
-**The browser is not here.** A list you browse and a value you have are different things, and one
-screen holding both made the lists scroll inside a screen that was already scrolling; the histories
-and their saves are the Saved Games screen, one button away. Nothing on this screen can move the
-player, which is why it has no `session_reloaded`.
+**Nothing here is written or loaded.** A list you browse and a value you have are different things,
+and one screen holding both made the lists scroll inside a screen that was already scrolling; the
+histories, their saves, **the Save button** and New Story are the Saved Games screen, one button
+away. Nothing on this screen can move the player, which is why it has no `session_reloaded`.
 
 ### `SpacesimSavedGamesPanel`
 
@@ -1154,10 +1156,14 @@ is a date and a place, and it needs the whole width to be one readable line.
 
 | Member | |
 |---|---|
-| `configure(player, session, system)` | it loads, switches and starts stories, so it needs all three |
+| `configure(player, session, system)` | it saves, loads, switches and starts stories, so it needs all three |
 | `session_reloaded` | signal: a load, a switch or a new story moved the player |
 | `opened()` | rebuilds everything, so the lists cannot show a save that is gone |
-| `New Story` / `Close` | in the button bar; renaming, playing and deleting a history are beside the histories list |
+| `Save` / `New Story` / `Close` | in the button bar; renaming, playing and deleting a history are beside the histories list |
+
+**Save is here because the row it writes appears in the list underneath it** — saving where you can
+see the result. It is still the only way a save happens: no key, no autosave. The confirmation that
+asks before a save removes the ones after it is this screen's `confirm_save` dialog, unchanged.
 
 **A left click** on a save shows what it holds — the wheel scrolls the list and does nothing else,
 which it does not do of its own accord (see `_on_save_clicked`).

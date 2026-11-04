@@ -140,10 +140,13 @@ func _ready() -> void:
 
 	_settings_screen = SpacesimSettingsPanel.new()
 	_settings_screen.configure(SpacesimSettings)
-	_settings_screen.exit_requested.connect(_on_exit_requested)
 	_register_screen(_settings_screen, "Settings")
 	_player_screen = SpacesimPlayerPanel.new()
 	_player_screen.configure(_player, _session, _system)
+	# **Exit Game lives here, not on the settings screen.** Settings is where a value is edited and
+	# throwing the edits away is Close's job; leaving the game is about the player, and the screen
+	# that shows them is where it belongs.
+	_player_screen.exit_requested.connect(_on_exit_requested)
 	_register_screen(_player_screen, "Player")
 
 	# The browser of what has been played, behind a button on the personal-data screen rather than a

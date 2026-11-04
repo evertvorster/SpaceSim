@@ -75,7 +75,13 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 		settings_panel.content != null and settings_panel.actions != null,
 		"the settings screen builds onto the shared chrome"
 	)
-	h.check(settings_panel.actions.get_child_count() == 3, "with its three buttons")
+	var settings_labels: Array = []
+	for button in settings_panel.actions.get_children():
+		settings_labels.append(String(button.text))
+	h.check(
+		settings_labels == ["Apply", "Close"],
+		"with Apply and Close, and no way out of the game from here (%s)" % str(settings_labels)
+	)
 	h.check(settings_panel.has_signal("closed"), "and the close signal it inherits")
 
 	var player_panel := PlayerPanel.new()
@@ -85,14 +91,15 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	for button in player_panel.actions.get_children():
 		labels.append(String(button.text))
 	h.check(
-		labels == ["Save", "Saved Games", "Close"],
-		"the player screen has Save, Saved Games and Close (%s)" % str(labels)
+		labels == ["Saved Games", "Close", "Exit Game"],
+		"the player screen has Saved Games, Close and Exit Game (%s)" % str(labels)
 	)
 	h.check(player_panel.has_signal("closed"), "and the same close signal")
 	h.check(
 		player_panel.has_signal("saved_games_requested"),
 		"and asks for the browser of what has been played, rather than holding it"
 	)
+	h.check(player_panel.has_signal("exit_requested"), "and asks to leave, which settings no longer does")
 
 	layer.free()
 
