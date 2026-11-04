@@ -168,6 +168,7 @@ func has_changes() -> bool:
 
 
 func discard() -> void:
+	push_warning("bindings-store: DISCARD called, staging was %s" % str(_staged.keys()))
 	_staged.clear()
 	_staged_axes.clear()
 

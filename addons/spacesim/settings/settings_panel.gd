@@ -89,7 +89,11 @@ func configure(settings: Node, bindings: SpacesimBindingsStore) -> void:
 	_bindings = bindings
 	_edit = EditScript.new(settings)
 	_build()
-	_edit.changed.connect(_refresh)
+	_edit.changed.connect(
+		func() -> void:
+			_refresh_reason = "a settings edit"
+			_refresh()
+	)
 	_refresh()
 
 	_dialog = Dialog.new()
@@ -835,6 +839,7 @@ func _rebuild_binding_rows() -> void:
 		child.free()
 	_binding_rows.clear()
 
+	Debug.say("bindings[%d]: rebuilt -> %d rows" % [get_instance_id(), _binding_rows.size()])
 	for category in Actions.CATEGORIES:
 		var ids := Actions.in_category(category)
 		if ids.is_empty():
@@ -958,7 +963,7 @@ func _stage_rows(action: String) -> void:
 func flush_rows() -> void:
 	if not _rows_dirty:
 		return
-	Debug.say("bindings: flushing rows (extras %s)" % str(_extra_rows))
+	Debug.say("bindings[%d]: flushing rows (extras %s)" % [get_instance_id(), str(_extra_rows)])
 	_rows_dirty = false
 	_rebuild_binding_rows()
 	if not _focus_row.is_empty():
@@ -969,8 +974,13 @@ func flush_rows() -> void:
 
 
 func _add_binding(action: String) -> void:
-	Debug.say("bindings: Add pressed on %s" % action)
+	# **The flag first**: if staging throws, the row must still be rebuilt.
+	_rows_dirty = true
+	Debug.say("bindings[%d]: Add on %s, rows before %d" % [
+		get_instance_id(), action, _binding_rows.size()
+	])
 	_stage_rows(action)
+	Debug.say("bindings[%d]: staged after Add: %s" % [get_instance_id(), str(_bindings.of(action))])
 	var opened := int(_extra_rows.get(action, 0)) + 1
 	_extra_rows[action] = opened
 	_focus_row = [action, _row_texts(action).size() + opened - 1]
@@ -1198,6 +1208,7 @@ func _finish_detect() -> void:
 	if _dialog != null:
 		_dialog.visible = false
 	_rows_dirty = true
+	_refresh_reason = "detect finished"
 	_refresh()
 
 
@@ -1218,6 +1229,7 @@ func _handle_detect_answer(answer: String) -> void:
 ## Apply is **two** edits now, and it only goes idle when both have committed. A file that cannot be
 ## written leaves the button amber, which is the one signal the player has.
 func _on_apply() -> void:
+	_refresh_reason = "Apply pressed"
 	_edit.apply()
 	if _bindings.apply() < 0:
 		push_warning("settings: the bindings could not be written")
@@ -1231,6 +1243,8 @@ func _on_close() -> void:
 ## Called just before the screen is shown. **Rebuilt from what stands**, because the bindings are a file
 ## that can change while this screen is not looking at it — a hand edit, or a changed `bindings.cfg`.
 func opened() -> void:
+	_refresh_reason = "opened"
+	Debug.say("bindings[%d]: opened" % get_instance_id())
 	_rows_dirty = true
 	_refresh()
 
@@ -1238,6 +1252,8 @@ func opened() -> void:
 ## Leaving without applying throws the staged edits away — which is what the amber Close button
 ## warns about. It holds whichever route the screen is left by, not only the Close button.
 func dismissed() -> void:
+	_refresh_reason = "dismissed"
+	Debug.say("bindings[%d]: dismissed" % get_instance_id())
 	_edit.discard()
 	if _bindings != null:
 		_bindings.discard()
@@ -1251,6 +1267,10 @@ func dismissed() -> void:
 
 ## Pull every control back to what the staging area holds — which is how a Reset shows up, and how
 ## a discarded edit disappears.
+## Why the refresh ran, for the debug line. Set by whatever is about to refresh.
+var _refresh_reason := "?"
+
+
 func _refresh() -> void:
 	_updating = true
 	for key in _fields.keys():
@@ -1294,8 +1314,9 @@ func _refresh() -> void:
 		(entry[5] as Label).text = _travel_text(profile)
 
 	var pending := _edit.has_changes() or _bindings.has_changes()
-	Debug.say("bindings: refresh, has_changes=%s, apply button %s"
-		% [pending, "missing" if _apply_button == null else "there"])
+	Debug.say("bindings[%d]: refresh(%s) has_changes=%s rows=%d" % [
+		get_instance_id(), _refresh_reason, pending, _binding_rows.size()
+	])
 	_apply_button.modulate = PENDING_COLOR if pending else IDLE_COLOR
 	_close_button.modulate = PENDING_COLOR if pending else IDLE_COLOR
 
