@@ -964,7 +964,7 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
 | **Bindings** | `mouse.sensitivity`, plus **the sixteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
-| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **one line per axis** — a bar with the deadband boxed, the shaped value, the centre and deadband fields, and Calibrate — every button laid out (21, lit when held), and a **Configure** box per device (below) |
+| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **two lines per axis** — the numbers above the bar it belongs to (`centre`, `travel`) and below it the bar, the shaped value, a **deadband** field, **Calibrate** and **Centred** — every button laid out (21, lit when held), and a **Configure** box per device (below). Plugging a device in or out rebuilds this list |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
 
@@ -1208,7 +1208,8 @@ rests, and how much of the middle is nothing.
 |---|---|
 | `normalise(raw) -> float` | symmetric about the profile's own centre and scaled by its **two** spans, so an asymmetric axis (`−0.95 … +0.88`) maps onto −1…+1 exactly |
 | `shape(raw) -> float` | after the deadband, **rescaled by `1 − deadband`** so full deflection stays full and the response does not step at the edge of the band |
-| `is_sane() -> bool` | travel that runs forwards, a centre inside it, a band under 1.0. **A band of 0.9 is silly and legal** — the bar shows the red box swallowing the line, and that is the feedback |
+| `default_for(axis) -> SpacesimAxisProfile` | **what an axis is before it is calibrated**: a `TRIGGER_*` rests at zero and travels to +1, so its default is `0 … +1` rather than a symmetric guess |
+| `is_sane() -> bool` | travel that runs forwards, a centre **at or inside** it (a trigger rests at the bottom of its travel, and a lever at one stop is a real device), a band under 1.0. **A band of 0.9 is silly and legal** — the bar shows the red box swallowing the line, and that is the feedback |
 | `from_text` / `to_text` | `"-0.950, 0.880, 0.030, 0.150"`; one unreadable number falls back to that field's default alone |
 | `with_travel(low, high)` | a calibration replaces the travel and keeps what was typed |
 

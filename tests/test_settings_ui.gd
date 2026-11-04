@@ -350,28 +350,41 @@ func _test_the_devices_tab(h, root: Node) -> void:
 			"with the bar drawing the profile's deadband"
 		)
 
-		# The two fields are the profile, and typing into them stages it.
-		var centre: LineEdit = rows[0][4]
-		var band: LineEdit = rows[0][5]
+		# **The numbers live above the bar**: the centre and the travel are shown, never typed; only the
+		# deadband has a field.
+		var centre_label: Label = rows[0][4]
+		var travel_label: Label = rows[0][5]
+		var band: LineEdit = rows[0][6]
 		h.check(
-			centre.text == "%.3f" % profile.centre and band.text == "%.3f" % profile.deadband,
-			"the fields show the centre and the deadband (%s, %s)" % [centre.text, band.text]
+			centre_label.text.contains("%.3f" % profile.centre)
+			and travel_label.text.contains("%.2f" % profile.low)
+			and travel_label.text.contains("%.2f" % profile.high),
+			"the centre and the travel are shown above the bar (%s · %s)"
+				% [centre_label.text, travel_label.text]
 		)
-		centre.text = "0.250"
-		centre.text_changed.emit("0.250")
-		h.check(store.has_changes(), "typing a centre stages it")
+		h.check(band.text == "%.3f" % profile.deadband, "and the deadband is a field (%s)" % band.text)
+		band.text = "0.250"
+		band.text_changed.emit("0.250")
+		h.check(store.has_changes(), "typing a deadband stages it")
 		h.check(
-			is_equal_approx(store.axis_profile(Devices.name_of(device), Devices.AXIS_NAMES[0]).centre, 0.25),
+			is_equal_approx(
+				store.axis_profile(Devices.name_of(device), Devices.AXIS_NAMES[0]).deadband, 0.25
+			),
 			"and it is that axis's profile that changed"
+		)
+
+		# **Centred takes the reading**, which is the one number a player cannot type accurately.
+		(rows[0][8] as Button).pressed.emit()
+		h.check(
+			is_equal_approx(
+				store.axis_profile(Devices.name_of(device), Devices.AXIS_NAMES[0]).centre,
+				Devices.axis(device, 0)
+			),
+			"Centred stores what the axis is reading now"
 		)
 		# **A profile that cannot make sense is refused**, and says so: a centre outside the travel, and a
 		# band of 1.0 where nothing could ever be deflected.
-		var status: Label = rows[0][7]
-		centre.text = "1.500"
-		centre.text_changed.emit("1.500")
-		h.check(not status.text.is_empty(), "a centre outside the travel is refused (%s)" % status.text)
-		centre.text = "0.250"
-		centre.text_changed.emit("0.250")
+		var status: Label = rows[0][9]
 		band.text = "1.000"
 		band.text_changed.emit("1.000")
 		h.check(not status.text.is_empty(), "and so is a band that would swallow everything")
@@ -383,8 +396,6 @@ func _test_the_devices_tab(h, root: Node) -> void:
 		)
 
 		# Apply writes the profile, and a second open reads it back.
-		centre.text = "0.100"
-		centre.text_changed.emit("0.100")
 		band.text = "0.200"
 		band.text_changed.emit("0.200")
 		panel._apply_button.pressed.emit()
@@ -392,7 +403,7 @@ func _test_the_devices_tab(h, root: Node) -> void:
 			Devices.name_of(device), Devices.AXIS_NAMES[0]
 		)
 		h.check(
-			is_equal_approx(saved.centre, 0.1) and is_equal_approx(saved.deadband, 0.2),
+			is_equal_approx(saved.deadband, 0.2),
 			"and Apply writes it to the store (%s)" % saved.to_text()
 		)
 

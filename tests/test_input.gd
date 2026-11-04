@@ -397,10 +397,15 @@ func _test_the_axis_profile(h) -> void:
 	bad.low = 0.5
 	bad.high = -0.5
 	h.check(not bad.is_sane(), "travel that runs backwards is refused")
-	var outside := Profile.new()
-	outside.centre = 1.5
-	outside._clamp()
-	h.check(not outside.is_sane(), "a centre clamped onto the end of the travel is refused")
+	# **The centre may sit at an end** — a trigger rests at the bottom of its travel — but not outside it.
+	var at_end := Profile.default_for("TRIGGER_LEFT")
+	h.check(
+		is_equal_approx(at_end.centre, 0.0) and is_equal_approx(at_end.low, 0.0) and at_end.is_sane(),
+		"a trigger's default is 0 … +1 and its rest is legal at the bottom (%s)" % at_end.to_text()
+	)
+	var outside := Profile.default_for("TRIGGER_LEFT")
+	outside.centre = -0.5
+	h.check(not outside.is_sane(), "a centre outside the travel is refused")
 	var band := Profile.new()
 	band.deadband = 1.0
 	h.check(not band.is_sane(), "and a band of one, where nothing could be deflected")

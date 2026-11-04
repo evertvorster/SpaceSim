@@ -31,6 +31,16 @@ var centre := 0.0
 var deadband := DEFAULT_DEADBAND
 
 
+## **What an axis is assumed to be before it is calibrated.** A trigger rests at zero and travels to +1,
+## so its whole useful range is *above* its rest — showing it a `−1 … +1` bar puts half a line on screen
+## that the device can never reach.
+static func default_for(axis: String) -> SpacesimAxisProfile:
+	var profile := SpacesimAxisProfile.new()
+	if axis.begins_with("TRIGGER"):
+		profile.low = 0.0
+	return profile
+
+
 ## A profile from its stored text, or the defaults when the text is empty or unusable. **A bad number
 ## falls back to that field's default rather than the whole profile**, so one typo does not throw away
 ## a calibration.
@@ -95,13 +105,16 @@ func shape(raw: float) -> float:
 ## **The centre is normalised to zero, so there is no "offset plus band must stay under 1" rule here** —
 ## whatever the centre is, the travel is measured either side of it and runs to ±1. What can be wrong is
 ## the travel itself (`low >= high`, which a bad calibration produces), a centre outside it, and a band of
-## 1.0 or more, where nothing can ever be deflected. A band of 0.9 is silly and *legal*: the bar shows the
+## 1.0 or more, where nothing can ever be deflected. The centre sitting *at* an end is legal: a trigger
+## rests at the bottom of its travel. A band of 0.9 is silly and *legal*: the bar shows the
 ## red box swallowing the line, and that is the feedback — refusing it would be hiding the picture behind
 ## a rule.
 func is_sane() -> bool:
 	if low >= high:
 		return false
-	if centre <= low or centre >= high:
+	# **The centre may be an end** — a trigger rests at the bottom of its travel, and a lever that rests
+	# at one stop is a real device. What is refused is a centre outside the travel altogether.
+	if centre < low or centre > high:
 		return false
 	if deadband < 0.0 or deadband >= 1.0:
 		return false

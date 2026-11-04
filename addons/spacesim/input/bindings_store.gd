@@ -195,7 +195,9 @@ func _stored_axis_profile(key: String) -> SpacesimAxisProfile:
 		return AxisProfile.new()
 	var section := AXES_PREFIX + String(split[0])
 	if not _file.has_section_key(section, String(split[1])):
-		return AxisProfile.new()
+		# **Uncalibrated is not "no idea"**: a trigger's default travel is 0 … +1, so a fresh profile is
+		# the one the axis actually has rather than a symmetric guess.
+		return AxisProfile.default_for(String(split[1]))
 	return AxisProfile.from_text(String(_file.get_value(section, String(split[1]), "")))
 
 
