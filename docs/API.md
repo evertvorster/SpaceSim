@@ -963,7 +963,7 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 |---|---|
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
-| **Bindings** | `mouse.sensitivity`, plus **the sixteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
+| **Bindings** | `mouse.sensitivity`, plus **the thirteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
 | **Devices** | **nothing from the registry**: the attached gamepads, their identity, **two lines per axis** — the numbers above the bar it belongs to (`centre`, `travel`) and below it the bar, the shaped value, a **deadband** field, **Calibrate** and **Centred** — every button laid out (21, lit when held), and a **Configure** box per device (below). Plugging a device in or out rebuilds this list |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
@@ -1179,7 +1179,7 @@ settings key *being* the action.
 
 | Member | |
 |---|---|
-| `REGISTRY` | id → `{label, kind, category, defaults}`; sixteen actions, the ids being the old `bindings.*` keys with the prefix dropped |
+| `REGISTRY` | id → `{label, kind, category, defaults}`; **thirteen actions**, the ids being the old `bindings.*` keys with the prefix dropped. The flight controls are not among them — a degree of freedom is a dimension, not a press |
 | `KINDS` | `trigger`, `rate`, `level` — what the control *is*, not what it is bound to |
 | `CATEGORIES` | `Flight`, `Camera`, `Interface` — where the settings screen shows it |
 | `ids()`, `has(id)`, `row(id)` | |
