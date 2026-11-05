@@ -8,6 +8,7 @@ const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
 const Profile := preload("res://addons/spacesim/input/axis_profile.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
+const Controls := preload("res://addons/spacesim/input/controls.gd")
 
 const TEST_DIR := "/tmp/spacesim-input-test"
 
@@ -23,6 +24,7 @@ func run(h, _root: Node) -> void:
 	_test_the_runtime(h)
 	_test_the_axis_profile(h)
 	_test_joypad_matching(h)
+	_test_degrees_of_freedom(h)
 
 
 ## **Every action declares the three things the screen and the runtime need**, and its defaults are
@@ -494,6 +496,89 @@ func _test_joypad_matching(h) -> void:
 		not Binding.matches(motion, "Joy:%s/Axis:LEFT_X" % named),
 		"an axis never matches an event"
 	)
+
+
+## **A degree of freedom is a dimension with sources, not an action with a press** — so what it proves is
+## that keys, a stick and a wheel all arrive as one signed number in the DOF's own unit.
+func _test_degrees_of_freedom(h) -> void:
+	_clean()
+	var store := Store.new()
+	store.open(TEST_DIR.path_join("bindings.cfg"))
+	var controls := Controls.new(store)
+
+	# Defaults: nothing assigned, nothing moving.
+	controls.step(0.1)
+	var quiet: Array[String] = []
+	for dof in Controls.DOFS:
+		if not is_zero_approx(controls.value(dof)):
+			quiet.append(dof)
+	h.check(quiet.is_empty(), "with nothing assigned, every degree of freedom is still%s"
+		% _detail(quiet))
+
+	# --- **two slots per direction, and the slot is the sign**
+	var roll := {"keyboard_decrease": "BracketLeft", "keyboard_increase": "BracketRight"}
+	h.check(store.stage_control("roll", roll), "a degree of freedom accepts its lines")
+
+	var left := _key_event("BracketLeft")
+	controls.feed(left)
+	controls.step(0.1)
+	var rate := float(Controls.REGISTRY["roll"]["rate"])
+	h.check(
+		is_equal_approx(controls.value("roll"), -rate * 0.1),
+		"the decrease key turns it one way at the full rate (%f)" % controls.value("roll")
+	)
+	controls.feed(_released(left))
+	controls.step(0.1)
+	h.check(is_zero_approx(controls.value("roll")), "and releasing it stops")
+
+	controls.feed(_key_event("BracketRight"))
+	controls.step(0.1)
+	h.check(
+		is_equal_approx(controls.value("roll"), rate * 0.1),
+		"while the increase key turns it the other way (%f)" % controls.value("roll")
+	)
+	controls.feed(_released(_key_event("BracketRight")))
+	controls.step(0.1)
+
+	# --- **a wheel notch is a step, not a rate**: one press, one increment, and it does not repeat
+	store.stage_control("throttle", {"mouse_increase": "Mouse:WheelUp"})
+	var notch := InputEventMouseButton.new()
+	notch.button_index = MOUSE_BUTTON_WHEEL_UP
+	notch.pressed = true
+	controls.feed(notch)
+	controls.step(0.1)
+	h.check(
+		is_equal_approx(controls.value("throttle"), Controls.NOTCH_STEP),
+		"one wheel notch is one step of %f (%f)" % [Controls.NOTCH_STEP, controls.value("throttle")]
+	)
+	controls.step(0.1)
+	h.check(is_zero_approx(controls.value("throttle")), "and it does not repeat on the next frame")
+
+	# --- **the pointer is an angle, and it is signed by the DOF's own axis**
+	controls.claim_pointer("yaw")
+	store.stage_control("yaw", {"mouse_movement": "glide"})
+	controls.pointer_sensitivity = 0.01
+	controls.feed_motion(Vector2(10.0, 0.0))
+	controls.step(0.1)
+	h.check(
+		is_equal_approx(controls.value("yaw"), 0.1),
+		"ten pixels of movement is %f radians of yaw" % controls.value("yaw")
+	)
+	controls.step(0.1)
+	h.check(is_zero_approx(controls.value("yaw")), "and the pointer is consumed once")
+
+	# --- **invert is per line**, and only a continuous one has it
+	store.stage_control("yaw", {"mouse_movement": "glide", "mouse_invert": true})
+	var inverted := Controls.new(store)
+	inverted.claim_pointer("yaw")
+	inverted.pointer_sensitivity = 0.01
+	inverted.feed_motion(Vector2(10.0, 0.0))
+	inverted.step(0.1)
+	h.check(
+		is_equal_approx(inverted.value("yaw"), -0.1),
+		"an inverted mouse line turns the other way (%f)" % inverted.value("yaw")
+	)
+	_clean()
 
 
 static func _released(event: InputEventKey) -> InputEventKey:

@@ -46,6 +46,10 @@ const DEVICE_PREFIX := "bindings."
 ## They live here because they are staged and written by the same edits as the bindings, not because they
 ## are bindings: a profile belongs to the device's axis.
 const AXES_PREFIX := "axes."
+## **The degrees of freedom**, one section each: what drives roll, pitch, yaw, throttle and the two
+## strafes. Separate from `[bindings]` because a DOF is a dimension with sources, not an action with a
+## press — see the vault's *Flight Control*.
+const FLIGHT_PREFIX := "flight."
 ## What separates two bindings on one action in the file. A comma cannot appear in a binding, so the
 ## split is unambiguous.
 const SEPARATOR := ","
@@ -56,6 +60,8 @@ var _path := ""
 var _staged := {}
 ## `"<device>|<axis>"` → `SpacesimAxisProfile`, for the axis profiles the player has edited.
 var _staged_axes := {}
+## dof → the dictionary of lines the player has edited.
+var _staged_flight := {}
 
 ## Anything the one-time import could not read, as `["<action>: <text>", …]`. Shown by the screen
 ## rather than swallowed: a binding that silently reverted to its default is the fault nobody reports.
@@ -69,6 +75,7 @@ func open(path := "", legacy_path := "") -> void:
 	_file = ConfigFile.new()
 	_staged.clear()
 	_staged_axes.clear()
+	_staged_flight.clear()
 	problems.clear()
 
 	if FileAccess.file_exists(_path):
@@ -164,12 +171,23 @@ func has_changes() -> bool:
 		var staged: SpacesimAxisProfile = _staged_axes[key]
 		if staged.to_text() != _stored_axis_profile(key).to_text():
 			return true
+	for dof in _staged_flight:
+		if _staged_flight[dof] != control(String(dof)):
+			# `control()` returns the staged copy when one exists, so compare against the file instead.
+			var stored := {}
+			var section := FLIGHT_PREFIX + String(dof)
+			if _file.has_section(section):
+				for key in _file.get_section_keys(section):
+					stored[key] = _file.get_value(section, key, "")
+			if _staged_flight[dof] != stored:
+				return true
 	return false
 
 
 func discard() -> void:
 	_staged.clear()
 	_staged_axes.clear()
+	_staged_flight.clear()
 
 
 ## **One axis's profile**: staged if edited, else the device's section, else the defaults.
@@ -186,6 +204,47 @@ func stage_axis_profile(device: String, axis: String, profile: SpacesimAxisProfi
 	if not profile.is_sane():
 		return false
 	_staged_axes[_axis_key(device, axis)] = profile.duplicate_profile()
+	return true
+
+
+## **One degree of freedom's sources**, staged if edited, else the file's, else the defaults.
+##
+## The shape is flat and fixed — `keyboard_decrease`, `keyboard_increase`, `joystick`,
+## `joystick_invert`, `mouse_movement`, `mouse_invert`, `mouse_decrease`, `mouse_increase` — because the tab
+## draws exactly those lines and nothing else reads it.
+## **A box of key–value pairs, not a shape.** The store does not know what lines a degree of freedom has
+## — `SpacesimControls` does — which also keeps the two modules from preloading each other.
+func control(dof: String) -> Dictionary:
+	if _staged_flight.has(dof):
+		return (_staged_flight[dof] as Dictionary).duplicate()
+	var found := {}
+	var section := FLIGHT_PREFIX + dof
+	if _file.has_section(section):
+		for key in _file.get_section_keys(section):
+			found[key] = _file.get_value(section, key, "")
+	return found
+
+
+## Stage a degree of freedom's lines. **Every value that looks like a binding must parse**; booleans and the
+## mouse mode are checked by their own shape.
+func stage_control(dof: String, lines: Dictionary) -> bool:
+	if dof.is_empty():
+		return false
+	for name in lines:
+		if String(name).ends_with("_invert"):
+			if typeof(lines[name]) != TYPE_BOOL:
+				return false
+			continue
+		var text := String(lines[name])
+		if String(name) == "mouse_movement":
+			if not ["off", "glide", "warp"].has(text):
+				return false
+			continue
+		if text.is_empty():
+			continue
+		if not Binding.is_valid(text):
+			return false
+	_staged_flight[dof] = lines.duplicate()
 	return true
 
 
@@ -216,10 +275,20 @@ func apply() -> int:
 	# A device's binding overrides and every axis profile are carried across untouched — nothing here
 	# writes one — so a section this screen does not know about survives an Apply.
 	for section in _file.get_sections():
-		if not (section.begins_with(DEVICE_PREFIX) or section.begins_with(AXES_PREFIX)):
+		if not (
+			section.begins_with(DEVICE_PREFIX)
+			or section.begins_with(AXES_PREFIX)
+			or section.begins_with(FLIGHT_PREFIX)
+		):
 			continue
 		for key in _file.get_section_keys(section):
 			fresh.set_value(section, key, _file.get_value(section, key))
+
+	# The staged degrees of freedom go over the top as well.
+	for dof in _staged_flight:
+		var lines: Dictionary = _staged_flight[dof]
+		for name in lines:
+			fresh.set_value(FLIGHT_PREFIX + String(dof), String(name), lines[name])
 
 	# The staged axis profiles go over the top of that.
 	for key in _staged_axes:
