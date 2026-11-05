@@ -8,8 +8,8 @@ extends Node3D
 ## budget on the brackets, all three of which had moved. Read the registry, or the HUD.
 ##
 ## **Escape is a binding like any other** — the personal-data screen — and the mouse is captured while
-## flying because mouse look reads relative motion. One key gives the pointer back, and it is **held**:
-## `Insert` by default, in the Bindings tab with everything else.
+## flying because mouse look reads relative motion. One key gives the pointer back and takes it again, and a
+## click in the view takes it back too: `F10` by default, a binding in the Bindings tab with everything else.
 ##
 ## The solar system comes from `systems/sol.tres`; this script only adds input, the camera's
 ## render range and a readout. A different system file should not need this script changed.
@@ -248,6 +248,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		_ship_mouse_look(event)
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		# **A click in the view takes the pointer back**, which is the gesture everyone already knows.
+		_capture_mouse()
 
 
 func _handle_key(event: InputEventKey) -> void:
@@ -266,6 +269,8 @@ func _handle_key(event: InputEventKey) -> void:
 		_cycle_target()
 	elif _triggered(event, "throttle_stop"):
 		_throttle_stop = true
+	elif _triggered(event, "mouse_release"):
+		_toggle_mouse()
 	elif _triggered(event, "wireframe_toggle"):
 		set_wireframe(not _wireframe)
 	elif _view_for(event) != null:
@@ -453,21 +458,21 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 			_apply_hud_visibility()
 
 
-## **The mouse belongs to the ship while flying and to a screen while one is open**, which is the whole of
-## the rule: no key releases it and no click takes it back. A capture warps the cursor, so the first motion
-## after one is dropped rather than read as a spin.
+## **Press the free-mouse key to let the pointer go, and press it again or click to take it back.** A capture
+## warps the cursor, so the first motion after one is dropped rather than read as a spin.
+func _toggle_mouse() -> void:
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	else:
+		_capture_mouse()
+
+
+
 func _capture_mouse() -> void:
 	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		return
 	_skip_next_motion = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
-
-## **Hold the free-mouse key to get the pointer back; releasing it flies again.** Captured, because mouse
-## look reads relative motion and a free pointer hits the screen's edges and sits over the view; held rather
-## than toggled, because a toggle leaves the ship in a state nobody asked for.
-func _freed_by_key() -> bool:
-	return _screen == null and _input_map.held("mouse_release")
 
 
 func _process(delta: float) -> void:
@@ -476,12 +481,6 @@ func _process(delta: float) -> void:
 		_fps.text = "-- fps"
 	else:
 		_fps.text = "%d fps    %.1f ms" % [frames, 1000.0 / float(frames)]
-	if _freed_by_key():
-		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	elif _screen == null and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		_capture_mouse()
-
 	# A screen is open, so the world is frozen and there is nothing to redraw it against.
 	if _screen == null:
 		_update_view(delta)

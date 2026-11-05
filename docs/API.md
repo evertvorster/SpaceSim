@@ -1661,7 +1661,7 @@ system and ship.
 | T | cycle the selected target |
 | P | hide/show the bodies |
 | Escape | pause and open the personal data screen |
-| Insert *(hold)* | give the pointer back while it is held; releasing it flies again |
+| F10 | free the mouse, or take it back — a click in the view takes it back too |
 | Alt+C | pause and open the settings screen |
 
 **The mesh error budget no longer has keys.** `lod.error_budget` is a *setting* and stays in the registry — it sets every body's tessellation — but the step-through was removed on 2026-10-20: the value is flown once and left at its best, so the brackets are better spent rolling. The HUD still reports the triangle count, which is the reading the trim was for.
@@ -1669,8 +1669,8 @@ system and ship.
 **Every one of those is a binding** in the bindings file and can be changed there — Escape included, which
 used to be the one exception because it released the mouse. **Flying captures the mouse** (mouse look reads
 relative motion; a free pointer hits the screen's edges and sits over the view), a screen releases it,
-closing one captures it again, and **`Insert` held gives the pointer back and re-captures on release** —
-held rather than toggled, so there is no half state to get stuck in. The
+closing one captures it again, and **`F10` toggles the pointer** — press to free it, press again or click in
+the view to take it back. The
 two screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab is also the UI's focus
 key and the UI system would consume it first.
 
