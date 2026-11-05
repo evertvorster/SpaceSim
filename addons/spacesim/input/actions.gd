@@ -95,6 +95,16 @@ const REGISTRY := {
 	# **Turning had no action**: pitch and yaw came from the mouse's own motion, so a stick had nothing to
 	# bind to and no key ever shipped for them. These four start with **no default binding**, which is why
 	# adding them changes nothing for a keyboard and mouse player.
+	# **The one key that gives the pointer back.** Flying needs the mouse captured — mouse look reads
+	# relative motion, and a free pointer hits edges and sits over the view — so the way out is a key that
+	# is *held*: let go and you are flying again, with nothing left half-done. Insert because nothing else
+	# in this game or in common practice wants it.
+	"mouse_release": {
+		"label": "Free the mouse",
+		"kind": "trigger",
+		"category": "Interface",
+		"defaults": ["Insert"],
+	},
 	"cycle_target": {
 		"label": "Cycle target",
 		"kind": "trigger",

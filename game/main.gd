@@ -7,9 +7,9 @@ extends Node3D
 ## the version of this paragraph before 2026-10-25 had throttle on `W`/`S`, roll on `A`/`D`, and the error
 ## budget on the brackets, all three of which had moved. Read the registry, or the HUD.
 ##
-## **Escape is a binding like any other** — the personal-data screen — and there is no key or click that
-## grabs or releases the mouse on its own: flying captures it, a screen releases it, closing one captures it
-## again.
+## **Escape is a binding like any other** — the personal-data screen — and the mouse is captured while
+## flying because mouse look reads relative motion. One key gives the pointer back, and it is **held**:
+## `Insert` by default, in the Bindings tab with everything else.
 ##
 ## The solar system comes from `systems/sol.tres`; this script only adds input, the camera's
 ## render range and a readout. A different system file should not need this script changed.
@@ -463,12 +463,25 @@ func _capture_mouse() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 
+## **Hold the free-mouse key to get the pointer back; releasing it flies again.** Captured, because mouse
+## look reads relative motion and a free pointer hits the screen's edges and sits over the view; held rather
+## than toggled, because a toggle leaves the ship in a state nobody asked for.
+func _freed_by_key() -> bool:
+	return _screen == null and _input_map.held("mouse_release")
+
+
 func _process(delta: float) -> void:
 	var frames := Engine.get_frames_per_second()
 	if frames <= 0:
 		_fps.text = "-- fps"
 	else:
 		_fps.text = "%d fps    %.1f ms" % [frames, 1000.0 / float(frames)]
+	if _freed_by_key():
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	elif _screen == null and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		_capture_mouse()
+
 	# A screen is open, so the world is frozen and there is nothing to redraw it against.
 	if _screen == null:
 		_update_view(delta)

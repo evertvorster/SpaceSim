@@ -159,7 +159,7 @@ and **`1`–`6`** fix the view forward, back, left, right, up and down — six f
 cloud can be looked at from every side while the mouse still steers. **T** cycles the selected target,
 **P** hides the bodies, **O** the ship and **L** draws wireframe. **Escape** opens the personal data
 screen, **Alt+C** the settings screen — and the mouse is the ship's while flying and the screen's while
-one is open, with no key to grab or let it go. Every one of these
+one is open. **Hold `Insert`** to get the pointer back — release it and you are flying again. Every one of these
 is a binding in the settings file — see `bindings.*` in [`docs/API.md`](docs/API.md). Both screens
 pause the game. On the personal data screen **Save** and **New Story** act on the world, and the
 histories and their saves are browsed and acted on there — playing, renaming or deleting a history,
