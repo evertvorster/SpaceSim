@@ -35,6 +35,12 @@ static func settings_path() -> String:
 	return config_dir().path_join("settings.cfg")
 
 
+## Where the player's bindings live — **beside** the settings and in their own file, because they are
+## written by a different store and staged by a different edit.
+static func bindings_path() -> String:
+	return config_dir().path_join("bindings.cfg")
+
+
 static func ensure_directory(path: String) -> bool:
 	if DirAccess.dir_exists_absolute(path):
 		return true

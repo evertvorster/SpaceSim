@@ -5,8 +5,10 @@ extends RefCounted
 ## one different temp path — so there is one.
 
 const Settings := preload("res://addons/spacesim/settings/settings.gd")
+const Store := preload("res://addons/spacesim/input/bindings_store.gd")
 
 const TEST_PATH := "user://test-settings.cfg"
+const BINDINGS_PATH := "user://test-bindings.cfg"
 
 var _instances: Array[Node] = []
 
@@ -19,6 +21,13 @@ func open() -> Node:
 	return settings
 
 
+## A bindings store on the throwaway file, for the screen that edits both.
+func bindings() -> SpacesimBindingsStore:
+	var store := Store.new()
+	store.open(BINDINGS_PATH, TEST_PATH)
+	return store
+
+
 func release() -> void:
 	for instance in _instances:
 		instance.free()
@@ -26,8 +35,9 @@ func release() -> void:
 
 
 static func clean() -> void:
-	if FileAccess.file_exists(TEST_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_PATH))
+	for path in [TEST_PATH, BINDINGS_PATH]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 ## The tail of a check's message: what went wrong, or nothing when nothing did.

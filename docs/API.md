@@ -917,46 +917,20 @@ see § Scope. **This is the current, complete list.**
 
 ### Bindings
 
-Input bindings live in the same file, under `[bindings]`, declared in the registry like any other
-setting — a string with the `key_binding` validator:
-
-```
-[bindings]
-settings_screen=Alt+C
-throttle_up=Shift+Equal
-throttle_stop=Backspace
-roll_left=BracketLeft
-```
-
-**There is no ship key, because there is no ship hull** (2026-10-28). The placeholder was an 18 m box floating in
-front of the camera: deep space's 100 m near plane clipped it away, and `_update_camera` pulled that plane inside the
-hull once it was drawn, so it appeared as a plate on the ground on approach — Evert: *"There is some sort of landing
-pad that pops up when I am close to the surface. Strip that out, and clear out the mechanism that makes it."* The
-camera's offset is a constant in `player_ship.gd`, and `camera.ship_distance` and `ship.visible` went with it.
-
-The **wireframe toggle** (`bindings.wireframe_toggle`, `L`) draws the body meshes as wireframes and takes
-the air and the deck out of the frame. It asks a different question from the picture: what the level
-policy actually did. A shaded sphere looks the same at every level, so whether the tessellation is where
-the eye is cannot be answered from a render — see `main.gd`'s `set_wireframe()`, and `SHOT_WIREFRAME=1`
-for the same view from the screenshot rig.
-
-Text rather than a raw keycode, so the file stays readable and hand-editable: the key name is
-whatever `OS.get_keycode_string` produces, which `OS.find_keycode_from_string` parses back, so the
-two agree by construction. Modifiers are prefixes and are **normalised** on write — `Alt+Shift+X`
-comes back as `Shift+Alt+X`.
+A setting may be a key binding: `bindings.settings_screen` is `Alt+C` by default. The text is stored
+rather than a raw keycode so the file stays readable and hand-editable; the name is whatever
+`OS.get_keycode_string` produces and `OS.find_keycode_from_string` parses back, so the two agree by
+construction. Modifiers are prefixes and are **normalised** on write — `Alt+Shift+X` comes back as
+`Shift+Alt+X`.
 
 Matching uses the **physical** key, so WASD stays under the same fingers on a layout that puts A
 somewhere else — which is why a binding stores a key rather than a character. Modifiers must match
 exactly, so `W` does not fire while Alt is held.
 
-| `SpacesimBindings` (static) | |
-|---|---|
-| `parse(text) -> Dictionary` | parts, or empty when the text is not a binding |
-| `is_valid(text) -> bool` | |
-| `keycode_of(text) -> int` | or `KEY_NONE`; for asking whether it is held |
-| `matches(event, text) -> bool` | |
-| `from_event(event) -> String` | for capturing a key press |
-| `format(binding) -> String` | |
+**The parser is `SpacesimBinding`** (`addons/spacesim/input/binding.gd`, documented below) — the
+`settings/bindings.gd` type of that name is gone, and its one remaining caller was the registry's
+`key_binding` validator, which now asks the new type. Everything that *consumes* a binding reads the
+store through `SpacesimInput`; nothing reads a `bindings.*` setting any more.
 
 ### The settings screen
 
@@ -989,12 +963,24 @@ the screen; grouping by key prefix in the panel instead would put that knowledge
 |---|---|
 | **Display** | the six `video.*` settings — window, screen, the two resolutions, aspect |
 | **HUD** | everything the player looks through: the six `camera.*` — field of view and the five range bands, a matched set read as one — the three `hud.*` switches (readout, frame rate, key hints), and the four `markers.*`, the navigation labels' size, margin, pool and selection colour |
-| **Bindings** | the sixteen keys and `mouse.sensitivity` |
+| **Bindings** | `mouse.sensitivity`, plus **the sixteen actions, which are not settings**: they come from `SpacesimActions` and are edited through `SpacesimBindingsStore` |
+| **Devices** | **nothing from the registry**: the attached gamepads, their identity, **two lines per axis** — the numbers above the bar it belongs to (`centre`, `travel`) and below it the bar, the shaped value, a **deadband** field, **Calibrate** and **Centred** — every button laid out (21, lit when held), and a **Configure** box per device (below). Plugging a device in or out rebuilds this list |
 | **Troubleshooting** | **what you reach for when the picture is wrong**: the drawing switches (`render.mode`, the two wireframe toggles, `render.surface_translation`, `render.atmosphere_volume`, `render.cloud_decks`), the LOD knobs (`lod.error_budget`, `lod.facet_angle`) and the exposure/sky calibration (`exposure.range_stops`, `exposure.adaptation_rate`, `render.ev_compensation`, `render.depth_tint`, `fog.gain`, `sky.star_depth`, `sky.star_gain`) |
 | **Rest** | the fallback: a row that declares no `tab` lands here rather than falling off the screen. **Empty today, so it is not built** |
 
 **A tab with nothing filed into it is not built**, because an empty page is a promise of settings that
 are somewhere else.
+
+**Configure, on the Devices tab: one device at a time is routed away from everything else.** While a
+device is named by `SpacesimSettingsPanel.configuring_device()`, `main.gd::_input` marks that device's
+events handled **before `Control._gui_input`** — the documented order is `_input` → `_gui_input` →
+`_shortcut_input` → `_unhandled_*`, and marking handled in an earlier phase skips the later ones, which
+is why one call keeps a pad out of the menus as well as out of the game. The screen reads the device by
+**polling**, so what is being set up still arrives; a consumed event does not stop a poll.
+
+Only one at a time, because what is being set up is a single target. `dismissed()` clears it: the flag is
+read live by `main.gd`, so a stale name would leave a device deaf to the game with nothing on screen to
+explain why.
 
 **A row that declares `choices` is offered rather than typed into** — an `OptionButton`, whose list
 is the row's own array, or `"screens"` for the one list that is the machine's rather than ours. What
@@ -1021,7 +1007,45 @@ like any other: it changes nothing until **Apply**, and **Close** throws it away
 | `changed` | emitted on any staging change |
 
 `SpacesimSettingsPanel` — `Control` — is built in code, since the project has no editor-authored
-scenes: `configure(settings)`, and the `closed` signal. The buttons drive the edit directly.
+scenes: `configure(settings, bindings)`, and the `closed` signal. The buttons drive the edits directly.
+
+**Apply is two edits now** — the settings and the bindings — and the button only goes idle when both
+have committed; a bindings file that cannot be written leaves it amber, which is the one signal the
+player has. `dismissed()` discards both.
+
+**The Bindings tab is the one tab with rows that are not settings** — and it is the only page that gets a
+container for them. *That guard is load-bearing*: without it every tab page built one, `_bindings_vbox`
+ended up pointing at the last tab's, and every rebuild drew the rows into Troubleshooting while the player
+watched Bindings. The buttons looked dead; the rows were being made correctly, one tab to the right. Below `mouse.sensitivity` it draws
+`SpacesimActions` grouped by category, **one row per binding**: the first row of an action carries its
+label, the rest repeat it dimmed. Each row has its text, **Detect**, **Remove**, and the first row also
+has **Add**.
+
+- **Add** opens another row for that action; **Remove** deletes that binding, and on the last row it
+  **clears the binding rather than the row** — an action always needs somewhere to be bound. An empty row
+  is not a binding: Apply writes nothing for it.
+- **Detect** listens, **on the flight lines as well as the action rows** — a key for a discrete slot, an
+  axis for the joystick line, and each line refuses the other kind rather than silently accepting it (`Not
+  an axis` / `Not a button`). A flight line has **no conflict check**: one source may legitimately do two
+  things, and the same key can roll the ship and set a view.
+- **Detect** listens. **Keys and pad buttons arrive as events** — `main.gd` forwards them while
+  `is_detecting()` and marks them handled — and **axes are polled** with `SpacesimDevices.most_moved`: the
+  biggest change since the last look, outside that axis's own deadband, and only while no button is
+  pressed. What is caught is **shown before it is committed**: *Bind* / *Detect again* / *Cancel*.
+- **A mouse click is only a binding inside the dialog's square.** Mouse events are *not* intercepted
+  globally: doing that would catch the click that presses the dialog's own buttons, and there would be no
+  way to confirm a capture. The click is also **deferred to the next frame** (`flush_capture()`), because
+  catching it rebuilds the dialog and a control cannot be freed while it is emitting its own `gui_input`.
+- **A control already bound elsewhere is a warning, never an override**: the dialog names the actions it
+  belongs to and offers *Bind to both*, *Take it from …*, *Detect again*, or *Cancel*.
+- While a detection is open `main.gd` marks the events handled, so nothing pressed in order to bind a
+  control also presses it in the game or walks a menu.
+
+**Rows are rebuilt at the next frame** (`_process` → `flush_rows()`), never inside the button's own
+`pressed` signal — freeing the control that is emitting is the error the codebase already has a note
+about. `flush_rows()` and `flush_capture()` are how a test asks for either immediately.
+
+An edit that does not parse is **coloured and staged nowhere**, so a typo cannot reach the file.
 
 ### `SpacesimXdg` — `RefCounted` (static)
 
@@ -1030,6 +1054,7 @@ scenes: `configure(settings)`, and the `closed` signal. The buttons drive the ed
 | `config_home()`, `data_home()` | XDG base directories, with fallbacks applied |
 | `config_dir()`, `data_dir()` | those, plus `spacesim` |
 | `settings_path()` | `config_dir()/settings.cfg` |
+| `bindings_path()` | `config_dir()/bindings.cfg` — **beside** the settings, in its own file, because a different store writes it |
 | `ensure_directory(path)` | create it, recursively |
 
 ### `SpacesimSettings` — `Node`, registered as the `SpacesimSettings` autoload
@@ -1044,11 +1069,11 @@ scenes: `configure(settings)`, and the `closed` signal. The buttons drive the ed
 | `set_value(key, value, save_now := false) -> bool` | the only way to write a setting; false if refused |
 | `save(force := false) -> bool` | write, if there is anything to write |
 | `static declared_keys()`, `scope_of(key)`, `default_of(key)` | |
-| `static TABS` | the tabs the settings screen shows, in order: `display`, `hud`, `bindings`, `troubleshooting`, `rest` |
+| `static TABS` | the tabs the settings screen shows, in order: `display`, `hud`, `bindings`, `devices`, `troubleshooting`, `rest`. **`bindings` and `devices` hold no settings** — the actions and the gamepads are drawn by the screen itself |
 | `static tab_title(tab) -> String` | what a tab is called on screen — its key capitalised, except `hud`, which is an acronym |
 | `static tab_of(key) -> String` | which tab a row is filed in; **a row that names none is in `rest`** |
 | `static is_acceptable(key, value) -> bool` | whether the store would accept it — what the screen asks before staging |
-| `KNOWN_VALIDATORS` | the named checks; a row naming anything else is a registry mistake |
+| `KNOWN_VALIDATORS` | the named checks; a row naming anything else is a registry mistake. **Empty since the bindings left** — `key_binding` went with them, and `SpacesimBindingsStore.stage` refuses a text it cannot parse |
 
 `get_value` never touches the disk. Tests use their own instance with their own path, so the suite
 never writes to the real file.
@@ -1135,6 +1160,209 @@ expansion**, so a screen can give its sections the room the window has. A `Scrol
 expanding child `max(its own size, the child's minimum)` (4.7.2, `scroll_container.cpp`,
 `_reposition_children`); without the flag the column is pinned to its minimum and the extra height is
 lost, which no screen noticed while every screen was a list of minimum-sized rows.
+
+### `SpacesimActions` — `RefCounted` (static)
+
+`addons/spacesim/input/actions.gd`. **Every action a player can take, declared once.** An action is
+*what* a player can do; a binding is one way to do it — they used to be the same identifier, with the
+settings key *being* the action.
+
+| Member | |
+|---|---|
+| `REGISTRY` | id → `{label, kind, category, defaults}`; sixteen actions, the ids being the old `bindings.*` keys with the prefix dropped |
+| `KINDS` | `trigger`, `rate`, `level` — what the control *is*, not what it is bound to |
+| `CATEGORIES` | `Flight`, `Camera`, `Interface` — where the settings screen shows it |
+| `ids()`, `has(id)`, `row(id)` | |
+| `label_of`, `kind_of`, `category_of`, `defaults_of` | |
+| `in_category(category) -> Array` | the ids in one category, in registry order |
+
+A **trigger** fires on the press and holds nothing. A **rate** is produced every frame and self-centers
+to zero. A **level** persists and is *changed* by its inputs — a key winds the throttle while held, and
+releasing it leaves the level where it got to. That distinction is what makes a key and a stick the
+same action.
+
+### `SpacesimBinding` — `RefCounted` (static)
+
+`addons/spacesim/input/binding.gd`. **One way to press one action, as text**, so the file stays
+readable and hand-editable: `Alt+C`, `W`, `BracketLeft`, `Mouse:Left`, `Mouse:WheelUp`, with the same
+optional modifier prefixes on either.
+
+| Member | |
+|---|---|
+| `parse(text) -> Dictionary` | `{"device": "keyboard", "keycode": int, "alt"/"ctrl"/"shift"/"meta": bool}`, `{"device": "mouse", "button": int, …}`, or `{"device": "joypad", "pad": name, "button"/"axis": int}`; `{}` when the text is not a binding |
+| `to_text(binding) -> String` | the inverse, so a round trip is identity |
+| `is_valid(text) -> bool` | |
+| `keycode_of(text) -> int`, `button_of(text) -> int` | for asking whether it is held |
+| `matches(event, text) -> bool` | exact on the whole chord, by **physical** keycode |
+
+**A modifier need not be a key.** A held **mouse button** goes where the key modifiers go —
+`Mouse:Right+Joy:PS4/Axis:LEFT_X` — because a mouse button is discrete and can be a chord like Shift. It is
+what makes "hold the right button and the stick means throttle" expressible, and it is why `matches()`
+takes the set of held modifiers: the caller is tracking events anyway.
+
+**An axis under a chord waits for the stick to come back to centre.** A chord changes what a position
+*means*, so the new meaning applies only once the axis is inside its deadband — without that rule, holding
+the stick over and tapping the modifier hands the ship full deflection in one frame.
+
+**A pad's control names are Godot's own** — `Joy:<device name>/Button:A`, `Joy:<device name>/Axis:LEFT_X`
+— because the engine exposes no name-to-index helper, so `SpacesimDevices`' tables are the only vocabulary
+there is. The device part is the device's **name**, which is what the store keys its sections by, and the
+split is at the last `/` so a name with spaces works. **An axis binding is `relative`** — a deflection is a
+rate; `absolute` is refused until a `level` action and `step(dt)` exist behind it.
+
+**`WheelUp` and `WheelDown` are buttons to Godot** (`MOUSE_BUTTON_WHEEL_UP` is 4), which is how a
+scroll can be bound at all.
+
+Three things `parse` refuses, each of which the old parser accepted: an **empty part** (`+W` used to
+bind `W`), a **modifier as the key** (`Alt` alone parses as the Alt keycode — `find_keycode_from_string`
+does not distinguish, so it is refused explicitly), and **any joypad form** — `Joy:<device>/Button:A`
+is reserved grammar for the pad work and must not silently bind something else.
+
+### `SpacesimDevices` — `RefCounted` (static)
+
+`addons/spacesim/input/devices.gd`. **What the operating system's gamepads look like through Godot —
+for looking at, not for binding.** It exists so a screen can show what a device is doing without
+knowing an enumeration, and so the capture dialog has one place to read a control's name from.
+
+| Member | |
+|---|---|
+| `AXIS_NAMES`, `BUTTON_NAMES` | the six axes and the buttons, in Godot's own order |
+| `SHOWN_AS_MOVED` | 0.1 — a **display** threshold, not a binding's deadband, so a stick resting at 0.02 does not look deflected |
+| `connected() -> Array` | device indices — **enumeration order**, never stored |
+| `name_of`, `guid_of`, `raw_name_of`, `is_known` | identity; `raw_name_of` is the OS's pre-database name, a diagnostic |
+| `axis(device, index) -> float`, `pressed(device) -> Array`, `axes(device) -> Array` | the readings |
+| `axis_index(name)`, `button_index(name)`, `device_index(name)` | **the reverse table** — a binding stores names, the engine takes indices |
+| `most_moved(device, previous, profile_of) -> [axis, change]` | **the axis being moved**, or `-1`: the biggest change since the last look, only if it is `MOVED_ENOUGH` and outside the axis's own deadband |
+| `MOVED_ENOUGH` | 0.15 — a threshold on the **change between looks**, not a deadband, so a slow drift is not an intention and a flick is |
+
+**What else the pad has, and what we do not use**: `has_joy_vibration` is true for a Switch Pro on this
+machine and `start_joy_vibration(device, weak, strong, duration)` drives it — unused so far. The motion
+sensors (`get_joy_gyroscope`, `get_joy_accelerometer`, `get_joy_gravity`, plus their calibration calls) are
+**off unless five `input_devices/sensors/*` project settings are enabled**, and that is a shared-file
+decision, not a detail; magnetometer and device-orientation have settings but no getter. Lights
+(`set_joy_light`) and touchpads (`get_joy_num_touchpads`, experimental) exist and are not wanted yet.
+
+**Whether the engine knows a device is the fact that changes what its numbers mean**: a recognised pad
+reports named controls in `[-1, 1]`, an unknown one reports raw indices. The screen prints that
+distinction beside the device's name.
+
+### `SpacesimAxisProfile` — `RefCounted`
+
+`addons/spacesim/input/axis_profile.gd`. **One physical axis, shaped**: where its travel ends, where it
+rests, and how much of the middle is nothing.
+
+| | from | default | |
+|---|---|---|---|
+| `low`, `high` | **calibration** | −1, +1 | the axis's real travel |
+| `centre` | the player | 0 | where it rests — **not** forced to the midpoint, because a worn stick's rest is not its middle |
+| `deadband` | the player | 0.15 | the **half-width** around `centre` that reads as nothing; a box spanning ±0.15 is *deadband 0.15* |
+
+| Member | |
+|---|---|
+| `normalise(raw) -> float` | symmetric about the profile's own centre and scaled by its **two** spans, so an asymmetric axis (`−0.95 … +0.88`) maps onto −1…+1 exactly |
+| `shape(raw) -> float` | after the deadband, **rescaled by `1 − deadband`** so full deflection stays full and the response does not step at the edge of the band |
+| `default_for(axis) -> SpacesimAxisProfile` | **what an axis is before it is calibrated**: a `TRIGGER_*` rests at zero and travels to +1, so its default is `0 … +1` rather than a symmetric guess |
+| `is_sane() -> bool` | travel that runs forwards, a centre **at or inside** it (a trigger rests at the bottom of its travel, and a lever at one stop is a real device), a band under 1.0. **A band of 0.9 is silly and legal** — the bar shows the red box swallowing the line, and that is the feedback |
+| `from_text` / `to_text` | `"-0.950, 0.880, 0.030, 0.150"`; one unreadable number falls back to that field's default alone |
+| `with_travel(low, high)` | a calibration replaces the travel and keeps what was typed |
+
+`low`/`high` rather than `min`/`max`, which are GDScript's own functions — a member that shadows them is
+a trap for the first line in that file that wants the function.
+
+**A profile belongs to the device's axis, not to a binding**: two bindings on one stick would otherwise
+have two deadbands for it. **Nothing consumes a profile yet** — there are no axis bindings, so these
+numbers are stored, shown and calibrated but change no behaviour.
+
+### `SpacesimAxisBar` — `Control`
+
+`addons/spacesim/ui/axis_bar.gd`. One axis drawn as a line: the **profile's travel** across the full
+width, the deadband **boxed in red**, a tick where it rests, and a dot where it is now — all in the
+travel's own units, so the dot lands in the middle of the box the moment **Centred** has been pressed.
+`set_state(raw, profile)` from a per-frame refresh; it draws and nothing else.
+
+**The unit matters and was wrong once**: drawing the box from the raw centre and the dot from the *shaped*
+value puts them in two coordinate spaces, and a centred axis then showed a dot that was not in the middle
+of its own deadband. The line spans `low … high` rather than `−1 … +1` for the same reason — a trigger that
+runs `0 … +1` gets a line it can actually fill. The band's half-width is converted per side
+(`deadband · (centre − low)` and `deadband · (high − centre)`), so an asymmetric axis gets a box that means
+the same thing either side of its rest.
+
+### `SpacesimBindingsStore` — `RefCounted`
+
+`addons/spacesim/input/bindings_store.gd`. **The player's bindings, in a file of their own** —
+`bindings.cfg`, beside `settings.cfg` — because the settings registry declares its keys statically and
+the suite asserts every declared setting has a control, which a bindings table cannot satisfy.
+
+```ini
+[bindings]
+throttle_up = "Shift+Equal"
+roll_left = "BracketLeft, Q"
+
+[bindings.PS4 Controller]
+throttle_up = "Joy:PS4 Controller/Button:A"
+```
+
+`[bindings]` is the default table; `[bindings.<device name>]` overrides it for one device, keyed by the
+device's **name**. **`[axes.<device name>]` holds that device's axis profiles**, one line per axis —
+they live in this file because the same edits stage and write them, not because they are bindings. **An empty value means unbound**, which is a different thing from an absent key
+(absent = use the registry's default) — that is what lets a player clear an action rather than only
+change it.
+
+| Member | |
+|---|---|
+| `open(path := "", legacy_path := "")` | empty paths mean the XDG locations; `legacy_path` is only read by the import |
+| `of(action, device := "") -> Array` | staged if edited, else the device's section, else the default section, else the registry's |
+| `table(device := "") -> Dictionary` | every action's bindings, defaults filled in |
+| `stage(action, texts) -> bool` | false when the action is unknown or any text does not parse |
+| `reset(action)`, `discard()`, `has_changes()` | |
+| `apply() -> int` | writes the **whole table**; `-1` when the file cannot be written; device sections carried across untouched |
+| `problems: Array` | what the one-time import could not read, as `"<action>: <text>"` |
+
+**Staged like the settings screen**: edits accumulate in memory, `apply()` writes them, `discard()`
+throws them away, and nothing is ever written by any other route.
+
+**The one-time import** (`_import_legacy`): when `bindings.cfg` does not exist, the sixteen
+`bindings.*` keys in `settings.cfg` are read into memory — `SpacesimSettings` stores them as
+`[bindings] throttle_up = "Shift+Equal"`, which is why the import reads that section and those keys.
+**It writes nothing**, so a first run cannot overwrite anything and the import is idempotent; the file
+first appears at the player's first Apply. A value that does not parse leaves the registry's default in
+place and is reported in `problems` rather than swallowed.
+
+### `SpacesimInput` — `RefCounted`
+
+`addons/spacesim/input/input_map.gd`. **What an action's bindings are doing right now** — the one place
+that knows an event is a press of an action. It replaces the three shapes the game used to call
+directly: `Bindings.matches(event, get_value("bindings.x"))`, a poll of `Input.is_physical_key_pressed`,
+and the raw text for the HUD's hints.
+
+| Member | |
+|---|---|
+| `store: SpacesimBindingsStore` | assigned at construction |
+| `feed(event) -> bool` | take one event, pressed **or released**; returns whether it belonged to any action |
+| `triggered(event, action) -> bool` | an edge: a press, never a release and never a key repeating |
+| `held(action) -> bool` | whether any **bang** source is down right now |
+| `value(action) -> float` | **−1 … +1**: bang sources at ±1 while down, axis sources shaped by their profile, summed and clamped — so one stick bound to `roll_right` reads `−1` pushed left, and the consumer multiplies rather than gating on "is it held" |
+| `release_all()` | forget every held source — what the screen pause uses |
+| `hint(action) -> String` | the first **keyboard** binding, else the first binding |
+
+**`value()` is what a stick needed and a key already had**: a key contributes `+1` while down; an axis
+contributes its *shaped* deflection through that axis's profile, so the deadband and the travel are
+respected without the flight model knowing they exist. `held()` deliberately stays about **bang** sources
+only — a level accumulated in the flight controller is not a key, and asking `held()` about an axis
+conflates the two.
+
+**Held state is tracked from what `feed` has seen, not polled from `Input`.** That is what makes it
+testable — a test cannot press a key — and it is what a stick will need anyway, where "down" is a
+threshold on a value. `release_all()` exists because a screen can swallow events while the game is not
+watching: without it, a key pressed and released behind a menu could leave an action held for ever.
+
+A source is an action's **binding**, not the action, so two bindings on one action are pressed
+independently and releasing one does not unpress the other.
+
+**There is no `step(dt)` in this slice.** The one level in the game — the ship's throttle — is
+integrated and clamped in `FlightController`, where the rest of the flight model lives, and the two
+throttle actions are `rate`s that say "+1 while held". A stick that sets a level directly is the pad
+work, and `step` arrives with it.
 
 ### `SpacesimDialog` — a `SpacesimScreen`
 

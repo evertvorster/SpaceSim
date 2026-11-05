@@ -69,7 +69,7 @@ func _test_screens_build_on_the_shared_chrome(h, root: Node) -> void:
 	root.add_child(layer)
 
 	var settings_panel := SettingsPanel.new()
-	settings_panel.configure(_fixture.open())
+	settings_panel.configure(_fixture.open(), _fixture.bindings())
 	layer.add_child(settings_panel)
 	h.check(
 		settings_panel.content != null and settings_panel.actions != null,
