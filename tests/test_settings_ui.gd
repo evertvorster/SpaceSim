@@ -265,8 +265,8 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 			"on the Bindings page, not another tab (%s)" % (page.name if page != null else "none")
 		)
 
-	var field: LineEdit = _row_field(panel, "throttle_up", 0)
-	h.check(field != null and field.text == "Shift+Equal", "showing the binding that stands")
+	var field: LineEdit = _row_field(panel, "bodies_toggle", 0)
+	h.check(field != null and field.text == "P", "showing the binding that stands")
 
 	# --- a typo is coloured and goes nowhere
 	field.text = "Nonsense"
@@ -280,44 +280,44 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 	h.check(field.modulate == panel.IDLE_COLOR, "a valid one is not coloured")
 	h.check(store.has_changes(), "and is staged")
 	panel._apply_button.pressed.emit()
-	h.check(_fixture.bindings().of("throttle_up") == ["W"], "applying writes the file")
+	h.check(_fixture.bindings().of("bodies_toggle") == ["W"], "applying writes the file")
 
 	# --- **Add opens a row; Remove on the last one clears the binding rather than the row**
 	# The panel rebuilds its rows from `_process`; a test asks for it directly.
-	var before := _rows_named(panel, "throttle_up").size()
-	var add: Button = _row_button(panel, "throttle_up", 0, "Add")
+	var before := _rows_named(panel, "bodies_toggle").size()
+	var add: Button = _row_button(panel, "bodies_toggle", 0, "Add")
 	h.check(add != null, "the first row can add another")
 	add.pressed.emit()
 	panel.flush_rows()
 	h.check(
-		_rows_named(panel, "throttle_up").size() == before + 1,
-		"which opens one more row for the same action (%d)" % _rows_named(panel, "throttle_up").size()
+		_rows_named(panel, "bodies_toggle").size() == before + 1,
+		"which opens one more row for the same action (%d)" % _rows_named(panel, "bodies_toggle").size()
 	)
-	var extra_field: LineEdit = _row_field(panel, "throttle_up", before)
+	var extra_field: LineEdit = _row_field(panel, "bodies_toggle", before)
 	h.check(extra_field != null and extra_field.text.is_empty(), "an empty row to detect into")
 	panel._apply_button.pressed.emit()
-	h.check(_fixture.bindings().of("throttle_up") == ["W"], "and applying stores nothing for it")
+	h.check(_fixture.bindings().of("bodies_toggle") == ["W"], "and applying stores nothing for it")
 
-	var remove: Button = _row_button(panel, "throttle_up", 0, "Remove")
+	var remove: Button = _row_button(panel, "bodies_toggle", 0, "Remove")
 	h.check(remove != null, "and remove a binding")
 	remove.pressed.emit()
 	panel.flush_rows()
 	# **Staged, not written**: the file is untouched until Apply.
-	h.check(store.of("throttle_up").is_empty(), "which clears what that row held")
-	h.check(not _rows_named(panel, "throttle_up").is_empty(), "leaving the row, not deleting it")
+	h.check(store.of("bodies_toggle").is_empty(), "which clears what that row held")
+	h.check(not _rows_named(panel, "bodies_toggle").is_empty(), "leaving the row, not deleting it")
 
 	# --- **A discarded edit is not left on screen.** The file is right either way; the fields must agree.
-	field = _row_field(panel, "throttle_up", 0)
+	field = _row_field(panel, "bodies_toggle", 0)
 	field.text = "G"
 	field.text_changed.emit("G")
 	h.check(store.has_changes(), "an edit is staged")
 	panel.dismissed()
 	panel.opened()
 	panel.flush_rows()
-	field = _row_field(panel, "throttle_up", 0)
+	field = _row_field(panel, "bodies_toggle", 0)
 	h.check(
 		not store.has_changes() and field.text == Store.SEPARATOR.join(PackedStringArray(
-			_fixture.bindings().of("throttle_up")
+			_fixture.bindings().of("bodies_toggle")
 		)),
 		"closing discards it, and opening again shows what stands (%s)" % field.text
 	)
@@ -404,11 +404,13 @@ static func _row_button(panel: Node, action: String, index: int, text: String) -
 	var field := _row_field(panel, action, index)
 	if field == null:
 		return null
-	for child in field.get_parent().get_children():
-		if child is HBoxContainer:
-			for button in child.get_children():
-				if button is Button and String(button.text) == text:
-					return button
+	# **A `GridContainer` has no row nodes**: the button cell is simply the child after the field's own,
+	# so `field.get_parent()` and a search through it would find the FIRST row's buttons.
+	var cell := field.get_parent().get_child(field.get_index() + 1)
+	if cell is HBoxContainer:
+		for button in cell.get_children():
+			if button is Button and String(button.text) == text:
+				return button
 	return null
 
 

@@ -56,12 +56,22 @@ const POINTER_AXIS := {
 }
 
 ## The lines a DOF stores, in the order the tab shows them.
-## The lines a DOF stores and what they are when the player has touched nothing.
-const DEFAULTS := {
+## The shape of a DOF's lines, all empty, before anything is assigned.
+const BLANK := {
 	"keyboard_decrease": "", "keyboard_increase": "",
 	"joystick": "", "joystick_invert": false,
 	"mouse_movement": "off", "mouse_invert": false,
 	"mouse_decrease": "", "mouse_increase": "",
+}
+
+## **What the ship flew with before this layer existed**, so wiring it in changes nothing: the brackets
+## rolled, minus and shifted-equal wound the throttle, and the mouse turned. Everything else starts
+## unassigned, and the tab is how it becomes anything else.
+const DEFAULTS := {
+	"roll": {"keyboard_decrease": "BracketLeft", "keyboard_increase": "BracketRight"},
+	"pitch": {"mouse_movement": "glide"},
+	"yaw": {"mouse_movement": "glide"},
+	"throttle": {"keyboard_decrease": "Minus", "keyboard_increase": "Shift+Equal"},
 }
 
 const KEYS := [
@@ -77,9 +87,7 @@ var store: SpacesimBindingsStore
 ## the player's `mouse.sensitivity`, so the pointer feels the same as it always has.
 var pointer_sensitivity := 0.0015
 
-## Which DOF the pointer drives. **One pointer, one meaning**: a mouse delta cannot mean pitch and roll at
-## once, so assigning movement to a DOF takes it from the one that had it.
-var _pointer_owner := ""
+
 
 ## Bang sources that are down, as `"<dof>|<slot>|<text>"`.
 var _down := {}
@@ -93,7 +101,10 @@ var _value := {}
 
 ## One DOF's lines: the store's over the defaults, so a missing key is never a missing line.
 func _row(dof: String) -> Dictionary:
-	var row := DEFAULTS.duplicate()
+	var row := BLANK.duplicate()
+	var assigned: Dictionary = DEFAULTS.get(dof, {})
+	for key in assigned:
+		row[key] = assigned[key]
 	var stored: Dictionary = store.control(dof)
 	for key in stored:
 		row[key] = stored[key]
@@ -104,7 +115,6 @@ func _init(p_store: SpacesimBindingsStore) -> void:
 	store = p_store
 	for dof in DOFS:
 		_value[dof] = 0.0
-	_pointer_owner = _find_pointer_owner()
 
 
 ## **Take one event**: a key or mouse button down/up, or a wheel notch. Called for every event before
@@ -144,9 +154,9 @@ func step(delta: float) -> void:
 		var out := drive * rate * delta
 
 		# **The pointer is an angle already**, so it is added rather than scaled by dt: a pixel of movement
-		# is the same amount of turn however fast the frame came round.
-		if dof == _pointer_owner:
-			out += _pointer_angle(dof, row)
+		# is the same amount of turn however fast the frame came round. **Several DOFs may read it**, one
+		# axis each — that is what mouse-look is, yaw from x and pitch from y.
+		out += _pointer_angle(dof, row)
 
 		out += float(_notches.get(dof, 0.0)) * NOTCH_STEP
 		_value[dof] = out
@@ -162,17 +172,6 @@ func value(dof: String) -> float:
 ## Every DOF's value, for a caller that wants them in one go.
 func values() -> Dictionary:
 	return _value.duplicate()
-
-
-## Which DOF currently owns the pointer, or `""`.
-func pointer_owner() -> String:
-	return _pointer_owner
-
-
-## Give the pointer to a DOF, or take it away with `""`. **The tab is what decides**, and the store is
-## what remembers: whoever holds it is the one DOF whose movement is not `off`.
-func claim_pointer(dof: String) -> void:
-	_pointer_owner = dof
 
 
 # --- the sources -----------------------------------------------------------------------------------

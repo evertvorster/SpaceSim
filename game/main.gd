@@ -20,19 +20,12 @@ const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
 const BindingsStore := preload("res://addons/spacesim/input/bindings_store.gd")
 const InputMapScript := preload("res://addons/spacesim/input/input_map.gd")
+const ControlsScript := preload("res://addons/spacesim/input/controls.gd")
 const Session := preload("res://addons/spacesim/save/session.gd")
 
 const SYSTEM_PATH := "res://systems/sol.tres"
 
 const MOUSE_SENSITIVITY_FALLBACK := 0.0015
-const TURN_RATE := 1.2 ## rad/s from the roll keys
-## **How fast a full stick deflection turns the ship**, in rad/s. The mouse contributes an angle per frame
-## as it always has; a stick contributes a *rate*, which is why these are separate numbers.
-const PITCH_RATE := 0.8
-const YAW_RATE := 0.8
-## **Ten seconds from zero to full**, which over the +-10 range is one unit a second — slow enough to stop
-## inside a deck and to watch a surface go past, and astern is reached in the same time.
-const THROTTLE_RATE := 1.0
 
 ## The mesh error budget, in pixels of silhouette error, as stops to step through rather than a
 ## continuous number: it is a perceptual trim, so the useful question is "is this better or worse"
@@ -71,6 +64,9 @@ var _saved_games_screen: SpacesimSavedGamesPanel
 ## is where an old `settings.cfg`'s keys are imported.
 var _bindings: SpacesimBindingsStore
 var _input_map: SpacesimInput
+## **The degrees of freedom** — roll, pitch, yaw, throttle — which are dimensions with sources, not actions
+## with a press. See the vault's *Flight Control*.
+var _controls: SpacesimControls
 
 ## The screen that is open, or null. Having one open *is* being paused.
 var _screen: SpacesimScreen
@@ -78,7 +74,6 @@ var _screen: SpacesimScreen
 ## Where closing the open screen goes, when it was opened *from* another screen. Null means the world.
 var _back_to: SpacesimScreen
 var _selected_index := -1
-var _look := Vector2.ZERO
 var _hud: Label
 var _hints: Label
 var _fps: Label
@@ -159,6 +154,7 @@ func _ready() -> void:
 	_bindings = BindingsStore.new()
 	_bindings.open()
 	_input_map = InputMapScript.new(_bindings)
+	_controls = ControlsScript.new(_bindings)
 
 	_settings_screen = SpacesimSettingsPanel.new()
 	_settings_screen.configure(SpacesimSettings, _bindings)
@@ -214,6 +210,7 @@ func _input(event: InputEvent) -> void:
 	# and a screen that swallows it is why `release_all()` exists.
 	if event is InputEventKey or event is InputEventMouseButton or event is InputEventJoypadButton:
 		_input_map.feed(event)
+		_controls.feed(event)
 
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
@@ -340,7 +337,7 @@ func _ship_mouse_look(event: InputEventMouseMotion) -> void:
 	if _skip_next_motion:
 		_skip_next_motion = false
 		return
-	_look += event.relative
+	_controls.feed_motion(event.relative)
 
 
 ## Pausing the game is the scene's business rather than the tree's: only the simulation needs to
@@ -410,12 +407,6 @@ func _on_exit_requested() -> void:
 
 ## Whether a binding's key is held. Read per frame rather than cached, so rebinding one takes
 ## effect without anything having to notice.
-## The action's value, −1 … +1 — see `SpacesimInput.value`. Everything the flight model reads that can be
-## driven by a stick is read this way; **a key gives ±1, so nothing about a keyboard changes**.
-func _value(action: String) -> float:
-	return _input_map.value(action)
-
-
 ## Whether this event is an action's edge. **One line, so the call sites read as actions** rather than as
 ## a chain of settings lookups.
 func _triggered(event: InputEvent, action: String) -> bool:
@@ -468,7 +459,6 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 func _capture_mouse() -> void:
 	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		return
-	_look = Vector2.ZERO
 	_skip_next_motion = true
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
@@ -488,25 +478,19 @@ func _physics_process(delta: float) -> void:
 	if _screen != null:
 		return
 
+	# **The degrees of freedom produce this frame's contribution each**, in radians for a rotation and a
+	# fraction of the throttle for throttle. The mouse, a stick and a key differ only in how they arrive.
+	_controls.pointer_sensitivity = float(SpacesimSettings.get_value("mouse.sensitivity"))
+	_controls.step(delta)
+
 	# **The stop key is edge-triggered**, so it puts the throttle at zero now rather than winding it down.
 	var throttle: float = 0.0 if _throttle_stop else _ship.throttle
 	_throttle_stop = false
-	throttle += THROTTLE_RATE * delta * _value("throttle_up")
-	throttle -= THROTTLE_RATE * delta * _value("throttle_down")
+	throttle += _controls.value("throttle")
 
-	# **Multiplied, not gated.** A key contributes ±1 and behaves exactly as it always did; a stick
-	# contributes its shaped deflection, so the same two actions give a proportional rate.
-	var roll := TURN_RATE * delta * (_value("roll_right") - _value("roll_left"))
-
-	# Read per frame rather than held, so it is hot without anything having to react to a change.
-	var sensitivity: float = SpacesimSettings.get_value("mouse.sensitivity")
-	# **The mouse gives an angle per frame and a stick gives a rate**, so the two are added rather than
-	# mixed: with nothing bound to the pitch and yaw actions their contribution is exactly zero, and the
-	# mouse is unchanged.
-	var pitch := -_look.y * sensitivity
-	pitch -= PITCH_RATE * delta * (_value("pitch_up") - _value("pitch_down"))
-	var yaw := _look.x * sensitivity
-	yaw += YAW_RATE * delta * (_value("yaw_right") - _value("yaw_left"))
+	var pitch := _controls.value("pitch")
+	var yaw := _controls.value("yaw")
+	var roll := _controls.value("roll")
 
 	var input := {
 		# The controller clamps to its own range; one place for the limit.
@@ -515,7 +499,6 @@ func _physics_process(delta: float) -> void:
 		"yaw": yaw,
 		"roll": roll,
 	}
-	_look = Vector2.ZERO
 
 	_ship.step(delta, input)
 	_system.frame_tree.evaluate()

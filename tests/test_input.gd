@@ -53,7 +53,7 @@ func _test_the_registry(h) -> void:
 	h.check(no_category.is_empty(), "every action is in a category the screen shows%s"
 		% _detail(no_category))
 	h.check(bad_default.is_empty(), "and every default binding parses%s" % _detail(bad_default))
-	h.check(Actions.ids().size() == 20, "there are twenty actions (%d)" % Actions.ids().size())
+	h.check(Actions.ids().size() == 12, "there are twelve actions, the flight controls having left (%d)" % Actions.ids().size())
 
 	# **Every category has something in it**, or the Bindings tab shows a heading over nothing.
 	var empty: Array = []
@@ -64,17 +64,15 @@ func _test_the_registry(h) -> void:
 
 	# **The four held actions are the only four that are read every frame**; everything else is an
 	# edge. If that ever changes, what `_physics_process` reads changes with it.
-	var rates := Actions.in_category("Flight").filter(
+	var rates := Actions.ids().filter(
 		func(id: String) -> bool: return Actions.kind_of(id) == "rate"
 	)
 	var levels := Actions.ids().filter(
 		func(id: String) -> bool: return Actions.kind_of(id) == "level"
 	)
-	h.check(
-		rates.size() == 8,
-		"eight rates: throttle up/down, roll and the four turning actions a stick needs (%d)"
-			% rates.size()
-	)
+	# **A rate is a degree of freedom now**, so no action is one: what used to be throttle and roll are
+	# lines on a flight control.
+	h.check(rates.is_empty(), "no action is a rate any more (%d)" % rates.size())
 	h.check(levels.is_empty(), "and no levels yet: a level is what a stick sets directly%s"
 		% _detail(levels))
 
@@ -82,7 +80,7 @@ func _test_the_registry(h) -> void:
 ## **The text format round-trips**, which is what makes the file hand-editable: a value read from
 ## `bindings.cfg`, turned into parts and written back, is the same text it started as.
 func _test_binding_text(h) -> void:
-	var texts := ["W", "Alt+C", "Shift+Equal", "BracketLeft", "Tab", "1", "Space", "Escape"]
+	var texts := ["W", "Alt+C", "P", "BracketLeft", "Tab", "1", "Space", "Escape"]
 	var broken: Array = []
 	for text in texts:
 		if Binding.to_text(Binding.parse(text)) != text:
@@ -200,29 +198,29 @@ func _test_the_store(h) -> void:
 
 	var store := Store.new()
 	store.open(path)
-	h.check(store.of("throttle_up") == ["Shift+Equal"], "with no file, an action is its registry default")
+	h.check(store.of("bodies_toggle") == ["P"], "with no file, an action is its registry default")
 	h.check(not store.has_changes(), "and nothing is staged")
 	h.check(not FileAccess.file_exists(path), "opening writes nothing")
 
-	h.check(store.stage("throttle_up", ["W"]), "a valid binding stages")
-	h.check(store.of("throttle_up") == ["W"], "and is what the action now reads")
+	h.check(store.stage("bodies_toggle", ["W"]), "a valid binding stages")
+	h.check(store.of("bodies_toggle") == ["W"], "and is what the action now reads")
 	h.check(store.has_changes(), "which counts as a change")
 	h.check(not FileAccess.file_exists(path), "and is still not written")
 	store.discard()
 	h.check(not store.has_changes(), "discarding clears it")
-	h.check(store.of("throttle_up") == ["Shift+Equal"], "and restores what stood")
+	h.check(store.of("bodies_toggle") == ["P"], "and restores what stood")
 
 	# A typo is refused at the store, not discovered at the next keypress.
-	h.check(not store.stage("throttle_up", ["Nonsense"]), "an unparseable binding is refused")
+	h.check(not store.stage("bodies_toggle", ["Nonsense"]), "an unparseable binding is refused")
 	h.check(not store.stage("no_such_action", ["W"]), "and so is an action that does not exist")
 
 	# **An empty list unbinds**, which is different from an absent key — that is what lets a player
 	# clear an action rather than only change it.
-	store.stage("cycle_target", [])
-	h.check(store.of("cycle_target").is_empty(), "an empty list unbinds the action")
+	store.stage("wireframe_toggle", [])
+	h.check(store.of("wireframe_toggle").is_empty(), "an empty list unbinds the action")
 
-	store.stage("roll_left", ["BracketLeft", "Q"])
-	h.check(store.of("roll_left") == ["BracketLeft", "Q"], "and an action can have several bindings")
+	store.stage("cycle_target", ["T", "Q"])
+	h.check(store.of("cycle_target") == ["T", "Q"], "and an action can have several bindings")
 
 	var written := store.apply()
 	h.check(written == Actions.ids().size(), "applying writes every action (%d)" % written)
@@ -231,28 +229,28 @@ func _test_the_store(h) -> void:
 
 	var reread := Store.new()
 	reread.open(path)
-	h.check(reread.of("roll_left") == ["BracketLeft", "Q"], "a second open reads the two bindings back")
-	h.check(reread.of("cycle_target").is_empty(), "including an action that was unbound")
-	h.check(reread.of("throttle_up") == ["Shift+Equal"], "and the ones that were never touched")
+	h.check(reread.of("cycle_target") == ["T", "Q"], "a second open reads the two bindings back")
+	h.check(reread.of("wireframe_toggle").is_empty(), "including an action that was unbound")
+	h.check(reread.of("bodies_toggle") == ["P"], "and the ones that were never touched")
 
 	# A device's own section overrides the default table, and survives an apply untouched.
 	var file := ConfigFile.new()
 	file.load(path)
-	file.set_value("bindings.PS4 Controller", "throttle_up", "W")
+	file.set_value("bindings.PS4 Controller", "bodies_toggle", "W")
 	file.save(path)
 	var with_pad := Store.new()
 	with_pad.open(path)
-	h.check(with_pad.of("throttle_up") == ["Shift+Equal"], "the default table still stands")
+	h.check(with_pad.of("bodies_toggle") == ["P"], "the default table still stands")
 	h.check(
-		with_pad.of("throttle_up", "PS4 Controller") == ["W"],
+		with_pad.of("bodies_toggle", "PS4 Controller") == ["W"],
 		"and a device's section overrides it for that device"
 	)
-	with_pad.stage("roll_right", ["E"])
+	with_pad.stage("wireframe_toggle", ["E"])
 	with_pad.apply()
 	var after := ConfigFile.new()
 	after.load(path)
 	h.check(
-		after.has_section_key("bindings.PS4 Controller", "throttle_up"),
+		after.has_section_key("bindings.PS4 Controller", "bodies_toggle"),
 		"applying carries a device section across untouched"
 	)
 	_clean()
@@ -266,21 +264,21 @@ func _test_the_legacy_import(h) -> void:
 	var bindings_path := TEST_DIR.path_join("bindings.cfg")
 
 	var legacy := ConfigFile.new()
-	legacy.set_value("bindings", "throttle_up", "W")
-	legacy.set_value("bindings", "roll_left", "Nonsense")
+	legacy.set_value("bindings", "bodies_toggle", "W")
+	legacy.set_value("bindings", "cycle_target", "Nonsense")
 	legacy.set_value("video", "mode", "windowed")
 	SpacesimXdg.ensure_directory(TEST_DIR)
 	legacy.save(settings_path)
 
 	var store := Store.new()
 	store.open(bindings_path, settings_path)
-	h.check(store.of("throttle_up") == ["W"], "a legacy binding is imported")
+	h.check(store.of("bodies_toggle") == ["W"], "a legacy binding is imported")
 	h.check(
-		store.of("roll_left") == Actions.defaults_of("roll_left"),
+		store.of("cycle_target") == Actions.defaults_of("cycle_target"),
 		"an unparseable one leaves the registry's default in place"
 	)
 	h.check(
-		store.problems.size() == 1 and String(store.problems[0]).begins_with("roll_left"),
+		store.problems.size() == 1 and String(store.problems[0]).begins_with("cycle_target"),
 		"and is reported rather than swallowed (%s)" % str(store.problems)
 	)
 	h.check(store.of("cycle_target") == Actions.defaults_of("cycle_target"),
@@ -291,7 +289,7 @@ func _test_the_legacy_import(h) -> void:
 	h.check(FileAccess.file_exists(bindings_path), "the first Apply creates the file")
 	var reread := Store.new()
 	reread.open(bindings_path, settings_path)
-	h.check(reread.of("throttle_up") == ["W"], "with the imported value in it")
+	h.check(reread.of("bodies_toggle") == ["W"], "with the imported value in it")
 	h.check(reread.problems.is_empty(), "and no problem re-reported, because nothing is re-imported")
 	_clean()
 
@@ -304,36 +302,36 @@ func _test_the_runtime(h) -> void:
 	var runtime = InputMapScript.new(store)
 
 	# --- an edge fires once, on the press
-	var press := _key_event("Equal", true, false, false, false)
-	h.check(runtime.triggered(press, "throttle_up"), "a chord matches its action")
-	h.check(not runtime.triggered(press, "throttle_down"), "and not another one")
-	var release := _key_event("Equal", true, false, false, false)
+	var press := _key_event("P")
+	h.check(runtime.triggered(press, "bodies_toggle"), "a chord matches its action")
+	h.check(not runtime.triggered(press, "cycle_target"), "and not another one")
+	var release := _key_event("P")
 	release.pressed = false
-	h.check(not runtime.triggered(release, "throttle_up"), "a release is not a trigger")
+	h.check(not runtime.triggered(release, "bodies_toggle"), "a release is not a trigger")
 
 	# --- held state is tracked from what it has been fed
-	h.check(not runtime.held("throttle_up"), "nothing is held to begin with")
+	h.check(not runtime.held("bodies_toggle"), "nothing is held to begin with")
 	runtime.feed(press)
-	h.check(runtime.held("throttle_up"), "a press holds the action")
-	h.check(not runtime.held("throttle_down"), "and only that action")
+	h.check(runtime.held("bodies_toggle"), "a press holds the action")
+	h.check(not runtime.held("cycle_target"), "and only that action")
 	runtime.feed(release)
-	h.check(not runtime.held("throttle_up"), "a release lets it go")
+	h.check(not runtime.held("bodies_toggle"), "a release lets it go")
 
 	# Two bindings on one action are independent sources: letting one go does not release the other.
-	store.stage("roll_left", ["BracketLeft", "Q"])
-	runtime.feed(_key_event("BracketLeft"))
+	store.stage("cycle_target", ["T", "Q"])
+	runtime.feed(_key_event("T"))
 	runtime.feed(_key_event("Q"))
-	h.check(runtime.held("roll_left"), "either of two bindings holds the action")
+	h.check(runtime.held("cycle_target"), "either of two bindings holds the action")
 	runtime.feed(_released(_key_event("Q")))
-	h.check(runtime.held("roll_left"), "and releasing one leaves the other held")
-	runtime.feed(_released(_key_event("BracketLeft")))
-	h.check(not runtime.held("roll_left"), "releasing both lets it go")
+	h.check(runtime.held("cycle_target"), "and releasing one leaves the other held")
+	runtime.feed(_released(_key_event("T")))
+	h.check(not runtime.held("cycle_target"), "releasing both lets it go")
 
 	# **A screen that swallows a release must not leave a key held for ever.**
-	runtime.feed(_key_event("BracketLeft"))
-	h.check(runtime.held("roll_left"), "held again")
+	runtime.feed(_key_event("T"))
+	h.check(runtime.held("cycle_target"), "held again")
 	runtime.release_all()
-	h.check(not runtime.held("roll_left"), "and release_all forgets everything")
+	h.check(not runtime.held("cycle_target"), "and release_all forgets everything")
 
 	# --- the floor is a button, and it can be fed like a key
 	var floor_binding := InputEventMouseButton.new()
@@ -345,7 +343,7 @@ func _test_the_runtime(h) -> void:
 	h.check(runtime.held("cycle_target"), "and holds it like a key")
 
 	# --- the hint text, which the HUD prints
-	h.check(runtime.hint("throttle_up") == "Shift+Equal", "the hint is the action's binding text")
+	h.check(runtime.hint("bodies_toggle") == "P", "the hint is the action's binding text")
 	h.check(runtime.hint("no_such_action").is_empty(), "and empty for an action that does not exist")
 	store.stage("bodies_toggle", ["Mouse:Middle", "P"])
 	h.check(runtime.hint("bodies_toggle") == "P", "a keyboard binding is preferred for a hint")
@@ -555,7 +553,6 @@ func _test_degrees_of_freedom(h) -> void:
 	h.check(is_zero_approx(controls.value("throttle")), "and it does not repeat on the next frame")
 
 	# --- **the pointer is an angle, and it is signed by the DOF's own axis**
-	controls.claim_pointer("yaw")
 	store.stage_control("yaw", {"mouse_movement": "glide"})
 	controls.pointer_sensitivity = 0.01
 	controls.feed_motion(Vector2(10.0, 0.0))
@@ -570,7 +567,6 @@ func _test_degrees_of_freedom(h) -> void:
 	# --- **invert is per line**, and only a continuous one has it
 	store.stage_control("yaw", {"mouse_movement": "glide", "mouse_invert": true})
 	var inverted := Controls.new(store)
-	inverted.claim_pointer("yaw")
 	inverted.pointer_sensitivity = 0.01
 	inverted.feed_motion(Vector2(10.0, 0.0))
 	inverted.step(0.1)
