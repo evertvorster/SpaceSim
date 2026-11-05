@@ -221,6 +221,7 @@ func _flight_slots(dof: String, kind: String) -> HBoxContainer:
 		field.text_changed.connect(func(_t: String) -> void: _stage_flight(dof))
 		row.add_child(field)
 		_flight_controls.append([dof, "%s_%s" % [kind, slot], field])
+		row.add_child(_flight_detect(dof, "%s_%s" % [kind, slot]))
 	return row
 
 
@@ -276,6 +277,7 @@ func _flight_axis(dof: String) -> HBoxContainer:
 	invert.toggled.connect(func(_on: bool) -> void: _stage_flight(dof))
 	row.add_child(invert)
 	_flight_controls.append([dof, "joystick_invert", invert])
+	row.add_child(_flight_detect(dof, "joystick"))
 	return row
 
 
@@ -307,6 +309,17 @@ func _flight_movement(dof: String) -> HBoxContainer:
 	row.add_child(invert)
 	_flight_controls.append([dof, "mouse_invert", invert])
 	return row
+
+
+## **Detect on a flight line**, because a control's name is not something a player should know. The same
+## dialog the action rows use, with a square for the mouse.
+func _flight_detect(dof: String, line: String) -> Button:
+	var button := Button.new()
+	button.name = "Detect_%s" % line
+	button.text = "Detect"
+	button.tooltip_text = "Listen for the control to bind to this line."
+	button.pressed.connect(func() -> void: _start_detect_flight(dof, line))
+	return button
 
 
 ## One DOF's lines as they stand: the shipped assignment, overlaid with the store's.
@@ -1291,6 +1304,23 @@ func flush_capture() -> void:
 	feed_capture(event)
 
 
+## Start listening for a **flight line** rather than an action row.
+func _start_detect_flight(dof: String, line: String) -> void:
+	_detect = {"kind": "flight", "dof": dof, "line": line}
+	_detected = ""
+	_detect_previous.clear()
+	for device in Devices.connected():
+		_detect_previous[int(device)] = _axis_readings(int(device))
+	_ask_detect(
+		"Detect for %s — %s" % [Controls.REGISTRY[dof]["label"], line.replace("_", " ")],
+		(
+			"Press a key or a button, or move a gamepad axis.\n\n"
+			+ "The device is taken away from the game and its menus while this is open."
+		),
+		["Cancel"]
+	)
+
+
 ## Whether a detection is in progress: `main.gd` forwards events here and marks them handled while it is.
 func is_detecting() -> bool:
 	return not _detect.is_empty()
@@ -1359,6 +1389,9 @@ func _on_detected(text: String) -> void:
 	if _detect.is_empty():
 		return
 	_detected = text
+	if String(_detect.get("kind", "row")) == "flight":
+		_on_detected_flight(text)
+		return
 	var action := String(_detect["action"])
 	var conflicts := _conflicts_with(text, action)
 	if conflicts.is_empty():
@@ -1382,6 +1415,36 @@ func _on_detected(text: String) -> void:
 	)
 
 
+## A flight line takes a control of the right **kind**: an axis on the joystick line, a discrete one
+## anywhere else. **No conflict check**: a source may legitimately do two things — the same key can roll the
+## ship and set a view — so there is nothing to warn about.
+func _on_detected_flight(text: String) -> void:
+	var line := String(_detect["line"])
+	var parsed := Binding.parse(text)
+	var is_axis: bool = parsed.has("axis")
+	if line == "joystick" and not is_axis:
+		_ask_detect(
+			"Not an axis",
+			"%s is a button, not an axis. Move the stick for this line, or Detect again." % text,
+			["Detect again", "Cancel"]
+		)
+		return
+	if line != "joystick" and is_axis:
+		_ask_detect(
+			"Not a button",
+			"%s is an axis. An axis belongs on the joystick line, which has an invert for it." % text,
+			["Detect again", "Cancel"]
+		)
+		return
+	_ask_detect(
+		"Detected",
+		"%s\n\nBind it to %s's %s?" % [
+			text, Controls.REGISTRY[String(_detect["dof"])]["label"], line.replace("_", " ")
+		],
+		["Bind", "Detect again", "Cancel"]
+	)
+
+
 ## Every action, other than the one being bound, that already holds this exact binding.
 func _conflicts_with(text: String, except_action: String) -> Array:
 	var found: Array = []
@@ -1399,6 +1462,10 @@ func _apply_detected(remove_from: bool) -> void:
 	Debug.say("bindings: apply_detected(%s) detect=%s detected='%s'" % [remove_from, str(_detect), _detected])
 	if _detect.is_empty() or _detected.is_empty():
 		Debug.say("bindings: nothing to apply, bail")
+		return
+	# **A flight line is not an action row**: route it before anything reads `action`.
+	if String(_detect.get("kind", "row")) == "flight":
+		_apply_detected_flight()
 		return
 	var action := String(_detect["action"])
 	var index := int(_detect["index"])
@@ -1422,6 +1489,29 @@ func _apply_detected(remove_from: bool) -> void:
 	_finish_detect()
 
 
+## Put the caught control on its line, then stage the DOF.
+func _apply_detected_flight() -> void:
+	if _detected.is_empty():
+		return
+	var dof := String(_detect["dof"])
+	var line := String(_detect["line"])
+	for entry in _flight_controls:
+		if String(entry[0]) != dof or String(entry[1]) != line:
+			continue
+		var control: Control = entry[2]
+		if control is LineEdit:
+			(control as LineEdit).text = _detected
+		elif control is OptionButton:
+			var picker: OptionButton = control
+			picker.add_item(_detected, picker.item_count)
+			picker.set_item_metadata(picker.item_count - 1, _detected)
+			picker.select(picker.item_count - 1)
+			picker.set_meta("chosen", _detected)
+		_stage_flight(dof)
+		break
+	_finish_detect()
+
+
 func _finish_detect() -> void:
 	_detect = {}
 	_detected = ""
@@ -1440,7 +1530,10 @@ func _handle_detect_answer(answer: String) -> void:
 	if answer.begins_with("Cancel"):
 		_finish_detect()
 	elif answer.begins_with("Detect again"):
-		_start_detect(String(_detect["action"]), int(_detect["index"]))
+		if String(_detect.get("kind", "row")) == "flight":
+			_start_detect_flight(String(_detect["dof"]), String(_detect["line"]))
+		else:
+			_start_detect(String(_detect["action"]), int(_detect["index"]))
 	elif answer.begins_with("Take it from"):
 		_apply_detected(true)
 	else:

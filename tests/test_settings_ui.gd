@@ -441,6 +441,29 @@ func _test_the_flight_tab(h, root: Node) -> void:
 		"and toggling it stages the line"
 	)
 
+	# --- **Detect on a flight line**: a key for a discrete slot, an axis for the joystick line
+	panel._start_detect_flight("roll", "keyboard_increase")
+	h.check(panel.is_detecting(), "a flight line can be detected")
+	var press := InputEventKey.new()
+	press.physical_keycode = KEY_K
+	press.pressed = true
+	panel.feed_capture(press)
+	h.check(panel._detected == "K", "the key is caught (%s)" % panel._detected)
+	panel._dialog.answered.emit("Bind")
+	h.check(
+		String(store.control("roll").get("keyboard_increase", "")) == "K",
+		"and staged on that line (%s)" % str(store.control("roll").get("keyboard_increase", ""))
+	)
+	# **An axis belongs on the joystick line**, and is refused elsewhere rather than silently accepted.
+	panel._start_detect_flight("roll", "keyboard_decrease")
+	panel._on_detected("Joy:Some Pad/Axis:LEFT_X")
+	h.check(
+		panel._dialog.title_label.text == "Not a button",
+		"an axis on a key slot is refused (%s)" % panel._dialog.title_label.text
+	)
+	panel._dialog.answered.emit("Cancel")
+	h.check(not panel.is_detecting(), "and cancelling ends it")
+
 	layer.free()
 
 

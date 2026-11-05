@@ -1024,6 +1024,10 @@ has **Add**.
 - **Add** opens another row for that action; **Remove** deletes that binding, and on the last row it
   **clears the binding rather than the row** — an action always needs somewhere to be bound. An empty row
   is not a binding: Apply writes nothing for it.
+- **Detect** listens, **on the flight lines as well as the action rows** — a key for a discrete slot, an
+  axis for the joystick line, and each line refuses the other kind rather than silently accepting it (`Not
+  an axis` / `Not a button`). A flight line has **no conflict check**: one source may legitimately do two
+  things, and the same key can roll the ship and set a view.
 - **Detect** listens. **Keys and pad buttons arrive as events** — `main.gd` forwards them while
   `is_detecting()` and marks them handled — and **axes are polled** with `SpacesimDevices.most_moved`: the
   biggest change since the last look, outside that axis's own deadband, and only while no button is
