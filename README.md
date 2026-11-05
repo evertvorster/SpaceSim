@@ -3,8 +3,50 @@
 **SpaceSim is a game engine** built on [Godot](https://godotengine.org) — rendering, physics, the
 simulation framework, persistence, coordinate spaces and a modding platform.
 
+**Every planet in it is derived from its chemistry, and so is the picture of it.** No body here is a
+texture, a hand-picked colour or a height map drawn in an editor: a system file states what a body is
+*made of*, and its mass, its air, its temperature, its clouds, its colour and its terrain all come out of
+that.
+
 **Cladogenesis** is a story/world built on it (not yet a repo). SpaceSim uses **no vegastrike
 assets** and is not a vegastrike port; that codebase is only a reference for what to avoid.
+
+## Everything is derived
+
+**A body is what it is made of.** A system file gives composition — how much iron, how much water, how much
+ammonia, how much of it is rock — and an orbit. Everything else is arithmetic on that, including everything
+you can see:
+
+```
+composition            →   mass and radius, at the density it implies
+mass and the star's lux →   surface gravity, and the air it can hold
+the air and the star    →   temperature, and the greenhouse that air implies
+temperature and pressure→   which volatiles condense, and at what altitude
+the minerals and ices   →   albedo and colour
+all of the above        →   what the shader draws
+```
+
+**Nothing in that column is authored on the right.** A cloud's base is not a number someone chose: it is
+the altitude where the air reaches the condensation point of something it carries — which is why Earth's
+water sits at 1.4 km and its ice at 7.7 km, at the tropopause where rising air stops and what it carried
+freezes out. It is why Venus has clouds at 52 km made of **sulphuric acid rather than water**: the model
+puts the condensate at the right level, and the atmosphere has the wrong molecule in it. It is why Jupiter
+bands twice — cream and brown circulation cells, and a broad white veil above them whose opacity varies
+across a latitude envelope — while a body with no surface gets an opaque interior floor at the depth the
+model stops claiming to know its air.
+
+**The surface is the same discipline**, one level down: plates standing and sagging, a region term slower
+than a plate so one continent stands higher than another, mountain belts where plates meet, and every
+octave weighted by what the pixel can resolve. The coast is a level set of the height, not a line drawn
+anywhere.
+
+**Sol is the falsifier, not the target.** The model is *plausible, not exact*, and derived from composition
+rather than fitted to the solar system: when a body comes out wrong the derivation is wrong, and a body
+that comes out right for the right reason is the evidence. Values are computed once when the system loads
+and then held, so a number that can change while playing is an exception that has to justify itself.
+
+**Every number the engine invents says so.** A constant that is neither derived nor measured is marked
+`A GUESS:` in the code with what would settle it, and the register is `grep -rn "A GUESS:" addons/`.
 
 ## Status
 
@@ -48,9 +90,6 @@ layer whose opacity varies over a broad latitude envelope, because Jupiter bands
 bands are the circulation cells and the broad white zones span several of them. A body with **no surface** draws
 an opaque interior floor at the depth the model stops claiming to know the troposphere, so a gap between two decks
 shows darkness and never stars.
-
-**Every number the engine invents says so.** A constant that is neither derived nor measured is marked
-`A GUESS:` in the code with what would settle it, and the register is `grep -rn "A GUESS:" addons/`.
 
 **What a stack still wants, now that the decks themselves are done**: the air as **one band per stack level**
 rather than one per body, and a fog that reads **the deck the eye is inside** instead of the top one. Neither is
