@@ -18,6 +18,7 @@ func run(h, root: Node) -> void:
 	print("  the window")
 	Fixture.clean()
 	_test_mode_names(h)
+	_test_frame_rates(h)
 	_test_aspect_names(h)
 	_test_the_render_scale(h)
 	_test_a_screen_that_is_gone(h)
@@ -207,6 +208,22 @@ static func _menu_buttons(node: Node, into: Array) -> Array:
 	for child in node.get_children():
 		_menu_buttons(child, into)
 	return into
+
+
+## **A frame rate is a fraction of the panel, not a number in a file**, which is the only form that survives
+## being moved to a different monitor — and the cap can only lower what vsync sets.
+func _test_frame_rates(h) -> void:
+	for pair in [["unlimited", 240.0, 0], ["screen", 240.0, 240], ["1/2 screen", 240.0, 120],
+			["1/4 screen", 240.0, 60], ["1/8 screen", 240.0, 30], ["1/3 screen", 144.0, 48],
+			["1/2 screen", 60.0, 30], ["60", 240.0, 60], ["240", 60.0, 240]]:
+		var got := Display.fps_for(String(pair[0]), float(pair[1]))
+		h.check(
+			got == int(pair[2]),
+			"%s of %d Hz is %d fps (%d)" % [pair[0], int(pair[1]), int(pair[2]), got]
+		)
+	# **A display server that will not say is 60**, not zero: a fraction of zero is a stopped game.
+	h.check(Display.fps_for("1/2 screen", 0.0) == 30, "an unknown refresh falls back to 60 Hz")
+	h.check(Display.fps_for("nonsense", 240.0) == 0, "and an unreadable choice is no cap, not a stop")
 
 
 ## The whole point of three settings rather than one: they are not each other.

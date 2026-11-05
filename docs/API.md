@@ -1080,6 +1080,16 @@ never writes to the real file.
 
 ### `SpacesimDisplay` — `Node`, registered as the `SpacesimDisplay` autoload, after `SpacesimSettings`
 
+**Two frame-rate settings, applied together**: `video.vsync` (`enabled`, `disabled`, `adaptive`,
+`mailbox`) and `video.max_fps` — a choice of `unlimited`, `screen`, a **fraction of the screen's own
+refresh** (`1/2`, `1/3`, `1/4`, `1/6`, `1/8`) or a fixed rate (`30`, `60`, `120`, `144`, `240`).
+`Display.fps_for(choice, rate)` is the pure part: **a fraction is the only form that survives a change of
+monitor** — half of 240 is 120 today and 30 on a 60 Hz laptop, and both are right. Vsync sets the ceiling
+and the cap can only lower it.
+
+**A display server that will not say its refresh rate answers 0**, and `fps_for` treats that as **60 Hz**
+rather than as a fraction of zero, which would be a stopped game.
+
 **Three sizes, and they are three different things.** Confusing them is the usual way this goes
 wrong:
 

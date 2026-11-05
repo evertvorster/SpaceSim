@@ -38,6 +38,8 @@ const SETTING_ASPECT := "video.aspect"
 const SETTING_CANVAS := "video.canvas_resolution"
 const SETTING_RENDER := "video.render_resolution"
 const SETTING_WINDOW := "video.window_size"
+const SETTING_VSYNC := "video.vsync"
+const SETTING_MAX_FPS := "video.max_fps"
 
 ## Godot clamps `scaling_3d_scale` to this, so the arithmetic is held to the same range rather than
 ## being silently clamped by the engine.
@@ -106,7 +108,63 @@ func apply() -> void:
 		var size: Vector2i = _settings.get_value(SETTING_WINDOW)
 		window.size = size
 	_apply_scaling()
+	_apply_frame_rate()
 	_applying = false
+
+
+## **When a frame is shown, and how many of them there are.**
+##
+## The two are one decision, which is why they are applied together: **vsync sets the ceiling and the frame
+## cap can only lower it**. A cap above the refresh does nothing while vsync is on, and a cap *at* the
+## refresh is the same as no cap. The fractions exist because a fraction of a panel's own rate is the only
+## form that survives a change of monitor — "half of 240" is 120 today and 30 on a 60 Hz laptop, and both are
+## the right answer.
+func _apply_frame_rate() -> void:
+	match String(_settings.get_value(SETTING_VSYNC)):
+		"disabled":
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		"adaptive":
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ADAPTIVE)
+		"mailbox":
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_MAILBOX)
+		_:
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED)
+	Engine.max_fps = fps_for(String(_settings.get_value(SETTING_MAX_FPS)), screen_rate())
+
+
+## The refresh rate of the screen the window is on, or **60 when the display server will not say** — a
+## virtual display and a headless run both answer 0, and a fraction of 0 is a stopped game.
+func screen_rate() -> float:
+	var window := get_window()
+	if window == null:
+		return 60.0
+	var rate := DisplayServer.screen_get_refresh_rate(DisplayServer.window_get_current_screen())
+	return rate if rate > 0.0 else 60.0
+
+
+## A stored choice, as a cap in frames per second. **0 means no cap**, which is what Godot's own
+## `Engine.max_fps` uses for unlimited.
+static func fps_for(choice: String, rate: float) -> int:
+	var base := rate if rate > 0.0 else 60.0
+	match choice:
+		"unlimited":
+			return 0
+		"screen":
+			return roundi(base)
+		"1/2 screen":
+			return roundi(base / 2.0)
+		"1/3 screen":
+			return roundi(base / 3.0)
+		"1/4 screen":
+			return roundi(base / 4.0)
+		"1/6 screen":
+			return roundi(base / 6.0)
+		"1/8 screen":
+			return roundi(base / 8.0)
+	if choice.is_valid_int():
+		return maxi(choice.to_int(), 0)
+	# An unreadable choice is no cap rather than a stopped game.
+	return 0
 
 
 ## The screen to open on, which is **not** simply the stored number: a stored number outlives the

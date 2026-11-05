@@ -56,6 +56,24 @@ const REGISTRY := {
 		"tab": "display",
 		"choices": ["windowed", "fullscreen", "exclusive"],
 	},
+	# **The two frame-rate controls, as words rather than numbers.** A rate is either a fraction of the
+	# screen's own refresh -- which is the only way "half of my 240 Hz panel" survives a move to a 60 Hz
+	# one -- or a fixed number for the machines where a fixed number is what you want.
+	"video.vsync": {
+		"default": "enabled",
+		"scope": Scope.PLAYER,
+		"choices": ["enabled", "disabled", "adaptive", "mailbox"],
+		"tab": "display",
+	},
+	"video.max_fps": {
+		"default": "unlimited",
+		"scope": Scope.PLAYER,
+		"choices": [
+			"unlimited", "screen", "1/2 screen", "1/3 screen", "1/4 screen", "1/6 screen",
+			"1/8 screen", "30", "60", "120", "144", "240",
+		],
+		"tab": "display",
+	},
 	"video.aspect": {"default": "expand", "scope": Scope.PLAYER, "choices": ["expand", "keep"],
 		"tab": "display"},
 	# The list of screens is the machine's, not ours, so the row names a builder rather than a list.

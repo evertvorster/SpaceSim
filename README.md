@@ -172,6 +172,10 @@ there without a rebuild.
 
 ## Settings
 
+**Frame rate**: `vsync` (enabled, disabled, adaptive, mailbox) and a cap that is either a fixed rate or a
+**fraction of the panel's own refresh** — half of a 240 Hz laptop is 120, and the same setting on a 60 Hz
+screen is 30. Both are choices on the settings screen's **Display** tab.
+
 Defaults live in code (the registry in `addons/spacesim/settings/settings.gd`); the player's file
 holds only what differs from them, so a default that improves reaches anyone who never changed it.
 It is machine read and written:

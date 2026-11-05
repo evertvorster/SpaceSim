@@ -177,7 +177,8 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	var trouble: Array = pages["Troubleshooting"]
 	var hud: Array = pages["HUD"]
 
-	h.check(display.size() == 6, "Display holds the six window settings (%d)" % display.size())
+	h.check(display.size() == 8, "Display holds the six window settings and the two frame-rate ones (%d)"
+		% display.size())
 	h.check(
 		display.all(func(key: String) -> bool: return key.begins_with("video.")),
 		"and they are the video ones (%s)" % str(display)
@@ -217,8 +218,8 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
 	)
 	h.check(
-		Edit.editable_keys().size() == 35,
-		"there are thirty-five settings, the sixteen bindings having left (%d)"
+		Edit.editable_keys().size() == 37,
+		"there are thirty-seven settings, the sixteen bindings having left (%d)"
 			% Edit.editable_keys().size()
 	)
 
