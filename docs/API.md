@@ -1235,6 +1235,13 @@ knowing an enumeration, and so the capture dialog has one place to read a contro
 | `most_moved(device, previous, profile_of) -> [axis, change]` | **the axis being moved**, or `-1`: the biggest change since the last look, only if it is `MOVED_ENOUGH` and outside the axis's own deadband |
 | `MOVED_ENOUGH` | 0.15 — a threshold on the **change between looks**, not a deadband, so a slow drift is not an intention and a flick is |
 
+**What else the pad has, and what we do not use**: `has_joy_vibration` is true for a Switch Pro on this
+machine and `start_joy_vibration(device, weak, strong, duration)` drives it — unused so far. The motion
+sensors (`get_joy_gyroscope`, `get_joy_accelerometer`, `get_joy_gravity`, plus their calibration calls) are
+**off unless five `input_devices/sensors/*` project settings are enabled**, and that is a shared-file
+decision, not a detail; magnetometer and device-orientation have settings but no getter. Lights
+(`set_joy_light`) and touchpads (`get_joy_num_touchpads`, experimental) exist and are not wanted yet.
+
 **Whether the engine knows a device is the fact that changes what its numbers mean**: a recognised pad
 reports named controls in `[-1, 1]`, an unknown one reports raw indices. The screen prints that
 distinction beside the device's name.
