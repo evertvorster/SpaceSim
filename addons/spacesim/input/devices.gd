@@ -29,6 +29,11 @@ const BUTTON_NAMES := [
 	"MISC1", "PADDLE1", "PADDLE2", "PADDLE3", "PADDLE4", "TOUCHPAD",
 ]
 
+## **How many buttons Godot accepts at all** — `JoyButton::MAX`, not the length of our name table. A device
+## may report anything up to this, and a control we have no name for is still a control the player can
+## press; refusing it is what made a stick's own directions unbindable.
+const MAX_BUTTONS := 128
+
 ## How far from the centre an axis has to be before it is worth colouring, so a worn stick that rests
 ## at 0.02 does not look deflected. This is a *display* threshold, not a binding's deadband.
 const SHOWN_AS_MOVED := 0.1
@@ -83,21 +88,41 @@ static func axis_index(named: String) -> int:
 	return AXIS_NAMES.find(named)
 
 
-## The index of a button, by Godot's own name — `A` → 0. −1 when the name is not one.
+## A button's name, or a plain number for one we have no name for. **Never empty**: it is the label a
+## screen shows and the text a binding stores.
+static func button_name(index: int) -> String:
+	if index >= 0 and index < BUTTON_NAMES.size():
+		return String(BUTTON_NAMES[index])
+	return str(index)
+
+
+## Whether an index is a button Godot would accept at all.
+static func is_button(index: int) -> bool:
+	return index >= 0 and index < MAX_BUTTONS
+
+
+## The index of a button, by Godot's own name — `A` → 0 — **or by its number** for one with no name.
+## −1 when it is neither.
 static func button_index(named: String) -> int:
-	return BUTTON_NAMES.find(named)
+	var found := BUTTON_NAMES.find(named)
+	if found >= 0:
+		return found
+	if named.is_valid_int() and is_button(named.to_int()):
+		return named.to_int()
+	return -1
 
 
 static func axis(device: int, index: int) -> float:
 	return Input.get_joy_axis(device, index)
 
 
-## The buttons held down right now, by name.
+## The buttons held down right now, by name — **every button the engine accepts**, so one we have no name
+## for is reported by its number rather than going unnoticed.
 static func pressed(device: int) -> Array:
 	var down: Array = []
-	for index in BUTTON_NAMES.size():
+	for index in MAX_BUTTONS:
 		if Input.is_joy_button_pressed(device, index):
-			down.append(BUTTON_NAMES[index])
+			down.append(button_name(index))
 	return down
 
 

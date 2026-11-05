@@ -450,10 +450,11 @@ func _build_devices(column: VBoxContainer) -> void:
 		button_grid.add_theme_constant_override("h_separation", 10)
 		button_grid.add_theme_constant_override("v_separation", 2)
 		box.add_child(button_grid)
-		for index in Devices.BUTTON_NAMES.size():
+		# **Every button the engine accepts**, so one with no name still shows up as its number.
+		for index in Devices.MAX_BUTTONS:
 			var button_label := Label.new()
 			button_label.name = "Button%d" % index
-			button_label.text = Devices.BUTTON_NAMES[index]
+			button_label.text = Devices.button_name(index)
 			button_label.add_theme_font_size_override("font_size", 12)
 			button_label.custom_minimum_size = Vector2(84.0, 0.0)
 			button_grid.add_child(button_label)

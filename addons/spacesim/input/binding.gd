@@ -146,7 +146,7 @@ static func to_text(binding: Dictionary) -> String:
 		var pad := String(binding.get("pad", ""))
 		if binding.has("button"):
 			parts.append("%s%s/Button:%s" % [
-				JOYPAD_PREFIX, pad, Devices.BUTTON_NAMES[int(binding["button"])]
+				JOYPAD_PREFIX, pad, Devices.button_name(int(binding["button"]))
 			])
 		else:
 			parts.append("%s%s/Axis:%s" % [
@@ -174,10 +174,12 @@ static func from_event(event: InputEvent) -> String:
 		})
 	if event is InputEventJoypadButton:
 		var pad: InputEventJoypadButton = event
-		if pad.button_index < 0 or pad.button_index >= Devices.BUTTON_NAMES.size():
+		# **Any button the engine accepts**, named or not: a device's own extra buttons are controls the
+		# player should be able to bind, and refusing an index we have no name for made them invisible.
+		if not Devices.is_button(pad.button_index):
 			return ""
 		return "%s%s/Button:%s" % [
-			JOYPAD_PREFIX, Devices.name_of(pad.device), Devices.BUTTON_NAMES[pad.button_index]
+			JOYPAD_PREFIX, Devices.name_of(pad.device), Devices.button_name(pad.button_index)
 		]
 	if event is InputEventMouseButton:
 		var mouse: InputEventMouseButton = event

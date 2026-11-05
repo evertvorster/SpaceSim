@@ -186,6 +186,30 @@ func _test_what_is_not_a_binding(h) -> void:
 	)
 	h.check(Binding.parse("Joy:/Button:A").is_empty(), "nor a binding with no device")
 
+	# **A button with no name is still a button.** Godot accepts indices up to 128 and a device may report
+	# more than our table has names for — refusing those made a stick's own directions unbindable.
+	var numbered := Binding.parse("Joy:PS4 Controller/Button:23")
+	h.check(
+		int(numbered.get("button", -1)) == 23,
+		"a button given by its number parses (%s)" % str(numbered)
+	)
+	h.check(
+		Binding.to_text(numbered) == "Joy:PS4 Controller/Button:23",
+		"and round-trips as that number"
+	)
+	h.check(
+		not Binding.parse("Joy:PS4 Controller/Button:200").is_empty() == false,
+		"but an index past what the engine accepts is not a binding"
+	)
+	var odd := InputEventJoypadButton.new()
+	odd.device = 0
+	odd.button_index = 23
+	odd.pressed = true
+	h.check(
+		Binding.from_event(odd) == "Joy:%s/Button:23" % Devices.name_of(0),
+		"and an event for one converts to a binding (%s)" % Binding.from_event(odd)
+	)
+
 	h.check(Devices.axis_index("LEFT_X") == 0 and Devices.axis_index("nope") == -1, "axis names resolve")
 	h.check(Devices.button_index("A") == 0 and Devices.button_index("nope") == -1, "button names resolve")
 
