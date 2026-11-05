@@ -71,12 +71,13 @@ func feed(event: InputEvent) -> bool:
 
 
 ## Whether this event is this action's, as a press. **Edges only**: a release is not a press, and a key
-## repeating while held is not another press.
-func triggered(event: InputEvent, action: String) -> bool:
+## repeating while held is not another press. `holds` is the set of held non-key modifiers — a mouse button
+## used as a chord — which the caller owns because it is tracking events anyway.
+func triggered(event: InputEvent, action: String, holds := {}) -> bool:
 	if not event.is_pressed():
 		return false
 	for text in store.of(action):
-		if Binding.matches(event, String(text)):
+		if Binding.matches(event, String(text), holds):
 			return true
 	return false
 

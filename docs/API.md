@@ -1191,6 +1191,15 @@ optional modifier prefixes on either.
 | `keycode_of(text) -> int`, `button_of(text) -> int` | for asking whether it is held |
 | `matches(event, text) -> bool` | exact on the whole chord, by **physical** keycode |
 
+**A modifier need not be a key.** A held **mouse button** goes where the key modifiers go —
+`Mouse:Right+Joy:PS4/Axis:LEFT_X` — because a mouse button is discrete and can be a chord like Shift. It is
+what makes "hold the right button and the stick means throttle" expressible, and it is why `matches()`
+takes the set of held modifiers: the caller is tracking events anyway.
+
+**An axis under a chord waits for the stick to come back to centre.** A chord changes what a position
+*means*, so the new meaning applies only once the axis is inside its deadband — without that rule, holding
+the stick over and tapping the modifier hands the ship full deflection in one frame.
+
 **A pad's control names are Godot's own** — `Joy:<device name>/Button:A`, `Joy:<device name>/Axis:LEFT_X`
 — because the engine exposes no name-to-index helper, so `SpacesimDevices`' tables are the only vocabulary
 there is. The device part is the device's **name**, which is what the store keys its sections by, and the

@@ -101,6 +101,11 @@ var pointer_sensitivity := 0.0015
 
 ## Bang sources that are down, as `"<dof>|<slot>|<text>"`.
 var _down := {}
+## **Non-key modifiers that are down**, by their binding text — `Mouse:Right` and friends. A mouse button is
+## discrete, so it can gate an axis exactly as Shift does.
+var _holds := {}
+## DOFs whose modified axis is waiting to be **returned to centre** before the modification applies.
+var _blocked := {}
 ## Wheel notches accumulated since the last step, per DOF.
 var _notches := {}
 ## The pointer's movement since the last step, in pixels.
@@ -127,6 +132,7 @@ func _init(p_store: SpacesimBindingsStore) -> void:
 ## **Take one event**: a key or mouse button down/up, or a wheel notch. Called for every event before
 ## anything is matched, because a release is what clears a held source.
 func feed(event: InputEvent) -> void:
+	_track_holds(event)
 	for dof in DOFS:
 		var row := _row(dof)
 		for slot in ["decrease", "increase"]:
@@ -143,6 +149,28 @@ func feed(event: InputEvent) -> void:
 					_notches[dof] = float(_notches.get(dof, 0.0)) + _sign(slot)
 				else:
 					_down[key] = true
+
+
+## Track the modifiers that are mouse buttons. **A key modifier needs no tracking**: an event carries its
+## own `shift_pressed` and the system refuses to fake one.
+func _track_holds(event: InputEvent) -> void:
+	var mouse := event as InputEventMouseButton
+	if mouse == null:
+		return
+	for named in Binding.MOUSE_BUTTONS:
+		if int(Binding.MOUSE_BUTTONS[named]) != mouse.button_index:
+			continue
+		var text := Binding.MOUSE_PREFIX + String(named)
+		if mouse.pressed:
+			_holds[text] = true
+		else:
+			_holds.erase(text)
+		return
+
+
+## The modifiers down right now, for anything that has to know what a binding's chord is.
+func holds() -> Dictionary:
+	return _holds.duplicate()
 
 
 ## The pointer's movement since the last call, in pixels.
@@ -210,6 +238,26 @@ func _axis(dof: String, row: Dictionary) -> float:
 	var shaped: float = store.axis_profile(pad, axis_name).shape(
 		Devices.axis(device, int(binding["axis"]))
 	)
+
+	# **A chord changes what the axis means, and an axis is a position** — so the new meaning waits until
+	# the stick is back inside its deadband. Without this, holding the stick over and tapping the modifier
+	# hands the ship full deflection in one frame.
+	var chord: Array = binding.get("holds", [])
+	var ready := true
+	for held in chord:
+		if not _holds.has(String(held)):
+			ready = false
+			break
+	if not ready:
+		if not is_zero_approx(shaped):
+			_blocked[dof] = true
+		return 0.0
+	if bool(_blocked.get(dof, false)):
+		if is_zero_approx(shaped):
+			_blocked[dof] = false
+		else:
+			return 0.0
+
 	return -shaped if bool(row.get("joystick_invert", false)) else shaped
 
 

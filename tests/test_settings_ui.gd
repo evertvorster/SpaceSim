@@ -519,8 +519,8 @@ func _test_the_devices_tab(h, root: Node) -> void:
 	)
 	var buttons: Array = panel.get("_button_labels")
 	h.check(
-		buttons.size() == pads.size() * Devices.BUTTON_NAMES.size(),
-		"and every button laid out, per device (%d for %d device(s))"
+		buttons.size() == pads.size() * Devices.MAX_BUTTONS,
+		"and every button the engine accepts is laid out, per device (%d for %d device(s))"
 			% [buttons.size(), pads.size()]
 	)
 

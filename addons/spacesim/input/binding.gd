@@ -18,6 +18,13 @@ extends RefCounted
 ## vocabulary there is, and using them here makes a control that can be seen on the Devices tab one that
 ## can be written in a binding.
 ##
+## ## Modifiers that are not keys
+##
+## A modifier may also be a **held mouse button**, written where the key modifiers go:
+## `Mouse:Right+Joy:PS4/Axis:LEFT_X`. A mouse button is discrete, so it can be a chord exactly like Shift —
+## and it is what makes "hold the right button and the stick means throttle" expressible. The four key
+## modifiers stay words (`Alt`, `Ctrl`, `Shift`, `Meta`); a mouse button is its own binding text.
+##
 ## **An axis binding is `relative`**, which is the default and the safe one: a deflection is a rate, and an
 ## accidental absolute binding on a throttle would pin the engine. `absolute` is not accepted yet — it
 ## needs a `level` action and `step(dt)` behind it, and a suffix that is parsed but ignored would be a lie.
@@ -80,18 +87,30 @@ static func parse(text: String) -> Dictionary:
 	binding["ctrl"] = false
 	binding["shift"] = false
 	binding["meta"] = false
+	# **Modifiers that are not key modifiers**: a held mouse button, as its own binding text.
+	var holds: Array = []
 	for index in range(parts.size() - 1):
-		match parts[index].strip_edges().to_lower():
+		var part := parts[index].strip_edges()
+		match part.to_lower():
 			"alt":
 				binding["alt"] = true
+				continue
 			"ctrl", "control":
 				binding["ctrl"] = true
+				continue
 			"shift":
 				binding["shift"] = true
+				continue
 			"meta", "super", "cmd":
 				binding["meta"] = true
-			_:
-				return {}
+				continue
+		if not part.begins_with(MOUSE_PREFIX):
+			return {}
+		if not MOUSE_BUTTONS.has(part.substr(MOUSE_PREFIX.length())):
+			return {}
+		holds.append(part)
+	if not holds.is_empty():
+		binding["holds"] = holds
 	return binding
 
 
@@ -137,6 +156,8 @@ static func to_text(binding: Dictionary) -> String:
 	for name in MODIFIER_ORDER:
 		if bool(binding.get(name.to_lower(), false)):
 			parts.append(name)
+	for held in binding.get("holds", []):
+		parts.append(String(held))
 	if String(binding.get("device", "")) == "mouse":
 		for name in MOUSE_BUTTONS:
 			if int(MOUSE_BUTTONS[name]) == int(binding.get("button", -1)):
@@ -212,10 +233,15 @@ static func button_of(text: String) -> int:
 
 ## Whether this event is this binding. **Modifiers must match exactly**, so `W` does not fire while
 ## Alt is held — a binding is the whole chord, not a subset of one.
-static func matches(event: InputEvent, text: String) -> bool:
+## `holds` is the set of non-key modifiers down right now — a held mouse button, by its binding text.
+## **A binding whose holds are not all down is not this event**, which is what makes the chord a chord.
+static func matches(event: InputEvent, text: String, holds := {}) -> bool:
 	var binding := parse(text)
 	if binding.is_empty():
 		return false
+	for held in binding.get("holds", []):
+		if not holds.has(String(held)):
+			return false
 
 	if String(binding["device"]) == "joypad":
 		var pad_button := event as InputEventJoypadButton

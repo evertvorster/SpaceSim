@@ -25,6 +25,7 @@ func run(h, _root: Node) -> void:
 	_test_the_axis_profile(h)
 	_test_joypad_matching(h)
 	_test_degrees_of_freedom(h)
+	_test_a_mouse_button_modifier(h)
 
 
 ## **Every action declares the three things the screen and the runtime need**, and its defaults are
@@ -375,6 +376,33 @@ func _test_the_runtime(h) -> void:
 	h.check(
 		runtime.hint("bodies_toggle") == "Mouse:Middle",
 		"and the first binding is used when there is no keyboard one"
+	)
+	_clean()
+
+
+## **A chord that is not a key**: a held mouse button may modify an axis, and the axis waits for the stick
+## to come back to centre before the new meaning applies.
+func _test_a_mouse_button_modifier(h) -> void:
+	_clean()
+	var store := Store.new()
+	store.open(TEST_DIR.path_join("bindings.cfg"))
+	var chord := "Mouse:Right+Joy:PS4 Controller/Axis:LEFT_X"
+	h.check(Binding.is_valid(chord), "a mouse button can modify a pad axis (%s)" % chord)
+	h.check(
+		Binding.to_text(Binding.parse(chord)) == chord,
+		"and round-trips in that order (%s)" % Binding.to_text(Binding.parse(chord))
+	)
+	h.check(
+		Binding.is_valid("Mouse:Sideways+Joy:PS4 Controller/Axis:LEFT_X") == false,
+		"a mouse button that does not exist is not a modifier"
+	)
+	h.check(
+		Binding.matches(_key_event("W"), "Mouse:Right+W", {}) == false,
+		"a chord whose modifier is not down is not a match"
+	)
+	h.check(
+		Binding.matches(_key_event("W"), "Mouse:Right+W", {"Mouse:Right": true}),
+		"and one whose modifier is down, is"
 	)
 	_clean()
 

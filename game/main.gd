@@ -410,7 +410,7 @@ func _on_exit_requested() -> void:
 ## Whether this event is an action's edge. **One line, so the call sites read as actions** rather than as
 ## a chain of settings lookups.
 func _triggered(event: InputEvent, action: String) -> bool:
-	return _input_map.triggered(event, action)
+	return _input_map.triggered(event, action, _controls.holds())
 
 
 ## Selection is the input half of targeting, and the smallest stand-in for the navigation we
