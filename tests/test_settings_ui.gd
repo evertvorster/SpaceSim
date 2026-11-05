@@ -10,6 +10,7 @@ const Devices := preload("res://addons/spacesim/input/devices.gd")
 const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
 const AxisBar := preload("res://addons/spacesim/ui/axis_bar.gd")
 const Store := preload("res://addons/spacesim/input/bindings_store.gd")
+const Controls := preload("res://addons/spacesim/input/controls.gd")
 const SettingsPanel := preload("res://addons/spacesim/settings/settings_panel.gd")
 
 const Fixture := preload("res://tests/settings_fixture.gd")
@@ -28,6 +29,7 @@ func run(h, root: Node) -> void:
 	_test_the_tabs_group_the_registry(h, root)
 	_test_the_bindings_tab(h, root)
 	_test_the_devices_tab(h, root)
+	_test_the_flight_tab(h, root)
 	Fixture.clean()
 	_fixture.release()
 
@@ -154,9 +156,8 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 	for index in tabs.get_tab_count():
 		titles.append(tabs.get_tab_title(index))
 	h.check(
-		titles == ["Display", "HUD", "Bindings", "Devices", "Troubleshooting"],
-		"the tabs are Display, HUD, Bindings, Devices and Troubleshooting, in that order (%s)"
-			% str(titles)
+		titles == ["Display", "HUD", "Flight", "Bindings", "Devices", "Troubleshooting"],
+		"the tabs are Display, HUD, Flight, Bindings, Devices and Troubleshooting (%s)" % str(titles)
 	)
 
 	# What each tab holds, read off the screen: the display tab is the window, the bindings are the
@@ -380,6 +381,75 @@ func _test_the_bindings_tab(h, root: Node) -> void:
 	)
 
 	layer.free()
+
+
+## **The flight tab: every degree of freedom, with the lines its kind of source needs.**
+func _test_the_flight_tab(h, root: Node) -> void:
+	var layer := CanvasLayer.new()
+	root.add_child(layer)
+	var store := _fixture.bindings()
+	var panel := SettingsPanel.new()
+	panel.configure(_fixture.open(), store)
+	layer.add_child(panel)
+
+	var missing: Array[String] = []
+	for dof in Controls.DOFS:
+		if not Ui.shows(panel, String(Controls.REGISTRY[dof]["label"])):
+			missing.append(String(dof))
+	h.check(missing.is_empty(), "every degree of freedom is on the tab%s" % Fixture.detail(missing))
+
+	# **The strafes say the ship cannot move that way**, rather than offering a control that does nothing.
+	h.check(
+		Ui.shows(panel, "the ship cannot move this way yet"),
+		"and the ones the ship cannot do say so"
+	)
+
+	# The shipped assignments are what the screen shows: brackets for roll, minus and shifted-equal for
+	# throttle, the pointer for pitch and yaw.
+	var roll := _flight_control(panel, "roll", "keyboard_decrease")
+	h.check(roll != null and (roll as LineEdit).text == "BracketLeft", "roll's decrease slot shows the bracket")
+	var throttle := _flight_control(panel, "throttle", "keyboard_increase")
+	h.check(
+		throttle != null and (throttle as LineEdit).text == "Shift+Equal",
+		"and throttle's increase slot shows the shifted equal"
+	)
+	var yaw := _flight_control(panel, "yaw", "mouse_movement")
+	h.check(
+		yaw != null and String((yaw as OptionButton).get_item_metadata((yaw as OptionButton).selected))
+			== "glide",
+		"and yaw's pointer is gliding"
+	)
+
+	# **Typing a line stages it, and a typo colours it and stages nothing.**
+	var field: LineEdit = _flight_control(panel, "roll", "keyboard_decrease")
+	field.text = "Z"
+	field.text_changed.emit("Z")
+	h.check(store.has_changes(), "editing a line stages it (%s)" % str(store.control("roll")))
+	field.text = "Nonsense"
+	field.text_changed.emit("Nonsense")
+	h.check(field.modulate == panel.INVALID_COLOR, "and a line that does not parse is coloured")
+
+	# **Invert is per continuous line**, which is the whole point of it being on that row.
+	field.text = "BracketLeft"
+	field.text_changed.emit("BracketLeft")
+	var invert: CheckBox = _flight_control(panel, "roll", "joystick_invert")
+	h.check(invert != null, "the joystick line has an invert")
+	invert.button_pressed = true
+	invert.toggled.emit(true)
+	h.check(
+		bool(store.control("roll").get("joystick_invert", false)),
+		"and toggling it stages the line"
+	)
+
+	layer.free()
+
+
+## One flight control, by DOF and line name.
+static func _flight_control(panel: Node, dof: String, name: String) -> Control:
+	for entry in panel.get("_flight_controls"):
+		if String(entry[0]) == dof and String(entry[1]) == name:
+			return entry[2]
+	return null
 
 
 ## One row's field, by action and index.

@@ -172,15 +172,15 @@ func has_changes() -> bool:
 		if staged.to_text() != _stored_axis_profile(key).to_text():
 			return true
 	for dof in _staged_flight:
-		if _staged_flight[dof] != control(String(dof)):
-			# `control()` returns the staged copy when one exists, so compare against the file instead.
-			var stored := {}
-			var section := FLIGHT_PREFIX + String(dof)
-			if _file.has_section(section):
-				for key in _file.get_section_keys(section):
-					stored[key] = _file.get_value(section, key, "")
-			if _staged_flight[dof] != stored:
-				return true
+		# **Compare against the FILE, not against `control()`** — that returns the staged copy when one
+		# exists, so a comparison through it is always equal and Apply would never light up.
+		var stored := {}
+		var section := FLIGHT_PREFIX + String(dof)
+		if _file.has_section(section):
+			for key in _file.get_section_keys(section):
+				stored[key] = _file.get_value(section, key, "")
+		if _staged_flight[dof] != stored:
+			return true
 	return false
 
 

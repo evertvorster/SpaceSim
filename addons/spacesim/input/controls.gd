@@ -56,6 +56,16 @@ const POINTER_AXIS := {
 }
 
 ## The lines a DOF stores, in the order the tab shows them.
+## What a DOF's lines are before the player has touched them: the blank shape with the shipped
+## assignments laid over it. The tab draws from this, so a fresh screen shows what the ship is flying.
+static func defaults_for(dof: String) -> Dictionary:
+	var row := BLANK.duplicate()
+	var assigned: Dictionary = DEFAULTS.get(dof, {})
+	for key in assigned:
+		row[key] = assigned[key]
+	return row
+
+
 ## The shape of a DOF's lines, all empty, before anything is assigned.
 const BLANK := {
 	"keyboard_decrease": "", "keyboard_increase": "",
@@ -101,10 +111,7 @@ var _value := {}
 
 ## One DOF's lines: the store's over the defaults, so a missing key is never a missing line.
 func _row(dof: String) -> Dictionary:
-	var row := BLANK.duplicate()
-	var assigned: Dictionary = DEFAULTS.get(dof, {})
-	for key in assigned:
-		row[key] = assigned[key]
+	var row := defaults_for(dof)
 	var stored: Dictionary = store.control(dof)
 	for key in stored:
 		row[key] = stored[key]

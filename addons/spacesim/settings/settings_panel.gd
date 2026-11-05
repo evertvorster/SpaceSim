@@ -14,6 +14,7 @@ const SettingsScript := preload("res://addons/spacesim/settings/settings.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
 const AxisProfile := preload("res://addons/spacesim/input/axis_profile.gd")
+const Controls := preload("res://addons/spacesim/input/controls.gd")
 const AxisBar := preload("res://addons/spacesim/ui/axis_bar.gd")
 const Dialog := preload("res://addons/spacesim/ui/dialog.gd")
 const Debug := preload("res://addons/spacesim/system/debug.gd")
@@ -26,6 +27,7 @@ const DisplayScript := preload("res://addons/spacesim/settings/display.gd")
 ## (which left the registry) and the attached gamepads.
 const BINDINGS_TAB := "bindings"
 const DEVICES_TAB := "devices"
+const FLIGHT_TAB := "flight"
 
 ## A button of a pad that is up, and one that is held. The resting colour is dim enough that a lit
 ## button is visible from across the room, which is the point of the tab.
@@ -46,6 +48,8 @@ var _binding_rows: Array = []
 ## Empty rows **Add** has opened on an action: rows to detect into, not bindings.
 var _extra_rows := {}
 var _bindings_vbox: VBoxContainer
+## The flight control tab's controls, as `[dof, line name, Control]` — one entry per line the tab draws.
+var _flight_controls: Array = []
 ## A detection in progress, `{action, index}`, or empty. While it is set `main.gd` forwards events here
 ## and marks them handled, so nothing pressed in order to bind a control also presses it in the game.
 var _detect := {}
@@ -122,10 +126,11 @@ func _build() -> void:
 		var keys := _keys_in(tab)
 		var actions := _actions_in(tab)
 		var is_devices: bool = tab == DEVICES_TAB
+		var is_flight: bool = tab == FLIGHT_TAB
 		# A tab nothing was filed into is not built: an empty page is a promise of settings that are
 		# somewhere else. The devices tab is the exception — **an empty device list is worth showing**,
 		# because "nothing is connected" is the answer to the question the tab asks.
-		if keys.is_empty() and actions.is_empty() and not is_devices:
+		if keys.is_empty() and actions.is_empty() and not is_devices and not is_flight:
 			continue
 		var page := ScrollContainer.new()
 		page.name = SettingsScript.tab_title(tab)
@@ -143,6 +148,8 @@ func _build() -> void:
 				_add_row(grid, key)
 		if is_devices:
 			_build_devices(column)
+		if is_flight:
+			_build_flight(column)
 		# **The actions are not settings**, so they get their own grid per category rather than a row
 		# among the settings — and **only the one tab that has any builds this**. Left unguarded, every
 		# tab got a vbox and `_bindings_vbox` ended up pointing at the last one, so every rebuild drew
@@ -155,6 +162,214 @@ func _build() -> void:
 
 	_apply_button = add_button("Apply", _on_apply)
 	_close_button = add_button("Close", _on_close)
+
+
+## **The degrees of freedom**, one block each: what drives it, per source kind.
+##
+## A DOF is a dimension, not an action — so its lines differ by *kind of source*, and the rule those lines
+## follow is the one the design note settled: **a continuous source gets an invert toggle; a discrete one
+## gets two slots, because the slot is the sign.**
+##
+## **The joystick line is a picker, not a field**: the axis names are Godot's own and nobody should have to
+## type `Joy:<device>/Axis:LEFT_Y`, nor be able to write one that does not exist.
+func _build_flight(column: VBoxContainer) -> void:
+	for dof in Controls.DOFS:
+		var info: Dictionary = Controls.REGISTRY[dof]
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", 2)
+		column.add_child(box)
+
+		var header := Label.new()
+		header.name = "Flight_%s" % dof
+		header.text = "%s    (%s)" % [info["label"], info["unit"]]
+		header.add_theme_font_size_override("font_size", 16)
+		box.add_child(header)
+		if not bool(info.get("in_ship", true)):
+			var note := Label.new()
+			note.text = "the ship cannot move this way yet — the control is stored, and does nothing"
+			note.modulate = INVALID_COLOR
+			note.add_theme_font_size_override("font_size", 12)
+			box.add_child(note)
+
+		box.add_child(_flight_slots(dof, "keyboard"))
+		box.add_child(_flight_axis(dof))
+		box.add_child(_flight_movement(dof))
+		box.add_child(_flight_slots(dof, "mouse"))
+
+
+## A discrete line: **two slots**, `decrease` and `increase`, because the control you press is the sign.
+func _flight_slots(dof: String, kind: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var caption := Label.new()
+	caption.text = kind
+	caption.custom_minimum_size = Vector2(70.0, 0.0)
+	caption.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	caption.add_theme_font_size_override("font_size", 12)
+	row.add_child(caption)
+
+	for slot in ["decrease", "increase"]:
+		var sign_label := Label.new()
+		sign_label.text = "−" if slot == "decrease" else "+"
+		sign_label.add_theme_font_size_override("font_size", 12)
+		sign_label.modulate = Color(1.0, 1.0, 1.0, 0.5)
+		row.add_child(sign_label)
+		var field := LineEdit.new()
+		field.name = "%s_%s" % [kind, slot]
+		field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		field.placeholder_text = "Mouse:WheelUp" if kind == "mouse" else "a key"
+		field.text_changed.connect(func(_t: String) -> void: _stage_flight(dof))
+		row.add_child(field)
+		_flight_controls.append([dof, "%s_%s" % [kind, slot], field])
+	return row
+
+
+## A continuous line: **one axis and an invert**, because a stick has a physical direction and the player
+## owns which way round it should mean.
+func _flight_axis(dof: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var caption := Label.new()
+	caption.text = "joystick"
+	caption.custom_minimum_size = Vector2(70.0, 0.0)
+	caption.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	caption.add_theme_font_size_override("font_size", 12)
+	row.add_child(caption)
+
+	# **Every axis of every attached device, by name**, and nothing else: an axis that is not there cannot
+	# be picked, and one that is cannot be misspelled.
+	var picker := OptionButton.new()
+	picker.name = "joystick"
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var stored := String(_flight_row(dof).get("joystick", ""))
+	picker.add_item("(none)", 0)
+	picker.set_item_metadata(0, "")
+	var at := 1
+	if not stored.is_empty():
+		picker.add_item(stored, at)
+		picker.set_item_metadata(at, stored)
+		at += 1
+	for device in Devices.connected():
+		for axis_name in Devices.AXIS_NAMES:
+			var text := "%s%s/Axis:%s" % [
+				Binding.JOYPAD_PREFIX, Devices.name_of(int(device)), axis_name
+			]
+			if text == stored:
+				continue
+			picker.add_item("%s · %s" % [Devices.name_of(int(device)), axis_name], at)
+			picker.set_item_metadata(at, text)
+			at += 1
+	if not stored.is_empty():
+		picker.select(1)
+	picker.item_selected.connect(
+		func(index: int) -> void:
+			picker.set_meta("chosen", String(picker.get_item_metadata(index)))
+			_stage_flight(dof)
+	)
+	picker.set_meta("chosen", stored)
+	row.add_child(picker)
+	_flight_controls.append([dof, "joystick", picker])
+
+	var invert := CheckBox.new()
+	invert.name = "joystick_invert"
+	invert.text = "invert"
+	invert.toggled.connect(func(_on: bool) -> void: _stage_flight(dof))
+	row.add_child(invert)
+	_flight_controls.append([dof, "joystick_invert", invert])
+	return row
+
+
+## The pointer: a **mode** and an invert. Glide versus warp is a property of movement, which is why it is
+## not on the button line beside it.
+func _flight_movement(dof: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var caption := Label.new()
+	caption.text = "mouse move"
+	caption.custom_minimum_size = Vector2(70.0, 0.0)
+	caption.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	caption.add_theme_font_size_override("font_size", 12)
+	row.add_child(caption)
+
+	var mode := OptionButton.new()
+	mode.name = "mouse_movement"
+	for name in ["off", "glide", "warp"]:
+		mode.add_item(name, mode.item_count)
+		mode.set_item_metadata(mode.item_count - 1, name)
+	mode.item_selected.connect(func(_index: int) -> void: _stage_flight(dof))
+	row.add_child(mode)
+	_flight_controls.append([dof, "mouse_movement", mode])
+
+	var invert := CheckBox.new()
+	invert.name = "mouse_invert"
+	invert.text = "invert"
+	invert.toggled.connect(func(_on: bool) -> void: _stage_flight(dof))
+	row.add_child(invert)
+	_flight_controls.append([dof, "mouse_invert", invert])
+	return row
+
+
+## One DOF's lines as they stand: the shipped assignment, overlaid with the store's.
+func _flight_row(dof: String) -> Dictionary:
+	var row := Controls.defaults_for(dof)
+	var stored: Dictionary = _bindings.control(dof)
+	for key in stored:
+		row[key] = stored[key]
+	return row
+
+
+## Stage what the tab shows for one DOF. **A line that does not parse is coloured and stages nothing.**
+func _stage_flight(dof: String) -> void:
+	var lines := {}
+	for entry in _flight_controls:
+		if String(entry[0]) != dof:
+			continue
+		var name := String(entry[1])
+		var control: Control = entry[2]
+		if control is LineEdit:
+			lines[name] = (control as LineEdit).text.strip_edges()
+		elif control is OptionButton:
+			var picker: OptionButton = control
+			if name == "joystick":
+				lines[name] = String(picker.get_meta("chosen", ""))
+			else:
+				lines[name] = String(picker.get_item_metadata(picker.selected))
+		elif control is CheckBox:
+			lines[name] = (control as CheckBox).button_pressed
+	if not _bindings.stage_control(dof, lines):
+		for entry in _flight_controls:
+			if String(entry[0]) == dof and entry[2] is LineEdit:
+				(entry[2] as LineEdit).modulate = INVALID_COLOR
+		return
+	for entry in _flight_controls:
+		if String(entry[0]) == dof and entry[2] is LineEdit:
+			(entry[2] as LineEdit).modulate = IDLE_COLOR
+
+
+## Put every flight control back to what stands, for an Apply, a discard or a fresh open.
+func _refresh_flight() -> void:
+	for dof in Controls.DOFS:
+		var row := _flight_row(dof)
+		for entry in _flight_controls:
+			if String(entry[0]) != dof:
+				continue
+			var name := String(entry[1])
+			var control: Control = entry[2]
+			if control is LineEdit:
+				var field: LineEdit = control
+				if not field.has_focus():
+					field.text = String(row.get(name, ""))
+					field.modulate = IDLE_COLOR
+			elif control is CheckBox:
+				var box: CheckBox = control
+				box.set_pressed_no_signal(bool(row.get(name, false)))
+			elif control is OptionButton and name == "mouse_movement":
+				var mode: OptionButton = control
+				var wanted := String(row.get(name, "off"))
+				for index in mode.item_count:
+					if String(mode.get_item_metadata(index)) == wanted:
+						mode.select(index)
+						break
 
 
 ## **What the attached gamepads are doing**, live: each device's name and identity, its axes with
@@ -1309,6 +1524,8 @@ func _refresh() -> void:
 
 	# The axis fields come back to what stands, which is how a discarded edit disappears — but **not
 	# while one of them is being typed into**, or the text would be rewritten under the cursor.
+	_refresh_flight()
+
 	for entry in _axis_rows:
 		var profile: SpacesimAxisProfile = _profile_of(int(entry[0]), int(entry[1]))
 		var field: LineEdit = entry[6]

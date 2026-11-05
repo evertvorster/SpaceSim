@@ -294,7 +294,7 @@ static func declared_keys() -> Array:
 ## **A row that declares no `tab` is in `rest`, and `rest` is always last**: a setting nobody has filed yet waits there rather than falling off the screen, and
 ## that list is where the next grouping is decided from. A tab nothing was filed into is not built, so
 ## `rest` costs nothing while it is empty.
-const TABS := ["display", "hud", "bindings", "devices", "troubleshooting", "rest"]
+const TABS := ["display", "hud", "flight", "bindings", "devices", "troubleshooting", "rest"]
 
 ## What a tab is called on screen. Everything but the acronym is its key capitalised.
 const TAB_TITLES := {"hud": "HUD"}
