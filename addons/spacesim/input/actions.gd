@@ -46,7 +46,9 @@ const REGISTRY := {
 		"label": "Personal data",
 		"kind": "trigger",
 		"category": "Interface",
-		"defaults": ["Tab"],
+		# **Escape rather than Tab**: Escape is where a player's hand already goes for a menu, and the mouse
+		# is released by opening any screen, which is what the key used to do on its own.
+		"defaults": ["Escape"],
 	},
 	"throttle_stop": {
 		"label": "Throttle stop",

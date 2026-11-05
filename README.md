@@ -104,7 +104,7 @@ A save is a commit: **a world per repository, a history per playthrough, a save 
 only the player's own state — the world's state is left alone, so the world has moved on. The game
 loads the last save on startup and puts you back in the frame it names.
 
-**There is no autosave: a save is a deliberate act.** The button on the personal data screen (Tab)
+**There is no autosave: a save is a deliberate act.** The button on the personal data screen (Escape)
 is the only way one happens, and the same screen browses the histories and their saves.
 
 ## Layout
@@ -157,8 +157,9 @@ the planets placed where JPL says they were at J2000. **`+` `-`** throttle, ten 
 to full and the same speed astern, **Backspace** stops, **mouse** yaws and pitches, **`[` `]`** roll,
 and **`1`–`6`** fix the view forward, back, left, right, up and down — six fixed directions, so one
 cloud can be looked at from every side while the mouse still steers. **T** cycles the selected target,
-**Esc** releases the mouse (click to take it back), **P** hides the bodies, **O** the ship and **L**
-draws wireframe. **Tab** the personal data screen, **Alt+C** the settings screen. Every one of these
+**P** hides the bodies, **O** the ship and **L** draws wireframe. **Escape** opens the personal data
+screen, **Alt+C** the settings screen — and the mouse is the ship's while flying and the screen's while
+one is open, with no key to grab or let it go. Every one of these
 is a binding in the settings file — see `bindings.*` in [`docs/API.md`](docs/API.md). Both screens
 pause the game. On the personal data screen **Save** and **New Story** act on the world, and the
 histories and their saves are browsed and acted on there — playing, renaming or deleting a history,

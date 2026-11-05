@@ -7,7 +7,9 @@ extends Node3D
 ## the version of this paragraph before 2026-10-25 had throttle on `W`/`S`, roll on `A`/`D`, and the error
 ## budget on the brackets, all three of which had moved. Read the registry, or the HUD.
 ##
-## Esc is the one exception, because it is not a binding: it releases the mouse, and a click takes it back.
+## **Escape is a binding like any other** — the personal-data screen — and there is no key or click that
+## grabs or releases the mouse on its own: flying captures it, a screen releases it, closing one captures it
+## again.
 ##
 ## The solar system comes from `systems/sol.tres`; this script only adds input, the camera's
 ## render range and a readout. A different system file should not need this script changed.
@@ -246,8 +248,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		_ship_mouse_look(event)
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_capture_mouse()
 
 
 func _handle_key(event: InputEventKey) -> void:
@@ -272,8 +272,6 @@ func _handle_key(event: InputEventKey) -> void:
 		# **The camera looks along a direction in the SHIP's frame**, so mouse look still steers and the
 		# chosen view stays put — which is what makes the same scene comparable from six sides.
 		_camera.basis = _view_for(event)
-	elif event.keycode == KEY_ESCAPE:
-		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
 ## **The body meshes as unshaded white wireframes, which is a different question from how they look.**
@@ -455,7 +453,9 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 			_apply_hud_visibility()
 
 
-## Click to take the mouse back after Esc released it.
+## **The mouse belongs to the ship while flying and to a screen while one is open**, which is the whole of
+## the rule: no key releases it and no click takes it back. A capture warps the cursor, so the first motion
+## after one is dropped rather than read as a spin.
 func _capture_mouse() -> void:
 	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		return
@@ -816,7 +816,7 @@ func _update_hud() -> void:
 		PackedStringArray(
 			[
 				(
-					"%s/%s throttle    %s stop    mouse look    %s/%s roll    Esc release mouse"
+					"%s/%s throttle    %s stop    mouse look    %s/%s roll"
 					% [
 						_hint("throttle_up"),
 						_hint("throttle_down"),

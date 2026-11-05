@@ -1655,19 +1655,21 @@ system and ship.
 |---|---|
 | `+` / `-` | throttle, signed: astern flies as fast as ahead. Ten seconds from zero to full |
 | Backspace | throttle to zero at once |
-| mouse | pitch and yaw (click to recapture after Esc) |
+| mouse | pitch and yaw — the mouse is captured while flying and released by any screen |
 | `[` `]` | roll |
 | `1` `2` `3` `4` `5` `6` | view forward, back, left, right, up, down — camera-local, in the ship's frame, so mouse look still steers and the view stays where it is put |
 | T | cycle the selected target |
 | P | hide/show the bodies |
-| Tab | pause and open the personal data screen |
+| Escape | pause and open the personal data screen |
 | Alt+C | pause and open the settings screen |
 
 **The mesh error budget no longer has keys.** `lod.error_budget` is a *setting* and stays in the registry — it sets every body's tessellation — but the step-through was removed on 2026-10-20: the value is flown once and left at its best, so the brackets are better spent rolling. The HUD still reports the triangle count, which is the reading the trim was for.
 
-Every one of those except Esc is a binding in the settings file and can be changed there. The two
-screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab is also the UI's
-focus key and the UI system would consume it first.
+**Every one of those is a binding** in the bindings file and can be changed there — Escape included, which
+used to be the one exception because it released the mouse. It does not any more: **flying captures the
+mouse, a screen releases it, closing one captures it again**, and there is no key or click for either. The
+two screen hotkeys are read in `_input` rather than `_unhandled_input`, because Tab is also the UI's focus
+key and the UI system would consume it first.
 
 **The personal data screen is where the world is saved and browsed**: Save and New Story act on the
 world, and **names are the only thing editable there** — a name each for the player, for what they
