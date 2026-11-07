@@ -87,6 +87,9 @@ var _hud: Label
 ## the block, because it is a different place and a different question: the strip is the flying view's
 ## instrument panel, and the block is the diagnostics that replace it when asked for.
 var _strip: Label
+## **The sensor column**, in the strip's right half: gravity, pressure and temperature where the observer
+## is. Filled from `SpacesimSystemScene.conditions_at`, so the air's laws are not re-derived here.
+var _sensors: Label
 var _hints: Label
 var _fps: Label
 var _skip_next_motion := false
@@ -787,6 +790,10 @@ func _range_key(kind: int) -> String:
 ## case that matters: while the frame is white, an unoutlined label is white on white and the one instrument
 ## that would say what the metre is doing is the thing that disappears. The marker labels already do this
 ## (`SpacesimMarkers`); the HUD did not.
+# **The sensor column starts here**, as a fraction of the strip's width — far enough right that the two
+# columns read as two and not as one ragged list.
+const SENSOR_COLUMN := 0.52
+
 const HUD_OUTLINE := Color(0.0, 0.0, 0.0, 0.9)
 const HUD_OUTLINE_SIZE := 6
 
@@ -837,6 +844,13 @@ func _place_strip_readout() -> void:
 	var strip := SpacesimDisplay.strip_rect()
 	_strip.position = strip.position + Vector2(24.0, 12.0)
 	_strip.size = strip.size - Vector2(48.0, 24.0)
+	if _sensors == null:
+		return
+	# **The split is a fraction of the strip's own width**, so a wide monitor gives the sensors room rather
+	# than stretching the ship's column across the whole screen.
+	var gutter := strip.size.x * SENSOR_COLUMN
+	_sensors.position = strip.position + Vector2(gutter, 12.0)
+	_sensors.size = Vector2(strip.size.x - gutter - 24.0, strip.size.y - 24.0)
 
 
 func _build_hud() -> void:
@@ -873,6 +887,14 @@ func _build_hud() -> void:
 	_outline(strip, 17)
 	layer.add_child(strip)
 	_strip = strip
+
+	# **The sensor column**, right of the ship's readings. Its own label because the two columns can grow
+	# independently, and because a label that wraps cannot keep two columns apart.
+	var sensors := Label.new()
+	sensors.name = "SensorReadout"
+	_outline(sensors, 17)
+	layer.add_child(sensors)
+	_sensors = sensors
 
 	# Top right, so a frame-rate change while tuning something else is visible at a glance.
 	var fps := Label.new()
@@ -939,6 +961,16 @@ func _update_hud() -> void:
 
 	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
 	# readings, what is left is what a developer reads to see what the engine is doing.
+	var air := _system.conditions_at(_ship.global_position)
+	_sensors.text = "\n".join(
+		PackedStringArray(
+			[
+				"Gravity: %.2f m/s²" % float(air["gravity"]),
+				"Pressure: %s" % _pressure(float(air["pressure"])),
+				"Temperature: %.0f K" % float(air["temperature"]),
+			]
+		)
+	)
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
@@ -1018,6 +1050,16 @@ func _apply_hud_visibility() -> void:
 ## are read at a keyboard.
 func _hint(action: String) -> String:
 	return _input_map.hint(action)
+
+
+## **A pressure a person can read at both ends of the range.** The engine works in pascals and the strip
+## spans a hard vacuum to Jupiter's depths, so the unit follows the magnitude: kilopascals where there is
+## air, pascals where there is almost none. **Zero stays pascals** — an airless body should read `0.0 Pa`,
+## because `0.000 kPa` reads like a breakdown rather than like a vacuum.
+static func _pressure(pascals: float) -> String:
+	if absf(pascals) >= 1.0e3:
+		return "%.1f kPa" % (pascals / 1.0e3)
+	return "%.1f Pa" % pascals
 
 
 static func _speed(metres_per_second: float) -> String:

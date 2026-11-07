@@ -811,6 +811,45 @@ static func mean_molar_mass(
 	return total
 
 
+## **The air where the eye is**: its pressure and temperature at a height above a body's surface.
+##
+## The same derived numbers the rest of this module computes — the surface temperature, the lapse rate, the
+## tropopause and the scale height — derived HERE from the two inputs a caller can be trusted with: the
+## surface gravity and the equilibrium temperature. `condensation_levels` carries the reasoning for that
+## shape and the 518 K Venus it cost to learn, and it applies word for word: a caller who assembles these
+## from their parts can get one of them inconsistent with the other three.
+##
+## A **pinned** `mean_surface_temperature` is the surface, exactly as it is for a deck.
+##
+## **Its limits are the profile's, and they are the model's rather than this function's**: one exponential
+## for pressure (Venus's real fall is 92x over 50 km, which no single scale height spans) and a DRY adiabat
+## for temperature, which flattens at the tropopause instead of warming above it. Above the top of the air
+## both keep their last value rather than going wild.
+static func conditions_at(
+	atmosphere: SpacesimAtmosphere,
+	materials: SpacesimMaterialTable,
+	gravity: float,
+	equilibrium: float,
+	height: float,
+	body: SpacesimSystemBody = null
+) -> Dictionary:
+	if atmosphere == null or materials == null or gravity <= 0.0 or equilibrium <= 0.0:
+		return {"pressure": 0.0, "temperature": equilibrium, "scale_height": 0.0}
+	var lapse := lapse_rate(atmosphere, materials, gravity)
+	var surface := surface_temperature(atmosphere, materials, gravity, equilibrium)
+	if body != null and body.overrides != null and body.overrides.set.has("mean_surface_temperature"):
+		surface = body.overrides.mean_surface_temperature
+	var air_height := scale_height(atmosphere, materials, surface, gravity)
+	if air_height <= 0.0:
+		return {"pressure": 0.0, "temperature": surface, "scale_height": 0.0}
+	var above := maxf(height, 0.0)
+	return {
+		"pressure": pressure_at(above, atmosphere.surface_pressure, air_height),
+		"temperature": temperature_at(above, surface, lapse, tropopause_temperature(equilibrium)),
+		"scale_height": air_height,
+	}
+
+
 ## The altitude over which the air's density falls by 1/e: `kT / (m-bar g)`.
 ##
 ## Earth comes out at 8.4 km against the 8.5 km the model doc quotes, and `glsl-atmosphere`'s own
