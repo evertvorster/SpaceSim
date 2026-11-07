@@ -903,7 +903,10 @@ func _update_hud() -> void:
 	# **The strip is the ship's own row** — what the ship is doing, which is what a pilot reads while flying.
 	# **Throttle is signed and in multiples of the local travel unit**, which is the number the flight model
 	# actually holds (`FlightController.TOP_THROTTLE` is 10); astern is negative and says so.
-	_strip.text = "altitude  %s        speed  %s        throttle  %+.1f ×        target  %s        frame  %s" % [
+	# **The nearest body leads the row**, because an altitude means nothing without saying what it is measured
+	# from — 234,098 m over Earth is a place, and over Jupiter it is inside the cloud.
+	_strip.text = "%s, Altitude %s        speed  %s        throttle  %+.1f ×        target  %s        frame  %s" % [
+		_ship.nearest_name,
 		SpacesimMarkers.format_distance(_ship.altitude()),
 		_speed(_ship.speed),
 		_ship.throttle,
