@@ -926,6 +926,13 @@ func _update_hud() -> void:
 					% [target_name, SpacesimMarkers.format_distance(target_distance)],
 				"Speed: %s    Throttle: %+.1f ×"
 					% [_speed(_ship.speed), _ship.throttle],
+				# **The world clock, as a plain number of seconds** — Evert, 2026-11-07: *"time should
+				# just be a very long number"*. No unit scaling and no calendar: at aeons a `YYYY-MM-DD
+				# hh:mm` carries five digits of noise, and the shape this should eventually take is not
+				# decided yet. **This is the world's clock, not the player's** — the two diverge under
+				# relativistic travel (`Relativity and the Two Clocks` §4), and the second one is the
+				# personal screen's.
+				"Time: %d s" % int(_session.world_time),
 			]
 		)
 	)
