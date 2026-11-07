@@ -223,11 +223,15 @@ const REGISTRY := {
 	# working, as we might not need it at all."*
 	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0,
 		"tab": "troubleshooting"},
-	# --- the HUD's own three parts. **Each is a separate switch because each is a different annoyance**:
-	# the readout is what a developer reads and a player stops seeing, the frame rate is an instrument, and
+	# --- the HUD's own parts. **Each is a separate switch because each is a different annoyance**:
+	# the debug block is what a developer reads and a player stops seeing, the frame rate is an instrument, and
 	# the key hints are a reminder that has done its job after the first hour. Off is empty screen, not a
 	# smaller label — the whole point is the room it gives back.
-	"hud.readout": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	#
+	# **`hud.readout` became `hud.debug` (2026-11-07)** when the strip took the ship's readings out of the
+	# block: what is left in it is diagnostics, and a name describing the old contents is the drift this
+	# project files as a problem.
+	"hud.debug": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"hud.fps": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"hud.key_hints": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	# --- **how much of the canvas is the HUD strip**, as a fraction of its height. A setting rather than a

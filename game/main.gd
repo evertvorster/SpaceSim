@@ -17,7 +17,6 @@ extends Node3D
 const PlayerShip := preload("res://game/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
-const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
 const BindingsStore := preload("res://addons/spacesim/input/bindings_store.gd")
@@ -84,6 +83,10 @@ var _screen: SpacesimScreen
 var _back_to: SpacesimScreen
 var _selected_index := -1
 var _hud: Label
+## **The strip's own readout** — the ship's numbers, in the black panel at the bottom. A separate label from
+## the block, because it is a different place and a different question: the strip is the flying view's
+## instrument panel, and the block is the diagnostics that replace it when asked for.
+var _strip: Label
 var _hints: Label
 var _fps: Label
 var _skip_next_motion := false
@@ -469,7 +472,7 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 			_apply_settings()
 		# The HUD's switches are visibility, so they are read by the readout's own refresh — which is
 		# once every `HUD_INTERVAL`, and would otherwise leave a toggle looking broken for a moment.
-		"hud.readout", "hud.fps", "hud.key_hints":
+		"hud.debug", "hud.fps", "hud.key_hints":
 			_apply_hud_visibility()
 		# **The band and the window's own resolution.** A strip height or a render height moves the picture's
 		# rect and the viewport under it, so both are re-fitted the moment they change rather than at the next
@@ -823,6 +826,17 @@ func _fit_band() -> void:
 		SpacesimDisplay.band_pixels(),
 		SpacesimDisplay.render_scale_now()
 	)
+	_place_strip_readout()
+
+
+## The strip's readout follows the strip, whatever height it is given — the same number the band and the
+## viewport are fitted from, so a changed strip height moves all three together.
+func _place_strip_readout() -> void:
+	if _strip == null:
+		return
+	var strip := SpacesimDisplay.strip_rect()
+	_strip.position = strip.position + Vector2(24.0, 12.0)
+	_strip.size = strip.size - Vector2(48.0, 24.0)
 
 
 func _build_hud() -> void:
@@ -832,7 +846,7 @@ func _build_hud() -> void:
 	_ui_layer = layer
 
 	# **Two labels in a column, not one block**, because the readout and the key hints are switched off
-	# separately: `hud.readout` and `hud.key_hints`. One label could only be hidden whole.
+	# separately: `hud.debug` and `hud.key_hints`. One label could only be hidden whole.
 	var column := VBoxContainer.new()
 	column.name = "Readouts"
 	column.position = Vector2(24.0, 18.0)
@@ -850,6 +864,15 @@ func _build_hud() -> void:
 	_outline(hints, 17)
 	column.add_child(hints)
 	_hints = hints
+
+	# **The strip's readout**, on the band's black panel rather than in the block. It is placed by
+	# `_place_strip_readout` rather than anchored here, because the strip's height is a setting and both move
+	# together.
+	var strip := Label.new()
+	strip.name = "StripReadout"
+	_outline(strip, 17)
+	layer.add_child(strip)
+	_strip = strip
 
 	# Top right, so a frame-rate change while tuning something else is visible at a glance.
 	var fps := Label.new()
@@ -871,15 +894,25 @@ func _build_hud() -> void:
 func _update_hud() -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var length: float = _ship.travel_length
-	var fraction := 0.0
-	if length > 0.0:
-		fraction = _ship.speed * TravelScale.TRAVERSE_SECONDS / length
 	var contact := "on the surface" if _ship.landed else "free flight"
 	var bodies := "visible" if _bodies_visible else "hidden"
 	var target := "none"
 	if _markers.selected != null:
 		target = _markers.selected.name
 
+	# **The strip is the ship's own row** — what the ship is doing, which is what a pilot reads while flying.
+	# **Throttle is signed and in multiples of the local travel unit**, which is the number the flight model
+	# actually holds (`FlightController.TOP_THROTTLE` is 10); astern is negative and says so.
+	_strip.text = "altitude  %s        speed  %s        throttle  %+.1f ×        target  %s        frame  %s" % [
+		SpacesimMarkers.format_distance(_ship.altitude()),
+		_speed(_ship.speed),
+		_ship.throttle,
+		target,
+		frame.name,
+	]
+
+	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
+	# readings, what is left is what a developer reads to see what the engine is doing.
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
@@ -887,18 +920,14 @@ func _update_hud() -> void:
 				"player      %s   in %s" % [_player.display_name(), _session.repo.current_history()],
 				"date        %s" % SpacesimWorldTime.format(_session.world_time),
 				"settings    %s" % SpacesimSettings.path(),
-				"frame       %s" % frame.name,
-				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
 				"mode        %s%s%s" % [
 					String(SpacesimSettings.get_value("render.mode")),
 					", depth tint" if bool(SpacesimSettings.get_value("render.depth_tint")) else "",
 					", EV compensated" if bool(SpacesimSettings.get_value("render.ev_compensation")) else ", EV off",
 				],
-				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
 				"nearest     %s at %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.nearest_distance)],
 				"local unit  %s" % SpacesimMarkers.format_distance(length),
 				"state       %s" % contact,
-				"target      %s" % target,
 				"",
 				"bodies      %s, %d triangles, %d chunks, depth %d"
 					% [bodies, _system.triangles(), _system.chunks(), _system.deepest_level()],
@@ -949,7 +978,7 @@ func _update_hud() -> void:
 ## here rather than cached, so a change on the settings screen is on screen before the player looks
 ## back; `_on_setting_changed` calls this for the same reason when a screen is open over the game.
 func _apply_hud_visibility() -> void:
-	_hud.visible = bool(SpacesimSettings.get_value("hud.readout"))
+	_hud.visible = bool(SpacesimSettings.get_value("hud.debug"))
 	_hints.visible = bool(SpacesimSettings.get_value("hud.key_hints"))
 	_fps.visible = bool(SpacesimSettings.get_value("hud.fps"))
 
