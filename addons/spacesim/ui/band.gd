@@ -84,10 +84,11 @@ func take(camera: Camera3D) -> void:
 	if camera == null or camera == _camera:
 		return
 	camera.reparent(_viewport, true)
-	# **Off, and this is not cosmetic.** The project interpolates physics, and a node that is handed an
-	# already-interpolated transform each frame would have the engine smooth it a second time — the camera
-	# then lags the geometry it is looking at, by up to a tick, everywhere.
-	camera.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	# **The camera keeps its own physics interpolation**, and that is load-bearing: the engine smooths it
+	# between ticks exactly as it smoothed it while it was the ship's child. What drives it is
+	# `main.gd::_sync_camera`, in the physics tick. Turning interpolation off and handing it an
+	# already-smoothed transform each drawn frame takes the smoothing off the RENDER camera, and it then
+	# lags the scene by up to a tick — which reads as the air flickering over the sea while you turn.
 	_camera = camera
 
 

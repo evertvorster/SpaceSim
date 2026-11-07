@@ -162,6 +162,7 @@ func _ready() -> void:
 		push_error("cannot open the world's repository: %s" % brought_up["reason"])
 	_player = _session.player
 	_place_observer_from_session()
+	_place_camera()
 
 	# **The bindings are their own store**, beside the settings file; `open()` is where the sixteen old
 	# `bindings.*` settings keys are imported, in memory, on the first run after this change.
@@ -532,6 +533,9 @@ func _physics_process(delta: float) -> void:
 	}
 
 	_ship.step(delta, input)
+	# **After the step, before anything renders.** The camera is in the band's viewport and inherits nothing,
+	# so it is placed here — in the physics tick, which is where its own interpolation history comes from.
+	_sync_camera()
 	_system.frame_tree.evaluate()
 	_sync_player_location()
 
@@ -635,21 +639,30 @@ func _clear_fog() -> void:
 ## **Nothing here may touch the `RenderingDevice`.** It belongs to the render thread and its RID allocator
 ## is not thread safe — reading it from `_process` demonstrated that with thousands of `Element limit
 ## reached` errors.
-## **The eye, in a band.** A camera outside the ship no longer inherits its transform, so this is what puts
-## it where the ship's viewpoint is — and it is the **interpolated** transform, the same reading the frame
-## makes for the eye position a few lines later. The plain one would tick against the smoothed geometry.
+## **The eye, in a band.** A camera outside the ship no longer inherits its transform, so `_sync_camera`
+## puts it where the ship's viewpoint is — **and it does that in the PHYSICS tick, from the mount's physics
+## transform, so the engine interpolates the camera exactly as it interpolated it when it was the ship's
+## child.**
 ##
-## Writing the camera's transform is safe because the band turned its own interpolation **off**: the value
-## coming in is already interpolated, and a node that smooths it a second time lags by up to a tick.
+## That distinction is the whole of this function. Driving it from `_process` instead — handing it a value
+## `get_global_transform_interpolated()` had already smoothed — takes the engine's smoothing away from the
+## render camera, and the camera then lags the scene by up to a tick. Turning is when that shows: the air's
+## transmittance is acutely sensitive to the view direction at grazing angles, so a lagging camera made the
+## sea behind it flicker dark. **The camera is smoothed once, by the engine, like everything else.**
 func _sync_camera() -> void:
 	if _camera_mount == null:
 		return
-	_camera.global_transform = _camera_mount.get_global_transform_interpolated()
+	_camera.global_transform = _camera_mount.global_transform
+
+
+## The ship has been moved without moving: a placed observer, a loaded session, a teleport. The camera has to
+## be put there *and* have its interpolation history cleared, or it streaks in from wherever it was.
+func _place_camera() -> void:
+	_sync_camera()
+	_camera.reset_physics_interpolation()
 
 
 func _update_view(delta: float) -> void:
-	# Before anything reads the eye: sky, LOD, markers, near and far all ask the camera where it is.
-	_sync_camera()
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
 	_system.aim_sun_at(observer)
@@ -712,6 +725,8 @@ func _place_observer_from_session() -> void:
 		return
 	if not _system.place_observer(_player.location):
 		push_warning("the saved location's frame is gone; placed at the nearest frame that remains")
+	# The camera was placed somewhere else entirely; without this it streaks in from there.
+	_place_camera()
 
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and

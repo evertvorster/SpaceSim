@@ -114,11 +114,14 @@ func _test_the_camera_moves(h, root: Node) -> void:
 		"and keeps its place, so the first frame is the one it would have drawn (%s against %s)"
 			% [str(camera.global_transform.origin), str(kept.origin)]
 	)
-	# **Off**, or the engine smooths a transform that was already interpolated and the camera lags the
-	# geometry it is looking at by up to a tick.
+	# **The camera KEEPS the engine's interpolation.** It used to be the ship's child and the engine smoothed
+	# it between ticks; it is placed by `_sync_camera` in the physics tick so the engine can go on doing
+	# exactly that. Turning interpolation off here — handing the render camera an already-smoothed value
+	# once per drawn frame — makes it lag the scene by up to a tick, which showed as the air flickering dark
+	# over the sea while turning (Evert, 2026-11-07: *"a deal breaker"*).
 	h.check(
-		camera.physics_interpolation_mode == Node.PHYSICS_INTERPOLATION_MODE_OFF,
-		"and stops interpolating its own transform"
+		camera.physics_interpolation_mode != Node.PHYSICS_INTERPOLATION_MODE_OFF,
+		"and keeps the engine's own interpolation, so the render camera is not a tick behind"
 	)
 
 	# Taking the same camera twice is a no-op rather than a second reparent.
