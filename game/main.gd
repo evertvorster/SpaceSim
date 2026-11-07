@@ -896,23 +896,35 @@ func _update_hud() -> void:
 	var length: float = _ship.travel_length
 	var contact := "on the surface" if _ship.landed else "free flight"
 	var bodies := "visible" if _bodies_visible else "hidden"
-	var target := "none"
-	if _markers.selected != null:
-		target = _markers.selected.name
 
-	# **The strip is the ship's own row** — what the ship is doing, which is what a pilot reads while flying.
-	# **Throttle is signed and in multiples of the local travel unit**, which is the number the flight model
-	# actually holds (`FlightController.TOP_THROTTLE` is 10); astern is negative and says so.
-	# **The nearest body leads the row**, because an altitude means nothing without saying what it is measured
-	# from — 234,098 m over Earth is a place, and over Jupiter it is inside the cloud.
-	_strip.text = "%s, Altitude %s        speed  %s        throttle  %+.1f ×        target  %s        frame  %s" % [
-		_ship.nearest_name,
-		SpacesimMarkers.format_distance(_ship.altitude()),
-		_speed(_ship.speed),
-		_ship.throttle,
-		target,
-		frame.name,
-	]
+	# **Two lines, both led by a name**: what is nearest and how high you are over it, then what is selected
+	# and how far away it is. **Surface distances both**, from the body's own geometry, so the altitude and
+	# the target's distance are the same kind of number — a centre-to-centre figure beside a surface
+	# altitude would be two quantities pretending to be one.
+	# **Nothing selected reads as dashes**, which is what `format_distance` already gives an infinite
+	# distance, so there is no second case to get wrong.
+	var target_name := "none"
+	var target_distance := INF
+	if _markers.selected != null:
+		target_name = _markers.selected.name
+		for body in _system.bodies:
+			if body.node == _markers.selected:
+				target_distance = body.surface_distance_to(_ship.global_position)
+				break
+	# **Throttle is signed, in multiples of the local travel unit** — the number the flight model holds
+	# (`FlightController.TOP_THROTTLE` is 10), so astern is a negative multiple and says so.
+	_strip.text = "\n".join(
+		PackedStringArray(
+			[
+				"Closest: %s, Altitude: %s"
+					% [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())],
+				"Target: %s, Distance: %s"
+					% [target_name, SpacesimMarkers.format_distance(target_distance)],
+				"Speed: %s    Throttle: %+.1f ×    Frame: %s"
+					% [_speed(_ship.speed), _ship.throttle, frame.name],
+			]
+		)
+	)
 
 	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
 	# readings, what is left is what a developer reads to see what the engine is doing.
