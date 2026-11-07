@@ -21,6 +21,7 @@ func run(h, root: Node) -> void:
 	_test_frame_rates(h)
 	_test_aspect_names(h)
 	_test_the_render_scale(h)
+	_test_the_strip(h)
 	_test_a_screen_that_is_gone(h)
 	_test_the_resolution_presets(h, root)
 	_test_the_picker_stages_and_apply_commits(h, root)
@@ -72,6 +73,65 @@ func _test_the_render_scale(h) -> void:
 	h.check(Display.render_scale(4320, 240.0) <= 2.0, "and a huge one at its ceiling")
 	# A window that has not been laid out yet is not a division by zero.
 	h.check(Display.render_scale(720, 0.0) > 0.0, "a window with no height at all is not a division by zero")
+
+
+## **The band and the strip**, both halves of the one number the whole HUD layout derives from.
+##
+## The arithmetic is checked rather than the picture: this suite can see a `Rect2` and cannot see a frame,
+## and every way this goes wrong is arithmetic — a rounding that leaves a seam, a canvases' worth of
+## confusion between canvas units and window pixels, or the render resolution turning a familiar preset
+## into an unfamiliar number.
+func _test_the_strip(h) -> void:
+	var canvas := Rect2(Vector2.ZERO, Vector2(1920.0, 1080.0))
+
+	# **The design's number**: a fifth of the height, and the picture above it is 2.22 : 1.
+	h.check(Display.strip_height(1080, 0.2) == 216, "20 % of 1080 rows is 216")
+	var band := Display.band_of(canvas, 0.2)
+	var strip := Display.strip_of(canvas, 0.2)
+	h.check(band.size == Vector2(1920.0, 864.0), "so the band is 1920 x 864 (%s)" % str(band.size))
+	h.check_near(band.size.x / band.size.y, 2.2222, "which is the 2.22 : 1 picture", 0.0001)
+
+	# **They tile the canvas exactly** — the band gets the remainder, so no rounding can leave a seam.
+	h.check(
+		band.size.y + strip.size.y == canvas.size.y,
+		"the two rects tile the canvas with nothing over and nothing short (%s)" % str(band.size.y + strip.size.y)
+	)
+	h.check(strip.position.y == 864.0, "and the strip is at the BOTTOM, under the picture (%s)" % str(strip.position.y))
+	h.check(strip.size.x == canvas.size.x, "across the full width")
+
+	# **A changed height moves both**, which is what makes it a setting rather than a constant.
+	var taller := Display.band_of(canvas, 0.3)
+	# **`%%`, not `%`** — a literal percent in a string that is also formatted is read as a specifier, and
+	# the error aborts the function it is in without failing the run (the message printed as though it had
+	# worked). The project has paid for this shape before.
+	h.check(taller.size.y == 756.0, "30 %% gives a 756-row band (%s)" % str(taller.size.y))
+	h.check(taller.size.y < band.size.y, "so a taller strip is a smaller picture")
+
+	# **Zero is the cockpit**: no strip, and the whole canvas is picture.
+	h.check(Display.band_of(canvas, 0.0) == canvas, "0 % leaves the band the whole canvas")
+	h.check(Display.strip_of(canvas, 0.0).size.y == 0.0, "and the strip nothing at all")
+
+	# A value from a hand-edited file clamps to a picture that still exists rather than to a degenerate one.
+	h.check(Display.band_of(canvas, 1.5).size.y > 0.0, "a nonsense fraction is clamped, not obeyed")
+	h.check(Display.strip_height(1080, -3.0) == 0, "and a negative one is no strip")
+
+	# **The render resolution describes the WHOLE WINDOW** (Evert, 2026-11-07): a preset must not turn
+	# into a shape nobody chose. 2560 x 1440 at the 1920 x 1080 preset is 0.75, the band is 2560 x 1152
+	# on screen, and its buffer is 1920 x 864 — the preset's own height, not a new one.
+	var size := Display.band_size(Vector2i(2560, 1440), 0.2)
+	var scale := Display.render_scale(1080, 1440.0)
+	h.check(size == Vector2i(2560, 1152), "the band in a 2560 x 1440 window is 2560 x 1152 (%s)" % str(size))
+	h.check_near(scale, 0.75, "and the 1920 x 1080 preset is 0.75 of that window", 0.0001)
+	h.check(
+		Vector2i(roundi(size.x * scale), roundi(size.y * scale)) == Vector2i(1920, 864),
+		"so the band's buffer is 1920 x 864 — the preset keeps its name and its height"
+	)
+
+	# The registry has to agree with the clamp, or a value the screen cannot refuse is a value the rect
+	# silently overrides.
+	h.check(Settings.is_acceptable("hud.strip_height", 0.0), "the registry accepts no strip at all")
+	h.check(Settings.is_acceptable("hud.strip_height", 0.4), "and the widest one the rects allow")
+	h.check(not Settings.is_acceptable("hud.strip_height", 0.9), "and refuses one that would be a letterbox")
 
 
 ## The one that outlives the machine it was set on: a laptop undocked, a docking station removed.

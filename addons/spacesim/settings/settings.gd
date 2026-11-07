@@ -230,6 +230,16 @@ const REGISTRY := {
 	"hud.readout": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"hud.fps": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"hud.key_hints": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	# --- **how much of the canvas is the HUD strip**, as a fraction of its height. A setting rather than a
+	# constant (Evert, 2026-11-07): the band's height is a taste, and a taste gets flown. 0.2 is what
+	# `The HUD Strip` argues for — one 20 % strip gives the picture the aspect of two 10 % bars and twice
+	# the instrument room in one place — and it is also 20 % fewer pixels to draw.
+	#
+	# **It is the ONE number the camera, the strip, the markers and the SubViewport all derive from** — see
+	# `SpacesimDisplay.band_rect()` and `band_pixels()` — so there is no second copy to drift. **0 means no
+	# strip at all**, which is a cockpit (HUD Strip §5), and that is why the floor is zero rather than
+	# something positive.
+	"hud.strip_height": {"default": 0.2, "scope": Scope.PLAYER, "min": 0.0, "max": 0.4, "tab": "hud"},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64, "tab": "hud"},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a

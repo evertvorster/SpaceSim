@@ -1120,6 +1120,30 @@ more world rather than from distortion.
 | `render_scale(render_height, drawn_height) -> float` | pure, and clamped to the range the engine allows |
 | `screen_names() -> Array` | the monitors, as `"1: 2560 x 1440  (primary)"` |
 | `resolution_presets() -> Array` | what the menu beside a resolution row offers, as `{"label", "size"}` — built on demand, because the window and the monitors move |
+| `strip_fraction() -> float` | the strip's share of the canvas — `hud.strip_height`, **read hot and clamped**, never cached |
+| `strip_height(height, fraction) -> int` | pure: the strip's rows from a total height. **The band gets the remainder**, so the two tile exactly |
+| `band_of(canvas, fraction)` / `strip_of(canvas, fraction)` | pure: the two rects, in **canvas** units |
+| `band_size(window_size, fraction) -> Vector2i` | pure: the band in **window pixels**, which is what a `SubViewport` is sized in |
+| `band_rect()` / `strip_rect()` / `band_pixels()` | the same three, live — the viewport's rect and the window's size, against the setting |
+
+**The strip is one number, and everything about the HUD layout derives from it.** `hud.strip_height`
+(default 0.2) is the share of the canvas the HUD strip takes at the bottom; the picture is everything
+above it. The camera, the strip's own `ColorRect`, the navigation markers' bounds and the `SubViewport`
+that renders the 3D all ask these functions rather than keeping a copy, which is the only way they
+cannot disagree. **0 is a real value**: it is a cockpit, which has no strip at all and gives the 3D the
+whole screen.
+
+**Canvas units and window pixels are two different answers to "where is the band"**, and they are
+different on any window that is not the canvas size. A `Control` is laid out in the first; a
+`SubViewport` is sized in the second. Sizing a SubViewport from the canvas rect renders the 3D at canvas
+resolution and bleeds it up to the window — a sharpness regression that looks like nothing at all until
+the window is bigger than 1920 × 1080.
+
+**The render resolution still describes the whole window.** `video.render_resolution` names what the
+*window* would be drawn at, so its presets stay `1920 × 1080`, `2560 × 1440` and so on — a 20 % strip
+does not turn 1080 into 864 and it must not turn the preset into `1920 × 864`. The scale is still
+`render_scale(preset height, window height)`, applied to the band's own buffer: at `2560 × 1440` with
+the `1920 × 1080` preset the band is `2560 × 1152` on screen and its buffer is `1920 × 864`.
 
 **Through the window, not the display server.** `DisplayServer.window_set_size` changes what the
 display server says the size is and leaves the root `Window` — and so the viewport that is actually
