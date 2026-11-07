@@ -924,8 +924,8 @@ func _update_hud() -> void:
 					% [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())],
 				"Target: %s, Distance: %s"
 					% [target_name, SpacesimMarkers.format_distance(target_distance)],
-				"Speed: %s    Throttle: %+.1f ×    Frame: %s"
-					% [_speed(_ship.speed), _ship.throttle, frame.name],
+				"Speed: %s    Throttle: %+.1f ×"
+					% [_speed(_ship.speed), _ship.throttle],
 			]
 		)
 	)
@@ -938,6 +938,7 @@ func _update_hud() -> void:
 				"system      %s" % _system.name,
 				"player      %s   in %s" % [_player.display_name(), _session.repo.current_history()],
 				"date        %s" % SpacesimWorldTime.format(_session.world_time),
+				"frame       %s" % frame.name,
 				"settings    %s" % SpacesimSettings.path(),
 				"mode        %s%s%s" % [
 					String(SpacesimSettings.get_value("render.mode")),
