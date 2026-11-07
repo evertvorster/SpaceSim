@@ -907,8 +907,12 @@ func _update_hud() -> void:
 	var target_distance := INF
 	if _markers.selected != null:
 		target_name = _markers.selected.name
-		for body in _system.bodies:
-			if body.node == _markers.selected:
+		# **The ship's own scaled bodies, not the scene's** — `surface_distance_to` is
+		# `SpacesimScaleBody`'s, and the ship already holds the list the flight controller finds the nearest
+		# body with. `_system.bodies` is a list of `SpacesimSceneBody`, which does not have it: calling it on
+		# one aborted this function, which froze the strip while still drawing the block.
+		for body in _ship.bodies:
+			if body != null and body.node == _markers.selected:
 				target_distance = body.surface_distance_to(_ship.global_position)
 				break
 	# **Throttle is signed, in multiples of the local travel unit** — the number the flight model holds
