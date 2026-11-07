@@ -266,6 +266,21 @@ func band_rect() -> Rect2:
 	return band_of(get_viewport().get_visible_rect(), strip_fraction())
 
 
+## **The render scale as it applies right now**: the stored render height against the window's own height.
+##
+## Not cached, for the same reason as the strip: both halves move — the setting when Apply commits it, the
+## window whenever it is dragged. This is what the band's `SubViewport` is scaled by, so the render
+## resolution still means "what the whole window would be drawn at" and the band takes its share of it.
+func render_scale_now() -> float:
+	if _settings == null:
+		return 1.0
+	var window := get_window()
+	if window == null:
+		return 1.0
+	var render: Vector2i = _settings.get_value(SETTING_RENDER)
+	return render_scale(render.y, float(window.size.y))
+
+
 ## The strip's rect in canvas units, on the same two numbers.
 func strip_rect() -> Rect2:
 	return strip_of(get_viewport().get_visible_rect(), strip_fraction())

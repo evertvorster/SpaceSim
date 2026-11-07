@@ -440,10 +440,14 @@ func _hide_meshes(node: Node) -> int:
 	return hidden
 
 
+## **The ship, by NAME** — the rig used to find it as "the parent of a `Camera3D`", which stopped being
+## true when the camera moved into the HUD band's `SubViewport` (2026-11-07, `SpacesimBand.take`). A
+## `SubViewport` is not a `Node3D`, so that search returned one and the function reported a type error
+## instead of a ship.
 func _find_ship(node: Node) -> Node3D:
 	for child in node.get_children():
-		if child is Camera3D:
-			return node
+		if child is Node3D and child.name == "Ship":
+			return child
 		var found := _find_ship(child)
 		if found != null:
 			return found

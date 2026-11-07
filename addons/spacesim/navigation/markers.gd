@@ -110,19 +110,35 @@ func _build_pool() -> void:
 ##
 ## **The CANVAS rect, and that is a deliberate difference from the sky, the air and `SpacesimLod.pixel_angle`,
 ## which take the render target's size.** The markers are `Control`s in a `CanvasLayer`, and `unproject_position()`
-## returns coordinates in the same space they are laid out in — so this file's space is the canvas's, and the
-## other three's is the 3D buffer's. Under `video.aspect = keep` the canvas is letterboxed over a full-width
-## buffer and the two rects differ, which is the setting this has never been exercised under: the reasoning says
-## the choice is right (an off-screen label should clamp to the edge of the *visible canvas*, not the wider
-## buffer behind it), and no run has confirmed it. Recorded as a watch rather than left as an inconsistency a
-## reader would try to "fix".
-func refresh(camera: Camera3D) -> void:
+## returns coordinates in the CAMERA's own viewport — which is the band's pixel rect once the HUD strip exists
+## and the camera lives in its `SubViewport`. The labels are laid out in the root canvas, so the two are
+## converted by [method to_canvas] with the band's rect, passed in by the caller: this file is engine code and
+## must not reach for the game's display autoload. An empty rect is the single-viewport case and converts
+## nothing.
+func refresh(camera: Camera3D, band := Rect2()) -> void:
 	if camera == null or _labels.is_empty():
 		return
 
-	var viewport_size := camera.get_viewport().get_visible_rect().size
+	var drawn := camera.get_viewport().get_visible_rect().size
+	# **The camera may be drawing into a `SubViewport`** — the HUD's band, `SpacesimBand` — in which case
+	# its rect is in the band's PIXELS while these labels are `Control`s in the root canvas. A projected
+	# point is therefore in the wrong units and has to be converted before it is drawn. An empty `band`
+	# means the camera draws into the canvas the labels live in, and nothing needs converting.
+	#
+	# **Passed in rather than fetched**: this file is engine code and must not reach for the game's display
+	# autoload, which in a headless test is not the viewport the camera was built into.
+	var space: Vector2 = band.size if band.has_area() else drawn
+	# **The markers are drawn in the band, so the band is where they may be drawn.** A ring is *allowed*
+	# to be off screen — that is how the edge label knows which way to point — and now that the picture is
+	# a band, "off screen" begins at the strip: without this, a ring for an object below the frame is
+	# painted over the readouts. The label is still clamped into the band, so the marker survives; it is
+	# the ring that must not.
+	if band.has_area():
+		_overlay.position = band.position
+		_overlay.size = band.size
+		_overlay.clip_contents = true
 	var bounds := Rect2(
-		Vector2(margin, margin), viewport_size - Vector2(margin, margin) * 2.0
+		Vector2(margin, margin), space - Vector2(margin, margin) * 2.0
 	)
 
 	var gathered := _candidates(camera.get_global_transform_interpolated().origin)
@@ -134,7 +150,7 @@ func refresh(camera: Camera3D) -> void:
 
 	var entries := _parents_before_their_moons(choose(gathered, pool_size))
 	for entry in entries:
-		entry["circle"] = _project(entry["node"], camera, viewport_size)
+		entry["circle"] = to_canvas(_project(entry["node"], camera, drawn), drawn, band)
 
 	# Only other labels: a label is placed against its own object, and the HUD is not reserved around.
 	var taken: Array[Rect2] = []
@@ -148,7 +164,7 @@ func refresh(camera: Camera3D) -> void:
 		if index >= entries.size():
 			label.visible = false
 			continue
-		var mark := _place(entries[index], label, marked, viewport_size, bounds, taken, placed)
+		var mark := _place(entries[index], label, marked, space, bounds, taken, placed)
 		if not mark.is_empty():
 			marks.append(mark)
 
@@ -336,6 +352,20 @@ static func choose(candidates: Array[Dictionary], limit: int) -> Array[Dictionar
 	if entries.size() > limit:
 		entries.resize(limit)
 	return entries
+
+
+## **A projected point, in the units the labels are DRAWN in.**
+##
+## `unproject_position()` answers in the camera's own viewport, which is the band's pixel rect when the
+## camera is inside a `SubViewport`, and the labels are `Control`s laid out in the root canvas. The two
+## are the same picture at two scales, so the conversion is one ratio and the band's own origin.
+##
+## **An empty `band` is the no-SubViewport case** — the camera draws into the canvas the labels live in —
+## and converts nothing.
+static func to_canvas(point: Vector2, drawn: Vector2, band: Rect2) -> Vector2:
+	if not band.has_area() or drawn.x <= 0.0:
+		return point
+	return band.position + point * (band.size.x / drawn.x)
 
 
 ## Clamp a viewport point onto the edge of `size`, inset by `margin`, along the line from the centre.

@@ -42,6 +42,13 @@ var _system: SpacesimSystemScene
 var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
+## **The eye, in the ship's frame.** The camera itself lives in the band's `SubViewport` — a `Camera3D`
+## renders into the viewport that contains it — so this node is what carries the ship's pose: the flight
+## model moves the ship, this is the viewpoint inside it, and `_sync_camera` hands the interpolated
+## result to the camera once a frame.
+var _camera_mount: Node3D
+## The band the picture is drawn in, and the strip under it. See `SpacesimBand`.
+var _band: SpacesimBand
 ## Set by the stop key and consumed by the next physics step.
 var _throttle_stop := false
 ## The camera's exposure attributes, held only so they can be put at **identity**: the frame-wide pass
@@ -103,6 +110,10 @@ func _ready() -> void:
 	_markers.orbits = _system.orbit_parents()
 	add_child(_markers)
 	_camera = _ship.get_node("Camera")
+	_camera_mount = Node3D.new()
+	_camera_mount.name = "CameraMount"
+	_camera_mount.position = PlayerShip.CAMERA_OFFSET
+	_ship.add_child(_camera_mount)
 	# Exposure is a camera property, and it is ours: the star's light is physical, so the exposure that
 	# puts a lit body at middle grey is arithmetic. Settled at once rather than transitioned into, so
 	# the first frame is already right.
@@ -141,6 +152,7 @@ func _ready() -> void:
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_build_hud()
+	_build_band()
 
 	# The session comes up after the system has real frames, because restoring where the player was
 	# means putting the ship into one of them.
@@ -275,8 +287,9 @@ func _handle_key(event: InputEventKey) -> void:
 		set_wireframe(not _wireframe)
 	elif _view_for(event) != null:
 		# **The camera looks along a direction in the SHIP's frame**, so mouse look still steers and the
-		# chosen view stays put — which is what makes the same scene comparable from six sides.
-		_camera.basis = _view_for(event)
+		# chosen view stays put — which is what makes the same scene comparable from six sides. It is set
+		# on the mount: the camera is in the band's viewport and does not inherit the ship.
+		_camera_mount.basis = _view_for(event)
 
 
 ## **The body meshes as unshaded white wireframes, which is a different question from how they look.**
@@ -431,8 +444,9 @@ func _cycle_target() -> void:
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
 	# **The camera sits in the ship's frame and there is no hull** — see `PlayerShip.CAMERA_OFFSET` for why the box that
-	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting.
-	_camera.position = PlayerShip.CAMERA_OFFSET
+	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting. It is the
+	# MOUNT's now: the camera lives in the band's viewport and is handed this transform every frame.
+	_camera_mount.position = PlayerShip.CAMERA_OFFSET
 	# The exposure's ceiling, hot like everything else here: `exposure.range_stops` is in stops above
 	# the light-adapted floor, and 32.0 is the whole window with no cap on the derived value.
 	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
@@ -456,6 +470,11 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 		# once every `HUD_INTERVAL`, and would otherwise leave a toggle looking broken for a moment.
 		"hud.readout", "hud.fps", "hud.key_hints":
 			_apply_hud_visibility()
+		# **The band and the window's own resolution.** A strip height or a render height moves the picture's
+		# rect and the viewport under it, so both are re-fitted the moment they change rather than at the next
+		# restart — the setting is hot or it is not a setting.
+		"hud.strip_height", "video.render_resolution":
+			_fit_band()
 
 
 ## **Press the free-mouse key to let the pointer go, and press it again or click to take it back.** A capture
@@ -616,7 +635,21 @@ func _clear_fog() -> void:
 ## **Nothing here may touch the `RenderingDevice`.** It belongs to the render thread and its RID allocator
 ## is not thread safe — reading it from `_process` demonstrated that with thousands of `Element limit
 ## reached` errors.
+## **The eye, in a band.** A camera outside the ship no longer inherits its transform, so this is what puts
+## it where the ship's viewpoint is — and it is the **interpolated** transform, the same reading the frame
+## makes for the eye position a few lines later. The plain one would tick against the smoothed geometry.
+##
+## Writing the camera's transform is safe because the band turned its own interpolation **off**: the value
+## coming in is already interpolated, and a node that smooths it a second time lags by up to a tick.
+func _sync_camera() -> void:
+	if _camera_mount == null:
+		return
+	_camera.global_transform = _camera_mount.get_global_transform_interpolated()
+
+
 func _update_view(delta: float) -> void:
+	# Before anything reads the eye: sky, LOD, markers, near and far all ask the camera where it is.
+	_sync_camera()
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
 	_system.aim_sun_at(observer)
@@ -690,7 +723,10 @@ func _update_markers(camera: Camera3D) -> void:
 	if in_space:
 		context = _system.significant_nodes()
 	_markers.context_targets = context
-	_markers.refresh(camera)
+	# **The band, because the camera draws into it.** The camera is inside the band's `SubViewport`, so
+	# `unproject_position` answers in the band's pixels while the labels are laid out in the root canvas;
+	# `refresh` converts with this rect. See `SpacesimMarkers.to_canvas`.
+	_markers.refresh(camera, SpacesimDisplay.band_rect())
 
 
 ## Render range tracks the scale you are operating at. Only the ratio costs depth precision, and
@@ -741,6 +777,37 @@ func _outline(label: Label, font_size: int) -> void:
 	label.add_theme_font_size_override("font_size", font_size)
 	label.add_theme_color_override("font_outline_color", HUD_OUTLINE)
 	label.add_theme_constant_override("outline_size", HUD_OUTLINE_SIZE)
+
+
+## **The band, and the strip under it.** The picture is rendered into a `SubViewport` the size of the
+## band — not drawn full-screen with black painted over it, which would be a vertical crop of the 20 % the
+## strip covers. `SpacesimBand` carries the reasoning; this is only the wiring.
+func _build_band() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "Band"
+	# **Under the HUD**, which is a layer above it: the readouts sit in the strip this paints.
+	layer.layer = 0
+	add_child(layer)
+	_band = SpacesimBand.new()
+	layer.add_child(_band)
+	# The camera moves into the band's viewport here; from now on `_sync_camera` is what moves it.
+	_band.take(_camera)
+	# A window that changes shape changes the band, and so does a strip height — both re-fit the same way.
+	get_window().size_changed.connect(_fit_band)
+	_fit_band()
+
+
+## **The band's four numbers, from the one place that owns them** — `SpacesimDisplay`, which derives both
+## rects from `hud.strip_height` and the viewport's size from the window's own pixels.
+func _fit_band() -> void:
+	if _band == null or not _band.is_inside_tree():
+		return
+	_band.fit(
+		SpacesimDisplay.band_rect(),
+		SpacesimDisplay.strip_rect(),
+		SpacesimDisplay.band_pixels(),
+		SpacesimDisplay.render_scale_now()
+	)
 
 
 func _build_hud() -> void:
