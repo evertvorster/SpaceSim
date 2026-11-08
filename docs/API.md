@@ -731,6 +731,44 @@ screen-space budget in one place.
 | `static screen_direction(camera, target) -> Vector2` | viewport direction, valid behind the camera |
 | `static format_distance(metres) -> String` | `1.50 Gm`, `2.5 km`, `12 m` |
 
+### `SpacesimBand` — `Control`
+
+**The band the 3D is drawn in, and the strip under it.** The picture is not the whole screen: the bottom
+fifth is an opaque black strip, and the 3D above it is rendered into a `SubViewport` sized to the band and
+shown in the band's rect. **That is a band, not a bar over a picture** — a full-screen picture with black
+painted over its bottom fifth loses that fifth of the VERTICAL field, because the camera's vertical FOV maps
+to the whole viewport. With the viewport the band's size, `keep_aspect = KEEP_HEIGHT` does what the design
+asks: the vertical field is unchanged and the horizontal grows (2.22 : 1 on 16:9).
+
+| Member | |
+|---|---|
+| `take(camera: Camera3D)` | **moves a camera into the viewport**, keeping its global transform. A `Camera3D` renders into the viewport that contains it, so this is what makes the picture come out at the band's size — and the caller must then DRIVE that camera, because it no longer inherits the ship's transform |
+| `fit(band, strip, pixels, scale)` | places both rects (canvas units) and sizes the `SubViewport` (**window pixels**) with the render scale. The rects come from `SpacesimDisplay`, so a changed strip height moves everything together |
+| `viewport() -> SubViewport`, `picture_rect()`, `strip_rect()` | for a test, and for anything that needs the render size |
+| `STRIP_COLOR` | black, and **painted** rather than left empty: the root's clear colour is not something to rely on once anything draws there |
+
+**A camera that leaves the ship loses the engine's physics interpolation**, and handing it an already-smoothed
+transform per drawn frame puts the render camera a tick behind the scene — which shows up as a shader effect
+flickering while the view rotates, not as a camera fault. Drive it in `_physics_process` from the source's
+physics `global_transform`; the `godot` skill carries the rule.
+
+### `SpacesimGroup` — `Control`
+
+**One labelled group in the HUD strip**: a thin white rounded border (`StyleBoxFlat`, radius 6, alpha 0.45),
+a heading, and its fields as two aligned columns.
+
+| Member | |
+|---|---|
+| `set_fields(fields: Array)` | `[label, value]` pairs. **The names are right-aligned in a column measured with the font they are drawn in**, which is what puts the colons in one line — counting characters only works in a monospaced face. One space either side of the colon: the leading one is part of the name (`"Label :"`), the trailing one is the gap between the two labels, measured rather than guessed |
+| `set_lines(lines: PackedStringArray)` | raw text in the values column, for a group with nothing to label |
+| `fit(rect)` | places the group and its text; the strip's geometry is `SpacesimDisplay`'s |
+| `set_heading(text)`, `heading_text()`, `names_text()`, `values_text()` | the heading and the content, for a caller and for a test |
+| `column_width()`, `value_gap()` | the measured column and gap, in pixels |
+
+**A group grows by gaining a field**: the border and the heading are fixed, and the widths of the groups in a
+row are weights in `main.gd`, so wiring a reading in moves nothing else. A group narrower than its own
+longest label clamps the column — a degenerate case, not a layout.
+
 ### `SpacesimOverlay` — `Control`
 
 Draws every ring and line in **one `_draw()` pass** rather than as a node each. Twelve markers
