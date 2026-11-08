@@ -169,8 +169,9 @@ func _test_a_group(h, root: Node) -> void:
 		"and the longest label ends at the column with no leader (%s)" % names[2]
 	)
 	h.check(
-		names[0].begins_with("Speed.") and names[0].ends_with(":"),
-		"while a short one is led by dots to the same place (%s)" % names[0]
+		names[0] == "Speed:" and names[1] == "Throttle:",
+		"and a short one carries no filler at all — the alignment is the column, not the characters (%s)"
+			% names[0]
 	)
 	# **Measured, not counted**: the column is the longest label's width in the font the values draw in.
 	var font: Font = (group.get_node("Values") as Label).get_theme_font("font")
@@ -180,11 +181,23 @@ func _test_a_group(h, root: Node) -> void:
 		"the column is the longest label's measured width (%.1f against %.1f)"
 			% [group.column_width(), widest]
 	)
-	# And the leader fills it rather than stopping short, which is the fault a character count produces.
-	var leader: float = font.get_string_size(names[0], HORIZONTAL_ALIGNMENT_LEFT, -1, Group.BODY_FONT_SIZE).x
+	# **One space between the colon and the value**, measured rather than guessed: the value column starts
+	# exactly one space's width past the colon column.
+	var space: float = font.get_string_size(" ", HORIZONTAL_ALIGNMENT_LEFT, -1, Group.BODY_FONT_SIZE).x
 	h.check(
-		leader >= widest - 0.5,
-		"and the leader reaches the column (%.1f against %.1f)" % [leader, widest]
+		absf(group.value_gap() - space) < 0.01,
+		"and exactly one space separates a colon from its value (%.2f against %.2f)"
+			% [group.value_gap(), space]
+	)
+	# **Placed first**: the two labels' positions come from `fit`, which is what knows the group's width.
+	# A group narrower than its own longest label clamps the column, which is a degenerate case rather
+	# than a layout — there is nowhere to put the values.
+	group.fit(Rect2(0.0, 0.0, 400.0, 120.0))
+	var values_label := group.get_node("Values") as Label
+	var names_label := group.get_node("Names") as Label
+	h.check(
+		absf((values_label.position.x - names_label.position.x) - (group.column_width() + space)) < 0.01,
+		"with the value column placed at the colon column plus that space"
 	)
 
 	# **An empty group reserves its room rather than collapsing**, which is what a reading that is not

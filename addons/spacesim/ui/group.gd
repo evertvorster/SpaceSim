@@ -30,8 +30,10 @@ const CORNER := 6
 const HEADING_HEIGHT := 20.0
 const PADDING := Vector2(10.0, 6.0)
 
-## The gap between the colon column and the values, in pixels.
-const VALUE_GAP := 6.0
+## The gap used until a font has been measured. Once it has, the gap is **one space in that font**, which
+## is what "a single space after the colon" means when the colon and its value are in different labels —
+## Evert, 2026-11-08.
+const VALUE_GAP_FALLBACK := 6.0
 
 ## The heading's own size, a little smaller than the fields under it, so the group reads as a label over
 ## content rather than as a title page.
@@ -46,6 +48,9 @@ var _values: Label
 
 ## The label column's width in pixels, measured from the longest label in this group.
 var _column := 0.0
+
+## The gap between the colon and the value, in pixels — one space in the body font.
+var _gap := VALUE_GAP_FALLBACK
 
 
 func _ready() -> void:
@@ -95,8 +100,8 @@ func _place_text() -> void:
 	var column := minf(_column, body.x)
 	_names.position = at
 	_names.size = Vector2(column, body.y)
-	_values.position = at + Vector2(column + VALUE_GAP, 0.0)
-	_values.size = Vector2(maxf(body.x - column - VALUE_GAP, 0.0), body.y)
+	_values.position = at + Vector2(column + _gap, 0.0)
+	_values.size = Vector2(maxf(body.x - column - _gap, 0.0), body.y)
 
 
 ## The group's name, above its fields.
@@ -106,7 +111,7 @@ func set_heading(text: String) -> void:
 	_heading.text = text
 
 
-## **The group's content as `[label, value]` pairs**, drawn as two aligned columns with dot leaders.
+## **The group's content as `[label, value]` pairs**, drawn as two aligned columns.
 ##
 ## The column is measured from the longest label **with the font the values are drawn in**, so the colons
 ## line up in a proportional face — a character count cannot do that, which is what the first version got
@@ -125,15 +130,17 @@ func set_fields(fields: Array) -> void:
 		column = maxf(column, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x)
 	_column = column
 
-	var dot := maxf(font.get_string_size(".", HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x, 0.001)
+	# **One space between the colon and its value**, measured in the same font the text is drawn in, since
+	# the two live in different labels and a pixel count would be a guess at what a space looks like.
+	_gap = font.get_string_size(" ", HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x
+
+	# **No leader characters.** The names are right-aligned in a measured column, which is what puts the
+	# colons in one line; padding them with dots or spaces would only be a second way of saying the same
+	# thing, and Evert asked for the dots out (2026-11-08).
 	var names := PackedStringArray()
 	var values := PackedStringArray()
 	for field in fields:
-		var label := String(field[0])
-		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x
-		# One dot more than fits, so a leader never stops short of the column and leaves a ragged gap.
-		var dots := maxi(int(ceil((column - width) / dot)), 0)
-		names.append(label + ".".repeat(dots) + ":")
+		names.append("%s:" % String(field[0]))
 		values.append(String(field[1]))
 	_names.text = "\n".join(names)
 	_values.text = "\n".join(values)
@@ -167,6 +174,11 @@ func values_text() -> String:
 ## The width the label column was measured to, in pixels.
 func column_width() -> float:
 	return _column
+
+
+## The gap between the colon column and the values, in pixels — one space in the body font.
+func value_gap() -> float:
+	return _gap
 
 
 func _draw() -> void:
