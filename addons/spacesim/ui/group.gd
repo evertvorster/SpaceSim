@@ -77,6 +77,28 @@ func set_heading(text: String) -> void:
 	_heading.text = text
 
 
+## **Aligned fields, as `Label....: value`** — Evert, 2026-11-08: *"I would like the readouts in the boxes
+## to be aligned. What I have seen that works well is to have something like: `Label....: <value>` /
+## `Longlabel: <value>`"*.
+##
+## Every field is `[label, value]`. **The dots are a leader, not decoration**: they fill the space between a
+## short label and the column where all the colons sit, which is the longest label in the group. So the
+## longest label carries no dots at all (`Longlabel: value`) and every shorter one is padded to it — the
+## colon column is one line to look down, which is what makes a list of readings scannable.
+##
+## **Per group, not per strip**: two groups are two panels, and a label in one should not be padded to the
+## length of a label in the other.
+func set_fields(fields: Array) -> void:
+	var width := 0
+	for field in fields:
+		width = maxi(width, String(field[0]).length())
+	var lines := PackedStringArray()
+	for field in fields:
+		var label := String(field[0])
+		lines.append("%s%s: %s" % [label, ".".repeat(width - label.length()), String(field[1])])
+	set_lines(lines)
+
+
 ## **The group's content, one string per line.** An empty array is a group with room reserved and nothing
 ## in it yet, which is what a reading that is not wired up should look like — not a line of dashes.
 func set_lines(lines: PackedStringArray) -> void:

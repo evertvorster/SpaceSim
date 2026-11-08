@@ -1597,7 +1597,8 @@ only place that knows a save is the player, the clock and the world.**
 | `save(system) -> Dictionary`, `save_confirmed(system)`, `label(system) -> String` | |
 | `new_story(name, system, player_name)` | branches from the trunk; history and player named separately |
 | `saves()`, `affected_saves(hash)`, `preview(hash)`, `delete_save(hash)` | deletions are tombstones |
-| `world_time: float`, `message: String`, `player`, `repo` | |
+| `world_time: float`, `player_time: float`, `message: String`, `player`, `repo` | **two clocks**: the world's, and the crew's own proper time. **Both are saved** (`player_time` in the state envelope, defaulting to `world_time` for a save written before it existed) |
+| `advance(seconds)` | **moves both clocks, from one place** — the player's by the frame's delta, the world's by `SpacesimWorldTime.clock_rate(speed)` times it. A clock advanced only on a save is a clock that stands still while you fly, which is what this replaces |
 
 **Reading a save is free; continuing from one is what costs.** `load()` reads the state out of the
 commit, so every save stays in the list and nothing is lost by looking. The session remembers which
@@ -1642,7 +1643,10 @@ refused.
 |---|---|
 | `frame_phrase(frame_id) -> String` | "landed on Nix", "above Nix", empty for a frame it does not have |
 | `nearest_body_name(position) -> String` | |
-| `SpacesimWorldTime.format(seconds) -> String` | the world clock as a Terran date and time, e.g. "512-05-02 14:33". **In `save/world_time.gd`, not on the scene class** — a built scene knows about its bodies, and nothing about calendars |
+| `SpacesimWorldTime.format(seconds) -> String` | the world clock as a Terran date and time, e.g. "512-05-02 14:33". **In `save/world_time.gd`, not on the scene class** — a built scene knows about its bodies, and nothing about calendars. **The strip does not use it**: at aeons a date is five digits of noise |
+| `SpacesimWorldTime.since_bang(seconds) -> int` | the same instant as **seconds since the Big Bang** (`SECONDS_SINCE_BANG` = 13.787 Gyr, Planck 2018), which is what the HUD's Time group shows for both clocks. **The counter is float64 at 4.35e17, where one ULP is ~97 s** — the last two digits are noise, and that is worth nothing at this scale |
+| `SpacesimWorldTime.grouped(value) -> String` | thousands separators, hand-rolled rather than locale-dependent: nineteen digits is the one number here the eye cannot parse alone |
+| `SpacesimWorldTime.clock_rate(speed) -> float` | **how fast the world's clock runs per second of the crew's. 1.0 today**, deliberately: the light-time floor (`v_f / (c·tanh(v_f/c))`) is a later change and lands here, with everything that advances a clock already going through it |
 | `describe(location, assets) -> String` | the location chain as prose, innermost first |
 | `place_observer(location) -> bool` | puts the observer back where a save says it was; false when the frame had to fall back |
 | `start_time: float` | the clock a story begins at, from the system file's `start.world_time` |

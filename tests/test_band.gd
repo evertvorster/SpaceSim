@@ -150,6 +150,27 @@ func _test_a_group(h, root: Node) -> void:
 		"and the lines come back one per line (%s)" % group.lines_text().replace("\n", " / ")
 	)
 
+	# **Aligned fields**: the leader dots pad every label to the longest one in the group, so the colons sit
+	# in one column and the longest label carries none at all.
+	group.set_fields([["Speed", "3.20 km/s"], ["Throttle", "+2.5 ×"], ["Temperature", "288 K"]])
+	var aligned: PackedStringArray = group.lines_text().split("\n")
+	h.check(aligned.size() == 3, "three fields are three lines (%d)" % aligned.size())
+	h.check(
+		aligned[0] == "Speed......: 3.20 km/s",
+		"a short label is padded with dots to the column (%s)" % aligned[0]
+	)
+	h.check(
+		aligned[2] == "Temperature: 288 K",
+		"and the longest label needs none, because it sets the column (%s)" % aligned[2]
+	)
+	var colons := PackedInt32Array()
+	for line in aligned:
+		colons.append(line.find(":"))
+	h.check(
+		colons[0] == colons[1] and colons[1] == colons[2],
+		"every colon is in the same column (%s)" % str(colons)
+	)
+
 	# **An empty group reserves its room rather than collapsing**, which is what a reading that is not
 	# wired up yet should look like — not a line of dashes that outlives the gap it fills.
 	group.set_lines(PackedStringArray())

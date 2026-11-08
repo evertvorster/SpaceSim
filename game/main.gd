@@ -963,47 +963,40 @@ func _update_hud() -> void:
 	# **Ship** — what the ship is doing, which is what a pilot reads while flying. Throttle is signed, in
 	# multiples of the local travel unit: the number the flight model holds (`TOP_THROTTLE` is 10), so
 	# astern is a negative multiple and says so.
-	_group_ship.set_lines(
-		PackedStringArray(
-			[
-				"Speed  %s" % _speed(_ship.speed),
-				"Throttle  %+.1f ×" % _ship.throttle,
-			]
-		)
+	_group_ship.set_fields(
+		[
+			["Speed", _speed(_ship.speed)],
+			["Throttle", "%+.1f ×" % _ship.throttle],
+		]
 	)
 
 	# **Sensors** — the air and the pull where the observer is, from `SpacesimSystemScene.conditions_at`,
 	# which is the one call that knows how to derive them. A body with no air answers 0 Pa rather than
 	# dropping the line, because standing on a moon is a real place to be.
 	var air := _system.conditions_at(_ship.global_position)
-	_group_sensors.set_lines(
-		PackedStringArray(
-			[
-				"Gravity  %.2f m/s²" % float(air["gravity"]),
-				"Pressure  %s" % _pressure(float(air["pressure"])),
-				"Temperature  %.0f K" % float(air["temperature"]),
-			]
-		)
+	_group_sensors.set_fields(
+		[
+			["Gravity", "%.2f m/s²" % float(air["gravity"])],
+			["Pressure", _pressure(float(air["pressure"]))],
+			["Temperature", "%.0f K" % float(air["temperature"])],
+		]
 	)
 
 	# **Location** — where you are, what you picked, and what is under you. **The galaxy and sector lines are
 	# not written yet**: the cosmos has no authored name in the engine (`Cosmos and Discovery`), so the system
 	# — which is named after its star — is as far up the hierarchy as there is anything true to say. They are
 	# one line each, added when the hierarchy is content.
-	_group_location.set_lines(
-		PackedStringArray(
-			[
-				# **Authored, and a placeholder.** Evert, 2026-11-08: *"Galaxy should be milky way. We'll
-				# author it for now, but this will be generated when we do the procedural universe."* There
-				# is no cosmos hierarchy in the engine yet (`Cosmos and Discovery`), so this is a constant
-				# and the sector line under it is the system, which is named after its star.
-				"Galaxy  %s" % GALAXY,
-				"Sector  %s" % _system.name,
-				"Target  %s, %s" % [target_name, SpacesimMarkers.format_distance(target_distance)],
-				"Nearest  %s, %s"
-					% [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())],
-			]
-		)
+	_group_location.set_fields(
+		[
+			# **Authored, and a placeholder.** Evert, 2026-11-08: *"Galaxy should be milky way. We'll
+			# author it for now, but this will be generated when we do the procedural universe."* There
+			# is no cosmos hierarchy in the engine yet (`Cosmos and Discovery`), so this is a constant
+			# and the sector line under it is the system, which is named after its star.
+			["Galaxy", GALAXY],
+			["Sector", _system.name],
+			["Target", "%s, %s" % [target_name, SpacesimMarkers.format_distance(target_distance)]],
+			["Nearest", "%s, %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())]],
+		]
 	)
 
 	# **Time** — both clocks, as seconds since the Big Bang, grouped by the thousand. Evert, 2026-11-07:
@@ -1014,14 +1007,11 @@ func _update_hud() -> void:
 	# noise, and this is the one number in the interface the eye cannot parse without help.
 	# **Both, because they are going to diverge** — they tick together today, and `Relativity and the Two
 	# Clocks` is why they will not forever.
-	_group_time.set_lines(
-		PackedStringArray(
-			[
-				"Player  %s s" % SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.player_time)),
-				"Universe  %s s"
-					% SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.world_time)),
-			]
-		)
+	_group_time.set_fields(
+		[
+			["Player", "%s s" % SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.player_time))],
+			["Universe", "%s s" % SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.world_time))],
+		]
 	)
 
 	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's

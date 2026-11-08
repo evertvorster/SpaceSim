@@ -18,7 +18,11 @@ const EPOCH_AT_YEAR_ZERO := -62167219200
 ## (Planck 2018), over Julian years. The strip shows both clocks as a count from here, because a count from
 ## a calendar epoch says nothing at the aeons this engine can cross, and `world_time`'s own year 0 is the
 ## calendar's, not the cosmos's.
-const SECONDS_SINCE_BANG := 13.787e9 * 365.25 * 86400.0
+## **An INTEGER, and that is not tidiness.** The count is displayed at 4.35e17 seconds, where a float64 has
+## a resolution of about 97 s — so adding the epoch in floating point made the strip's clock advance once
+## every minute and a half, which reads exactly like a clock that has stopped. `int` is exact to 9.2e18 and
+## the whole age of the universe fits in it with room for aeons of flying.
+const SECONDS_SINCE_BANG := 435084631200000000
 
 ## **How fast the world's clock runs per second of the player's**. **1.0, and that is deliberate for now** —
 ## Evert, 2026-11-08: *"The clock should be ticking, one second at a time. When we do relativistic travel,
@@ -33,12 +37,11 @@ static func clock_rate(_fantastical_speed: float) -> float:
 
 ## A world (or player) time as seconds since the Big Bang, in whole seconds.
 ##
-## **The number is float64 seconds at 4.35e17, where one ULP is about 97 s**, so the last two digits of the
-## count are noise at that scale — an hour of flight lands within a minute or two of where it should. That is
-## worth nothing against a geological clock and it is why the display shows whole seconds with separators
-## rather than pretending to a precision the arithmetic does not have.
+## **Integer arithmetic, deliberately** — see [constant SECONDS_SINCE_BANG]. The elapsed part is a float and
+## is rounded once, on its own, where a float is still exact to the second; the epoch is added as an `int`
+## afterwards. Adding the two in floating point quantises the answer to ~97 s and the clock appears stopped.
 static func since_bang(seconds: float) -> int:
-	return int(round(SECONDS_SINCE_BANG + seconds))
+	return SECONDS_SINCE_BANG + int(round(seconds))
 
 
 ## **A long number a person can read**: thousands separators every three digits.
