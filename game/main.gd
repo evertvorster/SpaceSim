@@ -540,6 +540,9 @@ func _physics_process(delta: float) -> void:
 	}
 
 	_ship.step(delta, input)
+	# **Both clocks, one second at a time** — Evert, 2026-11-08. The world's runs faster only when
+	# relativistic travel lands, and `SpacesimSession.advance` is the one place either of them moves.
+	_session.advance(delta)
 	# **After the step, before anything renders.** The camera is in the band's viewport and inherits nothing,
 	# so it is placed here — in the physics tick, which is where its own interpolation history comes from.
 	_sync_camera()
@@ -794,6 +797,9 @@ func _range_key(kind: int) -> String:
 ## **The four groups' shares of the strip's width**, in the order they are placed. Weights rather than
 ## pixels: a wider window gives every group the same proportion, and changing one number here rearranges the
 ## strip without touching the layout arithmetic.
+## **The galaxy's name, authored** — until the procedural universe generates one. Evert, 2026-11-08.
+const GALAXY := "Milky Way"
+
 const GROUP_WEIGHTS := [0.20, 0.24, 0.32, 0.24]
 
 ## The gap between groups, and the margin the group row keeps inside the strip.
@@ -987,7 +993,12 @@ func _update_hud() -> void:
 	_group_location.set_lines(
 		PackedStringArray(
 			[
-				"System  %s" % _system.name,
+				# **Authored, and a placeholder.** Evert, 2026-11-08: *"Galaxy should be milky way. We'll
+				# author it for now, but this will be generated when we do the procedural universe."* There
+				# is no cosmos hierarchy in the engine yet (`Cosmos and Discovery`), so this is a constant
+				# and the sector line under it is the system, which is named after its star.
+				"Galaxy  %s" % GALAXY,
+				"Sector  %s" % _system.name,
 				"Target  %s, %s" % [target_name, SpacesimMarkers.format_distance(target_distance)],
 				"Nearest  %s, %s"
 					% [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())],
@@ -995,12 +1006,23 @@ func _update_hud() -> void:
 		)
 	)
 
-	# **Time** — the world clock, as a plain number of seconds. Evert, 2026-11-07: *"time should just be a
-	# very long number"*; no unit scaling and no calendar, because at aeons a `YYYY-MM-DD hh:mm` carries five
-	# digits of noise and the shape this should eventually take is not decided. **The world's clock, not the
-	# player's** — the two diverge under relativistic travel (`Relativity and the Two Clocks` §4), and the
-	# second one belongs on the personal screen.
-	_group_time.set_lines(PackedStringArray(["%d s" % int(_session.world_time)]))
+	# **Time** — both clocks, as seconds since the Big Bang, grouped by the thousand. Evert, 2026-11-07:
+	# *"time should just be a very long number"*, and 2026-11-08: *"should be the number of seconds since the
+	# big bang. Add commas every three digits. Both player time and Universe time should be displayed."*
+	#
+	# **From the Bang rather than from the world's year zero**: at 13.8 Gyr a calendar date carries digits of
+	# noise, and this is the one number in the interface the eye cannot parse without help.
+	# **Both, because they are going to diverge** — they tick together today, and `Relativity and the Two
+	# Clocks` is why they will not forever.
+	_group_time.set_lines(
+		PackedStringArray(
+			[
+				"Player  %s s" % SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.player_time)),
+				"Universe  %s s"
+					% SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.world_time)),
+			]
+		)
+	)
 
 	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
 	# readings, what is left is what a developer reads to see what the engine is doing.
