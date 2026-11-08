@@ -196,6 +196,77 @@ func scale_bodies() -> Array[SpacesimScaleBody]:
 	return list
 
 
+## **What it is like where the observer is**, for the body nearest to them — the HUD's sensor column, and
+## anything else that wants conditions rather than the model's parts.
+##
+## **One call rather than four.** Pressure and temperature come from
+## `SpacesimAtmosphereModel.conditions_at`, which derives the surface temperature, the lapse rate and the
+## scale height from the two inputs this scene can be trusted with, and `equilibrium_temperature` is not
+## `reference_temperature` — the 518 K Venus behind that sentence is in `condensation_levels`.
+##
+## **Gravity is at the EYE**: `GM/r²` with `r` the distance from the body's centre, so a thousand kilometres
+## up reads 7.3 m/s² on Earth against 9.8 on the ground. The air's own laws keep the SURFACE gravity
+## because they are the body's, and do not move with the observer.
+##
+## Returns `{body, altitude, gravity, pressure, temperature}` — body null when nothing is near, and an
+## airless body answering pressure 0 rather than dropping the reading. Metres, m/s², pascals and kelvin.
+func conditions_at(position: Vector3) -> Dictionary:
+	var body := _nearest_body_to(position)
+	if body == null or body.content == null:
+		return {"body": null, "altitude": INF, "gravity": 0.0, "pressure": 0.0, "temperature": 0.0}
+	var centre: Vector3 = body.position
+	if body.node != null:
+		centre = body.node.global_position
+	var from_centre := maxf(centre.distance_to(position), 1.0)
+	var altitude := maxf(from_centre - body.radius, 0.0)
+	var gravity := SpacesimAtmosphereModel.GRAVITATION * body.content.mass / (from_centre * from_centre)
+	var light := _light_at(body)
+	var materials := _materials()
+	var equilibrium := 0.0
+	if light.x > 0.0 and light.y > 0.0:
+		equilibrium = SpacesimAtmosphereModel.equilibrium_temperature(
+			body.content, materials, light.x, light.y
+		)
+	if body.content.atmosphere == null:
+		return {
+			"body": body, "altitude": altitude, "gravity": gravity,
+			"pressure": 0.0, "temperature": equilibrium,
+		}
+	var air := SpacesimAtmosphereModel.conditions_at(
+		body.content.atmosphere,
+		materials,
+		SpacesimAtmosphereModel.surface_gravity(body.content),
+		equilibrium,
+		altitude,
+		body.content
+	)
+	return {
+		"body": body,
+		"altitude": altitude,
+		"gravity": gravity,
+		"pressure": air["pressure"],
+		"temperature": air["temperature"],
+	}
+
+
+## The body whose SURFACE is nearest to a point — the same question `Proximity` answers for the flight
+## controller, asked of the scene's own bodies so their content comes with them.
+func _nearest_body_to(position: Vector3) -> SpacesimSceneBody:
+	var nearest: SpacesimSceneBody = null
+	var best := INF
+	for body in bodies:
+		if body == null:
+			continue
+		var centre: Vector3 = body.position
+		if body.node != null:
+			centre = body.node.global_position
+		var distance := maxf(centre.distance_to(position) - body.radius, 0.0)
+		if distance < best:
+			best = distance
+			nearest = body
+	return nearest
+
+
 ## Every mesh in the system, so a debug key can hide or re-tessellate all of it.
 func meshes() -> Array[MeshInstance3D]:
 	var list: Array[MeshInstance3D] = []

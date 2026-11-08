@@ -40,6 +40,14 @@ const SETTING_RENDER := "video.render_resolution"
 const SETTING_WINDOW := "video.window_size"
 const SETTING_VSYNC := "video.vsync"
 const SETTING_MAX_FPS := "video.max_fps"
+const SETTING_STRIP := "hud.strip_height"
+
+## The strip's share of the canvas, as a range rather than a bare number. **The floor is zero because a
+## cockpit has no strip at all** — `The HUD Strip` §5 — and the ceiling is a look judgement: past 40 %
+## the picture is a letterbox with a text panel under it.
+const STRIP_MIN := 0.0
+const STRIP_MAX := 0.4
+const STRIP_DEFAULT := 0.2
 
 ## Godot clamps `scaling_3d_scale` to this, so the arithmetic is held to the same range rather than
 ## being silently clamped by the engine.
@@ -203,6 +211,87 @@ func _apply_render_resolution() -> void:
 ## does at the ends of the range can be checked without a window.
 static func render_scale(render_height: int, drawn_height: float) -> float:
 	return clampf(float(render_height) / maxf(drawn_height, 1.0), SCALE_MIN, SCALE_MAX)
+
+
+# --- the strip ----------------------------------------------------------------------------------
+#
+# **The band is the window minus the strip, and the strip is at the bottom.** Everything that needs
+# either asks these, so the camera, the strip, the marker bounds and the SubViewport cannot come to
+# different answers about where the picture is.
+#
+# Two pairs, on purpose: the rects are in **CANVAS units**, which is what a `Control` is laid out in,
+# and the size is in **WINDOW PIXELS**, which is what a `SubViewport` is sized in. With `canvas_items`
+# stretch those are different numbers on any window that is not the canvas size, and sizing a
+# SubViewport from the canvas would render the 3D at canvas resolution and bleed it up to the window.
+
+## The strip's share of the canvas, as the setting stores it, clamped to the range that is a strip.
+##
+## **Read, never cached** — and that is the whole reason the rects below are derived rather than stored:
+## a changed height has to move the camera, the strip and the markers in the same frame, and one number
+## in one place is what makes that possible.
+func strip_fraction() -> float:
+	if _settings == null:
+		return STRIP_DEFAULT
+	return clampf(float(_settings.get_value(SETTING_STRIP)), STRIP_MIN, STRIP_MAX)
+
+
+## The strip's height in rows, from a total height. **Integer, and the band gets the remainder**, so the
+## two tile exactly and a rounding cannot leave a one-pixel seam between them.
+static func strip_height(height: int, fraction: float) -> int:
+	return clampi(roundi(clampf(fraction, STRIP_MIN, STRIP_MAX) * float(height)), 0, height)
+
+
+## The strip, in canvas units: the full width, at the bottom.
+static func strip_of(canvas: Rect2, fraction: float) -> Rect2:
+	var rows := strip_height(roundi(canvas.size.y), fraction)
+	return Rect2(
+		canvas.position + Vector2(0.0, canvas.size.y - float(rows)),
+		Vector2(canvas.size.x, float(rows))
+	)
+
+
+## The band, in canvas units: everything above the strip.
+static func band_of(canvas: Rect2, fraction: float) -> Rect2:
+	var rows := strip_height(roundi(canvas.size.y), fraction)
+	return Rect2(canvas.position, Vector2(canvas.size.x, canvas.size.y - float(rows)))
+
+
+## The band in **window pixels** — what the `SubViewport` is sized in.
+static func band_size(window_size: Vector2i, fraction: float) -> Vector2i:
+	return Vector2i(window_size.x, window_size.y - strip_height(window_size.y, fraction))
+
+
+## The band's rect in canvas units, read from the live viewport and the setting.
+func band_rect() -> Rect2:
+	return band_of(get_viewport().get_visible_rect(), strip_fraction())
+
+
+## **The render scale as it applies right now**: the stored render height against the window's own height.
+##
+## Not cached, for the same reason as the strip: both halves move — the setting when Apply commits it, the
+## window whenever it is dragged. This is what the band's `SubViewport` is scaled by, so the render
+## resolution still means "what the whole window would be drawn at" and the band takes its share of it.
+func render_scale_now() -> float:
+	if _settings == null:
+		return 1.0
+	var window := get_window()
+	if window == null:
+		return 1.0
+	var render: Vector2i = _settings.get_value(SETTING_RENDER)
+	return render_scale(render.y, float(window.size.y))
+
+
+## The strip's rect in canvas units, on the same two numbers.
+func strip_rect() -> Rect2:
+	return strip_of(get_viewport().get_visible_rect(), strip_fraction())
+
+
+## The band in window pixels, for the `SubViewport` — see `band_of` on why it is not the canvas rect.
+func band_pixels() -> Vector2i:
+	var window := get_window()
+	if window == null:
+		return Vector2i.ZERO
+	return band_size(Vector2i(window.size), strip_fraction())
 
 
 ## A window of a different shape draws the 3D into a different buffer, so the scale is worked out

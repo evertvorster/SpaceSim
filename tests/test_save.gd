@@ -121,21 +121,21 @@ func _test_save_and_list(h) -> void:
 	h.check(repo.create_history("Evert")["ok"], "a history")
 
 	h.check(
-		repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "first")["ok"],
+		repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 100.0, 0.0)}, "first")["ok"],
 		"a save is a commit"
 	)
-	var again := repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "again")
+	var again := repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 100.0, 0.0)}, "again")
 	h.check(
 		not again["ok"] and again["reason"].contains("nothing has changed"),
 		"saving with nothing changed is refused rather than faked: %s" % again["reason"]
 	)
 
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 0.0)}, "second")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 200.0, 0.0)}, "second")
 	var third := repo.save(
-		{Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0, 0.0)}, "third"
+		{Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0, 300.0, 0.0)}, "third"
 	)
 	h.check(third["ok"], "and a third")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 40}}, 400.0, 0.0)}, "fourth")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 40}}, 400.0, 400.0, 0.0)}, "fourth")
 
 	var saves := repo.saves()
 	h.check(saves.size() == 4, "four saves are listed (%d)" % saves.size())
@@ -150,8 +150,8 @@ func _test_preview_does_not_touch_the_tree(h) -> void:
 	var repo := _fresh_repo(h)
 	repo.create({"world": "playground"})
 	repo.create_history("Evert")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "first")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 0.0)}, "second")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 100.0, 0.0)}, "first")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 200.0, 0.0)}, "second")
 
 	var before := repo.read_text(Repo.STATE_FILE)
 	var saves := repo.saves()
@@ -167,15 +167,15 @@ func _test_the_rewrite(h) -> void:
 	var repo := _fresh_repo(h)
 	repo.create({"world": "playground"})
 	repo.create_history("Evert")
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 0.0)}, "first")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 10}}, 100.0, 100.0, 0.0)}, "first")
 	repo.save(
 		{
-			Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 0.0),
+			Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 20}}, 200.0, 200.0, 0.0),
 			"world/delta.jsonl": "{\"village\":\"burnt\"}\n",
 		},
 		"second"
 	)
-	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0, 0.0)}, "third")
+	repo.save({Repo.STATE_FILE: Repo.state_text({"attributes": {"Credits": 30}}, 300.0, 300.0, 0.0)}, "third")
 
 	var target: String = repo.saves()[2]["hash"]  # the first save
 	h.check(repo.affected_saves(target).size() == 2, "two saves are affected")
@@ -203,10 +203,16 @@ func _test_state_round_trip(h) -> void:
 	)
 	h.check(not String(ship.get("id", "")).is_empty(), "an asset gets an id")
 
-	var text := Repo.state_text(player.to_dictionary(), 16156800000.0, 0.0)
+	var text := Repo.state_text(player.to_dictionary(), 16156800000, 16156800000, 0.0)
 	var state := Repo.read_state(text)
 	h.check(state.get(Repo.FIELD_VERSION) == Repo.STATE_FORMAT_VERSION, "the state carries a format version")
-	h.check(state.get(Repo.FIELD_WORLD_TIME) == 16156800000.0, "and the world clock")
+	h.check(state.get(Repo.FIELD_WORLD_TIME) == 16156800000, "and the world clock")
+	# **Two independent clocks** (Evert, 2026-11-08), so the envelope carries both — a save with one number
+	# would lose the difference between the crew's time and the world's.
+	h.check(
+		state.get(Repo.FIELD_PLAYER_TIME) == 16156800000,
+		"and the player's own clock beside it (%s)" % str(state.get(Repo.FIELD_PLAYER_TIME))
+	)
 	h.check(text.contains("\n\t\"attributes\""), "and is written one key per line, to diff well")
 
 	var restored := Player.new()
@@ -262,6 +268,35 @@ func _test_reading_a_location(h, root: Node) -> void:
 	# beside 500-01-01. What matters is that it is there at all, and that it grows.
 	var later := SpacesimWorldTime.format(31556952.0 * 500.0)
 	h.check(int(later.split("-")[0]) >= 499, "and half a millennium later reads as a year near 500 ('%s')" % later)
+
+	# **The strip's number: seconds since the Big Bang, grouped by the thousand.** From the Bang rather
+	# than from the world's year zero, because at 13.8 Gyr a calendar date is five digits of noise.
+	var bang := SpacesimWorldTime.since_bang(0)
+	h.check(
+		bang > 13.7e9 * 365.25 * 86400.0 and bang < 13.9e9 * 365.25 * 86400.0,
+		"the world's epoch sits at the age of the universe (%d s)" % bang
+	)
+	# **The counter is float64 seconds at 4.35e17**, where one ULP is about 97 s — so "an hour later" is an
+	# hour later to within that, and the last two digits of the number the strip prints are noise. That is
+	# the price of counting from the Bang in seconds, and it is worth nothing at this scale.
+	# **Exactly**, because both the epoch and the elapsed part are integers now: a second is a second.
+	h.check(
+		SpacesimWorldTime.since_bang(3600) - bang == 3600,
+		"and an hour into a history is exactly an hour later"
+	)
+	h.check(SpacesimWorldTime.grouped(0) == "0", "grouping leaves nothing to group alone")
+	h.check(SpacesimWorldTime.grouped(999) == "999", "three digits need no separator")
+	h.check(SpacesimWorldTime.grouped(1000) == "1,000", "four digits get one")
+	h.check(
+		SpacesimWorldTime.grouped(159000000) == "159,000,000",
+		"every three digits thereafter (%s)" % SpacesimWorldTime.grouped(159000000)
+	)
+	h.check(
+		SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(0)).length()
+			== str(bang).length() + 5,
+		"and the age of the universe gains five commas"
+	)
+	h.check(SpacesimWorldTime.grouped(-4500) == "-4,500", "a clock before the epoch keeps its sign")
 	system.container.free()
 
 

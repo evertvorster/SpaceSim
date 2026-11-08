@@ -223,13 +223,27 @@ const REGISTRY := {
 	# working, as we might not need it at all."*
 	"fog.gain": {"default": 2.0, "scope": Scope.PLAYER, "min": 0.0, "max": 8.0,
 		"tab": "troubleshooting"},
-	# --- the HUD's own three parts. **Each is a separate switch because each is a different annoyance**:
-	# the readout is what a developer reads and a player stops seeing, the frame rate is an instrument, and
+	# --- the HUD's own parts. **Each is a separate switch because each is a different annoyance**:
+	# the debug block is what a developer reads and a player stops seeing, the frame rate is an instrument, and
 	# the key hints are a reminder that has done its job after the first hour. Off is empty screen, not a
 	# smaller label — the whole point is the room it gives back.
-	"hud.readout": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	#
+	# **`hud.readout` became `hud.debug` (2026-11-07)** when the strip took the ship's readings out of the
+	# block: what is left in it is diagnostics, and a name describing the old contents is the drift this
+	# project files as a problem.
+	"hud.debug": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"hud.fps": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
 	"hud.key_hints": {"default": true, "scope": Scope.PLAYER, "tab": "hud"},
+	# --- **how much of the canvas is the HUD strip**, as a fraction of its height. A setting rather than a
+	# constant (Evert, 2026-11-07): the band's height is a taste, and a taste gets flown. 0.2 is what
+	# `The HUD Strip` argues for — one 20 % strip gives the picture the aspect of two 10 % bars and twice
+	# the instrument room in one place — and it is also 20 % fewer pixels to draw.
+	#
+	# **It is the ONE number the camera, the strip, the markers and the SubViewport all derive from** — see
+	# `SpacesimDisplay.band_rect()` and `band_pixels()` — so there is no second copy to drift. **0 means no
+	# strip at all**, which is a cockpit (HUD Strip §5), and that is why the floor is zero rather than
+	# something positive.
+	"hud.strip_height": {"default": 0.2, "scope": Scope.PLAYER, "min": 0.0, "max": 0.4, "tab": "hud"},
 	"markers.pool_size": {"default": 12, "scope": Scope.PLAYER, "min": 1, "max": 64, "tab": "hud"},
 	# --- the sky. How deep the star field is drawn, as a magnitude. The catalogue holds the whole sky
 	# and this only decides how much of it is shown, so sweeping it is a uniform write rather than a

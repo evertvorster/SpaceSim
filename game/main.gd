@@ -17,7 +17,6 @@ extends Node3D
 const PlayerShip := preload("res://game/player_ship.gd")
 const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 const Location := preload("res://addons/spacesim/coordinate/location.gd")
-const TravelScale := preload("res://addons/spacesim/travel/travel_scale.gd")
 const Actions := preload("res://addons/spacesim/input/actions.gd")
 const Devices := preload("res://addons/spacesim/input/devices.gd")
 const BindingsStore := preload("res://addons/spacesim/input/bindings_store.gd")
@@ -42,6 +41,13 @@ var _system: SpacesimSystemScene
 var _session: SpacesimSession
 var _ship: Node3D
 var _camera: Camera3D
+## **The eye, in the ship's frame.** The camera itself lives in the band's `SubViewport` — a `Camera3D`
+## renders into the viewport that contains it — so this node is what carries the ship's pose: the flight
+## model moves the ship, this is the viewpoint inside it, and `_sync_camera` hands the interpolated
+## result to the camera once a frame.
+var _camera_mount: Node3D
+## The band the picture is drawn in, and the strip under it. See `SpacesimBand`.
+var _band: SpacesimBand
 ## Set by the stop key and consumed by the next physics step.
 var _throttle_stop := false
 ## The camera's exposure attributes, held only so they can be put at **identity**: the frame-wide pass
@@ -77,6 +83,14 @@ var _screen: SpacesimScreen
 var _back_to: SpacesimScreen
 var _selected_index := -1
 var _hud: Label
+## **The strip's four groups** — Ship, Sensors, Location, Time (Evert, 2026-11-07). Each is a bordered panel
+## with a heading, and each gains lines as readings are wired in; see `SpacesimGroup`. They are separate
+## nodes from the block because they are a different place and a different question: the strip is the flying
+## view's instrument panel, and the block is the diagnostics that replace it when asked for.
+var _group_ship: SpacesimGroup
+var _group_sensors: SpacesimGroup
+var _group_location: SpacesimGroup
+var _group_time: SpacesimGroup
 var _hints: Label
 var _fps: Label
 var _skip_next_motion := false
@@ -103,6 +117,10 @@ func _ready() -> void:
 	_markers.orbits = _system.orbit_parents()
 	add_child(_markers)
 	_camera = _ship.get_node("Camera")
+	_camera_mount = Node3D.new()
+	_camera_mount.name = "CameraMount"
+	_camera_mount.position = PlayerShip.CAMERA_OFFSET
+	_ship.add_child(_camera_mount)
 	# Exposure is a camera property, and it is ours: the star's light is physical, so the exposure that
 	# puts a lit body at middle grey is arithmetic. Settled at once rather than transitioned into, so
 	# the first frame is already right.
@@ -141,6 +159,7 @@ func _ready() -> void:
 	_apply_settings()
 	SpacesimSettings.changed.connect(_on_setting_changed)
 	_build_hud()
+	_build_band()
 
 	# The session comes up after the system has real frames, because restoring where the player was
 	# means putting the ship into one of them.
@@ -150,6 +169,7 @@ func _ready() -> void:
 		push_error("cannot open the world's repository: %s" % brought_up["reason"])
 	_player = _session.player
 	_place_observer_from_session()
+	_place_camera()
 
 	# **The bindings are their own store**, beside the settings file; `open()` is where the sixteen old
 	# `bindings.*` settings keys are imported, in memory, on the first run after this change.
@@ -275,8 +295,9 @@ func _handle_key(event: InputEventKey) -> void:
 		set_wireframe(not _wireframe)
 	elif _view_for(event) != null:
 		# **The camera looks along a direction in the SHIP's frame**, so mouse look still steers and the
-		# chosen view stays put — which is what makes the same scene comparable from six sides.
-		_camera.basis = _view_for(event)
+		# chosen view stays put — which is what makes the same scene comparable from six sides. It is set
+		# on the mount: the camera is in the band's viewport and does not inherit the ship.
+		_camera_mount.basis = _view_for(event)
 
 
 ## **The body meshes as unshaded white wireframes, which is a different question from how they look.**
@@ -431,8 +452,9 @@ func _cycle_target() -> void:
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
 	# **The camera sits in the ship's frame and there is no hull** — see `PlayerShip.CAMERA_OFFSET` for why the box that
-	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting.
-	_camera.position = PlayerShip.CAMERA_OFFSET
+	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting. It is the
+	# MOUNT's now: the camera lives in the band's viewport and is handed this transform every frame.
+	_camera_mount.position = PlayerShip.CAMERA_OFFSET
 	# The exposure's ceiling, hot like everything else here: `exposure.range_stops` is in stops above
 	# the light-adapted floor, and 32.0 is the whole window with no cap on the derived value.
 	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
@@ -454,8 +476,13 @@ func _on_setting_changed(key: String, _value: Variant) -> void:
 			_apply_settings()
 		# The HUD's switches are visibility, so they are read by the readout's own refresh — which is
 		# once every `HUD_INTERVAL`, and would otherwise leave a toggle looking broken for a moment.
-		"hud.readout", "hud.fps", "hud.key_hints":
+		"hud.debug", "hud.fps", "hud.key_hints":
 			_apply_hud_visibility()
+		# **The band and the window's own resolution.** A strip height or a render height moves the picture's
+		# rect and the viewport under it, so both are re-fitted the moment they change rather than at the next
+		# restart — the setting is hot or it is not a setting.
+		"hud.strip_height", "video.render_resolution":
+			_fit_band()
 
 
 ## **Press the free-mouse key to let the pointer go, and press it again or click to take it back.** A capture
@@ -513,6 +540,12 @@ func _physics_process(delta: float) -> void:
 	}
 
 	_ship.step(delta, input)
+	# **Both clocks, one second at a time** — Evert, 2026-11-08. The world's runs faster only when
+	# relativistic travel lands, and `SpacesimSession.advance` is the one place either of them moves.
+	_session.advance(delta)
+	# **After the step, before anything renders.** The camera is in the band's viewport and inherits nothing,
+	# so it is placed here — in the physics tick, which is where its own interpolation history comes from.
+	_sync_camera()
 	_system.frame_tree.evaluate()
 	_sync_player_location()
 
@@ -616,6 +649,29 @@ func _clear_fog() -> void:
 ## **Nothing here may touch the `RenderingDevice`.** It belongs to the render thread and its RID allocator
 ## is not thread safe — reading it from `_process` demonstrated that with thousands of `Element limit
 ## reached` errors.
+## **The eye, in a band.** A camera outside the ship no longer inherits its transform, so `_sync_camera`
+## puts it where the ship's viewpoint is — **and it does that in the PHYSICS tick, from the mount's physics
+## transform, so the engine interpolates the camera exactly as it interpolated it when it was the ship's
+## child.**
+##
+## That distinction is the whole of this function. Driving it from `_process` instead — handing it a value
+## `get_global_transform_interpolated()` had already smoothed — takes the engine's smoothing away from the
+## render camera, and the camera then lags the scene by up to a tick. Turning is when that shows: the air's
+## transmittance is acutely sensitive to the view direction at grazing angles, so a lagging camera made the
+## sea behind it flicker dark. **The camera is smoothed once, by the engine, like everything else.**
+func _sync_camera() -> void:
+	if _camera_mount == null:
+		return
+	_camera.global_transform = _camera_mount.global_transform
+
+
+## The ship has been moved without moving: a placed observer, a loaded session, a teleport. The camera has to
+## be put there *and* have its interpolation history cleared, or it streaks in from wherever it was.
+func _place_camera() -> void:
+	_sync_camera()
+	_camera.reset_physics_interpolation()
+
+
 func _update_view(delta: float) -> void:
 	var eye: Transform3D = _camera.get_global_transform_interpolated()
 	var observer: Vector3 = _ship.get_global_transform_interpolated().origin
@@ -679,6 +735,8 @@ func _place_observer_from_session() -> void:
 		return
 	if not _system.place_observer(_player.location):
 		push_warning("the saved location's frame is gone; placed at the nearest frame that remains")
+	# The camera was placed somewhere else entirely; without this it streaks in from there.
+	_place_camera()
 
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and
@@ -690,7 +748,10 @@ func _update_markers(camera: Camera3D) -> void:
 	if in_space:
 		context = _system.significant_nodes()
 	_markers.context_targets = context
-	_markers.refresh(camera)
+	# **The band, because the camera draws into it.** The camera is inside the band's `SubViewport`, so
+	# `unproject_position` answers in the band's pixels while the labels are laid out in the root canvas;
+	# `refresh` converts with this rect. See `SpacesimMarkers.to_canvas`.
+	_markers.refresh(camera, SpacesimDisplay.band_rect())
 
 
 ## Render range tracks the scale you are operating at. Only the ratio costs depth precision, and
@@ -733,6 +794,18 @@ func _range_key(kind: int) -> String:
 ## case that matters: while the frame is white, an unoutlined label is white on white and the one instrument
 ## that would say what the metre is doing is the thing that disappears. The marker labels already do this
 ## (`SpacesimMarkers`); the HUD did not.
+## **The four groups' shares of the strip's width**, in the order they are placed. Weights rather than
+## pixels: a wider window gives every group the same proportion, and changing one number here rearranges the
+## strip without touching the layout arithmetic.
+## **The galaxy's name, authored** — until the procedural universe generates one. Evert, 2026-11-08.
+const GALAXY := "Milky Way"
+
+const GROUP_WEIGHTS := [0.20, 0.24, 0.32, 0.24]
+
+## The gap between groups, and the margin the group row keeps inside the strip.
+const GROUP_GAP := 12.0
+const STRIP_MARGIN := Vector2(16.0, 10.0)
+
 const HUD_OUTLINE := Color(0.0, 0.0, 0.0, 0.9)
 const HUD_OUTLINE_SIZE := 6
 
@@ -743,6 +816,73 @@ func _outline(label: Label, font_size: int) -> void:
 	label.add_theme_constant_override("outline_size", HUD_OUTLINE_SIZE)
 
 
+## **The band, and the strip under it.** The picture is rendered into a `SubViewport` the size of the
+## band — not drawn full-screen with black painted over it, which would be a vertical crop of the 20 % the
+## strip covers. `SpacesimBand` carries the reasoning; this is only the wiring.
+func _build_band() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "Band"
+	# **Under the HUD**, which is a layer above it: the readouts sit in the strip this paints.
+	layer.layer = 0
+	add_child(layer)
+	_band = SpacesimBand.new()
+	layer.add_child(_band)
+	# The camera moves into the band's viewport here; from now on `_sync_camera` is what moves it.
+	_band.take(_camera)
+	# A window that changes shape changes the band, and so does a strip height — both re-fit the same way.
+	get_window().size_changed.connect(_fit_band)
+	_fit_band()
+
+
+## **The band's four numbers, from the one place that owns them** — `SpacesimDisplay`, which derives both
+## rects from `hud.strip_height` and the viewport's size from the window's own pixels.
+func _fit_band() -> void:
+	if _band == null or not _band.is_inside_tree():
+		return
+	_band.fit(
+		SpacesimDisplay.band_rect(),
+		SpacesimDisplay.strip_rect(),
+		SpacesimDisplay.band_pixels(),
+		SpacesimDisplay.render_scale_now()
+	)
+	_place_strip_groups()
+
+
+## **The groups follow the strip**, whatever height it is given — the same number the band and the viewport
+## are fitted from, so a changed strip height moves the picture, the panel and all four groups together.
+##
+## The row is the strip inset by `STRIP_MARGIN`; the widths come from `GROUP_WEIGHTS` less the gaps. Nothing
+## here knows what any group contains, so a group that gains a line does not move any of the others.
+func _place_strip_groups() -> void:
+	var groups: Array[SpacesimGroup] = [
+		_group_ship, _group_sensors, _group_location, _group_time
+	]
+	if groups.any(func(group): return group == null):
+		return
+	var strip := SpacesimDisplay.strip_rect()
+	var row := Rect2(
+		strip.position + STRIP_MARGIN,
+		strip.size - STRIP_MARGIN * 2.0
+	)
+	var gaps := GROUP_GAP * float(groups.size() - 1)
+	var usable := maxf(row.size.x - gaps, 0.0)
+	var x := row.position.x
+	for index in groups.size():
+		var width := usable * float(GROUP_WEIGHTS[index])
+		groups[index].fit(Rect2(Vector2(x, row.position.y), Vector2(width, row.size.y)))
+		x += width + GROUP_GAP
+
+
+## One bordered group in the strip, with its heading. Built here rather than in `SpacesimGroup`'s `_ready`,
+## because the heading is the caller's word and not a property of the node.
+func _add_group(layer: CanvasLayer, node_name: String, heading: String) -> SpacesimGroup:
+	var group := SpacesimGroup.new()
+	group.name = node_name
+	layer.add_child(group)
+	group.set_heading(heading)
+	return group
+
+
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HUD"
@@ -750,7 +890,7 @@ func _build_hud() -> void:
 	_ui_layer = layer
 
 	# **Two labels in a column, not one block**, because the readout and the key hints are switched off
-	# separately: `hud.readout` and `hud.key_hints`. One label could only be hidden whole.
+	# separately: `hud.debug` and `hud.key_hints`. One label could only be hidden whole.
 	var column := VBoxContainer.new()
 	column.name = "Readouts"
 	column.position = Vector2(24.0, 18.0)
@@ -768,6 +908,14 @@ func _build_hud() -> void:
 	_outline(hints, 17)
 	column.add_child(hints)
 	_hints = hints
+
+	# **The strip's four groups**, on the band's black panel rather than in the block. They are placed by
+	# `_place_strip_groups` rather than anchored here, because the strip's height is a setting and everything
+	# in it moves with that one number.
+	_group_ship = _add_group(layer, "Ship", "Ship")
+	_group_sensors = _add_group(layer, "Sensors", "Sensors")
+	_group_location = _add_group(layer, "Location", "Location")
+	_group_time = _add_group(layer, "Time", "Time")
 
 	# Top right, so a frame-rate change while tuning something else is visible at a glance.
 	var fps := Label.new()
@@ -789,34 +937,101 @@ func _build_hud() -> void:
 func _update_hud() -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var length: float = _ship.travel_length
-	var fraction := 0.0
-	if length > 0.0:
-		fraction = _ship.speed * TravelScale.TRAVERSE_SECONDS / length
 	var contact := "on the surface" if _ship.landed else "free flight"
 	var bodies := "visible" if _bodies_visible else "hidden"
-	var target := "none"
-	if _markers.selected != null:
-		target = _markers.selected.name
 
+	# **Two lines, both led by a name**: what is nearest and how high you are over it, then what is selected
+	# and how far away it is. **Surface distances both**, from the body's own geometry, so the altitude and
+	# the target's distance are the same kind of number — a centre-to-centre figure beside a surface
+	# altitude would be two quantities pretending to be one.
+	# **Nothing selected reads as dashes**, which is what `format_distance` already gives an infinite
+	# distance, so there is no second case to get wrong.
+	var target_name := "none"
+	var target_distance := INF
+	if _markers.selected != null:
+		target_name = _markers.selected.name
+		# **The ship's own scaled bodies, not the scene's** — `surface_distance_to` is
+		# `SpacesimScaleBody`'s, and the ship already holds the list the flight controller finds the nearest
+		# body with. `_system.bodies` is a list of `SpacesimSceneBody`, which does not have it: calling it on
+		# one aborted this function, which froze the strip while still drawing the block.
+		for body in _ship.bodies:
+			if body != null and body.node == _markers.selected:
+				target_distance = body.surface_distance_to(_ship.global_position)
+				break
+	# **Throttle is signed, in multiples of the local travel unit** — the number the flight model holds
+	# (`FlightController.TOP_THROTTLE` is 10), so astern is a negative multiple and says so.
+	# **Ship** — what the ship is doing, which is what a pilot reads while flying. Throttle is signed, in
+	# multiples of the local travel unit: the number the flight model holds (`TOP_THROTTLE` is 10), so
+	# astern is a negative multiple and says so.
+	_group_ship.set_fields(
+		[
+			["Speed", _speed(_ship.speed)],
+			["Throttle", "%+.1f ×" % _ship.throttle],
+		]
+	)
+
+	# **Sensors** — the air and the pull where the observer is, from `SpacesimSystemScene.conditions_at`,
+	# which is the one call that knows how to derive them. A body with no air answers 0 Pa rather than
+	# dropping the line, because standing on a moon is a real place to be.
+	var air := _system.conditions_at(_ship.global_position)
+	_group_sensors.set_fields(
+		[
+			["Gravity", "%.2f m/s²" % float(air["gravity"])],
+			["Pressure", _pressure(float(air["pressure"]))],
+			["Temperature", "%.0f K" % float(air["temperature"])],
+		]
+	)
+
+	# **Location** — where you are, what you picked, and what is under you. **The galaxy and sector lines are
+	# not written yet**: the cosmos has no authored name in the engine (`Cosmos and Discovery`), so the system
+	# — which is named after its star — is as far up the hierarchy as there is anything true to say. They are
+	# one line each, added when the hierarchy is content.
+	_group_location.set_fields(
+		[
+			# **Authored, and a placeholder.** Evert, 2026-11-08: *"Galaxy should be milky way. We'll
+			# author it for now, but this will be generated when we do the procedural universe."* There
+			# is no cosmos hierarchy in the engine yet (`Cosmos and Discovery`), so this is a constant
+			# and the sector line under it is the system, which is named after its star.
+			["Galaxy", GALAXY],
+			["Sector", _system.name],
+			["Target", "%s, %s" % [target_name, SpacesimMarkers.format_distance(target_distance)]],
+			["Nearest", "%s, %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())]],
+		]
+	)
+
+	# **Time** — both clocks, as seconds since the Big Bang, grouped by the thousand. Evert, 2026-11-07:
+	# *"time should just be a very long number"*, and 2026-11-08: *"should be the number of seconds since the
+	# big bang. Add commas every three digits. Both player time and Universe time should be displayed."*
+	#
+	# **From the Bang rather than from the world's year zero**: at 13.8 Gyr a calendar date carries digits of
+	# noise, and this is the one number in the interface the eye cannot parse without help.
+	# **Both, because they are going to diverge** — they tick together today, and `Relativity and the Two
+	# Clocks` is why they will not forever.
+	_group_time.set_fields(
+		[
+			["Player", "%s s" % SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.player_time))],
+			["Universe", "%s s" % SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(_session.world_time))],
+		]
+	)
+
+	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
+	# readings, what is left is what a developer reads to see what the engine is doing.
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
 				"system      %s" % _system.name,
 				"player      %s   in %s" % [_player.display_name(), _session.repo.current_history()],
 				"date        %s" % SpacesimWorldTime.format(_session.world_time),
-				"settings    %s" % SpacesimSettings.path(),
 				"frame       %s" % frame.name,
-				"altitude    %s" % SpacesimMarkers.format_distance(_ship.altitude()),
+				"settings    %s" % SpacesimSettings.path(),
 				"mode        %s%s%s" % [
 					String(SpacesimSettings.get_value("render.mode")),
 					", depth tint" if bool(SpacesimSettings.get_value("render.depth_tint")) else "",
 					", EV compensated" if bool(SpacesimSettings.get_value("render.ev_compensation")) else ", EV off",
 				],
-				"speed       %s   (%.0f%% of local)" % [_speed(_ship.speed), fraction * 100.0],
 				"nearest     %s at %s" % [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.nearest_distance)],
 				"local unit  %s" % SpacesimMarkers.format_distance(length),
 				"state       %s" % contact,
-				"target      %s" % target,
 				"",
 				"bodies      %s, %d triangles, %d chunks, depth %d"
 					% [bodies, _system.triangles(), _system.chunks(), _system.deepest_level()],
@@ -867,7 +1082,7 @@ func _update_hud() -> void:
 ## here rather than cached, so a change on the settings screen is on screen before the player looks
 ## back; `_on_setting_changed` calls this for the same reason when a screen is open over the game.
 func _apply_hud_visibility() -> void:
-	_hud.visible = bool(SpacesimSettings.get_value("hud.readout"))
+	_hud.visible = bool(SpacesimSettings.get_value("hud.debug"))
 	_hints.visible = bool(SpacesimSettings.get_value("hud.key_hints"))
 	_fps.visible = bool(SpacesimSettings.get_value("hud.fps"))
 
@@ -880,6 +1095,16 @@ func _apply_hud_visibility() -> void:
 ## are read at a keyboard.
 func _hint(action: String) -> String:
 	return _input_map.hint(action)
+
+
+## **A pressure a person can read at both ends of the range.** The engine works in pascals and the strip
+## spans a hard vacuum to Jupiter's depths, so the unit follows the magnitude: kilopascals where there is
+## air, pascals where there is almost none. **Zero stays pascals** — an airless body should read `0.0 Pa`,
+## because `0.000 kPa` reads like a breakdown rather than like a vacuum.
+static func _pressure(pascals: float) -> String:
+	if absf(pascals) >= 1.0e3:
+		return "%.1f kPa" % (pascals / 1.0e3)
+	return "%.1f Pa" % pascals
 
 
 static func _speed(metres_per_second: float) -> String:

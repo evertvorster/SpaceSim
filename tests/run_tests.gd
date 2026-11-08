@@ -40,6 +40,8 @@ var suite_paths: Array = [
 	"res://tests/test_settings.gd",
 	"res://tests/test_settings_ui.gd",
 	"res://tests/test_display.gd",
+	"res://tests/test_conditions.gd",
+	"res://tests/test_band.gd",
 	"res://tests/test_player.gd",
 	"res://tests/test_save.gd",
 	"res://tests/test_session.gd",

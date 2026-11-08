@@ -30,6 +30,9 @@ const DEFAULT_REPO_NAME := "playground"
 const STATE_FORMAT_VERSION := 1
 const FIELD_VERSION := "save_format_version"
 const FIELD_WORLD_TIME := "world_time"
+## **The player's own clock** — proper time, beside the world's. Two independent clocks (Evert,
+## 2026-11-08), so a save that carried one would lose the difference between them.
+const FIELD_PLAYER_TIME := "player_time"
 const FIELD_SAVED_REALTIME := "saved_realtime"
 
 var root: String
@@ -109,10 +112,13 @@ func read_text(path: String) -> String:
 ##
 ## `saved_realtime` is the machine's clock at the moment of saving. It is how long the player has
 ## been away is worked out on load, which is what advances the world's clock between sessions.
-static func state_text(player_data: Dictionary, world_time: float, saved_realtime: float) -> String:
+static func state_text(
+	player_data: Dictionary, world_time: int, player_time: int, saved_realtime: float
+) -> String:
 	var state := player_data.duplicate(true)
 	state[FIELD_VERSION] = STATE_FORMAT_VERSION
 	state[FIELD_WORLD_TIME] = world_time
+	state[FIELD_PLAYER_TIME] = player_time
 	state[FIELD_SAVED_REALTIME] = saved_realtime
 	return JSON.stringify(state, "\t") + "\n"
 

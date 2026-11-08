@@ -17,6 +17,7 @@ func run(h, root: Node) -> void:
 	_test_a_line_leaves_the_ring_at_its_edge(h)
 	_test_the_target_has_its_own_colour(h, root)
 	_test_a_moon_gives_up_its_label_only_when_crowded(h, root)
+	_test_a_projection_in_a_subviewport_is_converted(h)
 
 
 func _test_keyed_union(h) -> void:
@@ -334,6 +335,37 @@ func _test_a_moon_gives_up_its_label_only_when_crowded(h, root: Node) -> void:
 	# Last, because the markers above are its children: freeing it first leaves every call after it
 	# on a freed object, which is a segfault rather than a failure.
 	container.free()
+
+
+## **The camera may be inside a `SubViewport`**, and then its projection is in that viewport's pixels while
+## the labels are `Control`s in the root canvas — the two are the same picture at two scales. An empty band
+## is the single-viewport case, where nothing needs converting.
+func _test_a_projection_in_a_subviewport_is_converted(h) -> void:
+	var drawn := Vector2(800.0, 450.0)
+	# The band is twice the camera's rect, which is what a 1080-window over a 540-pixel band looks like to a
+	# canvas the labels are laid out in.
+	var band := Rect2(0.0, 0.0, 1600.0, 900.0)
+	var mid := Markers.to_canvas(drawn * 0.5, drawn, band)
+	h.check(mid == Vector2(800.0, 450.0), "the camera's centre is the band's centre (%s)" % str(mid))
+	h.check(
+		Markers.to_canvas(Vector2.ZERO, drawn, band) == band.position,
+		"and its origin is the band's origin (%s)" % str(Markers.to_canvas(Vector2.ZERO, drawn, band))
+	)
+	# **A band that starts somewhere other than the origin** carries the point with it, which is what makes
+	# this a conversion rather than a scale.
+	var offset := Rect2(0.0, 120.0, 1600.0, 900.0)
+	h.check(
+		Markers.to_canvas(Vector2.ZERO, drawn, offset) == Vector2(0.0, 120.0),
+		"and an offset band offsets the point with it"
+	)
+	# **No band is the no-conversion case**: the camera draws into the canvas the labels live in.
+	var same := Vector2(123.0, 45.0)
+	h.check(Markers.to_canvas(same, drawn, Rect2()) == same, "with no band a point is left exactly as it is")
+	# A viewport with no width would divide by zero on the way to a NaN, which then places nothing at all.
+	h.check(
+		Markers.to_canvas(same, Vector2.ZERO, band) == same,
+		"and a camera with no rect cannot scale anything (%s)" % str(Markers.to_canvas(same, Vector2.ZERO, band))
+	)
 
 
 func _test_distance_format(h) -> void:
