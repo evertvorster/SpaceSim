@@ -7,6 +7,7 @@ extends RefCounted
 ## flight, and this suite cannot see a frame.
 
 const Band := preload("res://addons/spacesim/ui/band.gd")
+const Group := preload("res://addons/spacesim/ui/group.gd")
 
 
 func run(h, root: Node) -> void:
@@ -14,6 +15,7 @@ func run(h, root: Node) -> void:
 	_test_the_arrangement(h, root)
 	_test_a_cockpit_has_no_strip(h, root)
 	_test_the_camera_moves(h, root)
+	_test_a_group(h, root)
 
 
 ## The design's own numbers: a 1920 x 1080 canvas, a fifth for the strip, so the picture is 1920 x 864.
@@ -129,3 +131,44 @@ func _test_the_camera_moves(h, root: Node) -> void:
 	h.check(camera.get_parent() == band.viewport(), "taking it again leaves it exactly where it is")
 
 	band.free()
+
+
+## **A group in the strip: a heading, lines, and room reserved even when a reading is not wired up yet.**
+##
+## The border itself is a `_draw()` and this suite cannot see pixels; what it can see is that the node
+## carries the words and that `fit` puts it where it is asked, which is what the strip's arithmetic is
+## arranged around.
+func _test_a_group(h, root: Node) -> void:
+	var group: Control = Group.new()
+	root.add_child(group)
+	group.set_heading("Sensors")
+	h.check(group.heading_text() == "Sensors", "the heading is the caller's word (%s)" % group.heading_text())
+
+	group.set_lines(PackedStringArray(["Gravity  9.79 m/s²", "Pressure  101.3 kPa"]))
+	h.check(
+		group.lines_text() == "Gravity  9.79 m/s²\nPressure  101.3 kPa",
+		"and the lines come back one per line (%s)" % group.lines_text().replace("\n", " / ")
+	)
+
+	# **An empty group reserves its room rather than collapsing**, which is what a reading that is not
+	# wired up yet should look like — not a line of dashes that outlives the gap it fills.
+	group.set_lines(PackedStringArray())
+	h.check(group.lines_text() == "", "a group with nothing to say says nothing (%s)" % group.lines_text())
+
+	group.fit(Rect2(40.0, 500.0, 300.0, 120.0))
+	h.check(group.position == Vector2(40.0, 500.0), "and fit puts it where it is asked (%s)" % str(group.position))
+	h.check(group.size == Vector2(300.0, 120.0), "at the size it is given (%s)" % str(group.size))
+
+	# **The text is laid out inside the border**, not on top of it: the heading sits inside the padding and
+	# the body starts under the heading.
+	var heading := group.get_node("Heading") as Label
+	var body := group.get_node("Lines") as Label
+	h.check(
+		heading != null and heading.position.x >= Group.PADDING.x - 0.01,
+		"the heading is inset by the padding (%s)" % (str(heading.position) if heading else "missing")
+	)
+	h.check(
+		body != null and body.position.y > heading.position.y,
+		"and the lines start below it (%s)" % (str(body.position) if body else "missing")
+	)
+	group.free()

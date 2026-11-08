@@ -83,13 +83,14 @@ var _screen: SpacesimScreen
 var _back_to: SpacesimScreen
 var _selected_index := -1
 var _hud: Label
-## **The strip's own readout** — the ship's numbers, in the black panel at the bottom. A separate label from
-## the block, because it is a different place and a different question: the strip is the flying view's
-## instrument panel, and the block is the diagnostics that replace it when asked for.
-var _strip: Label
-## **The sensor column**, in the strip's right half: gravity, pressure and temperature where the observer
-## is. Filled from `SpacesimSystemScene.conditions_at`, so the air's laws are not re-derived here.
-var _sensors: Label
+## **The strip's four groups** — Ship, Sensors, Location, Time (Evert, 2026-11-07). Each is a bordered panel
+## with a heading, and each gains lines as readings are wired in; see `SpacesimGroup`. They are separate
+## nodes from the block because they are a different place and a different question: the strip is the flying
+## view's instrument panel, and the block is the diagnostics that replace it when asked for.
+var _group_ship: SpacesimGroup
+var _group_sensors: SpacesimGroup
+var _group_location: SpacesimGroup
+var _group_time: SpacesimGroup
 var _hints: Label
 var _fps: Label
 var _skip_next_motion := false
@@ -790,9 +791,14 @@ func _range_key(kind: int) -> String:
 ## case that matters: while the frame is white, an unoutlined label is white on white and the one instrument
 ## that would say what the metre is doing is the thing that disappears. The marker labels already do this
 ## (`SpacesimMarkers`); the HUD did not.
-# **The sensor column starts here**, as a fraction of the strip's width — far enough right that the two
-# columns read as two and not as one ragged list.
-const SENSOR_COLUMN := 0.52
+## **The four groups' shares of the strip's width**, in the order they are placed. Weights rather than
+## pixels: a wider window gives every group the same proportion, and changing one number here rearranges the
+## strip without touching the layout arithmetic.
+const GROUP_WEIGHTS := [0.20, 0.24, 0.32, 0.24]
+
+## The gap between groups, and the margin the group row keeps inside the strip.
+const GROUP_GAP := 12.0
+const STRIP_MARGIN := Vector2(16.0, 10.0)
 
 const HUD_OUTLINE := Color(0.0, 0.0, 0.0, 0.9)
 const HUD_OUTLINE_SIZE := 6
@@ -833,24 +839,42 @@ func _fit_band() -> void:
 		SpacesimDisplay.band_pixels(),
 		SpacesimDisplay.render_scale_now()
 	)
-	_place_strip_readout()
+	_place_strip_groups()
 
 
-## The strip's readout follows the strip, whatever height it is given — the same number the band and the
-## viewport are fitted from, so a changed strip height moves all three together.
-func _place_strip_readout() -> void:
-	if _strip == null:
+## **The groups follow the strip**, whatever height it is given — the same number the band and the viewport
+## are fitted from, so a changed strip height moves the picture, the panel and all four groups together.
+##
+## The row is the strip inset by `STRIP_MARGIN`; the widths come from `GROUP_WEIGHTS` less the gaps. Nothing
+## here knows what any group contains, so a group that gains a line does not move any of the others.
+func _place_strip_groups() -> void:
+	var groups: Array[SpacesimGroup] = [
+		_group_ship, _group_sensors, _group_location, _group_time
+	]
+	if groups.any(func(group): return group == null):
 		return
 	var strip := SpacesimDisplay.strip_rect()
-	_strip.position = strip.position + Vector2(24.0, 12.0)
-	_strip.size = strip.size - Vector2(48.0, 24.0)
-	if _sensors == null:
-		return
-	# **The split is a fraction of the strip's own width**, so a wide monitor gives the sensors room rather
-	# than stretching the ship's column across the whole screen.
-	var gutter := strip.size.x * SENSOR_COLUMN
-	_sensors.position = strip.position + Vector2(gutter, 12.0)
-	_sensors.size = Vector2(strip.size.x - gutter - 24.0, strip.size.y - 24.0)
+	var row := Rect2(
+		strip.position + STRIP_MARGIN,
+		strip.size - STRIP_MARGIN * 2.0
+	)
+	var gaps := GROUP_GAP * float(groups.size() - 1)
+	var usable := maxf(row.size.x - gaps, 0.0)
+	var x := row.position.x
+	for index in groups.size():
+		var width := usable * float(GROUP_WEIGHTS[index])
+		groups[index].fit(Rect2(Vector2(x, row.position.y), Vector2(width, row.size.y)))
+		x += width + GROUP_GAP
+
+
+## One bordered group in the strip, with its heading. Built here rather than in `SpacesimGroup`'s `_ready`,
+## because the heading is the caller's word and not a property of the node.
+func _add_group(layer: CanvasLayer, node_name: String, heading: String) -> SpacesimGroup:
+	var group := SpacesimGroup.new()
+	group.name = node_name
+	layer.add_child(group)
+	group.set_heading(heading)
+	return group
 
 
 func _build_hud() -> void:
@@ -879,22 +903,13 @@ func _build_hud() -> void:
 	column.add_child(hints)
 	_hints = hints
 
-	# **The strip's readout**, on the band's black panel rather than in the block. It is placed by
-	# `_place_strip_readout` rather than anchored here, because the strip's height is a setting and both move
-	# together.
-	var strip := Label.new()
-	strip.name = "StripReadout"
-	_outline(strip, 17)
-	layer.add_child(strip)
-	_strip = strip
-
-	# **The sensor column**, right of the ship's readings. Its own label because the two columns can grow
-	# independently, and because a label that wraps cannot keep two columns apart.
-	var sensors := Label.new()
-	sensors.name = "SensorReadout"
-	_outline(sensors, 17)
-	layer.add_child(sensors)
-	_sensors = sensors
+	# **The strip's four groups**, on the band's black panel rather than in the block. They are placed by
+	# `_place_strip_groups` rather than anchored here, because the strip's height is a setting and everything
+	# in it moves with that one number.
+	_group_ship = _add_group(layer, "Ship", "Ship")
+	_group_sensors = _add_group(layer, "Sensors", "Sensors")
+	_group_location = _add_group(layer, "Location", "Location")
+	_group_time = _add_group(layer, "Time", "Time")
 
 	# Top right, so a frame-rate change while tuning something else is visible at a glance.
 	var fps := Label.new()
@@ -939,38 +954,56 @@ func _update_hud() -> void:
 				break
 	# **Throttle is signed, in multiples of the local travel unit** — the number the flight model holds
 	# (`FlightController.TOP_THROTTLE` is 10), so astern is a negative multiple and says so.
-	_strip.text = "\n".join(
+	# **Ship** — what the ship is doing, which is what a pilot reads while flying. Throttle is signed, in
+	# multiples of the local travel unit: the number the flight model holds (`TOP_THROTTLE` is 10), so
+	# astern is a negative multiple and says so.
+	_group_ship.set_lines(
 		PackedStringArray(
 			[
-				"Closest: %s, Altitude: %s"
-					% [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())],
-				"Target: %s, Distance: %s"
-					% [target_name, SpacesimMarkers.format_distance(target_distance)],
-				"Speed: %s    Throttle: %+.1f ×"
-					% [_speed(_ship.speed), _ship.throttle],
-				# **The world clock, as a plain number of seconds** — Evert, 2026-11-07: *"time should
-				# just be a very long number"*. No unit scaling and no calendar: at aeons a `YYYY-MM-DD
-				# hh:mm` carries five digits of noise, and the shape this should eventually take is not
-				# decided yet. **This is the world's clock, not the player's** — the two diverge under
-				# relativistic travel (`Relativity and the Two Clocks` §4), and the second one is the
-				# personal screen's.
-				"Time: %d s" % int(_session.world_time),
+				"Speed  %s" % _speed(_ship.speed),
+				"Throttle  %+.1f ×" % _ship.throttle,
 			]
 		)
 	)
 
-	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
-	# readings, what is left is what a developer reads to see what the engine is doing.
+	# **Sensors** — the air and the pull where the observer is, from `SpacesimSystemScene.conditions_at`,
+	# which is the one call that knows how to derive them. A body with no air answers 0 Pa rather than
+	# dropping the line, because standing on a moon is a real place to be.
 	var air := _system.conditions_at(_ship.global_position)
-	_sensors.text = "\n".join(
+	_group_sensors.set_lines(
 		PackedStringArray(
 			[
-				"Gravity: %.2f m/s²" % float(air["gravity"]),
-				"Pressure: %s" % _pressure(float(air["pressure"])),
-				"Temperature: %.0f K" % float(air["temperature"]),
+				"Gravity  %.2f m/s²" % float(air["gravity"]),
+				"Pressure  %s" % _pressure(float(air["pressure"])),
+				"Temperature  %.0f K" % float(air["temperature"]),
 			]
 		)
 	)
+
+	# **Location** — where you are, what you picked, and what is under you. **The galaxy and sector lines are
+	# not written yet**: the cosmos has no authored name in the engine (`Cosmos and Discovery`), so the system
+	# — which is named after its star — is as far up the hierarchy as there is anything true to say. They are
+	# one line each, added when the hierarchy is content.
+	_group_location.set_lines(
+		PackedStringArray(
+			[
+				"System  %s" % _system.name,
+				"Target  %s, %s" % [target_name, SpacesimMarkers.format_distance(target_distance)],
+				"Nearest  %s, %s"
+					% [_ship.nearest_name, SpacesimMarkers.format_distance(_ship.altitude())],
+			]
+		)
+	)
+
+	# **Time** — the world clock, as a plain number of seconds. Evert, 2026-11-07: *"time should just be a
+	# very long number"*; no unit scaling and no calendar, because at aeons a `YYYY-MM-DD hh:mm` carries five
+	# digits of noise and the shape this should eventually take is not decided. **The world's clock, not the
+	# player's** — the two diverge under relativistic travel (`Relativity and the Two Clocks` §4), and the
+	# second one belongs on the personal screen.
+	_group_time.set_lines(PackedStringArray(["%d s" % int(_session.world_time)]))
+
+	# **The block is diagnostics**, and nothing in it is about flying: with the strip holding the ship's
+	# readings, what is left is what a developer reads to see what the engine is doing.
 	_hud.text = "\n".join(
 		PackedStringArray(
 			[
