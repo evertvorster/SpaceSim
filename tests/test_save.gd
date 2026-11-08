@@ -203,14 +203,14 @@ func _test_state_round_trip(h) -> void:
 	)
 	h.check(not String(ship.get("id", "")).is_empty(), "an asset gets an id")
 
-	var text := Repo.state_text(player.to_dictionary(), 16156800000.0, 16156800000.0, 0.0)
+	var text := Repo.state_text(player.to_dictionary(), 16156800000, 16156800000, 0.0)
 	var state := Repo.read_state(text)
 	h.check(state.get(Repo.FIELD_VERSION) == Repo.STATE_FORMAT_VERSION, "the state carries a format version")
-	h.check(state.get(Repo.FIELD_WORLD_TIME) == 16156800000.0, "and the world clock")
+	h.check(state.get(Repo.FIELD_WORLD_TIME) == 16156800000, "and the world clock")
 	# **Two independent clocks** (Evert, 2026-11-08), so the envelope carries both — a save with one number
 	# would lose the difference between the crew's time and the world's.
 	h.check(
-		state.get(Repo.FIELD_PLAYER_TIME) == 16156800000.0,
+		state.get(Repo.FIELD_PLAYER_TIME) == 16156800000,
 		"and the player's own clock beside it (%s)" % str(state.get(Repo.FIELD_PLAYER_TIME))
 	)
 	h.check(text.contains("\n\t\"attributes\""), "and is written one key per line, to diff well")
@@ -271,7 +271,7 @@ func _test_reading_a_location(h, root: Node) -> void:
 
 	# **The strip's number: seconds since the Big Bang, grouped by the thousand.** From the Bang rather
 	# than from the world's year zero, because at 13.8 Gyr a calendar date is five digits of noise.
-	var bang := SpacesimWorldTime.since_bang(0.0)
+	var bang := SpacesimWorldTime.since_bang(0)
 	h.check(
 		bang > 13.7e9 * 365.25 * 86400.0 and bang < 13.9e9 * 365.25 * 86400.0,
 		"the world's epoch sits at the age of the universe (%d s)" % bang
@@ -279,10 +279,10 @@ func _test_reading_a_location(h, root: Node) -> void:
 	# **The counter is float64 seconds at 4.35e17**, where one ULP is about 97 s — so "an hour later" is an
 	# hour later to within that, and the last two digits of the number the strip prints are noise. That is
 	# the price of counting from the Bang in seconds, and it is worth nothing at this scale.
-	var hour := SpacesimWorldTime.since_bang(3600.0) - bang
+	# **Exactly**, because both the epoch and the elapsed part are integers now: a second is a second.
 	h.check(
-		absi(hour - 3600) <= 128,
-		"and an hour into a history is an hour later, to the float's own resolution (%d s)" % hour
+		SpacesimWorldTime.since_bang(3600) - bang == 3600,
+		"and an hour into a history is exactly an hour later"
 	)
 	h.check(SpacesimWorldTime.grouped(0) == "0", "grouping leaves nothing to group alone")
 	h.check(SpacesimWorldTime.grouped(999) == "999", "three digits need no separator")
@@ -292,7 +292,7 @@ func _test_reading_a_location(h, root: Node) -> void:
 		"every three digits thereafter (%s)" % SpacesimWorldTime.grouped(159000000)
 	)
 	h.check(
-		SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(0.0)).length()
+		SpacesimWorldTime.grouped(SpacesimWorldTime.since_bang(0)).length()
 			== str(bang).length() + 5,
 		"and the age of the universe gains five commas"
 	)

@@ -144,37 +144,53 @@ func _test_a_group(h, root: Node) -> void:
 	group.set_heading("Sensors")
 	h.check(group.heading_text() == "Sensors", "the heading is the caller's word (%s)" % group.heading_text())
 
-	group.set_lines(PackedStringArray(["Gravity  9.79 m/s²", "Pressure  101.3 kPa"]))
+	group.set_lines(PackedStringArray(["nothing wired up yet", "and nothing to show"]))
 	h.check(
-		group.lines_text() == "Gravity  9.79 m/s²\nPressure  101.3 kPa",
-		"and the lines come back one per line (%s)" % group.lines_text().replace("\n", " / ")
+		group.values_text() == "nothing wired up yet\nand nothing to show",
+		"raw text comes back one entry per line (%s)" % group.values_text().replace("\n", " / ")
 	)
 
 	# **Aligned fields**: the leader dots pad every label to the longest one in the group, so the colons sit
 	# in one column and the longest label carries none at all.
+	# **Two columns, and the names are right-aligned in a column measured from the font** — Evert,
+	# 2026-11-08: *"The font is not monospaced, so it still does not line up."* Dot leaders counted in
+	# characters cannot align a proportional face, so what is asserted is the measured column: the two
+	# labels are different lengths and every value starts at the same x.
 	group.set_fields([["Speed", "3.20 km/s"], ["Throttle", "+2.5 ×"], ["Temperature", "288 K"]])
-	var aligned: PackedStringArray = group.lines_text().split("\n")
-	h.check(aligned.size() == 3, "three fields are three lines (%d)" % aligned.size())
+	var names: PackedStringArray = group.names_text().split("\n")
+	var values: PackedStringArray = group.values_text().split("\n")
+	h.check(values.size() == 3, "three fields are three lines (%d)" % values.size())
 	h.check(
-		aligned[0] == "Speed......: 3.20 km/s",
-		"a short label is padded with dots to the column (%s)" % aligned[0]
+		values[0] == "3.20 km/s" and values[2] == "288 K",
+		"the values are the values, with no label mixed in (%s)" % values[0]
 	)
 	h.check(
-		aligned[2] == "Temperature: 288 K",
-		"and the longest label needs none, because it sets the column (%s)" % aligned[2]
+		names[2] == "Temperature:",
+		"and the longest label ends at the column with no leader (%s)" % names[2]
 	)
-	var colons := PackedInt32Array()
-	for line in aligned:
-		colons.append(line.find(":"))
 	h.check(
-		colons[0] == colons[1] and colons[1] == colons[2],
-		"every colon is in the same column (%s)" % str(colons)
+		names[0].begins_with("Speed.") and names[0].ends_with(":"),
+		"while a short one is led by dots to the same place (%s)" % names[0]
+	)
+	# **Measured, not counted**: the column is the longest label's width in the font the values draw in.
+	var font: Font = (group.get_node("Values") as Label).get_theme_font("font")
+	var widest: float = font.get_string_size("Temperature", HORIZONTAL_ALIGNMENT_LEFT, -1, Group.BODY_FONT_SIZE).x
+	h.check(
+		absf(group.column_width() - widest) < 0.5,
+		"the column is the longest label's measured width (%.1f against %.1f)"
+			% [group.column_width(), widest]
+	)
+	# And the leader fills it rather than stopping short, which is the fault a character count produces.
+	var leader: float = font.get_string_size(names[0], HORIZONTAL_ALIGNMENT_LEFT, -1, Group.BODY_FONT_SIZE).x
+	h.check(
+		leader >= widest - 0.5,
+		"and the leader reaches the column (%.1f against %.1f)" % [leader, widest]
 	)
 
 	# **An empty group reserves its room rather than collapsing**, which is what a reading that is not
 	# wired up yet should look like — not a line of dashes that outlives the gap it fills.
 	group.set_lines(PackedStringArray())
-	h.check(group.lines_text() == "", "a group with nothing to say says nothing (%s)" % group.lines_text())
+	h.check(group.values_text() == "", "a group with nothing to say says nothing (%s)" % group.values_text())
 
 	group.fit(Rect2(40.0, 500.0, 300.0, 120.0))
 	h.check(group.position == Vector2(40.0, 500.0), "and fit puts it where it is asked (%s)" % str(group.position))
@@ -183,7 +199,7 @@ func _test_a_group(h, root: Node) -> void:
 	# **The text is laid out inside the border**, not on top of it: the heading sits inside the padding and
 	# the body starts under the heading.
 	var heading := group.get_node("Heading") as Label
-	var body := group.get_node("Lines") as Label
+	var body := group.get_node("Values") as Label
 	h.check(
 		heading != null and heading.position.x >= Group.PADDING.x - 0.01,
 		"the heading is inset by the padding (%s)" % (str(heading.position) if heading else "missing")

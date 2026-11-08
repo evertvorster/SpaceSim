@@ -1,21 +1,28 @@
 class_name SpacesimGroup
 extends Control
-## **One labelled group in the HUD strip**: a thin white rounded border, a heading, and its lines.
+## **One labelled group in the HUD strip**: a thin white rounded border, a heading, and its fields.
 ##
 ## The strip is grouped rather than listed (Evert, 2026-11-07: *"Ship settings and status, Sensors,
 ## Location, Time. Each grouping can get a thin white border with rounded corners with a heading."*), and
-## **a group grows by gaining lines** — the border and the heading are fixed, so wiring a new reading in is
-## one more string in `set_lines` and nothing about the layout moves.
+## **a group grows by gaining a field** — the border and the heading are fixed, so wiring a new reading in is
+## one more pair and nothing about the layout moves.
+##
+## ## The alignment is two columns, because the font is proportional
+##
+## Evert, 2026-11-08: *"I would like the readouts in the boxes to be aligned ... `Label....: <value>` /
+## `Longlabel: <value>`"*, and then: *"The font is not monospaced, so it still does not line up."*
+##
+## He was right, and it is the reason this is not one string per line. Dot leaders counted in **characters**
+## only line up in a monospaced face; in a proportional one a dot is a different width from an `m`, and the
+## colons drift apart. So the group measures its own labels with the font it actually draws with and puts
+## **the names in one right-aligned column and the values in another**. The leaders fall out of the
+## measurement rather than out of a character count, so the colon column is exact in any face.
 ##
 ## ## Why the border is drawn and the text is a `Label`
 ##
 ## A `StyleBoxFlat` draws the rounded border: `draw_rect` has no corner radius, and a `PanelContainer`
 ## would put a container's layout rules between this node and the strip's own arithmetic. The text is real
-## `Label`s, because they are what rasterises crisply under `canvas_items` stretch and what the rest of the
-## HUD already uses.
-##
-## **The node owns nothing about where it is.** `fit(rect)` places it; the strip's geometry is
-## `SpacesimDisplay`'s, so a changed strip height moves these exactly as it moves the picture.
+## `Label`s, because they are what rasterises crisply under `canvas_items` stretch.
 
 const BORDER := Color(1.0, 1.0, 1.0, 0.45)
 const BORDER_WIDTH := 1
@@ -23,13 +30,22 @@ const CORNER := 6
 const HEADING_HEIGHT := 20.0
 const PADDING := Vector2(10.0, 6.0)
 
-## The heading's own size, a little smaller than the lines under it, so the group reads as a label over
+## The gap between the colon column and the values, in pixels.
+const VALUE_GAP := 6.0
+
+## The heading's own size, a little smaller than the fields under it, so the group reads as a label over
 ## content rather than as a title page.
 const HEADING_FONT_SIZE := 14
 const BODY_FONT_SIZE := 17
 
 var _heading: Label
-var _body: Label
+## The names, right-aligned, so every colon ends in the same column.
+var _names: Label
+## The values, left-aligned, starting at that column.
+var _values: Label
+
+## The label column's width in pixels, measured from the longest label in this group.
+var _column := 0.0
 
 
 func _ready() -> void:
@@ -41,14 +57,23 @@ func _ready() -> void:
 	_heading.add_theme_color_override("font_color", BORDER)
 	add_child(_heading)
 
-	_body = Label.new()
-	_body.name = "Lines"
-	_body.add_theme_font_size_override("font_size", BODY_FONT_SIZE)
-	# The same outline the rest of the HUD text wears: these lines sit over a black panel but a bright
+	_names = _make_body("Names")
+	_names.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	add_child(_names)
+
+	_values = _make_body("Values")
+	add_child(_values)
+
+
+func _make_body(node_name: String) -> Label:
+	var label := Label.new()
+	label.name = node_name
+	label.add_theme_font_size_override("font_size", BODY_FONT_SIZE)
+	# The same outline the rest of the HUD text wears: these lines sit over a black panel, but a bright
 	# planet can still be behind the group's border on a narrow strip.
-	_body.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
-	_body.add_theme_constant_override("outline_size", 6)
-	add_child(_body)
+	label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
+	label.add_theme_constant_override("outline_size", 6)
+	return label
 
 
 ## **Place the group and lay its text out inside it.** Called whenever the strip's geometry changes.
@@ -61,50 +86,69 @@ func fit(rect: Rect2) -> void:
 func _place_text() -> void:
 	if _heading == null:
 		return
+	var inner := Vector2(maxf(size.x - PADDING.x * 2.0, 0.0), maxf(size.y - PADDING.y * 2.0, 0.0))
 	_heading.position = PADDING
-	_heading.size = Vector2(maxf(size.x - PADDING.x * 2.0, 0.0), HEADING_HEIGHT)
-	_body.position = PADDING + Vector2(0.0, HEADING_HEIGHT)
-	_body.size = Vector2(
-		maxf(size.x - PADDING.x * 2.0, 0.0),
-		maxf(size.y - HEADING_HEIGHT - PADDING.y * 2.0, 0.0)
-	)
+	_heading.size = Vector2(inner.x, HEADING_HEIGHT)
+
+	var body := Vector2(inner.x, maxf(inner.y - HEADING_HEIGHT, 0.0))
+	var at := PADDING + Vector2(0.0, HEADING_HEIGHT)
+	var column := minf(_column, body.x)
+	_names.position = at
+	_names.size = Vector2(column, body.y)
+	_values.position = at + Vector2(column + VALUE_GAP, 0.0)
+	_values.size = Vector2(maxf(body.x - column - VALUE_GAP, 0.0), body.y)
 
 
-## The group's name, above its lines.
+## The group's name, above its fields.
 func set_heading(text: String) -> void:
 	if _heading == null:
 		return
 	_heading.text = text
 
 
-## **Aligned fields, as `Label....: value`** — Evert, 2026-11-08: *"I would like the readouts in the boxes
-## to be aligned. What I have seen that works well is to have something like: `Label....: <value>` /
-## `Longlabel: <value>`"*.
+## **The group's content as `[label, value]` pairs**, drawn as two aligned columns with dot leaders.
 ##
-## Every field is `[label, value]`. **The dots are a leader, not decoration**: they fill the space between a
-## short label and the column where all the colons sit, which is the longest label in the group. So the
-## longest label carries no dots at all (`Longlabel: value`) and every shorter one is padded to it — the
-## colon column is one line to look down, which is what makes a list of readings scannable.
+## The column is measured from the longest label **with the font the values are drawn in**, so the colons
+## line up in a proportional face — a character count cannot do that, which is what the first version got
+## wrong. Each shorter label is then filled with dots to that column, which keeps the leader look while
+## being exact rather than approximately aligned.
 ##
-## **Per group, not per strip**: two groups are two panels, and a label in one should not be padded to the
-## length of a label in the other.
+## **Per group, not per strip**: two panels are two panels, and a label in one should not be padded to the
+## length of a label in another.
 func set_fields(fields: Array) -> void:
-	var width := 0
-	for field in fields:
-		width = maxi(width, String(field[0]).length())
-	var lines := PackedStringArray()
+	if _names == null:
+		return
+	var font := _values.get_theme_font("font")
+	var column := 0.0
 	for field in fields:
 		var label := String(field[0])
-		lines.append("%s%s: %s" % [label, ".".repeat(width - label.length()), String(field[1])])
-	set_lines(lines)
+		column = maxf(column, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x)
+	_column = column
+
+	var dot := maxf(font.get_string_size(".", HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x, 0.001)
+	var names := PackedStringArray()
+	var values := PackedStringArray()
+	for field in fields:
+		var label := String(field[0])
+		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x
+		# One dot more than fits, so a leader never stops short of the column and leaves a ragged gap.
+		var dots := maxi(int(ceil((column - width) / dot)), 0)
+		names.append(label + ".".repeat(dots) + ":")
+		values.append(String(field[1]))
+	_names.text = "\n".join(names)
+	_values.text = "\n".join(values)
+	_place_text()
 
 
-## **The group's content, one string per line.** An empty array is a group with room reserved and nothing
-## in it yet, which is what a reading that is not wired up should look like — not a line of dashes.
+## **Raw text, one entry per line, in the values column** — for a group with nothing to label, and for the
+## empty case a reading that is not wired up yet should look like rather than a line of dashes.
 func set_lines(lines: PackedStringArray) -> void:
-	if _body == null:
+	if _names == null:
 		return
-	_body.text = "\n".join(lines)
+	_column = 0.0
+	_names.text = ""
+	_values.text = "\n".join(lines)
+	_place_text()
 
 
 ## What the group currently reads, for a test and for a caller that needs to know whether it is empty.
@@ -112,8 +156,17 @@ func heading_text() -> String:
 	return _heading.text if _heading != null else ""
 
 
-func lines_text() -> String:
-	return _body.text if _body != null else ""
+func names_text() -> String:
+	return _names.text if _names != null else ""
+
+
+func values_text() -> String:
+	return _values.text if _values != null else ""
+
+
+## The width the label column was measured to, in pixels.
+func column_width() -> float:
+	return _column
 
 
 func _draw() -> void:

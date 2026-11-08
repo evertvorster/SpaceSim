@@ -40,8 +40,8 @@ static func clock_rate(_fantastical_speed: float) -> float:
 ## **Integer arithmetic, deliberately** — see [constant SECONDS_SINCE_BANG]. The elapsed part is a float and
 ## is rounded once, on its own, where a float is still exact to the second; the epoch is added as an `int`
 ## afterwards. Adding the two in floating point quantises the answer to ~97 s and the clock appears stopped.
-static func since_bang(seconds: float) -> int:
-	return SECONDS_SINCE_BANG + int(round(seconds))
+static func since_bang(seconds: int) -> int:
+	return SECONDS_SINCE_BANG + seconds
 
 
 ## **A long number a person can read**: thousands separators every three digits.

@@ -113,7 +113,7 @@ func read_text(path: String) -> String:
 ## `saved_realtime` is the machine's clock at the moment of saving. It is how long the player has
 ## been away is worked out on load, which is what advances the world's clock between sessions.
 static func state_text(
-	player_data: Dictionary, world_time: float, player_time: float, saved_realtime: float
+	player_data: Dictionary, world_time: int, player_time: int, saved_realtime: float
 ) -> String:
 	var state := player_data.duplicate(true)
 	state[FIELD_VERSION] = STATE_FORMAT_VERSION

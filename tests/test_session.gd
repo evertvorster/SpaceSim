@@ -144,18 +144,18 @@ func _test_the_clock_moves_on(h, system: SpacesimSystemScene) -> void:
 	var player_data := session.player.to_dictionary()
 
 	# A save written a day ago: the world has moved on by a day, and the player has not.
-	session.repo.write_text(Repo.STATE_FILE, Repo.state_text(player_data, 1000.0, 1000.0, Session.now() - 86400.0))
+	session.repo.write_text(Repo.STATE_FILE, Repo.state_text(player_data, 1000, 1000, Session.now() - 86400.0))
 	h.check(session.load_last(), "a state can be read")
 	h.check(
-		session.world_time >= 1000.0 + 86400.0,
+		session.world_time >= 1000 + 86400,
 		"and the world has moved on by the time the player was away (%.0f)" % session.world_time
 	)
-	h.check(session.world_time < 1000.0 + 86500.0, "by about that much")
+	h.check(session.world_time < 1000 + 86500, "by about that much")
 
 	# A machine clock that is ahead must not run the world backwards.
-	session.repo.write_text(Repo.STATE_FILE, Repo.state_text(player_data, 5000.0, 5000.0, Session.now() + 86400.0))
+	session.repo.write_text(Repo.STATE_FILE, Repo.state_text(player_data, 5000, 5000, Session.now() + 86400.0))
 	session.load_last()
-	h.check(session.world_time == 5000.0, "and a save from the future does not take it backwards")
+	h.check(session.world_time == 5000, "and a save from the future does not take it backwards")
 
 
 ## **Two clocks, both written, both read back** — Evert, 2026-11-08. They tick together today, and the save
@@ -167,32 +167,40 @@ func _test_both_clocks(h, system: SpacesimSystemScene) -> void:
 	# One tick of flown time moves both, and the world's does not run faster yet.
 	session.advance(1.0)
 	h.check(
-		is_equal_approx(session.player_time, started + 1.0),
-		"a second of flight is a second on the player's clock (%.1f)" % session.player_time
+		session.player_time == started + 1,
+		"a second of flight is a second on the player's clock (%d)" % session.player_time
 	)
 	h.check(
-		is_equal_approx(session.world_time, started + 1.0),
-		"and a second on the world's, because relativistic travel is not built (%.1f)" % session.world_time
+		session.world_time == started + 1,
+		"and a second on the world's, because relativistic travel is not built (%d)" % session.world_time
+	)
+	# **A tick shorter than a second is banked, not lost** — the clock is integer seconds, so the fraction
+	# has to live somewhere or a fast frame would advance nothing at all.
+	for _tick in 60:
+		session.advance(1.0 / 60.0)
+	h.check(
+		session.player_time == started + 2,
+		"sixty frames of a sixtieth of a second are one more second (%d)" % session.player_time
 	)
 	# A tick that never happened is not a tick: paused or a zero frame must not move a clock.
 	var before := session.world_time
 	session.advance(0.0)
-	h.check(is_equal_approx(session.world_time, before), "and a zero tick moves nothing")
+	h.check(session.world_time == before, "and a zero tick moves nothing")
 
 	# **The difference survives a save.** Set them apart by hand, which is what a relativistic crossing will
 	# do, and read them back.
-	session.player_time = 400.0
-	session.world_time = 900.0
+	session.player_time = 400
+	session.world_time = 900
 	h.check(session.save(system)["ok"], "the clocks save")
 	var read := _session()
 	h.check(read.load_last(), "and load")
 	h.check(
-		is_equal_approx(read.player_time, 400.0),
-		"the player's clock comes back as it was (%.1f)" % read.player_time
+		read.player_time == 400,
+		"the player's clock comes back as it was (%d)" % read.player_time
 	)
 	h.check(
-		is_equal_approx(read.world_time, 900.0 + maxf(0.0, read.world_time - 900.0)),
-		"and the world's is at least where it was (%.1f)" % read.world_time
+		read.world_time >= 900,
+		"and the world's is at least where it was (%d)" % read.world_time
 	)
 	h.check(read.world_time > read.player_time, "so the two are still two different numbers")
 

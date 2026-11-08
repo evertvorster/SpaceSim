@@ -19,9 +19,16 @@ const FIRST_HISTORY := "Traveller"
 var repo: SpacesimWorldRepo
 var player: SpacesimPlayer
 
-## The world's clock, in seconds from the world's epoch. Saved with the player, because it is the
-## point in the world's time that this history stands at.
-var world_time: float = 0.0
+## The world's clock, **in whole seconds** from the world's epoch. Saved with the player, because it is
+## the point in the world's time that this history stands at.
+##
+## **An `int`, not a float** (Evert, 2026-11-08: *"Can we store it as something else? Surely a data type
+## exists that can hold this number without weirdness? We don't really care about efficiency here."*). A
+## float accumulated from frame deltas is a number that stops responding once its magnitude outgrows the
+## delta — and the displayed value is the epoch plus this, at 4.35e17, where a float32-style step is
+## minutes. `int` is exact to 9.2e18 and the sub-second part lives in `_world_fraction`, so **a second is a
+## second** however long the history runs.
+var world_time: int = 0
 
 ## **The player's own clock** — proper time, what the crew lives through. It starts at the same instant as
 ## the world's and currently ticks with it: Evert, 2026-11-08: *"The clock should be ticking, one second at
@@ -30,7 +37,12 @@ var world_time: float = 0.0
 ## **Not written to the save yet.** `Relativity and the Two Clocks` §8 lists what the save carries as open,
 ## so a loaded history starts its player clock where the world's is rather than at zero — the honest
 ## default, and one line to change when the format gains the field.
-var player_time: float = 0.0
+var player_time: int = 0
+
+## The sub-second remainder of each clock. Separate, because the two clocks will not always advance at the
+## same rate (`Relativity and the Two Clocks`), and a shared remainder would tie them together.
+var _world_fraction := 0.0
+var _player_fraction := 0.0
 
 ## What the last operation has to say, for the screen to show. Empty when there is nothing to say.
 var message: String = ""
@@ -76,8 +88,10 @@ func start(system: SpacesimSystemScene) -> Dictionary:
 	if not began["ok"]:
 		return began
 	player.reset()
-	world_time = system.start_time
+	world_time = int(system.start_time)
 	player_time = world_time
+	_world_fraction = 0.0
+	_player_fraction = 0.0
 	var written := save(system)
 	message = "a new story" if written["ok"] else written["reason"]
 	return written
@@ -112,8 +126,10 @@ func new_story(name: String, system: SpacesimSystemScene, player_name := Player.
 	if not created["ok"]:
 		return created
 	player.reset(player_name)
-	world_time = system.start_time
+	world_time = int(system.start_time)
 	player_time = world_time
+	_world_fraction = 0.0
+	_player_fraction = 0.0
 	return save(system)
 
 
@@ -239,27 +255,35 @@ static func now() -> float:
 func advance(seconds: float) -> void:
 	if seconds <= 0.0:
 		return
-	var rate := SpacesimWorldTime.clock_rate(0.0)
-	player_time += seconds
-	world_time += seconds * rate
+	_player_fraction += seconds
+	var player_whole := int(floor(_player_fraction))
+	_player_fraction -= float(player_whole)
+	player_time += player_whole
+
+	# The world's, at `clock_rate` times the crew's. **Accumulated the same way and carried separately**, so
+	# the two cannot drift apart by rounding — the only thing that may separate them is the rate itself.
+	_world_fraction += seconds * SpacesimWorldTime.clock_rate(seconds)
+	var world_whole := int(floor(_world_fraction))
+	_world_fraction -= float(world_whole)
+	world_time += world_whole
 
 
 func _apply(state: Dictionary) -> bool:
 	if state.is_empty():
 		return false
 	player.from_dictionary(state)
-	world_time = float(state.get(Repo.FIELD_WORLD_TIME, 0.0))
+	world_time = int(state.get(Repo.FIELD_WORLD_TIME, 0))
 	# **A save written before the player's clock existed carries one number**, and the honest reading of it
 	# is that the two clocks had not diverged yet — which was true, because the world's clock only ever
 	# moved while the player was away.
-	player_time = float(state.get(Repo.FIELD_PLAYER_TIME, world_time))
+	player_time = int(state.get(Repo.FIELD_PLAYER_TIME, world_time))
 
 	# While the player was away the slow things kept happening, so the world's clock has moved on
 	# and the player has not. Loading an old save therefore costs *more* elapsed time than the
 	# player lived through — and the clock never runs backwards, even if the machine's does.
 	var away := now() - float(state.get(Repo.FIELD_SAVED_REALTIME, now()))
 	if away > 0.0:
-		world_time += away
+		world_time += int(away)
 	_last_body = _body()
 	return true
 
