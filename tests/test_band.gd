@@ -165,17 +165,17 @@ func _test_a_group(h, root: Node) -> void:
 		"the values are the values, with no label mixed in (%s)" % values[0]
 	)
 	h.check(
-		names[2] == "Temperature:",
+		names[2] == "Temperature :",
 		"and the longest label ends at the column with no leader (%s)" % names[2]
 	)
 	h.check(
-		names[0] == "Speed:" and names[1] == "Throttle:",
+		names[0] == "Speed :" and names[1] == "Throttle :",
 		"and a short one carries no filler at all — the alignment is the column, not the characters (%s)"
 			% names[0]
 	)
 	# **Measured, not counted**: the column is the longest label's width in the font the values draw in.
 	var font: Font = (group.get_node("Values") as Label).get_theme_font("font")
-	var widest: float = font.get_string_size("Temperature", HORIZONTAL_ALIGNMENT_LEFT, -1, Group.BODY_FONT_SIZE).x
+	var widest: float = font.get_string_size("Temperature :", HORIZONTAL_ALIGNMENT_LEFT, -1, Group.BODY_FONT_SIZE).x
 	h.check(
 		absf(group.column_width() - widest) < 0.5,
 		"the column is the longest label's measured width (%.1f against %.1f)"

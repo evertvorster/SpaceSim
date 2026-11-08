@@ -124,24 +124,25 @@ func set_fields(fields: Array) -> void:
 	if _names == null:
 		return
 	var font := _values.get_theme_font("font")
-	var column := 0.0
-	for field in fields:
-		var label := String(field[0])
-		column = maxf(column, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x)
-	_column = column
-
-	# **One space between the colon and its value**, measured in the same font the text is drawn in, since
-	# the two live in different labels and a pixel count would be a guess at what a space looks like.
+	# **One space either side of the colon** — Evert, 2026-11-08: *"I want some visual space around the
+	# colons. Like ' Label : variable'"*. The space BEFORE it is part of the name (`Label :`), so the
+	# right-aligned column carries it into every row identically; the space AFTER it is the gap between the
+	# two labels, measured in the same font rather than guessed in pixels.
 	_gap = font.get_string_size(" ", HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x
 
-	# **No leader characters.** The names are right-aligned in a measured column, which is what puts the
-	# colons in one line; padding them with dots or spaces would only be a second way of saying the same
-	# thing, and Evert asked for the dots out (2026-11-08).
 	var names := PackedStringArray()
 	var values := PackedStringArray()
 	for field in fields:
-		names.append("%s:" % String(field[0]))
+		names.append("%s :" % String(field[0]))
 		values.append(String(field[1]))
+
+	# **Measured with the space included**, so the column is the widest name plus its own space and colon —
+	# otherwise the longest label's colon would land a space's width past every other one.
+	var column := 0.0
+	for name in names:
+		column = maxf(column, font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, BODY_FONT_SIZE).x)
+	_column = column
+
 	_names.text = "\n".join(names)
 	_values.text = "\n".join(values)
 	_place_text()
