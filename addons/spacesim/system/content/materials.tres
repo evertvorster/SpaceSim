@@ -423,6 +423,25 @@ albedo = 0.12
 color = Color(0.45, 0.4, 0.35, 1)
 condensation_temperature = 0.0
 
+; **The dark rock of a primitive body** — Phobos and Deimos, and the belt's fragments behind them.
+; Evert, 2026-11-08: *"add the carbonus. We'll want to play with mining and I guess the more types of
+; material to mine the better."*
+;
+; **Albedo 0.07, and it is measured rather than chosen**: Phobos and Deimos are the darkest surfaces in
+; Sol, darker than the Moon's regolith at 0.12 and close to fresh asphalt. A carbonaceous chondrite body
+; is what they are, so the species is the material and the number is its published geometric albedo.
+; The colour is a very dark neutral grey with a faint brown cast, which is what a carbonaceous surface
+; reads as once the red channel is not being exaggerated by an albedo ramp.
+[sub_resource type="Resource" id="Sp_carbonaceous"]
+script = ExtResource("species")
+species_name = "carbonaceous"
+domain = 0
+density = 2200.0
+molar_mass = 12.011
+albedo = 0.07
+color = Color(0.18, 0.16, 0.15, 1)
+condensation_temperature = 0.0
+
 [sub_resource type="Resource" id="Sp_vegetation"]
 script = ExtResource("species")
 species_name = "vegetation"
@@ -435,4 +454,4 @@ condensation_temperature = 0.0
 
 [resource]
 script = ExtResource("table")
-species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ozone"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])
+species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ozone"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation"), SubResource("Sp_carbonaceous")])

@@ -61,7 +61,11 @@ func _test_internal_heat(h, sol: SpacesimSolarSystem) -> void:
 func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 	h.check(sol.system_name() == "Sol", "named after its star: '%s'" % sol.system_name())
 	h.check(sol.epoch == "2000-01-01T12:00:00", "at the J2000 epoch")
-	h.check(sol.bodies.size() == 16, "the Sun, eight planets and seven moons (%d)" % sol.bodies.size())
+	h.check(
+		sol.bodies.size() == 18,
+		"the Sun, eight planets and nine moons — Phobos and Deimos joined Luna's eight on 2026-11-08 (%d)"
+			% sol.bodies.size()
+	)
 
 	var star := sol.star()
 	h.check(star != null and star.id == "star:sol", "the primary is Sol")
@@ -78,7 +82,11 @@ func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 	for body in sol.bodies:
 		if body.landable:
 			landable += 1
-	h.check(landable == 11, "eleven landable bodies: four planets and seven moons (%d)" % landable)
+	h.check(
+		landable == 13,
+		"thirteen landable bodies: four planets and nine moons — and Phobos is the first shape that is not a "
+		+ "sphere (%d)" % landable
+	)
 
 
 func _test_calibration_values(h, sol: SpacesimSolarSystem) -> void:
@@ -313,4 +321,69 @@ func _test_the_scene_places_them(h, sol: SpacesimSolarSystem, root: Node) -> voi
 		h.check_near(start.distance_to(earth_node.global_position), earth.radius + sol.start_altitude,
 			"and the ship starts above the start body", 1.0)
 
+	_test_the_rocks(h, scene, root)
+
 	scene.container.free()
+
+
+## **A non-planet is built by its own mechanism, and the mesh that is drawn is the generated shape.**
+##
+## This is the check that did not exist when the last attempt at irregular bodies went wrong: a green suite that
+## asserted the shape and never looked at a vertex that reached a mesh. Evert, 2026-11-08: *"I am not getting a
+## height translation for this shape ... the body of Phobos still looks very round"*, five commits after every test
+## in the branch passed.
+##
+## So: the vertex COUNT is the sweep's grid, the vertices ARE the generator's, nothing planet-shaped was created
+## beside them, and the eye moving does not replace the mesh.
+func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
+	var phobos := scene.body_by_id("moon:phobos")
+	var earth := scene.body_by_id("planet:earth")
+	h.check(phobos != null, "Phobos built")
+	if phobos == null or phobos.mesh == null:
+		return
+	h.check(phobos.irregular, "and is drawn by its own mechanism, because 11 km of rock was never rounded")
+	h.check(earth != null and not earth.irregular, "while Earth, which gravity did round, keeps the planet path")
+
+	var arrays: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var grid := SpacesimJuliaShape.OUTLINE_POINTS * SpacesimJuliaShape.RINGS
+	h.check(vertices.size() == grid,
+		"its mesh is the sweep's own grid of %d vertices, not an icosphere's" % vertices.size())
+	var generated: Array = SpacesimJuliaShape.mesh(hash("moon:phobos"), phobos.radius).surface_get_arrays(0)
+	h.check(generated[Mesh.ARRAY_VERTEX] == vertices,
+		"and every vertex is the generated surface — this is the check the last attempt never had")
+
+	var lo := Vector3.ONE * INF
+	var hi := Vector3.ONE * -INF
+	for vertex in vertices:
+		lo = Vector3(minf(lo.x, vertex.x), minf(lo.y, vertex.y), minf(lo.z, vertex.z))
+		hi = Vector3(maxf(hi.x, vertex.x), maxf(hi.y, vertex.y), maxf(hi.z, vertex.z))
+	var size := hi - lo
+	var thin := minf(size.x, minf(size.y, size.z))
+	var thick := maxf(size.x, maxf(size.y, size.z))
+	h.check(thick / maxf(thin, 1.0) > 1.4,
+		"and it is a rock across its axes (%.1f x %.1f x %.1f km)"
+			% [size.x / 1000.0, size.y / 1000.0, size.z / 1000.0])
+
+	# **And none of the planet machinery was built beside it.** A flag that says "skip the walk" is what the last
+	# attempt had, and it meant five other switches; here there is simply nothing to skip.
+	h.check(phobos.surface_plan == null, "with no field plan, because it has no field")
+	h.check(phobos.decks.is_empty() and phobos.air.is_empty(), "and no decks and no air")
+	h.check(phobos.sphere == null and phobos.ocean == null and phobos.interior == null,
+		"and no datum lattice, sea or interior")
+
+	# **The eye cannot replace its mesh with a walked one.** This is the fault that made the last attempt draw a
+	# sphere in flight: a body whose geometry the walk rebuilt underneath it.
+	var camera := Camera3D.new()
+	camera.fov = 70.0
+	root.add_child(camera)
+	camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 40000.0)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(phobos.patch_walk_task == -1 and phobos.patch_task == -1,
+		"no walk was asked for it when the eye moved")
+	h.check(phobos.patch_chunks.is_empty(), "and it has no patch tree")
+	var after: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
+	h.check(after[Mesh.ARRAY_VERTEX] == vertices, "so its mesh is the same shape after the eye moved")
+	h.check(phobos.mesh.visible, "and it is drawn")
+	camera.queue_free()

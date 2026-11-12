@@ -1279,6 +1279,93 @@ surface = SubResource("S_triton")
 landable = true
 significant = true
 
+; **Phobos and Deimos** — Mars' two moons, and the first irregular bodies in the engine. Evert, 2026-11-08:
+; *"They are not round, and some asteroids are bigger than they are."* Their shape is not authored: it comes
+; from the relief law, which gives a body below the potato radius tens of per cent of its own radius rather
+; than a crustal ripple. What is authored is what they are made of (carbonaceous, albedo 0.07 — the darkest
+; surfaces in Sol) and where they are.
+[sub_resource type="Resource" id="L_phobos"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 11080.0
+composition = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+[sub_resource type="Resource" id="S_phobos"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+; Phobos: a = 9,376 km, e = 0.0151, i = 1.075 deg to Mars' equator. Inside the synchronous radius, so it
+; rises in the west and sets in the east.
+[sub_resource type="Resource" id="O_phobos"]
+script = ExtResource("orbit")
+semi_major_axis = 9376000.0
+eccentricity = 0.0151
+inclination = 1.075
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="L_deimos"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 6200.0
+composition = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+[sub_resource type="Resource" id="S_deimos"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+; Deimos: a = 23,463 km, e = 0.00033, i = 1.788 deg — just outside the synchronous radius, so it sets in
+; the east.
+[sub_resource type="Resource" id="O_deimos"]
+script = ExtResource("orbit")
+semi_major_axis = 23463200.0
+eccentricity = 0.00033
+inclination = 1.788
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_phobos"]
+script = ExtResource("body")
+id = "moon:phobos"
+display_name = "Phobos"
+kind = 3
+parent_id = "planet:mars"
+radius = 11080.0
+mass = 1.0659e+16
+rotation_period = 27540.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_phobos")])
+orbit = SubResource("O_phobos")
+surface = SubResource("S_phobos")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_deimos"]
+script = ExtResource("body")
+id = "moon:deimos"
+display_name = "Deimos"
+kind = 3
+parent_id = "planet:mars"
+radius = 6200.0
+mass = 1.4762e+15
+rotation_period = 109080.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_deimos")])
+orbit = SubResource("O_deimos")
+surface = SubResource("S_deimos")
+landable = true
+significant = true
+
 [resource]
 script = ExtResource("system")
 content_version = 1
@@ -1289,4 +1376,4 @@ start_altitude = 20000000.0
 ; J2000 on the world clock, which counts from year zero. Placing the system at exactly the epoch
 ; its elements are stated for is what makes the m0 values mean what JPL says they mean.
 start_world_time = 63113947200.0
-bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton")])
+bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton"), SubResource("B_phobos"), SubResource("B_deimos")])

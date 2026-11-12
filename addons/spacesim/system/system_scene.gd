@@ -555,6 +555,15 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.set_meta("spacesim_body", body.id)
 	system_frame.add_child(body.node)
 
+	# **A non-planet is not a small planet.** Below the potato radius a body's own gravity never rounded it, and
+	# it gets its own builder, its own mesh and its own material — a second mechanism rather than a branch in this
+	# one. Evert, 2026-11-08: *"I think what went wrong is that we tried to re-use planets mechanism, and these
+	# smaller bodies are something fundamentally different."* Nothing below this line runs for one, so there is no
+	# walk to lose its vertices in, no field to displace it, and no switch for any of the code further down to read.
+	if SpacesimIrregularBody.is_irregular(body):
+		SpacesimIrregularBody.build(body.node, body)
+		return
+
 	# **The map is baked here, and here only** — `build()` runs inside `_ready`, so this is before the first frame
 	# and outside the frame loop. `SpacesimSurfaceDistribution.prepare()` records what happens when it is moved into
 	# `_process`: the engine's RID pools are exhausted in a few minutes of flight, because a local
@@ -640,7 +649,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.sphere = _add_body_mesh(
 		body.node, SpacesimBodyRenderer.wireframe_material(), "%sSphere" % body.name
 	)
-	body.point = _add_point(body.node, body.name)
+	body.point = SpacesimBodyRenderer.add_point(body.node, body.name)
 	body.scale_body = ScaleBody.new(body.node, body.radius)
 	_derive_air(body)
 	_build_decks(body)
@@ -1206,19 +1215,6 @@ func _add_body_mesh(
 	return mesh
 
 
-## The **point of light** a body becomes once it is too small to be a disc: a camera-facing quad, sized
-## to the disc it would have had and coloured by its radiance. Hidden until `update_lod` says otherwise.
-func _add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
-	var point := MeshInstance3D.new()
-	point.name = "%sPoint" % body_name
-	point.mesh = SpacesimBodyRenderer.point_quad()
-	point.material_override = SpacesimBodyRenderer.point_material()
-	point.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	point.visible = false
-	parent.add_child(point)
-	return point
-
-
 ## Hand every body the tessellation its angular size has earned, once a frame.
 ##
 ## **The surface is a patch tree, not one level per body.** `SpacesimPatches` selects which chunks to
@@ -1281,6 +1277,17 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		var energy := SpacesimLod.angular_radius(body.radius, distance)
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
+		# **An irregular body has no level to choose.** Its mesh is generated once and is the same mesh at every
+		# distance, so the only thing a distance can change is whether it is a disc or a point of light. There is
+		# no walk to gate, no decks, no air, no field and no star-facing uniform — the engine's own light does the
+		# shading — so it leaves here rather than being switched off piece by piece below.
+		if body.irregular:
+			body.mesh.visible = not is_point
+			if body.point != null:
+				body.point.visible = is_point
+				if is_point:
+					_place_point(body, observer, energy, distance, pixel, screen, camera)
+			continue
 		# How much of the air this body's shell draws, from the gate below — read again when it is published.
 		var air_strength := 0.0
 		# **Five things a body may draw, and each has its own switch**: the surface, the datum lattice it is built on,
@@ -1396,9 +1403,9 @@ func _count_drawn_triangles() -> int:
 		if body.point != null and body.point.visible:
 			total += SpacesimBodyRenderer.POINT_TRIANGLES
 		elif body.mesh != null and body.mesh.visible:
-			total += body.patch_triangles
+			total += body.static_triangles if body.irregular else body.patch_triangles
 			# **The tree's own numbers**, counted from the selection that is drawn, so the HUD and the mesh cannot
-			# disagree about it.
+			# disagree about it. An irregular body has no tree; its count was taken from its mesh at build.
 			_chunks += body.patch_chunks.size()
 			for chunk in body.patch_chunks:
 				_deepest = maxi(_deepest, int(chunk[2]))

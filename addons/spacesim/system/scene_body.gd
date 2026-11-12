@@ -41,6 +41,13 @@ var sphere_arrays: Array = []
 ## is, and `sea_level` is the level the land stands from. Keeping them on the body rather than re-deriving them at the
 ## translation means the shader and the mesh cannot be given two different datums.
 var surface_plan: SpacesimSurfaceField.Plan
+## **A body drawn by [SpacesimIrregularBody] instead of by the planet path**, because its own gravity never rounded
+## it. Set once, at build, and never cleared: it is what keeps `update_lod` from asking for a patch walk for a body
+## whose mesh is generated and final. There is no second place that has to ask the question.
+var irregular := false
+## **The triangles its own mesh draws**, counted from that mesh at build. A static mesh has no walk to be counted
+## from, and the HUD's total has to include it.
+var static_triangles := 0
 var sea_level := 0.0
 ## **The field's measured extremes for this body** — `quantiles[0]` and `quantiles[last]`, which are NOT ±1: the
 ## shares are summed and the warp pushes past the normaliser, so Earth measures **-1.139 to +1.516**. The translation
