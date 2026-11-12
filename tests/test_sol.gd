@@ -518,6 +518,29 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 		"and turning the view off gives the solid mesh back, not a wireframe left standing")
 	top_camera.queue_free()
 
+	# **The datum must answer everywhere the ship can ask it.** `surface_distance_mesh` is called every tick, and
+	# its answer IS the ship's speed (`local_length / TRAVERSE_SECONDS`); an INF or a NaN there means the system
+	# band's 1e13 m maximum, which is 1.7e10 m in one tick. Evert, 2026-11-12: *"suddenly I was transported quite
+	# the distance away from the moons & mars"*. So the whole shell the caller is allowed to ask about is swept,
+	# not one point of it.
+	var worst := 0.0
+	var missing := 0
+	for index in 128:
+		var direction := Vector3(
+			cos(TAU * float(index) / 128.0), sin(TAU * float(index) / 128.0), 0.0
+		).normalized()
+		for multiplier in [1.0, 1.05, 1.1, 1.2, 1.3, 1.35]:
+			var probe: Vector3 = phobos.node.global_position + direction * (phobos.radius * multiplier)
+			var distance := phobos.scale_body.surface_distance_mesh(probe)
+			if not is_finite(distance):
+				missing += 1
+			else:
+				worst = maxf(worst, distance)
+	h.check(missing == 0,
+		"the altitude datum answers at every point inside its own reach (%d answers were not a number)" % missing)
+	h.check(worst < phobos.radius * 2.0,
+		"and never answers more than the body is wide (%.1f km)" % (worst / 1000.0))
+
 	# **A mined body is the seed plus its removals**, and the datum follows: the surface recedes where the chunk
 	# came out and is untouched everywhere else. This is the property mining will be built on, so it is asserted
 	# before there is a pickaxe rather than after.

@@ -14,9 +14,14 @@ extends RefCounted
 ## between bodies stays a sphere (a few hundred metres does not change which body is nearest), and only the
 ## reported altitude uses this. That keeps the expensive path to one call a frame.
 
-## How many cell rings to walk before giving up. Six cells out is already several body radii for any sane cell
-## size, so a query that reaches this is a query that should have used the sphere.
-const MAX_RING := 6
+## **The ring search has no constant limit, and that constant is what broke the ship.**
+##
+## It used to stop at six rings. With a cell of `0.12 x radius` the body's own surface lies **eight** rings from the
+## centre, so the search could not even reach it — every such query answered INF. And INF is not a quiet wrong
+## number: `SpacesimTravelScale.local_length` reads a non-finite distance as the band's MAXIMUM, so the ship's speed
+## became `1e13 / 10` m/s and one tick moved it 1.7e10 m. Evert, 2026-11-12: *"suddenly I was transported quite the
+## distance away from the moons & mars"* — that was this, near the Martian moons, and again near Saturn.
+const MAX_RING := 40
 
 var _points: PackedVector3Array
 ## cell key -> the vertex indices in it
@@ -47,8 +52,13 @@ func nearest_distance(from: Vector3) -> float:
 	if _points.is_empty():
 		return INF
 	var here := _key(from)
+	# **Enough rings to reach the whole body from here.** Every vertex is within `from.length() + reach` of the
+	# query, so that is the distance the search must be able to cover — derived from the geometry rather than a
+	# number in a constant. The break below still stops it as soon as the nearest found is provably nearest, so a
+	# query near the surface costs one or two rings and only a deep or a thin direction pays more.
+	var limit := mini(int(ceil((from.length() + reach) / _cell)) + 1, MAX_RING)
 	var best := INF
-	for ring in MAX_RING + 1:
+	for ring in limit:
 		for dx in range(-ring, ring + 1):
 			for dy in range(-ring, ring + 1):
 				for dz in range(-ring, ring + 1):
@@ -64,7 +74,9 @@ func nearest_distance(from: Vector3) -> float:
 		# each axis, so once the best is inside that there is nothing closer left to find.
 		if best < INF and float(ring) * _cell >= sqrt(best):
 			break
-	return sqrt(best) if best < INF else INF
+	# **Never not-a-number.** A caller cannot tell a failed search from a real answer, and this one's caller turns
+	# it into speed. The bounding sphere is the honest floor: wrong by the relief, and finite.
+	return sqrt(best) if best < INF else maxf(0.0, from.length() - reach)
 
 
 func _key(point: Vector3) -> Vector3i:
