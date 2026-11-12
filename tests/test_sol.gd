@@ -349,6 +349,36 @@ func _test_the_scene_places_them(h, sol: SpacesimSolarSystem, root: Node) -> voi
 		h.check_near(start.distance_to(earth_node.global_position), earth.radius + sol.start_altitude,
 			"and the ship starts above the start body", 1.0)
 
+	# **Moons are not in a line.** Every moon in the file leaves `mean_anomaly_at_epoch` at 0, and one anomaly for a
+	# whole planet puts its moons on one straight line out of it. Evert, 2026-11-12: *"All the moons are placed in
+	# straight lines, which is highly unlikely and looks wrong."* The phase is derived from the body's address, so
+	# this is deterministic rather than lucky.
+	var mars := scene.body_by_id("planet:mars")
+	var phobos := scene.body_by_id("moon:phobos")
+	var deimos := scene.body_by_id("moon:deimos")
+	if mars != null and phobos != null and deimos != null:
+		var to_phobos := (phobos.node.global_position - mars.node.global_position).normalized()
+		var to_deimos := (deimos.node.global_position - mars.node.global_position).normalized()
+		var apart := rad_to_deg(acos(clampf(to_phobos.dot(to_deimos), -1.0, 1.0)))
+		h.check(apart > 15.0,
+			"Mars' two moons are %.0f degrees apart round the planet, not on one line" % apart)
+
+	var jupiter := scene.body_by_id("planet:jupiter")
+	var spread := 0.0
+	var jupiter_moons: Array[SpacesimSceneBody] = []
+	for body in scene.bodies:
+		if body.parent_id == "planet:jupiter" and body.node != null:
+			jupiter_moons.append(body)
+	for a in jupiter_moons:
+		for b in jupiter_moons:
+			if a == b or jupiter == null:
+				continue
+			var da := (a.node.global_position - jupiter.node.global_position).normalized()
+			var db := (b.node.global_position - jupiter.node.global_position).normalized()
+			spread = maxf(spread, rad_to_deg(acos(clampf(da.dot(db), -1.0, 1.0))))
+	h.check(jupiter_moons.size() > 2 and spread > 90.0,
+		"and Jupiter's %d moons spread %.0f degrees round it" % [jupiter_moons.size(), spread])
+
 	_test_the_rocks(h, scene, root)
 
 	scene.container.free()

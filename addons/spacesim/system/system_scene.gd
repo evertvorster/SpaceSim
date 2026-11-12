@@ -545,7 +545,30 @@ func _position_of(body: SpacesimSceneBody, origin: Vector3, parent_id: String) -
 		body_mass = body.content.mass
 	# Two bodies, so G(M + m) — a giant's own mass measurably shortens its own orbit.
 	var mu := SpacesimKepler.mu_of(parent_mass + body_mass)
-	return origin + SpacesimKepler.position_at(body.orbit, mu, start_time, _epoch_time)
+	return origin + SpacesimKepler.position_at(body.orbit, mu, start_time + _phase_offset(body, mu), _epoch_time)
+
+
+## **Where in its orbit a body is, when the content does not say.**
+##
+## Every moon in `sol.tres` carries `mean_anomaly_at_epoch = 0.0`, which is not a measurement — it is the field left
+## alone — and a system where every moon of a planet shares one anomaly puts them all on **one straight line out of
+## the planet**, at different distances. Evert, 2026-11-12: *"All the moons are placed in straight lines, which is
+## highly unlikely and looks wrong."* Correct, and it was the data being trusted rather than derived.
+##
+## **Zero means "derive it"**, the same convention `mass = 0.0` already uses, and the phase comes from the body's own
+## address: the same body is in the same place every load, two bodies are not in the same place, and nothing is
+## authored. A shift of *time* rather than of angle, so exactly one turn of the orbit moves the body once round and
+## nothing else about the solve changes.
+##
+## The planets are untouched: their anomalies are real J2000 values from JPL, and a time shift would move Earth off
+## the perihelion distance the calibration asserts.
+func _phase_offset(body: SpacesimSceneBody, mu: float) -> float:
+	if body.orbit == null or body.orbit.mean_anomaly_at_epoch != 0.0:
+		return 0.0
+	var period := SpacesimKepler.period(body.orbit, mu)
+	if period <= 0.0:
+		return 0.0
+	return period * float(absi(hash(body.id)) % 100000) / 100000.0
 
 
 func _build_body(body: SpacesimSceneBody) -> void:
