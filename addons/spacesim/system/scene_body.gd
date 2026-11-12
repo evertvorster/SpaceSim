@@ -57,6 +57,10 @@ var wire_mesh: ArrayMesh
 ## below the potato radius is placed at scene load and extracted only when the eye is close enough to resolve it
 ## (`SpacesimIrregularBody.RESOLVE_PIXELS`), which is the LOD principle and the difference between a ten-second
 ## load and a system that starts at once.
+## **How irregular this body is drawn**, 0 to 1, set at build from its radius against its own material's rounding
+## radius. Both the extraction and the altitude datum use it, and they must use the same number or the ground and the
+## height above it disagree.
+var irregularity := 1.0
 var irregular_built := false
 var irregular_task := -1
 ## Where a worker leaves the extracted arrays, and where the main thread picks them up when the task is joined.

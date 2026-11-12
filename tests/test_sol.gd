@@ -416,7 +416,7 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	var arrays: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
 	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var generated: Array = SpacesimBlobShape.mesh(
-		hash("moon:phobos"), phobos.radius, SpacesimIrregularBody.RESOLUTION
+		hash("moon:phobos"), phobos.radius, SpacesimIrregularBody.RESOLUTION, [], phobos.irregularity
 	).surface_get_arrays(0)
 	h.check(vertices.size() > 500 and vertices.size() == (generated[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(),
 		"its mesh comes from the field's extraction, not from an icosphere (%d vertices)" % vertices.size())
@@ -473,6 +473,19 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	h.check(phobos.decks.is_empty() and phobos.air.is_empty(), "and no decks and no air")
 	h.check(phobos.sphere == null and phobos.ocean == null and phobos.interior == null,
 		"and no datum lattice, sea or interior")
+
+	# **Irregularity tapers with size.** Evert, 2026-11-12: *"smaller moons would look more irregular, and larger
+	# moons would tend to look more round from a distance."* Both shades of "not a sphere" — the off-centre balls and
+	# the fractal relief — scale with the same number, so a body near its own rounding radius is a slightly lumpy
+	# sphere and one far below it is a rock. Which also means a misclassified body costs relief, not a wrong shape.
+	var rocky := SpacesimBlobShape.arrays(hash("moon:phobos"), 40000.0, 48, [], 0.9)
+	var rounding := SpacesimBlobShape.arrays(hash("moon:phobos"), 40000.0, 48, [], 0.15)
+	var sphere := SpacesimBlobShape.arrays(hash("moon:phobos"), 40000.0, 48, [], 0.0)
+	h.check(_lumpiness(rocky) > _lumpiness(rounding) * 1.8,
+		"the same body at a lower irregularity is rounder (%.2f against %.2f)"
+			% [_lumpiness(rocky), _lumpiness(rounding)])
+	h.check(_lumpiness(sphere) < 0.02,
+		"and at zero it IS a sphere (%.3f)" % _lumpiness(sphere))
 
 	# **The eye cannot replace its mesh with a walked one.** This is the fault that made the last attempt draw a
 	# sphere in flight: a body whose geometry the walk rebuilt underneath it.
@@ -547,3 +560,21 @@ static func _signed_volume(mesh: Mesh) -> float:
 		for i in range(0, indices.size(), 3):
 			total += points[indices[i]].dot(points[indices[i + 1]].cross(points[indices[i + 2]]))
 	return total / 6.0
+
+
+## **How lumpy a shape is**, as the spread of vertex distances from the centre over their mean. A sphere is 0, a rock
+## is a tenth or more. Used to compare the same seed at different irregularities, so the only variable is the one
+## under test.
+static func _lumpiness(surface: Array) -> float:
+	var points: PackedVector3Array = surface[Mesh.ARRAY_VERTEX]
+	if points.is_empty():
+		return 0.0
+	var lo := INF
+	var hi := 0.0
+	var total := 0.0
+	for point in points:
+		var length := point.length()
+		lo = minf(lo, length)
+		hi = maxf(hi, length)
+		total += length
+	return (hi - lo) / maxf(total / float(points.size()), 1.0e-9)

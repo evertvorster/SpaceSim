@@ -65,7 +65,7 @@ const EDGES := [
 
 ## **The body's own balls** — `[centre: Vector3, radius: float]` each, normalised so the shape's furthest point
 ## is 1.0 from the centre. Seeded, so the same body is the same rock every load, and two bodies are two rocks.
-static func balls(seed_value: int) -> Array:
+static func balls(seed_value: int, irregularity := 1.0) -> Array:
 	var centres: Array = [Vector3.ZERO]
 	var radii: Array = [lerpf(0.55, 0.72, _unit(seed_value, 1))]
 	for index in BALLS - 1:
@@ -77,7 +77,11 @@ static func balls(seed_value: int) -> Array:
 		var angle := TAU * _unit(seed_value, 13 + index * 4)
 		var lift := lerpf(-1.0, 1.0, _unit(seed_value, 14 + index * 4))
 		var direction := Vector3(cos(angle), lift, sin(angle)).normalized()
-		centres.append(centres[anchor] + direction * reach)
+		# **How far the balls may sit off the centre is the body's irregularity**, so a body close to its own
+		# rounding radius is a nearly concentric pile — a sphere — and one far below it is a lump. Evert,
+		# 2026-11-12: *"smaller moons would look more irregular, and larger moons would tend to look more round
+		# from a distance."* At `irregularity = 0` every ball is concentric and their union is one sphere.
+		centres.append(centres[anchor] + direction * reach * clampf(irregularity, 0.0, 1.0))
 		radii.append(radius)
 	# **Normalised to the body's own reach**: without this the body's size would be a consequence of which balls
 	# the seed drew, and `radius` would mean something different for every rock.
@@ -99,12 +103,18 @@ static func balls(seed_value: int) -> Array:
 ## field is cut by it — `max(field, reach - distance)`, which makes the inside of that ball OUTSIDE the body. That
 ## is the whole of "take a chunk out": the shape is the seed plus the removals, so the save holds a list of holes
 ## rather than a mesh, and `radius_at` follows the new surface with no second bookkeeping.
-static func field(balls: Array, noise: FastNoiseLite, removals: Array, point: Vector3) -> float:
+static func field(
+	balls: Array, noise: FastNoiseLite, removals: Array, point: Vector3, irregularity := 1.0
+) -> float:
 	var result := 1.0e9
 	for ball in balls:
 		result = _smooth_min(result, point.distance_to(ball[0]) - ball[1])
 	if noise != null:
-		result -= ROUGHNESS * noise.get_noise_3d(point.x, point.y, point.z)
+		# **The relief scales with the same irregularity**, so the two shades of "not a sphere" agree: a body near
+		# its rounding radius has neither the off-centre balls nor the roughness that would make it a lump.
+		result -= ROUGHNESS * clampf(irregularity, 0.0, 1.0) * noise.get_noise_3d(
+			point.x, point.y, point.z
+		)
 	for removal in removals:
 		result = maxf(result, float(removal[1]) - point.distance_to(removal[0]))
 	return result
@@ -112,15 +122,17 @@ static func field(balls: Array, noise: FastNoiseLite, removals: Array, point: Ve
 
 ## **The surface's outward direction at a point** — the field's gradient, which is exact rather than differenced
 ## off triangles: three central differences, so six field evaluations.
-static func normal(balls: Array, noise: FastNoiseLite, removals: Array, point: Vector3) -> Vector3:
+static func normal(
+	balls: Array, noise: FastNoiseLite, removals: Array, point: Vector3, irregularity := 1.0
+) -> Vector3:
 	var step := 0.002
 	var gradient := Vector3(
-		field(balls, noise, removals, point + Vector3(step, 0.0, 0.0))
-			- field(balls, noise, removals, point - Vector3(step, 0.0, 0.0)),
-		field(balls, noise, removals, point + Vector3(0.0, step, 0.0))
-			- field(balls, noise, removals, point - Vector3(0.0, step, 0.0)),
-		field(balls, noise, removals, point + Vector3(0.0, 0.0, step))
-			- field(balls, noise, removals, point - Vector3(0.0, 0.0, step))
+		field(balls, noise, removals, point + Vector3(step, 0.0, 0.0), irregularity)
+			- field(balls, noise, removals, point - Vector3(step, 0.0, 0.0), irregularity),
+		field(balls, noise, removals, point + Vector3(0.0, step, 0.0), irregularity)
+			- field(balls, noise, removals, point - Vector3(0.0, step, 0.0), irregularity),
+		field(balls, noise, removals, point + Vector3(0.0, 0.0, step), irregularity)
+			- field(balls, noise, removals, point - Vector3(0.0, 0.0, step), irregularity)
 	)
 	return gradient.normalized()
 
@@ -130,8 +142,10 @@ static func normal(balls: Array, noise: FastNoiseLite, removals: Array, point: V
 ## the property subdivision needs.
 ##
 ## `removals` is the mined state — see [method field]. Empty is an unmined body.
-static func mesh(seed_value: int, radius: float, resolution := 64, removals := []) -> ArrayMesh:
-	return mesh_from(arrays(seed_value, radius, resolution, removals))
+static func mesh(
+	seed_value: int, radius: float, resolution := 64, removals := [], irregularity := 1.0
+) -> ArrayMesh:
+	return mesh_from(arrays(seed_value, radius, resolution, removals, irregularity))
 
 
 ## **The extraction on its own, as plain arrays** — the half that a WORKER THREAD may do.
@@ -139,8 +153,10 @@ static func mesh(seed_value: int, radius: float, resolution := 64, removals := [
 ## `add_surface_from_arrays` is a `RenderingServer` call, so it has to happen on the main thread; the sampling and
 ## the net are arithmetic and do not. Splitting them is what lets a body be extracted while the frame keeps
 ## running, which is the only way a lazily-built rock can appear without the frame stalling for a second.
-static func arrays(seed_value: int, radius: float, resolution := 64, removals := []) -> Array:
-	var balls := balls(seed_value)
+static func arrays(
+	seed_value: int, radius: float, resolution := 64, removals := [], irregularity := 1.0
+) -> Array:
+	var balls := balls(seed_value, irregularity)
 	var n := maxi(resolution, 8)
 	var noise := noise_for(seed_value, n)
 	var step := 2.0 * MARGIN / float(n)
@@ -153,7 +169,9 @@ static func arrays(seed_value: int, radius: float, resolution := 64, removals :=
 			var y := -MARGIN + step * float(j)
 			for i in side:
 				var x := -MARGIN + step * float(i)
-				values[(k * side + j) * side + i] = field(balls, noise, removals, Vector3(x, y, z))
+				values[(k * side + j) * side + i] = field(
+					balls, noise, removals, Vector3(x, y, z), irregularity
+				)
 
 	# --- one vertex per cell the surface crosses -------------------------------------------------------
 	var cell_vertex := PackedInt32Array()
@@ -200,7 +218,7 @@ static func arrays(seed_value: int, radius: float, resolution := 64, removals :=
 				)
 				cell_vertex[(k * n + j) * n + i] = points.size()
 				points.append(here * radius)
-				normals.append(normal(balls, noise, removals, here))
+				normals.append(normal(balls, noise, removals, here, irregularity))
 
 	# --- a quad around every grid edge whose ends differ in sign ----------------------------------------
 	var indices := PackedInt32Array()
@@ -286,9 +304,10 @@ static func wire_mesh(mesh: ArrayMesh) -> ArrayMesh:
 ## band limit decides which octaves exist, so a datum asked with another resolution would answer about a
 ## slightly different surface. The builder has one `RESOLUTION` and passes it to both.
 static func radius_at(
-	seed_value: int, radius: float, direction: Vector3, resolution := 64, removals := []
+	seed_value: int, radius: float, direction: Vector3, resolution := 64, removals := [],
+	irregularity := 1.0
 ) -> float:
-	var balls := balls(seed_value)
+	var balls := balls(seed_value, irregularity)
 	var noise := noise_for(seed_value, maxi(resolution, 8))
 	var dir := direction.normalized()
 	var t := MARGIN * 1.6
@@ -296,7 +315,7 @@ static func radius_at(
 	# trace that stepped by the field's full value could step past the surface. The safety factor is the price of
 	# having relief at all, and 128 steps is what it costs to keep converging.
 	for _step in 128:
-		var value := field(balls, noise, removals, dir * t)
+		var value := field(balls, noise, removals, dir * t, irregularity)
 		if value <= 0.0:
 			return t * radius
 		t -= maxf(value * 0.8, 0.001)

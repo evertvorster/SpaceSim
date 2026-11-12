@@ -561,7 +561,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# smaller bodies are something fundamentally different."* Nothing below this line runs for one, so there is no
 	# walk to lose its vertices in, no field to displace it, and no switch for any of the code further down to read.
 	if SpacesimIrregularBody.is_irregular(body, _materials()):
-		SpacesimIrregularBody.build(body.node, body)
+		SpacesimIrregularBody.build(body.node, body, _materials())
 		return
 
 	# **The map is baked here, and here only** — `build()` runs inside `_ready`, so this is before the first frame

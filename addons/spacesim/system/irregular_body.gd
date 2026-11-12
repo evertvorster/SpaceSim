@@ -69,6 +69,25 @@ static func rounding_radius(content: SpacesimSystemBody, materials: SpacesimMate
 	return sqrt(3.0 * species.strength / (2.0 * PI * G * species.density * species.density))
 
 
+## **How irregular a body should be, from 0 to 1** — how far below its own rounding radius it sits.
+##
+## Evert, 2026-11-12: *"Maybe we can make the strength of the perturbations for non-round moons less with size? So,
+## smaller moons would look more irregular, and larger moons would tend to look more round from a distance?"*
+##
+## **It makes the boundary stop mattering.** The rule that decides which builder a body goes to is a band, and a body
+## near its own rounding radius is genuinely nearly round, so drawing it with full relief was wrong in the one case
+## where the classification was uncertain. Now relief and the off-centre balls both scale with this, so a body just
+## under the threshold is a slightly lumpy sphere and one far below it is a rock — and a body that should have been
+## the other side of the line costs a little relief rather than a wrong shape.
+##
+## Linear, because the two ends are what matter and there is no measurement to justify a curve.
+static func irregularity(body: SpacesimSceneBody, materials: SpacesimMaterialTable) -> float:
+	var rounding := rounding_radius(body.content, materials)
+	if rounding <= 0.0:
+		return 1.0
+	return clampf(1.0 - body.radius / rounding, 0.0, 1.0)
+
+
 ## The material that makes up most of a body: its surface coverage where it has one, else its layer composition.
 static func _bulk_solid(content: SpacesimSystemBody, materials: SpacesimMaterialTable) -> SpacesimSpecies:
 	var shares: Dictionary = {}
@@ -111,8 +130,9 @@ static func is_irregular(body: SpacesimSceneBody, materials: SpacesimMaterialTab
 ##
 ## So a body is a node, a material, a point of light and a sphere for the travel unit; [method request] is what
 ## extracts it, once, from [method SpacesimSystemScene.update_lod] when its disc is worth drawing.
-static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
+static func build(parent: Node3D, body: SpacesimSceneBody, materials: SpacesimMaterialTable) -> void:
 	body.irregular = true
+	body.irregularity = irregularity(body, materials)
 	body.scale_body = SpacesimScaleBody.new(parent, body.radius)
 	var material := material_for(body)
 	var mesh := MeshInstance3D.new()
@@ -132,16 +152,21 @@ static func request(body: SpacesimSceneBody) -> void:
 	if body.irregular_task != -1 or body.irregular_built:
 		return
 	body.irregular_task = WorkerThreadPool.add_task(
-		_extract.bind(body, hash(body.id), body.radius, RESOLUTION, body.removals)
+		_extract.bind(
+			body, hash(body.id), body.radius, RESOLUTION, body.removals, body.irregularity
+		)
 	)
 
 
 ## **The extraction itself** — arithmetic only, which is why it may run off the main thread. The mesh is made in
 ## [method poll], because `add_surface_from_arrays` reaches the `RenderingServer`.
 static func _extract(
-	body: SpacesimSceneBody, seed_value: int, radius: float, resolution: int, removals: Array
+	body: SpacesimSceneBody, seed_value: int, radius: float, resolution: int, removals: Array,
+	roughness: float
 ) -> void:
-	body.irregular_arrays = SpacesimBlobShape.arrays(seed_value, radius, resolution, removals)
+	body.irregular_arrays = SpacesimBlobShape.arrays(
+		seed_value, radius, resolution, removals, roughness
+	)
 
 
 ## **Publish a finished extraction, on the main thread.** No stall and no hole: until this lands the body is its own
