@@ -158,6 +158,22 @@ static func point_material() -> StandardMaterial3D:
 	return material
 
 
+## **The node a point of light is drawn on** — a camera-facing quad, sized to the disc it would have had and
+## coloured by the body's radiance. Hidden until `update_lod` says otherwise.
+##
+## **Here rather than on the scene**, because two builders make bodies now and a body's point of light is not a
+## property of being a planet: a rock becomes a splat at the same screen radius everything else does.
+static func add_point(parent: Node3D, body_name: String) -> MeshInstance3D:
+	var point := MeshInstance3D.new()
+	point.name = "%sPoint" % body_name
+	point.mesh = point_quad()
+	point.material_override = point_material()
+	point.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	point.visible = false
+	parent.add_child(point)
+	return point
+
+
 ## The material a body is drawn with.
 ##
 ## **A star is a source and everything else is a reflector**, so the choice is by kind rather than by

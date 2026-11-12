@@ -72,6 +72,7 @@ domain = 0
 density = 7874.0
 molar_mass = 55.845
 albedo = 0.1
+strength = 300000000.0
 color = Color(0.55, 0.5, 0.47, 1)
 condensation_temperature = 1811.0
 
@@ -82,6 +83,7 @@ domain = 0
 density = 8908.0
 molar_mass = 58.693
 albedo = 0.15
+strength = 300000000.0
 color = Color(0.62, 0.62, 0.6, 1)
 condensation_temperature = 1728.0
 
@@ -92,6 +94,7 @@ domain = 0
 density = 3300.0
 molar_mass = 60.084
 albedo = 0.15
+strength = 100000000.0
 color = Color(0.55, 0.45, 0.35, 1)
 condensation_temperature = 1983.0
 
@@ -112,6 +115,7 @@ domain = 0
 density = 2267.0
 molar_mass = 12.011
 albedo = 0.05
+strength = 80000000.0
 color = Color(0.15, 0.15, 0.16, 1)
 condensation_temperature = 3915.0
 
@@ -122,6 +126,7 @@ domain = 0
 density = 1738.0
 molar_mass = 24.305
 albedo = 0.15
+strength = 90000000.0
 color = Color(0.62, 0.62, 0.6, 1)
 condensation_temperature = 923.0
 
@@ -132,6 +137,7 @@ domain = 0
 density = 2329.0
 molar_mass = 28.085
 albedo = 0.15
+strength = 100000000.0
 color = Color(0.45, 0.45, 0.5, 1)
 condensation_temperature = 1687.0
 
@@ -142,6 +148,7 @@ domain = 0
 density = 917.0
 molar_mass = 18.015
 albedo = 0.6
+strength = 2000000.0
 color = Color(0.85, 0.9, 0.95, 1)
 ; **water's 1-atm vapour-pressure reference is its BOILING point, 373.15 K** -- the same number for every
 ; phase the substance is stored in, because the field describes what the substance does at one atmosphere
@@ -160,6 +167,7 @@ domain = 0
 density = 817.0
 molar_mass = 17.031
 albedo = 0.55
+strength = 1000000.0
 color = Color(0.8, 0.85, 0.8, 1)
 ; the 1-atm reference is the boiling point, 239.8 K; 195.4 is the melting point and is its own field now
 condensation_temperature = 239.8
@@ -173,6 +181,7 @@ domain = 0
 density = 450.0
 molar_mass = 16.043
 albedo = 0.5
+strength = 1000000.0
 color = Color(0.82, 0.78, 0.72, 1)
 ; same species, solid phase: the 1-atm reference is still the boiling point
 condensation_temperature = 111.7
@@ -407,6 +416,7 @@ domain = 0
 density = 1026.0
 molar_mass = 28.014
 albedo = 0.6
+strength = 800000.0
 color = Color(0.88, 0.92, 0.96, 1)
 ; the 1-atm reference is the boiling point, 77.4 K; 63.15 is the melting point
 condensation_temperature = 77.4
@@ -420,7 +430,28 @@ domain = 0
 density = 1500.0
 molar_mass = 60.084
 albedo = 0.12
+strength = 3000000.0
 color = Color(0.45, 0.4, 0.35, 1)
+condensation_temperature = 0.0
+
+; **The dark rock of a primitive body** — Phobos and Deimos, and the belt's fragments behind them.
+; Evert, 2026-11-08: *"add the carbonus. We'll want to play with mining and I guess the more types of
+; material to mine the better."*
+;
+; **Albedo 0.07, and it is measured rather than chosen**: Phobos and Deimos are the darkest surfaces in
+; Sol, darker than the Moon's regolith at 0.12 and close to fresh asphalt. A carbonaceous chondrite body
+; is what they are, so the species is the material and the number is its published geometric albedo.
+; The colour is a very dark neutral grey with a faint brown cast, which is what a carbonaceous surface
+; reads as once the red channel is not being exaggerated by an albedo ramp.
+[sub_resource type="Resource" id="Sp_carbonaceous"]
+script = ExtResource("species")
+species_name = "carbonaceous"
+domain = 0
+density = 2200.0
+molar_mass = 12.011
+albedo = 0.07
+strength = 100000000.0
+color = Color(0.18, 0.16, 0.15, 1)
 condensation_temperature = 0.0
 
 [sub_resource type="Resource" id="Sp_vegetation"]
@@ -435,4 +466,4 @@ condensation_temperature = 0.0
 
 [resource]
 script = ExtResource("table")
-species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ozone"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation")])
+species = Array[ExtResource("species")]([SubResource("Sp_iron"), SubResource("Sp_nickel"), SubResource("Sp_silicate"), SubResource("Sp_sulfur"), SubResource("Sp_carbon"), SubResource("Sp_magnesium"), SubResource("Sp_silicon"), SubResource("Sp_water_ice"), SubResource("Sp_ammonia_ice"), SubResource("Sp_methane_ice"), SubResource("Sp_hydrogen_metallic"), SubResource("Sp_hydrogen"), SubResource("Sp_helium"), SubResource("Sp_nitrogen"), SubResource("Sp_oxygen"), SubResource("Sp_carbon_dioxide"), SubResource("Sp_argon"), SubResource("Sp_water_vapour"), SubResource("Sp_methane"), SubResource("Sp_ammonia"), SubResource("Sp_sulfur_dioxide"), SubResource("Sp_neon"), SubResource("Sp_ozone"), SubResource("Sp_ocean"), SubResource("Sp_ice_cap"), SubResource("Sp_nitrogen_ice"), SubResource("Sp_regolith"), SubResource("Sp_vegetation"), SubResource("Sp_carbonaceous")])

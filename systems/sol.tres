@@ -1279,6 +1279,888 @@ surface = SubResource("S_triton")
 landable = true
 significant = true
 
+; **Phobos and Deimos** — Mars' two moons, and the first irregular bodies in the engine. Evert, 2026-11-08:
+; *"They are not round, and some asteroids are bigger than they are."* Their shape is not authored: it comes
+; from the relief law, which gives a body below the potato radius tens of per cent of its own radius rather
+; than a crustal ripple. What is authored is what they are made of (carbonaceous, albedo 0.07 — the darkest
+; surfaces in Sol) and where they are.
+[sub_resource type="Resource" id="L_phobos"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 11080.0
+composition = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+[sub_resource type="Resource" id="S_phobos"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+; Phobos: a = 9,376 km, e = 0.0151, i = 1.075 deg to Mars' equator. Inside the synchronous radius, so it
+; rises in the west and sets in the east.
+[sub_resource type="Resource" id="O_phobos"]
+script = ExtResource("orbit")
+semi_major_axis = 9376000.0
+eccentricity = 0.0151
+inclination = 1.075
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="L_deimos"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 6200.0
+composition = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+[sub_resource type="Resource" id="S_deimos"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({
+"carbonaceous": 1.0
+})
+
+; Deimos: a = 23,463 km, e = 0.00033, i = 1.788 deg — just outside the synchronous radius, so it sets in
+; the east.
+[sub_resource type="Resource" id="O_deimos"]
+script = ExtResource("orbit")
+semi_major_axis = 23463200.0
+eccentricity = 0.00033
+inclination = 1.788
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_phobos"]
+script = ExtResource("body")
+id = "moon:phobos"
+display_name = "Phobos"
+kind = 3
+parent_id = "planet:mars"
+radius = 11080.0
+mass = 1.0659e+16
+rotation_period = 27540.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_phobos")])
+orbit = SubResource("O_phobos")
+surface = SubResource("S_phobos")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="B_deimos"]
+script = ExtResource("body")
+id = "moon:deimos"
+display_name = "Deimos"
+kind = 3
+parent_id = "planet:mars"
+radius = 6200.0
+mass = 1.4762e+15
+rotation_period = 109080.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_deimos")])
+orbit = SubResource("O_deimos")
+surface = SubResource("S_deimos")
+landable = true
+significant = true
+
+
+; **The small moons of Jupiter and Saturn** — Evert, 2026-11-12: *"Lets add the smaller moons for Jupiter and
+; Saturn."* Every one of them is below the potato radius, so every one is drawn from the field: their shape is
+; generated, and what is authored is what they are made of and where they are.
+;
+; SOURCES for these: JPL/NASA solar-system small-body fact sheets for the mean radii and semi-major axes, and the
+; published mean orbital periods for the rotation, which is the same number because they are all tidally locked.
+; The four inner Jovian moons are DARK (Amalthea 0.09, Thebe 0.047) — carbonaceous, like Phobos — and the ring
+; moons of Saturn are bright ice (Janus 0.71, Prometheus 0.6), which the composition gives at 0.53 because one mix
+; serves all seven. Masses of the smallest (Adrastea, Daphnis) are estimates from their size and density rather
+; than measured: they are far too small to have been measured.
+[sub_resource type="Resource" id="L_metis"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 21500.0
+composition = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="S_metis"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="O_metis"]
+script = ExtResource("orbit")
+semi_major_axis = 127960000.0
+eccentricity = 0.0002
+inclination = 0.06
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_metis"]
+script = ExtResource("body")
+id = "moon:metis"
+display_name = "Metis"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 21500.0
+mass = 3.6e+16
+rotation_period = 25469.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_metis")])
+orbit = SubResource("O_metis")
+surface = SubResource("S_metis")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_adrastea"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 8200.0
+composition = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="S_adrastea"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="O_adrastea"]
+script = ExtResource("orbit")
+semi_major_axis = 128980000.0
+eccentricity = 0.0015
+inclination = 0.03
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_adrastea"]
+script = ExtResource("body")
+id = "moon:adrastea"
+display_name = "Adrastea"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 8200.0
+mass = 7000000000000000.0
+rotation_period = 25770.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_adrastea")])
+orbit = SubResource("O_adrastea")
+surface = SubResource("S_adrastea")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_amalthea"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 83500.0
+composition = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="S_amalthea"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="O_amalthea"]
+script = ExtResource("orbit")
+semi_major_axis = 181360000.0
+eccentricity = 0.0032
+inclination = 0.374
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_amalthea"]
+script = ExtResource("body")
+id = "moon:amalthea"
+display_name = "Amalthea"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 83500.0
+mass = 2.08e+18
+rotation_period = 43043.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_amalthea")])
+orbit = SubResource("O_amalthea")
+surface = SubResource("S_amalthea")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_thebe"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 49300.0
+composition = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="S_thebe"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"carbonaceous": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="O_thebe"]
+script = ExtResource("orbit")
+semi_major_axis = 221890000.0
+eccentricity = 0.0175
+inclination = 1.076
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_thebe"]
+script = ExtResource("body")
+id = "moon:thebe"
+display_name = "Thebe"
+kind = 3
+parent_id = "planet:jupiter"
+radius = 49300.0
+mass = 4.3e+17
+rotation_period = 58280.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_thebe")])
+orbit = SubResource("O_thebe")
+surface = SubResource("S_thebe")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_pan"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 14100.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_pan"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_pan"]
+script = ExtResource("orbit")
+semi_major_axis = 133580000.0
+eccentricity = 3.5e-05
+inclination = 0.001
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_pan"]
+script = ExtResource("body")
+id = "moon:pan"
+display_name = "Pan"
+kind = 3
+parent_id = "planet:saturn"
+radius = 14100.0
+mass = 4950000000000000.0
+rotation_period = 49684.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_pan")])
+orbit = SubResource("O_pan")
+surface = SubResource("S_pan")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_daphnis"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 4300.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_daphnis"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_daphnis"]
+script = ExtResource("orbit")
+semi_major_axis = 136510000.0
+eccentricity = 3.3e-05
+inclination = 0.004
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_daphnis"]
+script = ExtResource("body")
+id = "moon:daphnis"
+display_name = "Daphnis"
+kind = 3
+parent_id = "planet:saturn"
+radius = 4300.0
+mass = 84000000000000.0
+rotation_period = 51322.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_daphnis")])
+orbit = SubResource("O_daphnis")
+surface = SubResource("S_daphnis")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_atlas"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 15100.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_atlas"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_atlas"]
+script = ExtResource("orbit")
+semi_major_axis = 137670000.0
+eccentricity = 0.0012
+inclination = 0.003
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_atlas"]
+script = ExtResource("body")
+id = "moon:atlas"
+display_name = "Atlas"
+kind = 3
+parent_id = "planet:saturn"
+radius = 15100.0
+mass = 6600000000000000.0
+rotation_period = 51986.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_atlas")])
+orbit = SubResource("O_atlas")
+surface = SubResource("S_atlas")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_prometheus"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 43100.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_prometheus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_prometheus"]
+script = ExtResource("orbit")
+semi_major_axis = 139380000.0
+eccentricity = 0.0022
+inclination = 0.008
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_prometheus"]
+script = ExtResource("body")
+id = "moon:prometheus"
+display_name = "Prometheus"
+kind = 3
+parent_id = "planet:saturn"
+radius = 43100.0
+mass = 1.6e+17
+rotation_period = 52963.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_prometheus")])
+orbit = SubResource("O_prometheus")
+surface = SubResource("S_prometheus")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_pandora"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 40700.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_pandora"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_pandora"]
+script = ExtResource("orbit")
+semi_major_axis = 141710000.0
+eccentricity = 0.0042
+inclination = 0.05
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_pandora"]
+script = ExtResource("body")
+id = "moon:pandora"
+display_name = "Pandora"
+kind = 3
+parent_id = "planet:saturn"
+radius = 40700.0
+mass = 1.4e+17
+rotation_period = 54302.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_pandora")])
+orbit = SubResource("O_pandora")
+surface = SubResource("S_pandora")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_epimetheus"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 58100.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_epimetheus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_epimetheus"]
+script = ExtResource("orbit")
+semi_major_axis = 151410000.0
+eccentricity = 0.0098
+inclination = 0.351
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_epimetheus"]
+script = ExtResource("body")
+id = "moon:epimetheus"
+display_name = "Epimetheus"
+kind = 3
+parent_id = "planet:saturn"
+radius = 58100.0
+mass = 5.3e+17
+rotation_period = 59990.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_epimetheus")])
+orbit = SubResource("O_epimetheus")
+surface = SubResource("S_epimetheus")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_janus"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 89500.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_janus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_janus"]
+script = ExtResource("orbit")
+semi_major_axis = 151460000.0
+eccentricity = 0.0068
+inclination = 0.163
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_janus"]
+script = ExtResource("body")
+id = "moon:janus"
+display_name = "Janus"
+kind = 3
+parent_id = "planet:saturn"
+radius = 89500.0
+mass = 1.9e+18
+rotation_period = 60013.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_janus")])
+orbit = SubResource("O_janus")
+surface = SubResource("S_janus")
+landable = true
+significant = true
+
+
+
+; **The ROUND moons of Saturn and Uranus** — Evert, 2026-11-12: *"Lets add the round moons as well, Saturn is
+; famous for having a LOT of moons. If I recall correctly, Uranus also has a few."*
+;
+; These are big enough that their own gravity rounded them, so they are NOT drawn from the field: the potato radius
+; is derived per material now (`SpacesimIrregularBody.rounding_radius`), and ice rounds at 129 km against rock's
+; 338, which is what lets Mimas at 198 km be a sphere while Amalthea at 83 km stays a lump.
+;
+; SOURCES as for the rest of the file: JPL/NASA fact sheets for radii, masses, semi-major axes and periods, all
+; tidally locked so the rotation period is the orbital one. Uranus's moons orbit in ITS equatorial plane, which is
+; tilted 98 degrees to the ecliptic; the orbit model has no such frame, so these are the inclinations to Uranus's
+; own equator and the plane is not reproduced. Named rather than hidden.
+
+[sub_resource type="Resource" id="L_mimas"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 198200.0
+composition = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="S_mimas"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.85, "silicate": 0.15})
+
+[sub_resource type="Resource" id="O_mimas"]
+script = ExtResource("orbit")
+semi_major_axis = 185540000.0
+eccentricity = 0.0196
+inclination = 1.574
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_mimas"]
+script = ExtResource("body")
+id = "moon:mimas"
+display_name = "Mimas"
+kind = 3
+parent_id = "planet:saturn"
+radius = 198200.0
+mass = 3.7493e+19
+rotation_period = 81389.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_mimas")])
+orbit = SubResource("O_mimas")
+surface = SubResource("S_mimas")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_enceladus"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 252100.0
+composition = Dictionary[String, float]({"water_ice": 0.9, "silicate": 0.1})
+
+[sub_resource type="Resource" id="S_enceladus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.9, "silicate": 0.1})
+
+[sub_resource type="Resource" id="O_enceladus"]
+script = ExtResource("orbit")
+semi_major_axis = 238040000.0
+eccentricity = 0.0047
+inclination = 0.009
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_enceladus"]
+script = ExtResource("body")
+id = "moon:enceladus"
+display_name = "Enceladus"
+kind = 3
+parent_id = "planet:saturn"
+radius = 252100.0
+mass = 1.0802e+20
+rotation_period = 118387.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_enceladus")])
+orbit = SubResource("O_enceladus")
+surface = SubResource("S_enceladus")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_tethys"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 531100.0
+composition = Dictionary[String, float]({"water_ice": 0.9, "silicate": 0.1})
+
+[sub_resource type="Resource" id="S_tethys"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.9, "silicate": 0.1})
+
+[sub_resource type="Resource" id="O_tethys"]
+script = ExtResource("orbit")
+semi_major_axis = 294670000.0
+eccentricity = 0.0001
+inclination = 1.091
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_tethys"]
+script = ExtResource("body")
+id = "moon:tethys"
+display_name = "Tethys"
+kind = 3
+parent_id = "planet:saturn"
+radius = 531100.0
+mass = 6.1745e+20
+rotation_period = 163095.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_tethys")])
+orbit = SubResource("O_tethys")
+surface = SubResource("S_tethys")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_dione"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 561400.0
+composition = Dictionary[String, float]({"water_ice": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="S_dione"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.8, "silicate": 0.2})
+
+[sub_resource type="Resource" id="O_dione"]
+script = ExtResource("orbit")
+semi_major_axis = 377420000.0
+eccentricity = 0.0022
+inclination = 0.028
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_dione"]
+script = ExtResource("body")
+id = "moon:dione"
+display_name = "Dione"
+kind = 3
+parent_id = "planet:saturn"
+radius = 561400.0
+mass = 1.0954e+21
+rotation_period = 236477.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_dione")])
+orbit = SubResource("O_dione")
+surface = SubResource("S_dione")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_rhea"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 763800.0
+composition = Dictionary[String, float]({"water_ice": 0.75, "silicate": 0.25})
+
+[sub_resource type="Resource" id="S_rhea"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.75, "silicate": 0.25})
+
+[sub_resource type="Resource" id="O_rhea"]
+script = ExtResource("orbit")
+semi_major_axis = 527070000.0
+eccentricity = 0.001
+inclination = 0.331
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_rhea"]
+script = ExtResource("body")
+id = "moon:rhea"
+display_name = "Rhea"
+kind = 3
+parent_id = "planet:saturn"
+radius = 763800.0
+mass = 2.3065e+21
+rotation_period = 390355.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_rhea")])
+orbit = SubResource("O_rhea")
+surface = SubResource("S_rhea")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_iapetus"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 734500.0
+composition = Dictionary[String, float]({"water_ice": 0.7, "silicate": 0.3})
+
+[sub_resource type="Resource" id="S_iapetus"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.7, "silicate": 0.3})
+
+[sub_resource type="Resource" id="O_iapetus"]
+script = ExtResource("orbit")
+semi_major_axis = 3560840000.0
+eccentricity = 0.0286
+inclination = 15.47
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_iapetus"]
+script = ExtResource("body")
+id = "moon:iapetus"
+display_name = "Iapetus"
+kind = 3
+parent_id = "planet:saturn"
+radius = 734500.0
+mass = 1.8056e+21
+rotation_period = 6853248.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_iapetus")])
+orbit = SubResource("O_iapetus")
+surface = SubResource("S_iapetus")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_miranda"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 235800.0
+composition = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="S_miranda"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="O_miranda"]
+script = ExtResource("orbit")
+semi_major_axis = 129390000.0
+eccentricity = 0.0013
+inclination = 4.232
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_miranda"]
+script = ExtResource("body")
+id = "moon:miranda"
+display_name = "Miranda"
+kind = 3
+parent_id = "planet:uranus"
+radius = 235800.0
+mass = 6.59e+19
+rotation_period = 122083.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_miranda")])
+orbit = SubResource("O_miranda")
+surface = SubResource("S_miranda")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_ariel"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 578900.0
+composition = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="S_ariel"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="O_ariel"]
+script = ExtResource("orbit")
+semi_major_axis = 191020000.0
+eccentricity = 0.0012
+inclination = 0.26
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_ariel"]
+script = ExtResource("body")
+id = "moon:ariel"
+display_name = "Ariel"
+kind = 3
+parent_id = "planet:uranus"
+radius = 578900.0
+mass = 1.353e+21
+rotation_period = 217728.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_ariel")])
+orbit = SubResource("O_ariel")
+surface = SubResource("S_ariel")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_umbriel"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 584700.0
+composition = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="S_umbriel"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="O_umbriel"]
+script = ExtResource("orbit")
+semi_major_axis = 266300000.0
+eccentricity = 0.0039
+inclination = 0.205
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_umbriel"]
+script = ExtResource("body")
+id = "moon:umbriel"
+display_name = "Umbriel"
+kind = 3
+parent_id = "planet:uranus"
+radius = 584700.0
+mass = 1.172e+21
+rotation_period = 358042.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_umbriel")])
+orbit = SubResource("O_umbriel")
+surface = SubResource("S_umbriel")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_titania"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 788900.0
+composition = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="S_titania"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="O_titania"]
+script = ExtResource("orbit")
+semi_major_axis = 435910000.0
+eccentricity = 0.0011
+inclination = 0.34
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_titania"]
+script = ExtResource("body")
+id = "moon:titania"
+display_name = "Titania"
+kind = 3
+parent_id = "planet:uranus"
+radius = 788900.0
+mass = 3.527e+21
+rotation_period = 752198.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_titania")])
+orbit = SubResource("O_titania")
+surface = SubResource("S_titania")
+landable = true
+significant = true
+
+[sub_resource type="Resource" id="L_oberon"]
+script = ExtResource("layer")
+layer_name = "body"
+radius = 761400.0
+composition = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="S_oberon"]
+script = ExtResource("surface")
+coverage = Dictionary[String, float]({"water_ice": 0.6, "silicate": 0.4})
+
+[sub_resource type="Resource" id="O_oberon"]
+script = ExtResource("orbit")
+semi_major_axis = 583520000.0
+eccentricity = 0.0014
+inclination = 0.058
+ascending_node = 0.0
+argument_of_periapsis = 0.0
+mean_anomaly_at_epoch = 0.0
+
+[sub_resource type="Resource" id="B_oberon"]
+script = ExtResource("body")
+id = "moon:oberon"
+display_name = "Oberon"
+kind = 3
+parent_id = "planet:uranus"
+radius = 761400.0
+mass = 3.014e+21
+rotation_period = 1163203.0
+axial_tilt = 0.0
+layers = Array[ExtResource("layer")]([SubResource("L_oberon")])
+orbit = SubResource("O_oberon")
+surface = SubResource("S_oberon")
+landable = true
+significant = true
+
 [resource]
 script = ExtResource("system")
 content_version = 1
@@ -1289,4 +2171,4 @@ start_altitude = 20000000.0
 ; J2000 on the world clock, which counts from year zero. Placing the system at exactly the epoch
 ; its elements are stated for is what makes the m0 values mean what JPL says they mean.
 start_world_time = 63113947200.0
-bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton")])
+bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton"), SubResource("B_phobos"), SubResource("B_deimos"), SubResource("B_metis"), SubResource("B_adrastea"), SubResource("B_amalthea"), SubResource("B_thebe"), SubResource("B_pan"), SubResource("B_daphnis"), SubResource("B_atlas"), SubResource("B_prometheus"), SubResource("B_pandora"), SubResource("B_epimetheus"), SubResource("B_janus"), SubResource("B_mimas"), SubResource("B_enceladus"), SubResource("B_tethys"), SubResource("B_dione"), SubResource("B_rhea"), SubResource("B_iapetus"), SubResource("B_miranda"), SubResource("B_ariel"), SubResource("B_umbriel"), SubResource("B_titania"), SubResource("B_oberon")])

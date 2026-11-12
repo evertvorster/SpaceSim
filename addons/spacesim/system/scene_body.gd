@@ -41,6 +41,37 @@ var sphere_arrays: Array = []
 ## is, and `sea_level` is the level the land stands from. Keeping them on the body rather than re-deriving them at the
 ## translation means the shader and the mesh cannot be given two different datums.
 var surface_plan: SpacesimSurfaceField.Plan
+## **A body drawn by [SpacesimIrregularBody] instead of by the planet path**, because its own gravity never rounded
+## it. Set once, at build, and never cleared: it is what keeps `update_lod` from asking for a patch walk for a body
+## whose mesh is generated and final. There is no second place that has to ask the question.
+var irregular := false
+## **The triangles its own mesh draws**, counted from that mesh at build. A static mesh has no walk to be counted
+## from, and the HUD's total has to include it.
+var static_triangles := 0
+## **The generated solid, and the wireframe's line version of it**, for a body built by `SpacesimIrregularBody`.
+## Both are kept because wireframe mode swaps the node's mesh and the solid has to come back when the view does;
+## `wire_mesh` is built the first time a wireframe view asks for it, so a debug view is not a cost every rock pays.
+var solid_mesh: ArrayMesh
+var wire_mesh: ArrayMesh
+## **Whether this body's shape has been extracted yet**, and the pool task doing it. **False at build** — a body
+## below the potato radius is placed at scene load and extracted only when the eye is close enough to resolve it
+## (`SpacesimIrregularBody.RESOLVE_PIXELS`), which is the LOD principle and the difference between a ten-second
+## load and a system that starts at once.
+## **How irregular this body is drawn**, 0 to 1, set at build from its radius against its own material's rounding
+## radius. Both the extraction and the altitude datum use it, and they must use the same number or the ground and the
+## height above it disagree.
+var irregularity := 1.0
+var irregular_built := false
+var irregular_task := -1
+## Where a worker leaves the extracted arrays, and where the main thread picks them up when the task is joined.
+var irregular_arrays: Array = []
+## **The chunks taken out of this body**, as `[centre: Vector3, reach: float]` in BODY RADII. The shape is the
+## seed plus this list, so mining is state and not a mesh: the mesh is rebuilt from it, `radius_at` follows it,
+## and a save carries the holes rather than the geometry. Empty on a body nothing has been mined from.
+##
+## Nothing writes it yet — mining is not built — but the generator takes it now, because a signature that grows a
+## parameter later is a rewrite of every caller on the day the feature lands.
+var removals: Array = []
 var sea_level := 0.0
 ## **The field's measured extremes for this body** — `quantiles[0]` and `quantiles[last]`, which are NOT ±1: the
 ## shares are summed and the warp pushes past the normaliser, so Earth measures **-1.139 to +1.516**. The translation

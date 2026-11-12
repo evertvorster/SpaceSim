@@ -61,7 +61,11 @@ func _test_internal_heat(h, sol: SpacesimSolarSystem) -> void:
 func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 	h.check(sol.system_name() == "Sol", "named after its star: '%s'" % sol.system_name())
 	h.check(sol.epoch == "2000-01-01T12:00:00", "at the J2000 epoch")
-	h.check(sol.bodies.size() == 16, "the Sun, eight planets and seven moons (%d)" % sol.bodies.size())
+	h.check(
+		sol.bodies.size() == 40,
+		"the Sun, eight planets and thirty-one moons — the small ones and then Saturn's and Uranus's round ones "
+		+ "joined on 2026-11-12 (%d)" % sol.bodies.size()
+	)
 
 	var star := sol.star()
 	h.check(star != null and star.id == "star:sol", "the primary is Sol")
@@ -78,7 +82,10 @@ func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 	for body in sol.bodies:
 		if body.landable:
 			landable += 1
-	h.check(landable == 11, "eleven landable bodies: four planets and seven moons (%d)" % landable)
+	h.check(
+		landable == 35,
+		"thirty-five landable bodies: four planets and thirty-one moons (%d)" % landable
+	)
 
 
 func _test_calibration_values(h, sol: SpacesimSolarSystem) -> void:
@@ -243,6 +250,31 @@ func _test_moons(h, sol: SpacesimSolarSystem) -> void:
 		"moon:callisto": [16.6908, "Callisto"],
 		"moon:titan": [15.9505, "Titan"],
 		"moon:triton": [5.8887, "Triton"],
+		# **The small moons, whose elements are real** — a period that solves correctly out of the parent's mass
+		# and the semi-major axis is what proves the authored numbers are the published ones and not invented.
+		"moon:metis": [0.29478, "Metis"],
+		"moon:adrastea": [0.29826, "Adrastea"],
+		"moon:amalthea": [0.49818, "Amalthea"],
+		"moon:thebe": [0.67454, "Thebe"],
+		"moon:pan": [0.57505, "Pan"],
+		"moon:daphnis": [0.59400, "Daphnis"],
+		"moon:atlas": [0.60169, "Atlas"],
+		"moon:prometheus": [0.61300, "Prometheus"],
+		"moon:pandora": [0.62850, "Pandora"],
+		"moon:epimetheus": [0.69433, "Epimetheus"],
+		"moon:janus": [0.69459, "Janus"],
+		# The round moons of Saturn and Uranus.
+		"moon:mimas": [0.94242, "Mimas"],
+		"moon:enceladus": [1.37022, "Enceladus"],
+		"moon:tethys": [1.88780, "Tethys"],
+		"moon:dione": [2.73692, "Dione"],
+		"moon:rhea": [4.51750, "Rhea"],
+		"moon:iapetus": [79.3200, "Iapetus"],
+		"moon:miranda": [1.41348, "Miranda"],
+		"moon:ariel": [2.52038, "Ariel"],
+		"moon:umbriel": [4.14418, "Umbriel"],
+		"moon:titania": [8.70587, "Titania"],
+		"moon:oberon": [13.4632, "Oberon"],
 	}
 	for id in expected:
 		var label: String = expected[id][1]
@@ -258,7 +290,11 @@ func _test_moons(h, sol: SpacesimSolarSystem) -> void:
 			continue
 		var mu := SpacesimKepler.mu_of(parent.mass + moon.mass)
 		var days := SpacesimKepler.period(moon.orbit, mu) / 86400.0
-		h.check_near(days, expected[id][0], "and its period solves to %.4f days" % days, 0.02)
+		# **The tolerance is relative past 20 days**, because the published pair itself only agrees to about 0.02 %:
+		# Iapetus's measured a and period are consistent with each other only to that much, so an absolute 0.02 days
+		# asks the solver to be more accurate than the data it is checked against.
+		var tolerance := maxf(0.02, float(expected[id][0]) * 0.001)
+		h.check_near(days, expected[id][0], "and its period solves to %.4f days" % days, tolerance)
 		# Tidally locked: one face in, so the rotation period IS the orbital period. Half a percent,
 		# because the authored rotation uses the measured period and the solved one comes from the
 		# mean semi-major axis.
@@ -313,4 +349,232 @@ func _test_the_scene_places_them(h, sol: SpacesimSolarSystem, root: Node) -> voi
 		h.check_near(start.distance_to(earth_node.global_position), earth.radius + sol.start_altitude,
 			"and the ship starts above the start body", 1.0)
 
+	_test_the_rocks(h, scene, root)
+
 	scene.container.free()
+
+
+## **A non-planet is built by its own mechanism, and the mesh that is drawn is the generated shape.**
+##
+## This is the check that did not exist when the last attempt at irregular bodies went wrong: a green suite that
+## asserted the shape and never looked at a vertex that reached a mesh. Evert, 2026-11-08: *"I am not getting a
+## height translation for this shape ... the body of Phobos still looks very round"*, five commits after every test
+## in the branch passed.
+##
+## So: the vertex COUNT is the sweep's grid, the vertices ARE the generator's, nothing planet-shaped was created
+## beside them, and the eye moving does not replace the mesh.
+func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
+	var phobos := scene.body_by_id("moon:phobos")
+	var earth := scene.body_by_id("planet:earth")
+	h.check(phobos != null, "Phobos built")
+	if phobos == null or phobos.mesh == null:
+		return
+	h.check(phobos.irregular, "and is drawn by its own mechanism, because 11 km of rock was never rounded")
+
+	# **The boundary is DERIVED per material, and the inventory is what falsifies it.** Evert, 2026-11-12: *"Lets add
+	# the round moons as well."* One constant could not serve both: Mimas is 198 km of ice and is round, Amalthea is
+	# 83 km of rock and is a lump. Ice (2 MPa) rounds at 130 km against rock's 384, and both facts come out right.
+	var materials := SpacesimMaterialTable.engine_table()
+	var mimas := scene.body_by_id("moon:mimas")
+	var amalthea := scene.body_by_id("moon:amalthea")
+	h.check(mimas != null and not mimas.irregular,
+		"Mimas, 198 km of ice, is round — ice rounds at %.0f km"
+			% (SpacesimIrregularBody.rounding_radius(mimas.content, materials) / 1000.0))
+	h.check(amalthea != null and amalthea.irregular,
+		"while Amalthea, 83 km of rock, is still a lump — rock rounds at %.0f km"
+			% (SpacesimIrregularBody.rounding_radius(amalthea.content, materials) / 1000.0))
+	h.check(earth != null and not earth.irregular, "while Earth, which gravity did round, keeps the planet path")
+
+	# **Placed at load, NOT extracted at load.** Evert, 2026-11-12: *"We should only be building them when we get
+	# close enough to start resolving them. Does the LOD principle mean nothing to you?"* — a system with a dozen
+	# small moons paid ten seconds at load for geometry nobody was looking at.
+	h.check(not phobos.irregular_built and phobos.mesh.mesh == null,
+		"a rock nobody is close enough to resolve is placed but not extracted")
+
+	# **From far away it is its own point of light**, which is what keeps it from being a hole while it is still
+	# unextracted — the publish-over rule the patch walk and the cloud maps follow.
+	var camera := Camera3D.new()
+	camera.fov = 70.0
+	root.add_child(camera)
+	camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 1.0e7)
+	scene.update_lod(camera)
+	h.check(phobos.point != null and phobos.point.visible,
+		"from far away it is drawn as its point of light, so it is never a hole")
+	h.check(not phobos.irregular_built, "and still not extracted, because nothing can resolve it")
+
+	# Bring the eye in: at 40 km an 11 km rock is a disc, so the extraction is asked for and the join publishes it.
+	camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 40000.0)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(phobos.irregular_built and phobos.mesh.mesh != null,
+		"closing in on it extracts the shape, once")
+	# The frame after the join is what makes it visible — a mesh published mid-frame is drawn from the next one.
+	scene.update_lod(camera)
+	h.check(phobos.mesh.visible and not phobos.point.visible,
+		"and the next frame draws the shape instead of the splat")
+
+	var arrays: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var generated: Array = SpacesimBlobShape.mesh(
+		hash("moon:phobos"), phobos.radius, SpacesimIrregularBody.RESOLUTION, [], phobos.irregularity
+	).surface_get_arrays(0)
+	h.check(vertices.size() > 500 and vertices.size() == (generated[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(),
+		"its mesh comes from the field's extraction, not from an icosphere (%d vertices)" % vertices.size())
+	h.check(generated[Mesh.ARRAY_VERTEX] == vertices,
+		"and every vertex is the generated surface — this is the check the last attempt never had")
+
+	# **Wound the way the ENGINE winds, measured against the engine.** Evert, 2026-11-12, flying it: *"it seems its
+	# rendered inside-out... I see the far side of the mesh, and its lit wrong."* Every outward triangle was culled
+	# and the inside of the far wall drawn instead. **A check against my own convention could not catch that** — the
+	# sign is what has to match Godot, so it is measured against `SphereMesh`, whose winding every material here is
+	# written for (`tests/test_icosphere.gd` does the same thing for the sphere levels).
+	var reference := SphereMesh.new()
+	reference.radius = 1.0
+	reference.height = 2.0
+	reference.radial_segments = 16
+	reference.rings = 8
+	h.check(
+		signf(_signed_volume(reference)) == signf(_signed_volume(phobos.mesh.mesh)),
+		"and the rock is wound the SAME way as SphereMesh, so it is drawn from outside and not inside out"
+	)
+
+	# **And the altitude is measured to its own vertices.** A mean radius is wrong by the whole relief: on Phobos
+	# 830 m, which is the difference between hovering and standing. Asked at a vertex, the mesh datum answers ~0
+	# while the sphere answers whatever the relief is there — which is what makes this check able to fail.
+	var nearest_vertex := Vector3.ZERO
+	var furthest := -1.0
+	for vertex in vertices:
+		if vertex.length() > furthest:
+			furthest = vertex.length()
+			nearest_vertex = vertex
+	var on_the_lump := phobos.node.global_position + nearest_vertex
+	var to_the_mesh := phobos.scale_body.surface_distance_mesh(on_the_lump)
+	var to_the_sphere := phobos.scale_body.surface_distance_to(on_the_lump)
+	h.check(to_the_mesh < 1.0,
+		"standing on the highest vertex is zero altitude to the mesh (%.2f m)" % to_the_mesh)
+	h.check(to_the_sphere > 200.0,
+		"and the mean sphere would have said %.0f m, which is why it is not the datum" % to_the_sphere)
+
+	var lo := Vector3.ONE * INF
+	var hi := Vector3.ONE * -INF
+	for vertex in vertices:
+		lo = Vector3(minf(lo.x, vertex.x), minf(lo.y, vertex.y), minf(lo.z, vertex.z))
+		hi = Vector3(maxf(hi.x, vertex.x), maxf(hi.y, vertex.y), maxf(hi.z, vertex.z))
+	var size := hi - lo
+	var thin := minf(size.x, minf(size.y, size.z))
+	var thick := maxf(size.x, maxf(size.y, size.z))
+	h.check(thick / maxf(thin, 1.0) > 1.4,
+		"and it is a rock across its axes (%.1f x %.1f x %.1f km)"
+			% [size.x / 1000.0, size.y / 1000.0, size.z / 1000.0])
+
+	# **And none of the planet machinery was built beside it.** A flag that says "skip the walk" is what the last
+	# attempt had, and it meant five other switches; here there is simply nothing to skip.
+	h.check(phobos.surface_plan == null, "with no field plan, because it has no field")
+	h.check(phobos.decks.is_empty() and phobos.air.is_empty(), "and no decks and no air")
+	h.check(phobos.sphere == null and phobos.ocean == null and phobos.interior == null,
+		"and no datum lattice, sea or interior")
+
+	# **Irregularity tapers with size.** Evert, 2026-11-12: *"smaller moons would look more irregular, and larger
+	# moons would tend to look more round from a distance."* Both shades of "not a sphere" — the off-centre balls and
+	# the fractal relief — scale with the same number, so a body near its own rounding radius is a slightly lumpy
+	# sphere and one far below it is a rock. Which also means a misclassified body costs relief, not a wrong shape.
+	var rocky := SpacesimBlobShape.arrays(hash("moon:phobos"), 40000.0, 48, [], 0.9)
+	var rounding := SpacesimBlobShape.arrays(hash("moon:phobos"), 40000.0, 48, [], 0.15)
+	var sphere := SpacesimBlobShape.arrays(hash("moon:phobos"), 40000.0, 48, [], 0.0)
+	h.check(_lumpiness(rocky) > _lumpiness(rounding) * 1.8,
+		"the same body at a lower irregularity is rounder (%.2f against %.2f)"
+			% [_lumpiness(rocky), _lumpiness(rounding)])
+	h.check(_lumpiness(sphere) < 0.02,
+		"and at zero it IS a sphere (%.3f)" % _lumpiness(sphere))
+
+	# **The eye cannot replace its mesh with a walked one.** This is the fault that made the last attempt draw a
+	# sphere in flight: a body whose geometry the walk rebuilt underneath it.
+	h.check(phobos.patch_walk_task == -1 and phobos.patch_task == -1,
+		"no walk was asked for it when the eye moved")
+	h.check(phobos.patch_chunks.is_empty(), "and it has no patch tree")
+	var after: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
+	h.check(after[Mesh.ARRAY_VERTEX] == vertices, "so its mesh is the same shape after the eye moved")
+	h.check(phobos.mesh.visible, "and it is drawn")
+	camera.queue_free()
+
+	# **And the debug view shows ITS mesh, as lines.** Evert, 2026-11-12: *"in wireframe mode, I want to see the
+	# meshes of EVERYTHING."* A wireframe here is a `PRIMITIVE_LINES` mesh and not a material, so a body with no walk
+	# had none — the check is that the primitive type actually changes, not that something was made white.
+	var top_camera := Camera3D.new()
+	top_camera.fov = 70.0
+	root.add_child(top_camera)
+	top_camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 40000.0)
+	scene.wireframe = true
+	scene.update_lod(top_camera)
+	var wire := phobos.mesh.mesh as ArrayMesh
+	h.check(wire != null and wire.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
+		"in wireframe mode the rock's own mesh is drawn as lines")
+	var edges: PackedInt32Array = wire.surface_get_arrays(0)[Mesh.ARRAY_INDEX] if wire != null else PackedInt32Array()
+	h.check(edges.size() > 0 and edges.size() % 2 == 0,
+		"with the grid's edges as segments (%d)" % edges.size())
+	scene.wireframe = false
+	scene.update_lod(top_camera)
+	h.check((phobos.mesh.mesh as ArrayMesh).surface_get_primitive_type(0) == Mesh.PRIMITIVE_TRIANGLES,
+		"and turning the view off gives the solid mesh back, not a wireframe left standing")
+	top_camera.queue_free()
+
+	# **A mined body is the seed plus its removals**, and the datum follows: the surface recedes where the chunk
+	# came out and is untouched everywhere else. This is the property mining will be built on, so it is asserted
+	# before there is a pickaxe rather than after.
+	var seed_value := hash("moon:phobos")
+	var before := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.RIGHT, SpacesimIrregularBody.RESOLUTION
+	)
+	var behind := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.LEFT, SpacesimIrregularBody.RESOLUTION
+	)
+	# **At the surface, not out in space.** A removal is a ball, so one placed beyond the body grazes it and removes
+	# almost nothing — which is what the first version of this asserted, and it reported 4.6 km to 4.4 km.
+	var at_surface := Vector3(before / phobos.radius, 0.0, 0.0)
+	var removals := [[at_surface, 0.25]]
+	var carved := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.RIGHT, SpacesimIrregularBody.RESOLUTION, removals
+	)
+	var still_there := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.LEFT, SpacesimIrregularBody.RESOLUTION, removals
+	)
+	h.check(carved < before * 0.85 and carved > 0.0,
+		"a chunk taken out of a body takes its surface in (%.1f km to %.1f km)"
+			% [before / 1000.0, carved / 1000.0])
+	h.check(is_equal_approx(still_there, behind),
+		"and the far side of the body is untouched, because a removal is local")
+
+
+## **A mesh's signed volume**, which is the one thing about winding that is measurable with no render: the sign
+## flips when the whole surface is wound the other way. Borrowed verbatim from `tests/test_icosphere.gd`, where
+## the same measurement proved the sphere levels against `SphereMesh`.
+static func _signed_volume(mesh: Mesh) -> float:
+	var arrays := mesh.surface_get_arrays(0)
+	var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var total := 0.0
+	if indices.is_empty():
+		for i in range(0, points.size(), 3):
+			total += points[i].dot(points[i + 1].cross(points[i + 2]))
+	else:
+		for i in range(0, indices.size(), 3):
+			total += points[indices[i]].dot(points[indices[i + 1]].cross(points[indices[i + 2]]))
+	return total / 6.0
+
+
+## **How lumpy a shape is**, as the spread of vertex distances from the centre over their mean. A sphere is 0, a rock
+## is a tenth or more. Used to compare the same seed at different irregularities, so the only variable is the one
+## under test.
+static func _lumpiness(surface: Array) -> float:
+	var points: PackedVector3Array = surface[Mesh.ARRAY_VERTEX]
+	if points.is_empty():
+		return 0.0
+	var lo := INF
+	var hi := 0.0
+	var total := 0.0
+	for point in points:
+		var length := point.length()
+		lo = minf(lo, length)
+		hi = maxf(hi, length)
+		total += length
+	return (hi - lo) / maxf(total / float(points.size()), 1.0e-9)
