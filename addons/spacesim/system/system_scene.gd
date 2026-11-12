@@ -1283,6 +1283,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# shading — so it leaves here rather than being switched off piece by piece below.
 		if body.irregular:
 			body.mesh.visible = not is_point
+			SpacesimIrregularBody.show_wireframe(body, wireframe)
 			if body.point != null:
 				body.point.visible = is_point
 				if is_point:

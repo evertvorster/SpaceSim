@@ -48,6 +48,11 @@ var irregular := false
 ## **The triangles its own mesh draws**, counted from that mesh at build. A static mesh has no walk to be counted
 ## from, and the HUD's total has to include it.
 var static_triangles := 0
+## **The generated solid, and the wireframe's line version of it**, for a body built by `SpacesimIrregularBody`.
+## Both are kept because wireframe mode swaps the node's mesh and the solid has to come back when the view does;
+## `wire_mesh` is built the first time a wireframe view asks for it, so a debug view is not a cost every rock pays.
+var solid_mesh: ArrayMesh
+var wire_mesh: ArrayMesh
 var sea_level := 0.0
 ## **The field's measured extremes for this body** — `quantiles[0]` and `quantiles[last]`, which are NOT ±1: the
 ## shares are summed and the warp pushes past the normaliser, so Earth measures **-1.139 to +1.516**. The translation

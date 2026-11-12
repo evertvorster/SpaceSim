@@ -64,12 +64,33 @@ static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
 	parent.add_child(mesh)
 	body.mesh = mesh
 	body.mesh_material = material
+	body.solid_mesh = shape
 	# **Counted once, from the mesh that is drawn**, so the HUD's total includes a rock and a static mesh needs
 	# no walk to be counted from.
 	body.static_triangles = shape.get_faces().size() / 3
 	# **The point of light**, so the body is a pixel of its own brightness once it is smaller than one rather
 	# than an aliased speck of geometry.
 	body.point = SpacesimBodyRenderer.add_point(parent, body.name)
+
+
+## **The body in the debug view — its own mesh, as lines.**
+##
+## Evert, 2026-11-12: *"in wireframe mode, I want to see the meshes of EVERYTHING."* In this engine a wireframe is
+## not a material or a render mode: the walk builds a `PRIMITIVE_LINES` mesh and the shaded one is a different
+## product of the same walk. A body with no walk therefore had no wireframe at all — which is the gap this closes,
+## and it closes it by drawing the line mesh of the same grid rather than by dressing the solid one white.
+##
+## **Unconditional**: there is no second setting, because a rock has one mesh and nothing to tell apart in it. The
+## line mesh is built on first use and kept.
+static func show_wireframe(body: SpacesimSceneBody, wire: bool) -> void:
+	if body.mesh == null or body.solid_mesh == null:
+		return
+	if wire and body.wire_mesh == null:
+		body.wire_mesh = SpacesimJuliaShape.mesh(hash(body.id), body.radius, 1, true)
+	body.mesh.mesh = body.wire_mesh if wire else body.solid_mesh
+	body.mesh.material_override = (
+		SpacesimBodyRenderer.wireframe_material() if wire else body.mesh_material
+	)
 
 
 ## **What it is made of, and nothing else.** A regolith scatters: full roughness, no specular, no gloss — the one

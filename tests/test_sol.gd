@@ -387,3 +387,24 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	h.check(after[Mesh.ARRAY_VERTEX] == vertices, "so its mesh is the same shape after the eye moved")
 	h.check(phobos.mesh.visible, "and it is drawn")
 	camera.queue_free()
+
+	# **And the debug view shows ITS mesh, as lines.** Evert, 2026-11-12: *"in wireframe mode, I want to see the
+	# meshes of EVERYTHING."* A wireframe here is a `PRIMITIVE_LINES` mesh and not a material, so a body with no walk
+	# had none — the check is that the primitive type actually changes, not that something was made white.
+	var top_camera := Camera3D.new()
+	top_camera.fov = 70.0
+	root.add_child(top_camera)
+	top_camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 40000.0)
+	scene.wireframe = true
+	scene.update_lod(top_camera)
+	var wire := phobos.mesh.mesh as ArrayMesh
+	h.check(wire != null and wire.surface_get_primitive_type(0) == Mesh.PRIMITIVE_LINES,
+		"in wireframe mode the rock's own mesh is drawn as lines")
+	var edges: PackedInt32Array = wire.surface_get_arrays(0)[Mesh.ARRAY_INDEX] if wire != null else PackedInt32Array()
+	h.check(edges.size() > 0 and edges.size() % 2 == 0,
+		"with the grid's edges as segments (%d)" % edges.size())
+	scene.wireframe = false
+	scene.update_lod(top_camera)
+	h.check((phobos.mesh.mesh as ArrayMesh).surface_get_primitive_type(0) == Mesh.PRIMITIVE_TRIANGLES,
+		"and turning the view off gives the solid mesh back, not a wireframe left standing")
+	top_camera.queue_free()

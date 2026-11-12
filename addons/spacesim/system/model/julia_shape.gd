@@ -115,7 +115,10 @@ static func surface_point(
 ## of the same body — Evert, 2026-11-08: *"When we subdivide that, we can get closer and closer to the true shape
 ## with the subdivisions."* The chord error falls as the square of the step, which `tests/test_surface_field.gd`
 ## measures rather than assumes.
-static func mesh(seed_value: int, radius: float, detail := 1) -> ArrayMesh:
+##
+## `wire` builds the SAME grid as `PRIMITIVE_LINES` instead — the debug view's product, and it has to be built here
+## because a wireframe in this engine is a mesh and not a material: a body with no walk has no other source of one.
+static func mesh(seed_value: int, radius: float, detail := 1, wire := false) -> ArrayMesh:
 	var radii := outline(seed_value)
 	var points := OUTLINE_POINTS * maxi(detail, 1)
 	var rings := RINGS * maxi(detail, 1)
@@ -146,14 +149,22 @@ static func mesh(seed_value: int, radius: float, detail := 1) -> ArrayMesh:
 			var b := ring * points + next_point
 			var c := (ring + 1) * points + point
 			var d := (ring + 1) * points + next_point
-			indices.append_array([a, c, b, b, c, d])
+			if wire:
+				# **Both directions of the grid and no diagonals.** A wireframe's job is to show the tessellation, so
+				# what it draws is the sampling: rings along the sweep, points around it.
+				indices.append_array([a, b, a, c])
+			else:
+				indices.append_array([a, c, b, b, c, d])
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_NORMAL] = normals
+	# **No normals on the wireframe** — the material is unshaded white, so a normal per vertex would be bytes
+	# nothing reads. The same rule the walk's own line mesh follows.
+	if not wire:
+		arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var result := ArrayMesh.new()
-	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	result.add_surface_from_arrays(Mesh.PRIMITIVE_LINES if wire else Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return result
 
 
