@@ -18,6 +18,8 @@ func run(h, root: Node) -> void:
 	_test_the_target_has_its_own_colour(h, root)
 	_test_a_moon_gives_up_its_label_only_when_crowded(h, root)
 	_test_a_projection_in_a_subviewport_is_converted(h)
+	_test_a_place_has_no_range_limit(h, root)
+	_test_a_moon_yields_to_the_body_it_orbits(h, root)
 
 
 func _test_keyed_union(h) -> void:
@@ -373,3 +375,74 @@ func _test_distance_format(h) -> void:
 	h.check(SpacesimMarkers.format_distance(2500.0) == "2.5 km", "kilometres")
 	h.check(SpacesimMarkers.format_distance(12.0) == "12 m", "metres")
 	h.check(SpacesimMarkers.format_distance(INF) == "--", "and nothing at all reads as dashes")
+
+
+## **A place is marked however far away it is.**
+##
+## Evert, 2026-11-12: *"significant objects like planets and SOL stop showing up when they are beyond 600Gm ... There
+## should be no range limit."* The marker set was capped at `pool_size` and ordered by distance, so a system full of
+## nearby moons spent the whole budget and the star fell off the list — a distance limit that nobody wrote as one.
+func _test_a_place_has_no_range_limit(h, root: Node) -> void:
+	var container := Node3D.new()
+	root.add_child(container)
+	var markers := Markers.new()
+	container.add_child(markers)
+
+	var star := Node3D.new()
+	star.position = Vector3(1.0e12, 0.0, 0.0)
+	container.add_child(star)
+	var nearby: Array[Node3D] = []
+	for index in 20:
+		var moon := Node3D.new()
+		moon.position = Vector3(float(index) * 1.0e6, 0.0, 0.0)
+		container.add_child(moon)
+		nearby.append(moon)
+		var parent := SpacesimSceneBody.new()
+		parent.node = star
+		markers.orbits[moon] = parent
+
+	markers.context_targets = [star]
+	markers.context_targets.append_array(nearby)
+
+	var gathered := markers._candidates(Vector3.ZERO)
+	var places := 0
+	for candidate in gathered:
+		if int(candidate["priority"]) >= Markers.Priority.PRIMARY:
+			places += 1
+	h.check(places == 1, "the star is a place and is a candidate at a terametre (%d)" % places)
+	var chosen := Markers.choose(gathered, maxi(4, places))
+	h.check(chosen.size() > 0 and chosen[0]["node"] == star,
+		"and it is the FIRST marker chosen, ahead of twenty nearer moons")
+	container.free()
+
+
+## **A moon is marked only when it is the nearer of the two things you could name.**
+##
+## Evert, 2026-11-12: *"Moons and such can be hidden when they are far away, but the body they are orbiting should be
+## marked."* From outside a system its moons are behind their planet; inside it they are in front.
+func _test_a_moon_yields_to_the_body_it_orbits(h, root: Node) -> void:
+	var container := Node3D.new()
+	root.add_child(container)
+	var markers := Markers.new()
+	container.add_child(markers)
+
+	var planet := Node3D.new()
+	planet.position = Vector3(1000.0, 0.0, 0.0)
+	container.add_child(planet)
+	var moon := Node3D.new()
+	moon.position = Vector3(900.0, 0.0, 0.0)
+	container.add_child(moon)
+	var body := SpacesimSceneBody.new()
+	body.node = planet
+	markers.orbits[moon] = body
+
+	markers.context_targets = [planet, moon]
+	# **Inside the planet's neighbourhood**: the moon is nearer than the planet, so it is worth naming.
+	var inside := markers._candidates(Vector3.ZERO)
+	h.check(inside.size() == 2, "both the planet and its moon are candidates from nearby")
+
+	# **From outside**: the planet is in front of its moon, so only the planet is named.
+	var outside := markers._candidates(Vector3(1.0e12, 0.0, 0.0))
+	h.check(outside.size() == 1 and outside[0]["node"] == planet,
+		"and from outside the system only the planet is marked, not its moon")
+	container.free()

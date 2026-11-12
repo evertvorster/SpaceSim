@@ -841,6 +841,14 @@ is usually exactly where the markers are. Labels are placed nearest-first, so wh
 its spot first and the rest arrange themselves around it. A last-resort fallback is returned when
 nothing is free: an overlapping label still says where something is, and a missing one does not.
 
+**And a place has no range limit.** Markers are capped and ordered by distance, which is right for *details* and
+wrong for *places*: a system full of nearby moons spent the whole budget and the star fell off the list past a few
+hundred gigametres, a distance limit nobody had written as one. `Priority.PRIMARY` is the tier for anything that is
+not a moon — the star, the planets — and the cap is `max(pool_size, primaries)`, so the marker pool grows to fit the
+places in the system. A **moon** is a candidate only when it is the nearer of itself and the body it orbits, which is
+Evert's rule (2026-11-12): *"Moons and such can be hidden when they are far away, but the body they are orbiting
+should be marked."*
+
 ### A moon gives up its label, not its ring — but only where the two compete
 
 **A moon's label is dropped only where the body it orbits has taken its space.** The nearest spot

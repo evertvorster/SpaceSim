@@ -19,7 +19,11 @@ extends Node3D
 
 ## Context is the ambient group (other planets while you are in space, say); a selected target
 ## outranks a mission objective, which outranks context.
-enum Priority { CONTEXT = 0, MISSION = 1, SELECTED = 2 }
+## **`PRIMARY` is the tier that has no range limit.** Evert, 2026-11-12: *"Any significant object should show up on
+## the HUD. There should be no range limit. Moons and such can be hidden when they are far away, but the body they are
+## orbiting should be marked."* A star or a planet is a **place** — being 900 Gm from it is exactly when its name
+## matters — while a moon is a detail of the place it orbits.
+enum Priority { CONTEXT = 0, PRIMARY = 1, MISSION = 2, SELECTED = 3 }
 
 const Overlay := preload("res://addons/spacesim/navigation/overlay.gd")
 
@@ -94,16 +98,29 @@ func _build_pool() -> void:
 	_layer.add_child(_overlay)
 
 	for index in pool_size:
-		var label := Label.new()
-		label.name = "Marker%d" % index
-		label.add_theme_font_size_override("font_size", font_size)
-		label.add_theme_color_override("font_color", Overlay.COLOR)
-		label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
-		label.add_theme_constant_override("outline_size", 6)
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.visible = false
-		_layer.add_child(label)
-		_labels.append(label)
+		_labels.append(_make_label(index))
+
+
+## One label, built to the current font size. **On demand as well as at build**, because the primary tier is allowed
+## more markers than the pool setting asks for — see [method refresh].
+func _make_label(index: int) -> Label:
+	var label := Label.new()
+	label.name = "Marker%d" % index
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", Overlay.COLOR)
+	label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.9))
+	label.add_theme_constant_override("outline_size", 6)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.visible = false
+	_layer.add_child(label)
+	return label
+
+
+## Grow the label pool when the primaries need more room than it has. It never shrinks: a system with nine places in
+## it must not lose one because the player set the marker cap to six, and a spare label costs nothing.
+func _ensure_labels(count: int) -> void:
+	for index in range(_labels.size(), count):
+		_labels.append(_make_label(index))
 
 
 ## Rebuild the marker set, place its labels, and hand the rings to the overlay. Call once a frame.
@@ -148,7 +165,16 @@ func refresh(camera: Camera3D, band := Rect2()) -> void:
 	for candidate in gathered:
 		marked[(candidate["node"] as Node3D).get_instance_id()] = true
 
-	var entries := _parents_before_their_moons(choose(gathered, pool_size))
+	# **Every place gets a marker, whatever the pool is set to.** The cap is a budget for the *details* — moons,
+	# mission targets — and the number of stars and planets in a system is content, not something a slider should be
+	# able to hide. So the limit is the pool OR the primaries, whichever is larger.
+	var primaries := 0
+	for candidate in gathered:
+		if int(candidate["priority"]) >= Priority.PRIMARY:
+			primaries += 1
+	var limit := maxi(pool_size, primaries)
+	_ensure_labels(limit)
+	var entries := _parents_before_their_moons(choose(gathered, limit))
 	for entry in entries:
 		entry["circle"] = to_canvas(_project(entry["node"], camera, drawn), drawn, band)
 
@@ -322,7 +348,30 @@ func _gather(list: Array[Dictionary], nodes: Array[Node3D], priority: int, eye: 
 	for node in nodes:
 		if node == null:
 			continue
-		list.append({"node": node, "priority": priority, "distance": eye.distance_to(node.global_position)})
+		var rank := priority
+		if priority == Priority.CONTEXT:
+			rank = _context_priority(node, eye)
+			if rank < 0:
+				continue
+		list.append({"node": node, "priority": rank, "distance": eye.distance_to(node.global_position)})
+
+
+## **What an ambient object is worth naming from here** — `-1` for not at all.
+##
+## A **primary** (the star, a planet, anything that is not a moon) is always worth it: it is a place, and distance is
+## exactly when its name is what you want. `orbits` holds only moons, so the test is its absence.
+##
+## A **moon** is marked only when it is the **nearer of the two things you can name**, itself and the body it orbits.
+## Evert, 2026-11-12: *"Moons and such can be hidden when they are far away, but the body they are orbiting should be
+## marked."* One comparison says exactly that: from outside a system its moons are behind their planet, and inside
+## it they are in front, so the labels are the ones you are actually near.
+func _context_priority(node: Node3D, eye: Vector3) -> int:
+	var parent: SpacesimSceneBody = orbits.get(node, null)
+	if parent == null or parent.node == null:
+		return Priority.PRIMARY
+	if eye.distance_to(node.global_position) > eye.distance_to(parent.node.global_position):
+		return -1
+	return Priority.CONTEXT
 
 
 ## The keyed union for one frame: one marker per object, highest priority wins, then nearest
