@@ -56,7 +56,6 @@ static func is_irregular(body: SpacesimSceneBody) -> bool:
 ## it, because `body.irregular` keeps `update_lod` from ever asking for a walk for this body.
 static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
 	body.irregular = true
-	body.scale_body = SpacesimScaleBody.new(parent, body.radius)
 	# **The shape is the seed's, not the body's radius alone** — `hash(body.id)` means two 11 km rocks are two
 	# rocks, and the same body is the same rock every load.
 	#
@@ -67,6 +66,12 @@ static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
 	var shape: ArrayMesh = SpacesimBlobShape.mesh(
 		hash(body.id), body.radius, RESOLUTION, body.removals
 	)
+	# **Its altitude is measured to its own vertices**, not to a mean sphere — the relief is hundreds of metres, and
+	# the vertex bin is what makes that answer cost a handful of cell lookups instead of a scan per tick.
+	var surface := SpacesimSurfacePoints.new(
+		shape.surface_get_arrays(0)[Mesh.ARRAY_VERTEX], body.radius * 0.12
+	)
+	body.scale_body = SpacesimScaleBody.new(parent, body.radius, surface)
 	var material := material_for(body)
 	var mesh := MeshInstance3D.new()
 	mesh.name = "%sSurface" % body.name

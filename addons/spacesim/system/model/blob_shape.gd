@@ -305,15 +305,24 @@ static func _emit_quad(
 	_emit_triangle(points, normals, indices, corners[0], corners[2], corners[3])
 
 
-## **A triangle, wound so its face agrees with the field's own outward direction.** The net's winding depends on
-## which way the sign flips and which way the loop was walked, and getting that wrong once per axis is the usual
-## way a surface net comes out with holes; asking the normal is one comparison per triangle and cannot be wrong.
+## **A triangle, wound the way Godot's front faces are.** Winding is not a detail here: Godot's front face is
+## CLOCKWISE seen from outside (`icosphere.gd` carries the same note, and `tests/test_icosphere.gd` measures it
+## against `SphereMesh` rather than trusting the prose), so a triangle whose cross-product normal points OUTWARD
+## is counter-clockwise and is therefore a BACK face — which `cull_back` culls.
+##
+## **Getting this wrong does not look like an inversion.** Evert, 2026-11-12, flying the first blob build: *"it
+## seems its rendered inside-out... I see the far side of the mesh, and its lit wrong."* Every outward triangle was
+## culled and the inside of the far wall was drawn instead, so the body was lit by whatever was behind it — a
+## plausible-looking body with the sun on the wrong side.
+##
+## So the face normal is asked to point INWARD, which is what the outward-stored vertex normal says is correct:
+## `face · normal < 0` means the winding already matches the engine, and `> 0` is the case that must be swapped.
 static func _emit_triangle(
 	points: PackedVector3Array, normals: PackedVector3Array, indices: PackedInt32Array,
 	a: int, b: int, c: int
 ) -> void:
 	var face := (points[b] - points[a]).cross(points[c] - points[a])
-	if face.dot(normals[a]) >= 0.0:
+	if face.dot(normals[a]) <= 0.0:
 		indices.append_array([a, b, c])
 	else:
 		indices.append_array([a, c, b])

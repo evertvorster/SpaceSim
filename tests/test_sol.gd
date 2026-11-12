@@ -354,6 +354,38 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	h.check(generated[Mesh.ARRAY_VERTEX] == vertices,
 		"and every vertex is the generated surface — this is the check the last attempt never had")
 
+	# **Wound the way the ENGINE winds, measured against the engine.** Evert, 2026-11-12, flying it: *"it seems its
+	# rendered inside-out... I see the far side of the mesh, and its lit wrong."* Every outward triangle was culled
+	# and the inside of the far wall drawn instead. **A check against my own convention could not catch that** — the
+	# sign is what has to match Godot, so it is measured against `SphereMesh`, whose winding every material here is
+	# written for (`tests/test_icosphere.gd` does the same thing for the sphere levels).
+	var reference := SphereMesh.new()
+	reference.radius = 1.0
+	reference.height = 2.0
+	reference.radial_segments = 16
+	reference.rings = 8
+	h.check(
+		signf(_signed_volume(reference)) == signf(_signed_volume(phobos.mesh.mesh)),
+		"and the rock is wound the SAME way as SphereMesh, so it is drawn from outside and not inside out"
+	)
+
+	# **And the altitude is measured to its own vertices.** A mean radius is wrong by the whole relief: on Phobos
+	# 830 m, which is the difference between hovering and standing. Asked at a vertex, the mesh datum answers ~0
+	# while the sphere answers whatever the relief is there — which is what makes this check able to fail.
+	var nearest_vertex := Vector3.ZERO
+	var furthest := -1.0
+	for vertex in vertices:
+		if vertex.length() > furthest:
+			furthest = vertex.length()
+			nearest_vertex = vertex
+	var on_the_lump := phobos.node.global_position + nearest_vertex
+	var to_the_mesh := phobos.scale_body.surface_distance_mesh(on_the_lump)
+	var to_the_sphere := phobos.scale_body.surface_distance_to(on_the_lump)
+	h.check(to_the_mesh < 1.0,
+		"standing on the highest vertex is zero altitude to the mesh (%.2f m)" % to_the_mesh)
+	h.check(to_the_sphere > 200.0,
+		"and the mean sphere would have said %.0f m, which is why it is not the datum" % to_the_sphere)
+
 	var lo := Vector3.ONE * INF
 	var hi := Vector3.ONE * -INF
 	for vertex in vertices:
@@ -435,3 +467,20 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 			% [before / 1000.0, carved / 1000.0])
 	h.check(is_equal_approx(still_there, behind),
 		"and the far side of the body is untouched, because a removal is local")
+
+
+## **A mesh's signed volume**, which is the one thing about winding that is measurable with no render: the sign
+## flips when the whole surface is wound the other way. Borrowed verbatim from `tests/test_icosphere.gd`, where
+## the same measurement proved the sphere levels against `SphereMesh`.
+static func _signed_volume(mesh: Mesh) -> float:
+	var arrays := mesh.surface_get_arrays(0)
+	var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var total := 0.0
+	if indices.is_empty():
+		for i in range(0, points.size(), 3):
+			total += points[i].dot(points[i + 1].cross(points[i + 2]))
+	else:
+		for i in range(0, indices.size(), 3):
+			total += points[indices[i]].dot(points[indices[i + 1]].cross(points[indices[i + 2]]))
+	return total / 6.0

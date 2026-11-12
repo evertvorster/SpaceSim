@@ -97,8 +97,13 @@ func _apply_attitude(input: Dictionary) -> void:
 
 
 func _update_proximity() -> void:
+	# **Which body is nearest is a sphere question; how far above it is not.** The choice is a scan over every
+	# significant body, so it stays the cheap comparison; the reported altitude is one call, for the body already
+	# chosen, and it asks that body's own surface — a mean radius is wrong by the whole relief.
 	_nearest_body = Proximity.nearest_body(global_position, bodies)
-	nearest_distance = INF if _nearest_body == null else _nearest_body.surface_distance_to(global_position)
+	nearest_distance = (
+		INF if _nearest_body == null else _nearest_body.surface_distance_mesh(global_position)
+	)
 	nearest_name = _nearest_body.node.name if _nearest_body != null and _nearest_body.node != null else "—"
 
 
