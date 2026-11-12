@@ -62,9 +62,9 @@ func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 	h.check(sol.system_name() == "Sol", "named after its star: '%s'" % sol.system_name())
 	h.check(sol.epoch == "2000-01-01T12:00:00", "at the J2000 epoch")
 	h.check(
-		sol.bodies.size() == 18,
-		"the Sun, eight planets and nine moons — Phobos and Deimos joined Luna's eight on 2026-11-08 (%d)"
-			% sol.bodies.size()
+		sol.bodies.size() == 29,
+		"the Sun, eight planets and twenty moons — Jupiter's four small ones and Saturn's seven joined on "
+		+ "2026-11-12 (%d)" % sol.bodies.size()
 	)
 
 	var star := sol.star()
@@ -83,9 +83,9 @@ func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 		if body.landable:
 			landable += 1
 	h.check(
-		landable == 13,
-		"thirteen landable bodies: four planets and nine moons — and Phobos is the first shape that is not a "
-		+ "sphere (%d)" % landable
+		landable == 24,
+		"twenty-four landable bodies: four planets and twenty moons, eleven of them shapes that are not spheres (%d)"
+			% landable
 	)
 
 
@@ -251,6 +251,19 @@ func _test_moons(h, sol: SpacesimSolarSystem) -> void:
 		"moon:callisto": [16.6908, "Callisto"],
 		"moon:titan": [15.9505, "Titan"],
 		"moon:triton": [5.8887, "Triton"],
+		# **The small moons, whose elements are real** — a period that solves correctly out of the parent's mass
+		# and the semi-major axis is what proves the authored numbers are the published ones and not invented.
+		"moon:metis": [0.29478, "Metis"],
+		"moon:adrastea": [0.29826, "Adrastea"],
+		"moon:amalthea": [0.49818, "Amalthea"],
+		"moon:thebe": [0.67454, "Thebe"],
+		"moon:pan": [0.57505, "Pan"],
+		"moon:daphnis": [0.59400, "Daphnis"],
+		"moon:atlas": [0.60169, "Atlas"],
+		"moon:prometheus": [0.61300, "Prometheus"],
+		"moon:pandora": [0.62850, "Pandora"],
+		"moon:epimetheus": [0.69433, "Epimetheus"],
+		"moon:janus": [0.69459, "Janus"],
 	}
 	for id in expected:
 		var label: String = expected[id][1]
@@ -344,6 +357,34 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	h.check(phobos.irregular, "and is drawn by its own mechanism, because 11 km of rock was never rounded")
 	h.check(earth != null and not earth.irregular, "while Earth, which gravity did round, keeps the planet path")
 
+	# **Placed at load, NOT extracted at load.** Evert, 2026-11-12: *"We should only be building them when we get
+	# close enough to start resolving them. Does the LOD principle mean nothing to you?"* — a system with a dozen
+	# small moons paid ten seconds at load for geometry nobody was looking at.
+	h.check(not phobos.irregular_built and phobos.mesh.mesh == null,
+		"a rock nobody is close enough to resolve is placed but not extracted")
+
+	# **From far away it is its own point of light**, which is what keeps it from being a hole while it is still
+	# unextracted — the publish-over rule the patch walk and the cloud maps follow.
+	var camera := Camera3D.new()
+	camera.fov = 70.0
+	root.add_child(camera)
+	camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 1.0e7)
+	scene.update_lod(camera)
+	h.check(phobos.point != null and phobos.point.visible,
+		"from far away it is drawn as its point of light, so it is never a hole")
+	h.check(not phobos.irregular_built, "and still not extracted, because nothing can resolve it")
+
+	# Bring the eye in: at 40 km an 11 km rock is a disc, so the extraction is asked for and the join publishes it.
+	camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 40000.0)
+	scene.update_lod(camera)
+	scene.await_patch_builds()
+	h.check(phobos.irregular_built and phobos.mesh.mesh != null,
+		"closing in on it extracts the shape, once")
+	# The frame after the join is what makes it visible — a mesh published mid-frame is drawn from the next one.
+	scene.update_lod(camera)
+	h.check(phobos.mesh.visible and not phobos.point.visible,
+		"and the next frame draws the shape instead of the splat")
+
 	var arrays: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
 	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var generated: Array = SpacesimBlobShape.mesh(
@@ -407,12 +448,6 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 
 	# **The eye cannot replace its mesh with a walked one.** This is the fault that made the last attempt draw a
 	# sphere in flight: a body whose geometry the walk rebuilt underneath it.
-	var camera := Camera3D.new()
-	camera.fov = 70.0
-	root.add_child(camera)
-	camera.global_position = phobos.node.global_position + Vector3(0.0, 0.0, 40000.0)
-	scene.update_lod(camera)
-	scene.await_patch_builds()
 	h.check(phobos.patch_walk_task == -1 and phobos.patch_task == -1,
 		"no walk was asked for it when the eye moved")
 	h.check(phobos.patch_chunks.is_empty(), "and it has no patch tree")

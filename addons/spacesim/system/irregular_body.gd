@@ -36,6 +36,11 @@ const POTATO_RADIUS := 300000.0
 ## belt** — a population needs the extraction on a worker thread or the GPU, or a small library of shapes reused.
 const RESOLUTION := 64
 
+## **How big a body has to look before its shape is worth extracting**, in pixels of RADIUS — and it is **half the
+## point tier** (`SpacesimLod.POINT_TIER_SCREEN_RADIUS` is 4), because the work has to be STARTED before the eye
+## arrives and finished before the handover. Every other ladder in this project starts its work the same way.
+const RESOLVE_PIXELS := 2.0
+
 
 ## **Is this body drawn by its own mechanism?** Radius decides, because radius is what decides whether gravity
 ## could round a body; a star is always large enough that it never comes up, and is excluded by name because a
@@ -49,45 +54,74 @@ static func is_irregular(body: SpacesimSceneBody) -> bool:
 	)
 
 
-## **The body's whole geometry and material, built once.** `parent` is the body's own node, already placed in
-## the system frame.
+## **Placed now, extracted when the eye is close enough to resolve it.**
 ##
-## `body.mesh` is the static mesh and stays that mesh for the body's life: nothing in the planet path can reach
-## it, because `body.irregular` keeps `update_lod` from ever asking for a walk for this body.
+## **Nothing here builds the shape.** Evert, 2026-11-12: *"We should only be building them when we get close
+## enough to start resolving them. Does the LOD principle mean nothing to you?"* — a system with a dozen moons paid
+## ten seconds at load for geometry nobody was looking at, and the meshes were built whether or not the player ever
+## flew within a million kilometres of them. The LOD principle is a requirement of this engine, not an optimisation.
+##
+## So a body is a node, a material, a point of light and a sphere for the travel unit; [method request] is what
+## extracts it, once, from [method SpacesimSystemScene.update_lod] when its disc is worth drawing.
 static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
 	body.irregular = true
-	# **The shape is the seed's, not the body's radius alone** — `hash(body.id)` means two 11 km rocks are two
-	# rocks, and the same body is the same rock every load.
-	#
-	# **A field, not a swept outline**: a few seeded balls fused with a smooth minimum, so a lump is somewhere
-	# rather than all the way round one axis, and a pinch or a crater is not a special case. See
-	# `SpacesimBlobShape` for why and for the cost. The swept Julia (`SpacesimJuliaShape`) is kept as the record
-	# of the first attempt — it is what the flight of 2026-11-12 showed as a ribbed crescent.
-	var shape: ArrayMesh = SpacesimBlobShape.mesh(
-		hash(body.id), body.radius, RESOLUTION, body.removals
-	)
-	# **Its altitude is measured to its own vertices**, not to a mean sphere — the relief is hundreds of metres, and
-	# the vertex bin is what makes that answer cost a handful of cell lookups instead of a scan per tick.
-	var surface := SpacesimSurfacePoints.new(
-		shape.surface_get_arrays(0)[Mesh.ARRAY_VERTEX], body.radius * 0.12
-	)
-	body.scale_body = SpacesimScaleBody.new(parent, body.radius, surface)
+	body.scale_body = SpacesimScaleBody.new(parent, body.radius)
 	var material := material_for(body)
 	var mesh := MeshInstance3D.new()
 	mesh.name = "%sSurface" % body.name
-	mesh.mesh = shape
 	mesh.material_override = material
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mesh)
 	body.mesh = mesh
 	body.mesh_material = material
-	body.solid_mesh = shape
-	# **Counted once, from the mesh that is drawn**, so the HUD's total includes a rock and a static mesh needs
-	# no walk to be counted from.
-	body.static_triangles = shape.get_faces().size() / 3
-	# **The point of light**, so the body is a pixel of its own brightness once it is smaller than one rather
-	# than an aliased speck of geometry.
 	body.point = SpacesimBodyRenderer.add_point(parent, body.name)
+
+
+## **Ask for the extraction, on the worker pool.** Captured values, not members read on the worker: a removal that
+## lands meanwhile must not change the shape of a build that is already described, and the shape is the one thing
+## the eye cannot check while it is being used.
+static func request(body: SpacesimSceneBody) -> void:
+	if body.irregular_task != -1 or body.irregular_built:
+		return
+	body.irregular_task = WorkerThreadPool.add_task(
+		_extract.bind(body, hash(body.id), body.radius, RESOLUTION, body.removals)
+	)
+
+
+## **The extraction itself** — arithmetic only, which is why it may run off the main thread. The mesh is made in
+## [method poll], because `add_surface_from_arrays` reaches the `RenderingServer`.
+static func _extract(
+	body: SpacesimSceneBody, seed_value: int, radius: float, resolution: int, removals: Array
+) -> void:
+	body.irregular_arrays = SpacesimBlobShape.arrays(seed_value, radius, resolution, removals)
+
+
+## **Publish a finished extraction, on the main thread.** No stall and no hole: until this lands the body is its own
+## point of light, sized to the disc it would have had, so the picture improves rather than blinking.
+static func poll(body: SpacesimSceneBody) -> void:
+	if body.irregular_task == -1:
+		return
+	if not WorkerThreadPool.is_task_completed(body.irregular_task):
+		return
+	WorkerThreadPool.wait_for_task_completion(body.irregular_task)
+	body.irregular_task = -1
+	var surface: Array = body.irregular_arrays
+	body.irregular_arrays = []
+	var shape := SpacesimBlobShape.mesh_from(surface)
+	if shape == null:
+		return
+	body.solid_mesh = shape
+	body.mesh.mesh = shape
+	# **Counted once, from the mesh that is drawn**, so the HUD's total includes a rock and a static mesh needs no
+	# walk to be counted from.
+	body.static_triangles = shape.get_faces().size() / 3
+	# **The altitude datum arrives with the shape.** Until now the body was a sphere to `surface_distance_mesh`,
+	# which is right at the distance its geometry was not worth; from here it answers with its own vertices.
+	if body.scale_body != null:
+		body.scale_body.surface = SpacesimSurfacePoints.new(
+			surface[Mesh.ARRAY_VERTEX], body.radius * 0.12
+		)
+	body.irregular_built = true
 
 
 ## **The body in the debug view — its own mesh, as lines.**

@@ -53,6 +53,14 @@ var static_triangles := 0
 ## `wire_mesh` is built the first time a wireframe view asks for it, so a debug view is not a cost every rock pays.
 var solid_mesh: ArrayMesh
 var wire_mesh: ArrayMesh
+## **Whether this body's shape has been extracted yet**, and the pool task doing it. **False at build** — a body
+## below the potato radius is placed at scene load and extracted only when the eye is close enough to resolve it
+## (`SpacesimIrregularBody.RESOLVE_PIXELS`), which is the LOD principle and the difference between a ten-second
+## load and a system that starts at once.
+var irregular_built := false
+var irregular_task := -1
+## Where a worker leaves the extracted arrays, and where the main thread picks them up when the task is joined.
+var irregular_arrays: Array = []
 ## **The chunks taken out of this body**, as `[centre: Vector3, reach: float]` in BODY RADII. The shape is the
 ## seed plus this list, so mining is state and not a mesh: the mesh is rebuilt from it, `radius_at` follows it,
 ## and a save carries the holes rather than the geometry. Empty on a body nothing has been mined from.

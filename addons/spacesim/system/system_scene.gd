@@ -1278,15 +1278,23 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		var screen := SpacesimLod.screen_radius_pixels(energy, pixel)
 		var is_point: bool = screen < SpacesimLod.POINT_TIER_SCREEN_RADIUS
 		# **An irregular body has no level to choose.** Its mesh is generated once and is the same mesh at every
-		# distance, so the only thing a distance can change is whether it is a disc or a point of light. There is
-		# no walk to gate, no decks, no air, no field and no star-facing uniform — the engine's own light does the
-		# shading — so it leaves here rather than being switched off piece by piece below.
+		# distance, so the only things a distance can change are whether it is a disc and whether its shape has been
+		# extracted yet. There is no walk to gate, no decks, no air, no field and no star-facing uniform — the
+		# engine's own light does the shading — so it leaves here rather than being switched off piece by piece.
 		if body.irregular:
-			body.mesh.visible = not is_point
-			SpacesimIrregularBody.show_wireframe(body, wireframe)
+			SpacesimIrregularBody.poll(body)
+			# **Extracted when the eye is close enough to resolve it, and not before.** The threshold is half the point
+			# tier, so the work starts while the body is still a splat and is finished before the handover.
+			if not body.irregular_built and screen >= SpacesimIrregularBody.RESOLVE_PIXELS:
+				SpacesimIrregularBody.request(body)
+			body.mesh.visible = body.irregular_built and not is_point
+			if body.mesh.visible:
+				SpacesimIrregularBody.show_wireframe(body, wireframe)
 			if body.point != null:
-				body.point.visible = is_point
-				if is_point:
+				# **The splat stands in for the geometry until there is some**, so a body is never a hole while it is being
+				# extracted — the same publish-over rule the patch walk and the cloud maps follow.
+				body.point.visible = is_point or not body.irregular_built
+				if body.point.visible:
 					_place_point(body, observer, energy, distance, pixel, screen, camera)
 			continue
 		# How much of the air this body's shell draws, from the gate below — read again when it is published.
@@ -2198,6 +2206,14 @@ func await_patch_builds(rounds: int = 8) -> void:
 				OS.delay_usec(100)
 			if body.patch_task != -1:
 				waiting = true
+			# **And an irregular body's extraction**, for the same reason a walk is drained here: a pool task still
+			# running after teardown holds the object it writes into, and this project has already paid for that
+			# with a segfault at exit.
+			while body.irregular_task != -1 and not WorkerThreadPool.is_task_completed(body.irregular_task):
+				OS.delay_usec(100)
+			if body.irregular_task != -1:
+				waiting = true
+			SpacesimIrregularBody.poll(body)
 		_poll_walks()
 		_poll_patch_builds()
 		_triangles = _count_drawn_triangles()

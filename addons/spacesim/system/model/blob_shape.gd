@@ -131,6 +131,15 @@ static func normal(balls: Array, noise: FastNoiseLite, removals: Array, point: V
 ##
 ## `removals` is the mined state — see [method field]. Empty is an unmined body.
 static func mesh(seed_value: int, radius: float, resolution := 64, removals := []) -> ArrayMesh:
+	return mesh_from(arrays(seed_value, radius, resolution, removals))
+
+
+## **The extraction on its own, as plain arrays** — the half that a WORKER THREAD may do.
+##
+## `add_surface_from_arrays` is a `RenderingServer` call, so it has to happen on the main thread; the sampling and
+## the net are arithmetic and do not. Splitting them is what lets a body be extracted while the frame keeps
+## running, which is the only way a lazily-built rock can appear without the frame stalling for a second.
+static func arrays(seed_value: int, radius: float, resolution := 64, removals := []) -> Array:
 	var balls := balls(seed_value)
 	var n := maxi(resolution, 8)
 	var noise := noise_for(seed_value, n)
@@ -226,13 +235,21 @@ static func mesh(seed_value: int, radius: float, resolution := 64, removals := [
 					[i - 1, j - 1, k], [i, j - 1, k], [i, j, k], [i - 1, j, k],
 				])
 
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = points
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_INDEX] = indices
+	var surface := []
+	surface.resize(Mesh.ARRAY_MAX)
+	surface[Mesh.ARRAY_VERTEX] = points
+	surface[Mesh.ARRAY_NORMAL] = normals
+	surface[Mesh.ARRAY_INDEX] = indices
+	return surface
+
+
+## **The arrays turned into a mesh, on the MAIN THREAD.** `add_surface_from_arrays` reaches the
+## `RenderingServer`, so this is the half a worker cannot do — see [method arrays].
+static func mesh_from(surface: Array) -> ArrayMesh:
+	if surface.is_empty() or (surface[Mesh.ARRAY_VERTEX] as PackedVector3Array).is_empty():
+		return null
 	var result := ArrayMesh.new()
-	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface)
 	return result
 
 
