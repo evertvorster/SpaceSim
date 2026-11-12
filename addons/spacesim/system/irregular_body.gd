@@ -31,6 +31,11 @@ extends RefCounted
 ## kilometres for rock and ice. Above it the planet mechanism; below it, this one.
 const POTATO_RADIUS := 300000.0
 
+## **The field's grid, in cells across the body.** 64 is the cost/quality compromise `tests/probe_blob_rock.gd`
+## measured: 10,444 triangles and 0.8 s a body at build. That is fine for a handful of moons and **too much for a
+## belt** — a population needs the extraction on a worker thread or the GPU, or a small library of shapes reused.
+const RESOLUTION := 64
+
 
 ## **Is this body drawn by its own mechanism?** Radius decides, because radius is what decides whether gravity
 ## could round a body; a star is always large enough that it never comes up, and is excluded by name because a
@@ -54,7 +59,12 @@ static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
 	body.scale_body = SpacesimScaleBody.new(parent, body.radius)
 	# **The shape is the seed's, not the body's radius alone** — `hash(body.id)` means two 11 km rocks are two
 	# rocks, and the same body is the same rock every load.
-	var shape: ArrayMesh = SpacesimJuliaShape.mesh(hash(body.id), body.radius)
+	#
+	# **A field, not a swept outline**: a few seeded balls fused with a smooth minimum, so a lump is somewhere
+	# rather than all the way round one axis, and a pinch or a crater is not a special case. See
+	# `SpacesimBlobShape` for why and for the cost. The swept Julia (`SpacesimJuliaShape`) is kept as the record
+	# of the first attempt — it is what the flight of 2026-11-12 showed as a ribbed crescent.
+	var shape: ArrayMesh = SpacesimBlobShape.mesh(hash(body.id), body.radius, RESOLUTION)
 	var material := material_for(body)
 	var mesh := MeshInstance3D.new()
 	mesh.name = "%sSurface" % body.name
@@ -86,7 +96,7 @@ static func show_wireframe(body: SpacesimSceneBody, wire: bool) -> void:
 	if body.mesh == null or body.solid_mesh == null:
 		return
 	if wire and body.wire_mesh == null:
-		body.wire_mesh = SpacesimJuliaShape.mesh(hash(body.id), body.radius, 1, true)
+		body.wire_mesh = SpacesimBlobShape.wire_mesh(body.solid_mesh)
 	body.mesh.mesh = body.wire_mesh if wire else body.solid_mesh
 	body.mesh.material_override = (
 		SpacesimBodyRenderer.wireframe_material() if wire else body.mesh_material
@@ -102,7 +112,7 @@ static func show_wireframe(body: SpacesimSceneBody, wire: bool) -> void:
 ##
 ## **The datum stays the sphere, deliberately, for stage 1.** `SpacesimScaleBody` answers altitude and proximity
 ## from `body.radius`, so standing on a lump is wrong by up to the lump's height. The shape's own datum
-## (`SpacesimJuliaShape.radius_at`) is the fix and it belongs with landing, not with placing — see the vault's
+## (`SpacesimBlobShape.radius_at`) is the fix and it belongs with landing, not with placing — see the vault's
 ## small-bodies note, §5c.
 static func material_for(body: SpacesimSceneBody) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()

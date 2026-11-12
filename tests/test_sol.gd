@@ -346,10 +346,11 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 
 	var arrays: Array = (phobos.mesh.mesh as ArrayMesh).surface_get_arrays(0)
 	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var grid := SpacesimJuliaShape.OUTLINE_POINTS * SpacesimJuliaShape.RINGS
-	h.check(vertices.size() == grid,
-		"its mesh is the sweep's own grid of %d vertices, not an icosphere's" % vertices.size())
-	var generated: Array = SpacesimJuliaShape.mesh(hash("moon:phobos"), phobos.radius).surface_get_arrays(0)
+	var generated: Array = SpacesimBlobShape.mesh(
+		hash("moon:phobos"), phobos.radius, SpacesimIrregularBody.RESOLUTION
+	).surface_get_arrays(0)
+	h.check(vertices.size() > 500 and vertices.size() == (generated[Mesh.ARRAY_VERTEX] as PackedVector3Array).size(),
+		"its mesh comes from the field's extraction, not from an icosphere (%d vertices)" % vertices.size())
 	h.check(generated[Mesh.ARRAY_VERTEX] == vertices,
 		"and every vertex is the generated surface — this is the check the last attempt never had")
 
