@@ -209,8 +209,8 @@ and otherwise leaves it alone.
 
 | Member | |
 |---|---|
-| `POTATO_RADIUS` | `300000.0` m — below it a body kept the shape it accreted. **Radius decides, and it is the only rule**: a belt's fragments are automatic rather than a kind somebody has to author, and it is the same rule the relief law carries |
-| `static is_irregular(body) -> bool` | radius, and a star is excluded by name (a star's mesh is its photosphere, not a ground) |
+| `static rounding_radius(content, materials) -> float` | **how big a body of THIS material has to be before its own gravity rounds it** — `R = sqrt(3·strength / (2·π·G·ρ²))`, from the central pressure of a uniform sphere against the material's yield strength. **Derived, because one constant cannot be right for both**: ice (2 MPa) rounds at 130 km and rock (100 MPa) at 384 km, which is why Mimas at 198 km is a sphere and Amalthea at 83 km is a lump. The strength is the largest solid share's (`SpacesimSpecies.strength`); `POTATO_RADIUS` 300 km is only the fallback for a material that states none, and the boundary is a band rather than a number |
+| `static is_irregular(body, materials) -> bool` | that radius against the body's own, with a star excluded by name (a star's mesh is its photosphere, not a ground) |
 | `static build(parent, body) -> void` | **places** the body and nothing more: node, material, a point of light, and a sphere for the travel unit. **Nothing is extracted here** — a small moon is built when it is placed and shaped when the eye is close enough to resolve it |
 | `static request(body) -> void` | asks the worker pool for the extraction, once, capturing the values rather than reading members on the worker, so a removal that lands meanwhile cannot change a shape already described |
 | `static poll(body) -> void` | publishes a finished extraction **on the main thread** (`add_surface_from_arrays` reaches the `RenderingServer`), and with it the altitude datum — the vertex bin the mesh needs |

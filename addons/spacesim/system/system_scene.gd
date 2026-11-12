@@ -560,7 +560,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# one. Evert, 2026-11-08: *"I think what went wrong is that we tried to re-use planets mechanism, and these
 	# smaller bodies are something fundamentally different."* Nothing below this line runs for one, so there is no
 	# walk to lose its vertices in, no field to displace it, and no switch for any of the code further down to read.
-	if SpacesimIrregularBody.is_irregular(body):
+	if SpacesimIrregularBody.is_irregular(body, _materials()):
 		SpacesimIrregularBody.build(body.node, body)
 		return
 

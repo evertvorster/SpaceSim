@@ -27,9 +27,13 @@ extends RefCounted
 ## calls at build time and one shared mesh per distinct seed — not a per-frame cost and not a per-instance one.
 ## Nothing here draws per tick, and nothing here is a function of the eye, which is what keeps that open.
 
-## **The radius below which a body was never rounded by its own gravity** — the *potato radius*, a few hundred
-## kilometres for rock and ice. Above it the planet mechanism; below it, this one.
+## **The radius below which a body was never rounded by its own gravity** — the *potato radius*. Above it the planet
+## mechanism; below it, this one.
+##
+## **Derived, not authored** — see [method rounding_radius]. This constant is only the fallback for a body whose
+## material states no strength, and 300 km is the rock value it has always been.
 const POTATO_RADIUS := 300000.0
+const G := 6.6743e-11
 
 ## **The field's grid, in cells across the body.** 64 is the cost/quality compromise `tests/probe_blob_rock.gd`
 ## measured: 10,444 triangles and 0.8 s a body at build. That is fine for a handful of moons and **too much for a
@@ -42,15 +46,59 @@ const RESOLUTION := 64
 const RESOLVE_PIXELS := 2.0
 
 
-## **Is this body drawn by its own mechanism?** Radius decides, because radius is what decides whether gravity
-## could round a body; a star is always large enough that it never comes up, and is excluded by name because a
-## star's mesh is its photosphere rather than a ground.
-static func is_irregular(body: SpacesimSceneBody) -> bool:
+## **How big a body of this material has to be before its own gravity rounds it.**
+##
+## The central pressure of a uniform sphere is `(2/3) pi G rho^2 R^2`; a body relaxes into a sphere once that
+## exceeds its own yield strength, so
+##
+##     R = sqrt(3 * strength / (2 * pi * G * rho^2))
+##
+## **This is why radius alone was not enough.** Evert, 2026-11-12: *"Lets add the round moons as well."* Mimas is
+## 198 km and perfectly round, and Amalthea is 83 km and a lump — one constant cannot be right for both, because
+## ice is far weaker than rock. Ice (2 MPa) rounds at 129 km and rock (100 MPa) at 338 km, and the inventory lands
+## where the facts say: Mimas round, Amalthea not.
+##
+## The strength is the **largest solid share's** — a mix is decided by whichever material is the body's bulk, and
+## the boundary is a band rather than a number, so a second decimal place here would be false precision.
+static func rounding_radius(content: SpacesimSystemBody, materials: SpacesimMaterialTable) -> float:
+	if content == null or materials == null:
+		return POTATO_RADIUS
+	var species := _bulk_solid(content, materials)
+	if species == null or species.strength <= 0.0 or species.density <= 0.0:
+		return POTATO_RADIUS
+	return sqrt(3.0 * species.strength / (2.0 * PI * G * species.density * species.density))
+
+
+## The material that makes up most of a body: its surface coverage where it has one, else its layer composition.
+static func _bulk_solid(content: SpacesimSystemBody, materials: SpacesimMaterialTable) -> SpacesimSpecies:
+	var shares: Dictionary = {}
+	if content.surface != null:
+		shares = content.surface.coverage
+	if shares.is_empty():
+		for layer in content.layers:
+			for name in layer.composition:
+				shares[name] = float(shares.get(name, 0.0)) + layer.composition[name]
+	var best := ""
+	var best_share := 0.0
+	for name in shares:
+		var species := materials.by_name(name)
+		if species == null or species.domain != SpacesimSpecies.Domain.SOLID:
+			continue
+		if float(shares[name]) > best_share:
+			best_share = float(shares[name])
+			best = name
+	return materials.by_name(best) if best != "" else null
+
+
+## **Is this body drawn by its own mechanism?** Its own radius against its own material's rounding radius decides,
+## because that is what decides whether gravity could round it; a star is excluded by name because a star's mesh is
+## its photosphere rather than a ground.
+static func is_irregular(body: SpacesimSceneBody, materials: SpacesimMaterialTable) -> bool:
 	return (
 		body.radius > 0.0
-		and body.radius < POTATO_RADIUS
 		and body.content != null
 		and body.content.kind != SpacesimSystemBody.Kind.STAR
+		and body.radius < rounding_radius(body.content, materials)
 	)
 
 

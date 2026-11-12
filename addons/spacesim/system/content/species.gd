@@ -10,6 +10,11 @@ enum Domain { SOLID, LIQUID, GAS }
 @export var density: float = 0.0 ## kg/m3 at the relevant phase
 @export var molar_mass: float = 0.0 ## g/mol
 @export var albedo: float = 0.0 ## Bond albedo of the material
+## **Yield strength, pascals** — how much stress the substance carries before it flows. It is what decides
+## whether a body of this material was ever rounded by its own gravity (see
+## [method SpacesimIrregularBody.rounding_radius]) and it is the number a mining mechanism would cut against.
+## **Zero means not known**, and an unknown strength falls back to the rock default rather than inventing one.
+@export var strength: float = 0.0
 @export var color: Color = Color.GRAY
 ## Wavelength-dependent Rayleigh scattering scale, one per channel, in **square metres per
 ## molecule** at the three channel wavelengths (red, green, blue). The sky derivation sums each

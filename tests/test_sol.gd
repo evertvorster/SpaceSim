@@ -62,9 +62,9 @@ func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 	h.check(sol.system_name() == "Sol", "named after its star: '%s'" % sol.system_name())
 	h.check(sol.epoch == "2000-01-01T12:00:00", "at the J2000 epoch")
 	h.check(
-		sol.bodies.size() == 29,
-		"the Sun, eight planets and twenty moons — Jupiter's four small ones and Saturn's seven joined on "
-		+ "2026-11-12 (%d)" % sol.bodies.size()
+		sol.bodies.size() == 40,
+		"the Sun, eight planets and thirty-one moons — the small ones and then Saturn's and Uranus's round ones "
+		+ "joined on 2026-11-12 (%d)" % sol.bodies.size()
 	)
 
 	var star := sol.star()
@@ -83,9 +83,8 @@ func _test_shape(h, sol: SpacesimSolarSystem) -> void:
 		if body.landable:
 			landable += 1
 	h.check(
-		landable == 24,
-		"twenty-four landable bodies: four planets and twenty moons, eleven of them shapes that are not spheres (%d)"
-			% landable
+		landable == 35,
+		"thirty-five landable bodies: four planets and thirty-one moons (%d)" % landable
 	)
 
 
@@ -264,6 +263,18 @@ func _test_moons(h, sol: SpacesimSolarSystem) -> void:
 		"moon:pandora": [0.62850, "Pandora"],
 		"moon:epimetheus": [0.69433, "Epimetheus"],
 		"moon:janus": [0.69459, "Janus"],
+		# The round moons of Saturn and Uranus.
+		"moon:mimas": [0.94242, "Mimas"],
+		"moon:enceladus": [1.37022, "Enceladus"],
+		"moon:tethys": [1.88780, "Tethys"],
+		"moon:dione": [2.73692, "Dione"],
+		"moon:rhea": [4.51750, "Rhea"],
+		"moon:iapetus": [79.3200, "Iapetus"],
+		"moon:miranda": [1.41348, "Miranda"],
+		"moon:ariel": [2.52038, "Ariel"],
+		"moon:umbriel": [4.14418, "Umbriel"],
+		"moon:titania": [8.70587, "Titania"],
+		"moon:oberon": [13.4632, "Oberon"],
 	}
 	for id in expected:
 		var label: String = expected[id][1]
@@ -279,7 +290,11 @@ func _test_moons(h, sol: SpacesimSolarSystem) -> void:
 			continue
 		var mu := SpacesimKepler.mu_of(parent.mass + moon.mass)
 		var days := SpacesimKepler.period(moon.orbit, mu) / 86400.0
-		h.check_near(days, expected[id][0], "and its period solves to %.4f days" % days, 0.02)
+		# **The tolerance is relative past 20 days**, because the published pair itself only agrees to about 0.02 %:
+		# Iapetus's measured a and period are consistent with each other only to that much, so an absolute 0.02 days
+		# asks the solver to be more accurate than the data it is checked against.
+		var tolerance := maxf(0.02, float(expected[id][0]) * 0.001)
+		h.check_near(days, expected[id][0], "and its period solves to %.4f days" % days, tolerance)
 		# Tidally locked: one face in, so the rotation period IS the orbital period. Half a percent,
 		# because the authored rotation uses the measured period and the solved one comes from the
 		# mean semi-major axis.
@@ -355,6 +370,19 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	if phobos == null or phobos.mesh == null:
 		return
 	h.check(phobos.irregular, "and is drawn by its own mechanism, because 11 km of rock was never rounded")
+
+	# **The boundary is DERIVED per material, and the inventory is what falsifies it.** Evert, 2026-11-12: *"Lets add
+	# the round moons as well."* One constant could not serve both: Mimas is 198 km of ice and is round, Amalthea is
+	# 83 km of rock and is a lump. Ice (2 MPa) rounds at 130 km against rock's 384, and both facts come out right.
+	var materials := SpacesimMaterialTable.engine_table()
+	var mimas := scene.body_by_id("moon:mimas")
+	var amalthea := scene.body_by_id("moon:amalthea")
+	h.check(mimas != null and not mimas.irregular,
+		"Mimas, 198 km of ice, is round — ice rounds at %.0f km"
+			% (SpacesimIrregularBody.rounding_radius(mimas.content, materials) / 1000.0))
+	h.check(amalthea != null and amalthea.irregular,
+		"while Amalthea, 83 km of rock, is still a lump — rock rounds at %.0f km"
+			% (SpacesimIrregularBody.rounding_radius(amalthea.content, materials) / 1000.0))
 	h.check(earth != null and not earth.irregular, "while Earth, which gravity did round, keeps the planet path")
 
 	# **Placed at load, NOT extracted at load.** Evert, 2026-11-12: *"We should only be building them when we get
