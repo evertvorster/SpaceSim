@@ -409,3 +409,29 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 	h.check((phobos.mesh.mesh as ArrayMesh).surface_get_primitive_type(0) == Mesh.PRIMITIVE_TRIANGLES,
 		"and turning the view off gives the solid mesh back, not a wireframe left standing")
 	top_camera.queue_free()
+
+	# **A mined body is the seed plus its removals**, and the datum follows: the surface recedes where the chunk
+	# came out and is untouched everywhere else. This is the property mining will be built on, so it is asserted
+	# before there is a pickaxe rather than after.
+	var seed_value := hash("moon:phobos")
+	var before := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.RIGHT, SpacesimIrregularBody.RESOLUTION
+	)
+	var behind := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.LEFT, SpacesimIrregularBody.RESOLUTION
+	)
+	# **At the surface, not out in space.** A removal is a ball, so one placed beyond the body grazes it and removes
+	# almost nothing — which is what the first version of this asserted, and it reported 4.6 km to 4.4 km.
+	var at_surface := Vector3(before / phobos.radius, 0.0, 0.0)
+	var removals := [[at_surface, 0.25]]
+	var carved := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.RIGHT, SpacesimIrregularBody.RESOLUTION, removals
+	)
+	var still_there := SpacesimBlobShape.radius_at(
+		seed_value, phobos.radius, Vector3.LEFT, SpacesimIrregularBody.RESOLUTION, removals
+	)
+	h.check(carved < before * 0.85 and carved > 0.0,
+		"a chunk taken out of a body takes its surface in (%.1f km to %.1f km)"
+			% [before / 1000.0, carved / 1000.0])
+	h.check(is_equal_approx(still_there, behind),
+		"and the far side of the body is untouched, because a removal is local")

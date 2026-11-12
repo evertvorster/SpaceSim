@@ -53,6 +53,13 @@ var static_triangles := 0
 ## `wire_mesh` is built the first time a wireframe view asks for it, so a debug view is not a cost every rock pays.
 var solid_mesh: ArrayMesh
 var wire_mesh: ArrayMesh
+## **The chunks taken out of this body**, as `[centre: Vector3, reach: float]` in BODY RADII. The shape is the
+## seed plus this list, so mining is state and not a mesh: the mesh is rebuilt from it, `radius_at` follows it,
+## and a save carries the holes rather than the geometry. Empty on a body nothing has been mined from.
+##
+## Nothing writes it yet — mining is not built — but the generator takes it now, because a signature that grows a
+## parameter later is a rewrite of every caller on the day the feature lands.
+var removals: Array = []
 var sea_level := 0.0
 ## **The field's measured extremes for this body** — `quantiles[0]` and `quantiles[last]`, which are NOT ±1: the
 ## shares are summed and the warp pushes past the normaliser, so Earth measures **-1.139 to +1.516**. The translation

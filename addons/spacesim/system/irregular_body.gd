@@ -64,7 +64,9 @@ static func build(parent: Node3D, body: SpacesimSceneBody) -> void:
 	# rather than all the way round one axis, and a pinch or a crater is not a special case. See
 	# `SpacesimBlobShape` for why and for the cost. The swept Julia (`SpacesimJuliaShape`) is kept as the record
 	# of the first attempt — it is what the flight of 2026-11-12 showed as a ribbed crescent.
-	var shape: ArrayMesh = SpacesimBlobShape.mesh(hash(body.id), body.radius, RESOLUTION)
+	var shape: ArrayMesh = SpacesimBlobShape.mesh(
+		hash(body.id), body.radius, RESOLUTION, body.removals
+	)
 	var material := material_for(body)
 	var mesh := MeshInstance3D.new()
 	mesh.name = "%sSurface" % body.name

@@ -37,9 +37,24 @@ const BALLS := 6
 ## much and the balls melt into something convex.
 const SMOOTH := 0.25
 ## **The grid's margin, in body radii.** The balls are normalised so the furthest surface point is exactly 1.0,
-## so every sample outside this is outside the body — which is what keeps the extracted surface off the grid's
-## own boundary, and a surface that never touches the boundary is closed.
-const MARGIN := 1.12
+## and the roughness below can push it out by `ROUGHNESS * 1.875` — so this must exceed that sum, and a surface
+## that touches the grid's own boundary is a surface with a hole in it.
+const MARGIN := 1.18
+
+## **The shape is rough, not a smooth blob.** A smooth minimum of six spheres is C1 continuous: there is no
+## crease anywhere, so the normals are smooth and the body reads as a melted thing however finely it is meshed.
+## The relief is a fractal **subtracted from the field**, so it is a function of POSITION and not of the mesh —
+## re-extracting at another resolution, or after a chunk is mined out, gives the same rock sampled differently
+## rather than a different rock.
+##
+## In body radii, per octave, and the octaves are bounded by the grid (see `_octaves_for`): an octave finer than
+## three cells aliases into the extraction rather than shaping it. 0.04 with a fractal gain of 0.5 sums to about
+## 0.075 of the radius — 830 m on Phobos, which is the scale its real grooves and crater rims sit at.
+const ROUGHNESS := 0.04
+## The broadest roughness feature, in body radii — about two features across the body, before the octaves halve it.
+const ROUGHNESS_WAVELENGTH := 0.45
+## How many octaves the field may carry. The grid decides how many of them can be represented; this is the cap.
+const ROUGHNESS_OCTAVES := 5
 ## The cube's twelve edges, as corner-index pairs. A corner's index is `dx + 2*dy + 4*dz`.
 const EDGES := [
 	Vector2i(0, 1), Vector2i(2, 3), Vector2i(4, 5), Vector2i(6, 7),
@@ -77,23 +92,35 @@ static func balls(seed_value: int) -> Array:
 
 ## **The signed distance to the body's surface**, in body radii — negative inside, positive outside.
 ##
-## Takes the balls rather than the seed because it is called once per grid corner: recomputing them per sample
-## would be most of the cost of the whole extraction.
-static func field(balls: Array, point: Vector3) -> float:
+## Takes the balls and the noise rather than the seed because it is called once per grid corner: rebuilding either
+## per sample would be most of the cost of the whole extraction.
+##
+## **`removals` is what mining changes.** Each entry is `[centre: Vector3, reach: float]` in body radii, and the
+## field is cut by it — `max(field, reach - distance)`, which makes the inside of that ball OUTSIDE the body. That
+## is the whole of "take a chunk out": the shape is the seed plus the removals, so the save holds a list of holes
+## rather than a mesh, and `radius_at` follows the new surface with no second bookkeeping.
+static func field(balls: Array, noise: FastNoiseLite, removals: Array, point: Vector3) -> float:
 	var result := 1.0e9
 	for ball in balls:
 		result = _smooth_min(result, point.distance_to(ball[0]) - ball[1])
+	if noise != null:
+		result -= ROUGHNESS * noise.get_noise_3d(point.x, point.y, point.z)
+	for removal in removals:
+		result = maxf(result, float(removal[1]) - point.distance_to(removal[0]))
 	return result
 
 
 ## **The surface's outward direction at a point** — the field's gradient, which is exact rather than differenced
 ## off triangles: three central differences, so six field evaluations.
-static func normal(balls: Array, point: Vector3) -> Vector3:
+static func normal(balls: Array, noise: FastNoiseLite, removals: Array, point: Vector3) -> Vector3:
 	var step := 0.002
 	var gradient := Vector3(
-		field(balls, point + Vector3(step, 0.0, 0.0)) - field(balls, point - Vector3(step, 0.0, 0.0)),
-		field(balls, point + Vector3(0.0, step, 0.0)) - field(balls, point - Vector3(0.0, step, 0.0)),
-		field(balls, point + Vector3(0.0, 0.0, step)) - field(balls, point - Vector3(0.0, 0.0, step))
+		field(balls, noise, removals, point + Vector3(step, 0.0, 0.0))
+			- field(balls, noise, removals, point - Vector3(step, 0.0, 0.0)),
+		field(balls, noise, removals, point + Vector3(0.0, step, 0.0))
+			- field(balls, noise, removals, point - Vector3(0.0, step, 0.0)),
+		field(balls, noise, removals, point + Vector3(0.0, 0.0, step))
+			- field(balls, noise, removals, point - Vector3(0.0, 0.0, step))
 	)
 	return gradient.normalized()
 
@@ -101,9 +128,12 @@ static func normal(balls: Array, point: Vector3) -> Vector3:
 ## **The body as a mesh**, `resolution` cells across its bounding cube. Every vertex is on the field's isosurface
 ## because that is where the extraction puts it, so a finer grid is a finer sampling of the same body — which is
 ## the property subdivision needs.
-static func mesh(seed_value: int, radius: float, resolution := 64) -> ArrayMesh:
+##
+## `removals` is the mined state — see [method field]. Empty is an unmined body.
+static func mesh(seed_value: int, radius: float, resolution := 64, removals := []) -> ArrayMesh:
 	var balls := balls(seed_value)
 	var n := maxi(resolution, 8)
+	var noise := noise_for(seed_value, n)
 	var step := 2.0 * MARGIN / float(n)
 	var side := n + 1
 	var values := PackedFloat32Array()
@@ -114,7 +144,7 @@ static func mesh(seed_value: int, radius: float, resolution := 64) -> ArrayMesh:
 			var y := -MARGIN + step * float(j)
 			for i in side:
 				var x := -MARGIN + step * float(i)
-				values[(k * side + j) * side + i] = field(balls, Vector3(x, y, z))
+				values[(k * side + j) * side + i] = field(balls, noise, removals, Vector3(x, y, z))
 
 	# --- one vertex per cell the surface crosses -------------------------------------------------------
 	var cell_vertex := PackedInt32Array()
@@ -161,7 +191,7 @@ static func mesh(seed_value: int, radius: float, resolution := 64) -> ArrayMesh:
 				)
 				cell_vertex[(k * n + j) * n + i] = points.size()
 				points.append(here * radius)
-				normals.append(normal(balls, here))
+				normals.append(normal(balls, noise, removals, here))
 
 	# --- a quad around every grid edge whose ends differ in sign ----------------------------------------
 	var indices := PackedInt32Array()
@@ -235,15 +265,24 @@ static func wire_mesh(mesh: ArrayMesh) -> ArrayMesh:
 ## **How far the body reaches in a direction** — the datum question, answered by marching the field inward from
 ## outside it. Sphere tracing: every step is the field's own value, which is the distance to the surface, so it
 ## cannot step past it.
-static func radius_at(seed_value: int, radius: float, direction: Vector3) -> float:
+## **The noise is built for the resolution, and both the drawn mesh and this must use the same one** — the
+## band limit decides which octaves exist, so a datum asked with another resolution would answer about a
+## slightly different surface. The builder has one `RESOLUTION` and passes it to both.
+static func radius_at(
+	seed_value: int, radius: float, direction: Vector3, resolution := 64, removals := []
+) -> float:
 	var balls := balls(seed_value)
+	var noise := noise_for(seed_value, maxi(resolution, 8))
 	var dir := direction.normalized()
 	var t := MARGIN * 1.6
-	for _step in 64:
-		var value := field(balls, dir * t)
+	# **The roughness makes the field no longer a true distance** — its gradient can exceed 1 — so a sphere
+	# trace that stepped by the field's full value could step past the surface. The safety factor is the price of
+	# having relief at all, and 128 steps is what it costs to keep converging.
+	for _step in 128:
+		var value := field(balls, noise, removals, dir * t)
 		if value <= 0.0:
 			return t * radius
-		t -= value
+		t -= maxf(value * 0.8, 0.001)
 		if t <= 0.0:
 			break
 	return maxf(t, 0.0) * radius
@@ -283,6 +322,26 @@ static func _emit_triangle(
 ## A corner's offset within its cell, from the index `dx + 2*dy + 4*dz`.
 static func _corner(corner: int) -> Vector3:
 	return Vector3(float(corner & 1), float((corner >> 1) & 1), float((corner >> 2) & 1))
+
+
+## **The roughness generator for a grid.** Seeded from the body, so the same rock is the same rock; the octave
+## count follows the CELL SIZE, because an octave finer than three cells is aliased into the extraction instead
+## of shaping it — which is the same rule the surface shader follows, one resolution down.
+static func noise_for(seed_value: int, resolution: int) -> FastNoiseLite:
+	var cell := 2.0 * MARGIN / float(maxi(resolution, 8))
+	var octaves := 1
+	var wavelength := ROUGHNESS_WAVELENGTH
+	while octaves < ROUGHNESS_OCTAVES and wavelength * 0.5 >= 3.0 * cell:
+		wavelength *= 0.5
+		octaves += 1
+	var noise := FastNoiseLite.new()
+	noise.seed = seed_value
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = 1.0 / ROUGHNESS_WAVELENGTH
+	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
+	noise.fractal_octaves = octaves
+	noise.fractal_gain = 0.5
+	return noise
 
 
 ## The polynomial smooth minimum: `min(a, b)` where the two are further apart than `SMOOTH`, rounding the join
