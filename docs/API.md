@@ -987,7 +987,7 @@ on change (`camera.fov`, the marker pool and font size).
 | `hud.debug` | player | **true** — the information block in the top left, which is **diagnostics now**: system, player, date, settings path, mode, nearest, local unit, state and the mesh's counts. **The ship's own readings live in the strip** (altitude, speed, throttle, target, frame), not here — the strip is the flying view's instrument panel and the block is what replaces it when asked for. Off hides the label, which is the point — the block is what a developer reads and a player stops seeing |
 | `hud.fps` | player | **true** — the frame rate, top right |
 | `hud.key_hints` | player | **true** — the three lines of key reminders under the readout. Read from the bindings, so a rebound key is right here without anyone editing text; off is a HUD with no reminders in it |
-| `markers.pool_size` | player | 12 |
+| `markers.pool_size` | player | **24** — how many markers the pool holds. It is a budget for **details**: the places in a system (the star and the planets) are always marked and the pool grows to fit them, so this number only decides how many moons and mission targets get a name. Doubled from 12 on 2026-11-12, which could not name a planet's moons while you flew among them |
 | `markers.font_size` | player | 17 — the HUD's own size, so markers read as part of the screen |
 | `markers.margin` | player | 24.0 — breathing room; labels are fitted inside it, so it is not the clearance a clamped pointer needed |
 | `markers.selected_color` | player | `Color(1.0, 0.9, 0.3)` — the one thing on the overlay that stands out, so it can be made to stand out against what it is seen against |
