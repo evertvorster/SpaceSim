@@ -27,7 +27,9 @@ enum Priority { CONTEXT = 0, PRIMARY = 1, MISSION = 2, SELECTED = 3 }
 
 const Overlay := preload("res://addons/spacesim/navigation/overlay.gd")
 
-const DEFAULT_POOL_SIZE := 12
+## **Twelve was too few to name a planet's moons while flying among them** — Evert, 2026-11-12: *"you can
+## double the size of the limit to how many bodies can be shown."* Kept in step with the setting's default.
+const DEFAULT_POOL_SIZE := 24
 
 ## A projection is only meaningful on screen; anything past this is behind the camera or beside it,
 ## and both cases want the same thing — a line from the edge in the right direction.
@@ -356,21 +358,20 @@ func _gather(list: Array[Dictionary], nodes: Array[Node3D], priority: int, eye: 
 		list.append({"node": node, "priority": rank, "distance": eye.distance_to(node.global_position)})
 
 
-## **What an ambient object is worth naming from here** — `-1` for not at all.
+## **What an ambient object is worth** — a place, or a detail.
 ##
-## A **primary** (the star, a planet, anything that is not a moon) is always worth it: it is a place, and distance is
-## exactly when its name is what you want. `orbits` holds only moons, so the test is its absence.
+## A **primary** (the star, a planet, anything that is not a moon) is a place and is marked whatever the distance:
+## `orbits` holds only moons, so the test is its absence.
 ##
-## A **moon** is marked only when it is the **nearer of the two things you can name**, itself and the body it orbits.
-## Evert, 2026-11-12: *"Moons and such can be hidden when they are far away, but the body they are orbiting should be
-## marked."* One comparison says exactly that: from outside a system its moons are behind their planet, and inside
-## it they are in front, so the labels are the ones you are actually near.
-func _context_priority(node: Node3D, eye: Vector3) -> int:
-	var parent: SpacesimSceneBody = orbits.get(node, null)
-	if parent == null or parent.node == null:
+## A **moon** is a detail, and which details are worth naming is decided by the distance ordering in
+## [method choose] — the nearest fill what the pool has left after the places have taken their slots. Evert,
+## 2026-11-12: *"when close to a body, I might be flying in between the moons, so I want the list of moons to be
+## marked to be calculated from the moons that are closest to me."* So there is no gate on a moon here: a moon that
+## is nearer than its planet is a moon you may be flying past, and a moon farther than its planet is still the one
+## you are heading for from the other side.
+func _context_priority(node: Node3D, _eye: Vector3) -> int:
+	if orbits.get(node, null) == null:
 		return Priority.PRIMARY
-	if eye.distance_to(node.global_position) > eye.distance_to(parent.node.global_position):
-		return -1
 	return Priority.CONTEXT
 
 

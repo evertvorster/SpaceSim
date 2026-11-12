@@ -19,7 +19,7 @@ func run(h, root: Node) -> void:
 	_test_a_moon_gives_up_its_label_only_when_crowded(h, root)
 	_test_a_projection_in_a_subviewport_is_converted(h)
 	_test_a_place_has_no_range_limit(h, root)
-	_test_a_moon_yields_to_the_body_it_orbits(h, root)
+	_test_the_nearest_moons_are_marked(h, root)
 
 
 func _test_keyed_union(h) -> void:
@@ -416,33 +416,43 @@ func _test_a_place_has_no_range_limit(h, root: Node) -> void:
 	container.free()
 
 
-## **A moon is marked only when it is the nearer of the two things you could name.**
+## **The moons that are marked are the ones nearest the eye.**
 ##
-## Evert, 2026-11-12: *"Moons and such can be hidden when they are far away, but the body they are orbiting should be
-## marked."* From outside a system its moons are behind their planet; inside it they are in front.
-func _test_a_moon_yields_to_the_body_it_orbits(h, root: Node) -> void:
+## Evert, 2026-11-12: *"when close to a body, I might be flying in between the moons, so I want the list of moons to be
+## marked to be calculated from the moons that are closest to me."* The places take their slots first and the rest of
+## the pool goes to details in distance order — so a moon behind its planet is still marked when it is the near one,
+## and a moon far off is not.
+func _test_the_nearest_moons_are_marked(h, root: Node) -> void:
 	var container := Node3D.new()
 	root.add_child(container)
 	var markers := Markers.new()
 	container.add_child(markers)
 
 	var planet := Node3D.new()
-	planet.position = Vector3(1000.0, 0.0, 0.0)
+	planet.position = Vector3(5000.0, 0.0, 0.0)
 	container.add_child(planet)
-	var moon := Node3D.new()
-	moon.position = Vector3(900.0, 0.0, 0.0)
-	container.add_child(moon)
 	var body := SpacesimSceneBody.new()
 	body.node = planet
-	markers.orbits[moon] = body
 
-	markers.context_targets = [planet, moon]
-	# **Inside the planet's neighbourhood**: the moon is nearer than the planet, so it is worth naming.
-	var inside := markers._candidates(Vector3.ZERO)
-	h.check(inside.size() == 2, "both the planet and its moon are candidates from nearby")
+	markers.context_targets = [planet]
+	var moons: Array[Node3D] = []
+	for index in 6:
+		var moon := Node3D.new()
+		# 100 m, 200 m ... out from the eye, and all of them nearer than the planet except the last two.
+		moon.position = Vector3(100.0 * float(index + 1), 0.0, 0.0)
+		container.add_child(moon)
+		markers.orbits[moon] = body
+		moons.append(moon)
+		markers.context_targets.append(moon)
 
-	# **From outside**: the planet is in front of its moon, so only the planet is named.
-	var outside := markers._candidates(Vector3(1.0e12, 0.0, 0.0))
-	h.check(outside.size() == 1 and outside[0]["node"] == planet,
-		"and from outside the system only the planet is marked, not its moon")
+	var gathered := markers._candidates(Vector3.ZERO)
+	var chosen := Markers.choose(gathered, 4)
+	var picked: Array = []
+	for entry in chosen:
+		picked.append(entry["node"])
+	h.check(picked.size() == 4 and picked[0] == planet,
+		"the planet is a place, so it is marked even though every moon is nearer")
+	h.check(picked.has(moons[0]) and picked.has(moons[1]) and picked.has(moons[2]),
+		"and the pool goes to the three NEAREST moons (%d marked)" % picked.size())
+	h.check(not picked.has(moons[5]), "not to the furthest one")
 	container.free()

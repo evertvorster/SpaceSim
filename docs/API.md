@@ -845,9 +845,10 @@ nothing is free: an overlapping label still says where something is, and a missi
 wrong for *places*: a system full of nearby moons spent the whole budget and the star fell off the list past a few
 hundred gigametres, a distance limit nobody had written as one. `Priority.PRIMARY` is the tier for anything that is
 not a moon — the star, the planets — and the cap is `max(pool_size, primaries)`, so the marker pool grows to fit the
-places in the system. A **moon** is a candidate only when it is the nearer of itself and the body it orbits, which is
-Evert's rule (2026-11-12): *"Moons and such can be hidden when they are far away, but the body they are orbiting
-should be marked."*
+places in the system. A **moon** is a detail with no gate of its own: which moons are named is decided by the distance ordering, so the
+nearest fill whatever the pool has left after the places. Evert, 2026-11-12: *"when close to a body, I might be
+flying in between the moons, so I want the list of moons to be marked to be calculated from the moons that are
+closest to me"* — and the default pool is 24, because twelve could not name a planet's moons while flying among them.
 
 ### A moon gives up its label, not its ring — but only where the two compete
 
