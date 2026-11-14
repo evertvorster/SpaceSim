@@ -133,7 +133,8 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 
 | Class | |
 |---|---|
-| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_direction`, `start_world_time`, `bodies`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
+| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_direction`, `start_world_time`, `bodies`, `populations`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
+| `SpacesimPopulation` | `content/population.gd` — **a swarm of small bodies that is not a body**: the asteroid belt, a ring. `id`, `display_name`, `parent_id` (empty means the primary star, so a ring is the same type with a planet as its parent), `seed_value`, `composition`, `semi_major_axis` (Vector2, metres), `inclination` (Vector2, degrees — **this is the belt's thickness**, not a per-fragment tilt), `reference_size`, `count` (**fragments at or above `reference_size`** — Sol's published figure is 1.1 million above 1 km, and the addressable count at the 10 m floor follows from `size_index`), `size_index` (cumulative `N(>D) ∝ D^-index`, Dohnanyi's 2.5), `size_floor` (**the smallest fragment that exists at all**; below it the material is dust and part of no object) and `size_ceiling`. A population is a **distribution, not a list** — see `SpacesimPopulationField` |
 | `SpacesimSystemBody` | `content/system_body.gd` — one body: `id`, `display_name`, `kind`, `parent_id`, `primary`, `radius`, `mass`, `internal_heat_flux` (**W/m2 of radiogenic and primordial heat, added to the absorbed flux before the equilibrium temperature's fourth root** — Jupiter's 5.44 against 6.25 of sunlight takes it from 102 K to 120 K; **authored, because nothing in an orbit or an atmosphere yields it**, and zero for the rocky bodies), `rotation_period`, `axial_tilt`, `layers`, `orbit`, `fixed_position`, `atmosphere`, `surface`, `clouds`, `overrides`, `landable`, `significant` |
 | `SpacesimLayer` | `content/layer.gd` — `layer_name`, `radius` (outer boundary), `composition` |
 | `SpacesimOrbit` | `content/orbit.gd` — the six Keplerian elements, degrees. **`mean_anomaly_at_epoch = 0.0` means "derive it"**, the same convention `mass = 0.0` uses: the phase comes from the body's own address (a shift of one turn's fraction of the period), so a whole planet's moons are not on one straight line out of it and nothing is authored. The planets keep their real J2000 values, which is why the shift is conditional on the authored value being zero |
@@ -159,7 +160,7 @@ body with no `orbit` is fixed, so "orbiting *and* fixed" cannot happen rather th
 reference values for condensables), layer boundaries that do not ascend with the outermost equal to
 the body radius, layer or surface fractions that are empty where they are required, a body that is
 its own parent, a parent that is not in the system, a moon of a star, a parent chain that is a
-cycle, a negative rotation period, and an axial tilt outside `[0, 180]`. It reports rather than
+cycle, a negative rotation period, an axial tilt outside `[0, 180]`, and for each **population** a band that is empty or runs backwards, a band that starts inside the body it orbits, an inclination outside `[0, 90]` or backwards, no fragments, a size range that is empty or upside down, and a composition that does not sum to 1. It reports rather than
 corrects: a silently repaired world is a wrong world nobody notices.
 
 A body with **no `orbit` does not move** — it stands at its `fixed_position` — and that is a
@@ -224,6 +225,43 @@ and otherwise leaves it alone.
 **The datum is still the sphere** (`SpacesimScaleBody` answers altitude from `body.radius`), so on a
 lump the altitude is wrong by up to the lump's height. `SpacesimBlobShape.radius_at` is the shape's
 own datum and it belongs with landing rather than with placing.
+
+### `SpacesimPopulationField` — `RefCounted`
+
+**The fragments a population actually has — made up around the observer and forgotten when they leave.**
+Nothing about a fragment is stored anywhere but here and only while it is in range: the population is a
+density, a fragment is drawn from that density inside a ball around the ship, given a circular orbit that
+passes through the point it was drawn at, moved along it, and dropped once it is outside the ball again.
+Evert, 2026-11-14: *"you calculate the chances of an asteroid being in a position, make up a few that are
+in range, and forget about them when they go out of range again."*
+
+**There is no address lattice and no query inverse.** The design that had one could not be queried: the
+orbital period depends on the semi-major axis alone, so the radius is the only dimension that localises
+anything, and a population whose fragments each carry their own phase cannot be inverted from a position.
+Making the fragments up deletes that problem — nothing is inverted, and the density is a number rather
+than a structure. The cost, accepted and named: **coming back to a place gives different rocks.**
+
+| Member | |
+|---|---|
+| `population: SpacesimPopulation` | the distribution being drawn from |
+| `fragments() -> Array[Fragment]` | what the field holds now |
+| `position_of(fragment, parent_position) -> Vector3` | the system-frame position |
+| `update(parent_position, mu, ship_position, delta)` | advance every fragment, drop the ones outside the ball, make up enough to fill the field again |
+| `static density_of(pop) -> float` | fragments per cubic metre above the size floor |
+| `static addressable_count(pop) -> float` | `count · (size_floor/reference_size)^-size_index` — Sol's 1.1 million above 1 km becomes 1.1 × 10¹¹ above 10 m |
+| `static volume_of(pop) -> float` | the shell between the two semi-major axes, as thick as the inclination band makes it |
+| `static spawn_radius_of(pop) -> float` | **the ball the field is drawn in**: the radius that holds `FIELD_COUNT` fragments at that density, so the nearest fragment is as far away as the real belt would put it rather than as far as a rendering decision would |
+| `static in_band(pop, local) -> bool` | whether a point relative to the parent is inside the population |
+| `const FIELD_COUNT` | 24 — how many fragments *exist*; the marker pool decides how many are *shown* |
+
+`Fragment` is an inner class: `radius` (metres from the parent, also the semi-major axis), `u` and `v` (unit
+vectors — where it is at phase 0 and the direction of travel), `phase`, `rate` (radians/s, the circular rate
+`sqrt(mu/r³)`), `diameter`, `designation` (`A-0007`).
+
+**Sol's main belt is authored** in `systems/sol.tres` as `population:main_belt`: 2.1 to 3.3 AU, inclination
+0 to 20°, 1.1 million fragments above 1 km, a 10 m floor. At those numbers the density is 8.6 × 10⁻²⁵
+fragments per cubic metre — a mean spacing of **105,000 km** — and the field draws two dozen of them inside
+**188,000 km**.
 
 ### `SpacesimKepler` — `RefCounted`
 
