@@ -531,6 +531,7 @@ func _process(delta: float) -> void:
 	# A screen is open, so the world is frozen and there is nothing to redraw it against.
 	if _screen == null:
 		_update_view(delta)
+		_update_fragment_mesh()
 
 
 func _physics_process(delta: float) -> void:
@@ -562,11 +563,6 @@ func _physics_process(delta: float) -> void:
 	# **Before the step**, so the ship is slowed by the fragments that are there now rather than by the
 	# ones that were there last tick.
 	_update_fields(delta)
-	# **In the physics tick, with the rest of the fragment state.** A node placed from `_process` is drawn
-	# from a stale interpolated sample, and the ship beside a rock is moving at 18.8 km/s in absolute terms
-	# — one tick of that is 314 m, which was the whole of the "triangles vanish, label is off, lit area
-	# moves" report. See `_update_fragment_mesh`.
-	_update_fragment_mesh()
 	_ship.step(delta, input)
 	# **Both clocks, one second at a time** — Evert, 2026-11-08. The world's runs faster only when
 	# relativistic travel lands, and `SpacesimSession.advance` is the one place either of them moves.
@@ -843,15 +839,7 @@ func _refresh_scale_bodies() -> void:
 
 ## **The nearest fragment, if it is close enough to have a shape worth extracting.** One at a time: the
 ## rock you are about to fly past is the only one whose geometry can be seen, and the marker is the whole
-## of the others.
-##
-## **It runs in the PHYSICS tick, and that is not presentation being misplaced.** `physics_interpolation`
-## is on, so a node positioned from `_process` is drawn against the interpolator's *previous* sample: the
-## mesh then trails the camera by up to one tick of the ship's motion. Near a planet that motion is small
-## and invisible; in a belt the ship is carried at a fragment's 18.8 km/s, so **one tick is 314 m** — and
-## that put the mesh at or behind the camera exactly when it came within a few hundred metres, cutting its
-## near side on the 100 m near plane and leaving its interior showing. Placed here, from this tick's raw
-## physics transform, the engine smooths it once like everything else.
+## of the others. Presentation, so it runs in the drawn frame rather than the physics tick.
 func _update_fragment_mesh() -> void:
 	var eye := _ship.global_position
 	var best: SpacesimPopulationField.Fragment = null
