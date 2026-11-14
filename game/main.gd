@@ -109,6 +109,11 @@ var _field_parents: Array[SpacesimSceneBody] = []
 ## array and rewritten in place, because the proximity scan runs every tick and a fresh array — or a
 ## fresh `SpacesimScaleBody` — per tick is garbage for nothing. The fragment entries are pooled and
 ## reused for the same reason.
+## **The rock you arrive at**: one fragment's mesh, extracted when the eye is close enough to resolve it.
+## A population's fragments have no geometry at all until one of them is near enough to look at.
+var _fragment_renderer: SpacesimFragmentRenderer
+var _fragment_materials: Array[StandardMaterial3D] = []
+
 var _system_scale: Array[SpacesimScaleBody] = []
 var _scale_bodies: Array[SpacesimScaleBody] = []
 var _fragment_scale: Array[SpacesimScaleBody] = []
@@ -526,6 +531,7 @@ func _process(delta: float) -> void:
 	# A screen is open, so the world is frozen and there is nothing to redraw it against.
 	if _screen == null:
 		_update_view(delta)
+		_update_fragment_mesh()
 
 
 func _physics_process(delta: float) -> void:
@@ -774,6 +780,10 @@ func _build_fields() -> void:
 			continue
 		_fields.append(SpacesimPopulationField.new(population))
 		_field_parents.append(parent)
+		_fragment_materials.append(SpacesimFragmentRenderer.material_for(population))
+	_fragment_renderer = SpacesimFragmentRenderer.new()
+	_fragment_renderer.name = "Fragment"
+	add_child(_fragment_renderer)
 	_system_scale = _ship.bodies.duplicate()
 	_scale_bodies.append_array(_system_scale)
 	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a
@@ -822,6 +832,38 @@ func _refresh_scale_bodies() -> void:
 			scale.name = fragment.designation
 			_scale_bodies[cursor] = scale
 			cursor += 1
+
+
+## **The nearest fragment, if it is close enough to have a shape worth extracting.** One at a time: the
+## rock you are about to fly past is the only one whose geometry can be seen, and the marker is the whole
+## of the others. Presentation, so it runs in the drawn frame rather than the physics tick.
+func _update_fragment_mesh() -> void:
+	var eye := _ship.global_position
+	var best: SpacesimPopulationField.Fragment = null
+	var best_index := -1
+	var best_distance := INF
+	var best_position := Vector3.ZERO
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		var origin := parent.node.global_position
+		for fragment in _fields[index].fragments():
+			var where := _fields[index].position_of(fragment, origin)
+			var distance := where.distance_to(eye)
+			if distance < best_distance:
+				best_distance = distance
+				best = fragment
+				best_index = index
+				best_position = where
+	if best == null or best_distance > SpacesimFragmentRenderer.resolve_distance(best.diameter):
+		_fragment_renderer.hide_fragment()
+	else:
+		_fragment_renderer.draw_at(
+			best_position, best.designation, best.seed_value, best.diameter,
+			_fragment_materials[best_index]
+		)
+	_fragment_renderer.poll()
 
 
 ## One pooled scale body per fragment slot. **Reused rather than made and thrown away**: the array is

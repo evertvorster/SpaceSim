@@ -22,6 +22,7 @@ func run(h, root: Node) -> void:
 	_test_sizes_follow_the_power_law(h)
 	_test_sol_authors_the_belt(h)
 	_test_a_fragment_is_significant(h)
+	_test_a_fragment_earns_its_shape(h)
 
 
 func _belt() -> SpacesimPopulation:
@@ -245,3 +246,24 @@ func _test_a_fragment_is_significant(h) -> void:
 	h.check(near_unit < far_unit / 1.0e6,
 		"the rock's unit is orders below the planet's (%s against %s)"
 			% [String.num(near_unit), String.num(far_unit)])
+
+
+## **A rock has no geometry until the eye can resolve one.** Four pixels is where a shape is worth
+## extracting, and a fragment of diameter d is one pixel across at 900 d.
+func _test_a_fragment_earns_its_shape(h) -> void:
+	h.check_near(SpacesimFragmentRenderer.resolve_distance(100.0), 22500.0,
+		"a 100 m fragment earns its shape inside 22.5 km", 1.0e-6)
+	h.check_near(SpacesimFragmentRenderer.resolve_distance(10.0), 2250.0,
+		"and a 10 m one inside 2.25 km", 1.0e-6)
+
+	var material := SpacesimFragmentRenderer.material_for(_belt_with_composition())
+	h.check(material.roughness == 1.0 and material.metallic_specular == 0.0,
+		"a rock scatters rather than reading as glass")
+	h.check(material.albedo_color.is_equal_approx(Color(0.18, 0.16, 0.15)),
+		"and is the colour of what it is mostly made of")
+
+
+func _belt_with_composition() -> SpacesimPopulation:
+	var belt := _belt()
+	belt.composition = {"carbonaceous": 0.75, "iron": 0.08, "silicate": 0.17}
+	return belt

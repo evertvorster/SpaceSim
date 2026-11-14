@@ -41,6 +41,9 @@ class Fragment:
 	var phase: float ## radians
 	var rate: float ## radians per second, the circular orbital rate at `radius`
 	var diameter: float ## metres
+	## What its shape is extracted from, so its mesh is the same one every time it is resolved. Its own
+	## rather than the population's seed, or every fragment would be the same rock.
+	var seed_value: int
 	var designation: String ## `A-0007` — the address is gone, so this is its identity for a session
 
 
@@ -199,6 +202,7 @@ func _fragment_at(local: Vector3, mu: float) -> Fragment:
 	fragment.phase = 0.0
 	fragment.rate = sqrt(maxf(mu, 0.0) / pow(fragment.radius, 3.0)) if mu > 0.0 else 0.0
 	fragment.diameter = _random_diameter()
+	fragment.seed_value = _rng.randi()
 	_made += 1
 	fragment.designation = "A-%04d" % _made
 	return fragment
