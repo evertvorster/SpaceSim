@@ -81,6 +81,10 @@ func draw_at(
 	_shown = designation
 	_material = material
 	_mesh.mesh = null
+	# **Reaching here is always a switch to a different rock** — the caller returns early otherwise — and a
+	# switch is a teleport: the interpolator still holds the previous sample, so without this the new mesh
+	# slides in from where the old one was across one tick.
+	reset_physics_interpolation()
 	_arrays = []
 	_task = WorkerThreadPool.add_task(
 		_extract.bind(seed_value, maxf(diameter * 0.5, 0.5), RESOLUTION)
