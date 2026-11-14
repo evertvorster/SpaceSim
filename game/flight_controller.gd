@@ -104,7 +104,11 @@ func _update_proximity() -> void:
 	nearest_distance = (
 		INF if _nearest_body == null else _nearest_body.surface_distance_mesh(global_position)
 	)
-	nearest_name = _nearest_body.node.name if _nearest_body != null and _nearest_body.node != null else "—"
+	# **A fragment has no node**, so it answers with its own designation — it is the only thing in range
+	# out there, and the readout has to be able to name it.
+	nearest_name = "—"
+	if _nearest_body != null:
+		nearest_name = _nearest_body.name if _nearest_body.node == null else _nearest_body.node.name
 
 
 ## Altitude above the nearest significant surface, in metres.

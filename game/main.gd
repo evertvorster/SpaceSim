@@ -105,6 +105,14 @@ var _wireframe := false
 var _fields: Array[SpacesimPopulationField] = []
 var _field_parents: Array[SpacesimSceneBody] = []
 
+## **The scale bodies the ship is slowed by**: the system's own, then one per live fragment. Kept in one
+## array and rewritten in place, because the proximity scan runs every tick and a fresh array — or a
+## fresh `SpacesimScaleBody` — per tick is garbage for nothing. The fragment entries are pooled and
+## reused for the same reason.
+var _system_scale: Array[SpacesimScaleBody] = []
+var _scale_bodies: Array[SpacesimScaleBody] = []
+var _fragment_scale: Array[SpacesimScaleBody] = []
+
 
 func _ready() -> void:
 	_print_build()
@@ -113,9 +121,9 @@ func _ready() -> void:
 		push_error("cannot load %s" % SYSTEM_PATH)
 		return
 	_system.build(self)
-	_build_fields()
 	_ship = PlayerShip.create()
 	PlayerShip.place(_system, _ship)
+	_build_fields()
 	_markers = SpacesimMarkers.new()
 	_markers.name = "Markers"
 	# The HUD is built after this, and the marker overlay needs its rectangles to place labels clear
@@ -546,8 +554,10 @@ func _physics_process(delta: float) -> void:
 		"roll": roll,
 	}
 
-	_ship.step(delta, input)
+	# **Before the step**, so the ship is slowed by the fragments that are there now rather than by the
+	# ones that were there last tick.
 	_update_fields(delta)
+	_ship.step(delta, input)
 	# **Both clocks, one second at a time** — Evert, 2026-11-08. The world's runs faster only when
 	# relativistic travel lands, and `SpacesimSession.advance` is the one place either of them moves.
 	_session.advance(delta)
@@ -764,6 +774,11 @@ func _build_fields() -> void:
 			continue
 		_fields.append(SpacesimPopulationField.new(population))
 		_field_parents.append(parent)
+	_system_scale = _ship.bodies.duplicate()
+	_scale_bodies.append_array(_system_scale)
+	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a
+	# copy of it.
+	_ship.bodies = _scale_bodies
 
 
 ## Advance every population. **In the physics tick**, because a fragment is what sets the local travel
@@ -777,6 +792,44 @@ func _update_fields(delta: float) -> void:
 		_fields[index].update(
 			parent.node.global_position, SpacesimKepler.mu_of(parent.content.mass), eye, delta
 		)
+	_refresh_scale_bodies()
+
+
+## **A fragment is significant from the moment it exists**, so the ship's own proximity scan has to see
+## it: it sets the local travel unit, which means the speed at full throttle drops as the belt is
+## entered, and the readout can name what is nearest.
+func _refresh_scale_bodies() -> void:
+	var wanted := _system_scale.size()
+	for index in _fields.size():
+		wanted += _fields[index].fragments().size()
+	_scale_bodies.resize(wanted)
+
+	var cursor := 0
+	for body in _system_scale:
+		_scale_bodies[cursor] = body
+		cursor += 1
+	var slot := 0
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		var origin := parent.node.global_position
+		for fragment in _fields[index].fragments():
+			var scale := _scale_for(slot)
+			slot += 1
+			scale.position = _fields[index].position_of(fragment, origin)
+			scale.radius = fragment.diameter * 0.5
+			scale.name = fragment.designation
+			_scale_bodies[cursor] = scale
+			cursor += 1
+
+
+## One pooled scale body per fragment slot. **Reused rather than made and thrown away**: the array is
+## rewritten every physics tick.
+func _scale_for(slot: int) -> SpacesimScaleBody:
+	while _fragment_scale.size() <= slot:
+		_fragment_scale.append(SpacesimScaleBody.new(null, 0.0))
+	return _fragment_scale[slot]
 
 
 ## Every fragment the fields hold, as a marker target. **No node, no ring, and the label is the whole

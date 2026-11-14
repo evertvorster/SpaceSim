@@ -21,6 +21,7 @@ func run(h, root: Node) -> void:
 	_test_a_fragment_orbits(h)
 	_test_sizes_follow_the_power_law(h)
 	_test_sol_authors_the_belt(h)
+	_test_a_fragment_is_significant(h)
 
 
 func _belt() -> SpacesimPopulation:
@@ -214,3 +215,33 @@ func _test_sol_authors_the_belt(h) -> void:
 	h.check_near(belt.semi_major_axis.x, 2.1 * AU, "its inner edge is 2.1 AU", 1.0e6)
 	h.check_near(belt.semi_major_axis.y, 3.3 * AU, "its outer edge is 3.3 AU", 1.0e6)
 	h.check(SpacesimPopulationField.density_of(belt) > 0.0, "and it has a density")
+
+
+## **A fragment is significant from the moment it exists** — it sets the local travel unit, so it has to
+## be a scale body the ship's own proximity scan can see. It has no node at all, which is the half of
+## `SpacesimScaleBody` this adds.
+func _test_a_fragment_is_significant(h) -> void:
+	var rock := SpacesimScaleBody.new(null, 5.0)
+	rock.position = Vector3(1000.0, 0.0, 0.0)
+	rock.name = "A-0007"
+	h.check_near(rock.surface_distance_to(Vector3.ZERO), 995.0,
+		"a scale body with no node answers its distance", 1.0e-6)
+	h.check_near(rock.surface_distance_mesh(Vector3.ZERO), 995.0,
+		"and its altitude, without a mesh to ask", 1.0e-6)
+
+	var planet := SpacesimScaleBody.new(null, 6.371e6)
+	planet.position = Vector3(1.0e11, 0.0, 0.0)
+	var bodies: Array[SpacesimScaleBody] = [planet, rock]
+	h.check(SpacesimProximity.nearest_body(Vector3.ZERO, bodies) == rock,
+		"the rock is nearest even though the planet is a place")
+	h.check_near(SpacesimProximity.nearest_surface_distance(Vector3.ZERO, bodies), 995.0,
+		"and the nearest surface is the rock's", 1.0e-6)
+
+	# **The unit is the rock's, not the planet's**, which is what makes full throttle drop as the belt is
+	# entered rather than only once the ship is on top of something. 1e11 m to 995 m is eight orders.
+	var band := Vector2(1.0, 1.0e11)
+	var near_unit := SpacesimTravelScale.local_length(995.0, band.x, band.y)
+	var far_unit := SpacesimTravelScale.local_length(1.0e11 - 6.371e6, band.x, band.y)
+	h.check(near_unit < far_unit / 1.0e6,
+		"the rock's unit is orders below the planet's (%s against %s)"
+			% [String.num(near_unit), String.num(far_unit)])

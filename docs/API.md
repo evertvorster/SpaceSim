@@ -83,8 +83,10 @@ of the unit rather than being imposed on top of a flight model.
 
 ### `SpacesimScaleBody` — `RefCounted`
 
-Something whose proximity sets the travel unit. Which bodies count as significant is
-content's decision.
+Something whose proximity sets the travel unit. Which bodies count as significant is content's
+decision — and **a fragment of an asteroid population counts from the moment it exists**, which
+reverses the older rule here (*"a pebble should not slow you down"*): in an empty belt a rock is the
+only thing there is, and slowing down is how you arrive somewhere instead of passing through it.
 
 ```gdscript
 SpacesimScaleBody.new(node: Node3D, radius: float)
@@ -92,9 +94,11 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 
 | Member | |
 |---|---|
-| `node: Node3D` | the body's origin |
+| `node: Node3D` | the body's origin, or **null** for something with no node at all |
+| `position: Vector3`, `name: String` | where it is and what it is called **when `node` is null** — a fragment is arithmetic, not a node |
 | `radius: float` | metres |
-| `surface_distance_to(position) -> float` | distance to the *surface*, never negative |
+| `surface_distance_to(position) -> float` | distance to the *surface*, never negative — the cheap comparison the proximity scan uses |
+| `surface_distance_mesh(position) -> float` | distance to the nearest *vertex* of a body's own mesh; the sphere when there is no mesh to ask |
 
 ### `SpacesimProximity` — `RefCounted` (static)
 
