@@ -267,6 +267,23 @@ vectors — where it is at phase 0 and the direction of travel), `phase`, `rate`
 fragments per cubic metre — a mean spacing of **105,000 km** — and the field draws two dozen of them inside
 **188,000 km**.
 
+### `SpacesimFragmentRenderer` — `Node3D`
+
+**The rock you arrive at.** A population's fragments have no geometry at all until one is close enough to
+look at, so this draws **one** — the nearest — and rebuilds when the ship moves on to another. The
+extraction is on the worker pool (`SpacesimBlobShape.arrays`) and the publish is on the main thread
+(`mesh_from`), the same split `SpacesimIrregularBody` uses.
+
+| Member | |
+|---|---|
+| `draw_at(where, designation, seed_value, diameter, material)` | show this fragment here; a request arriving while another extraction is in flight is dropped and asked again next frame |
+| `hide_fragment()` | take the shape away and forget which fragment it belonged to |
+| `poll()` | publish a finished extraction — once a frame, on the main thread |
+| `is_showing(designation) -> bool` | whether the fragment being drawn is the one asked for |
+| `static resolve_distance(diameter) -> float` | `diameter · 900 / 4` — four pixels of disc, the same 900-diameter-per-pixel rule `SpacesimLod` uses. A 100 m rock earns a shape inside 22.5 km |
+| `static material_for(population) -> StandardMaterial3D` | the bulk solid of the composition: full roughness, no specular, the species' own colour |
+| `const RESOLUTION` | 24 cells across — a rock is one to two orders of magnitude across against a planet's eight, so the subdivision a planet needs is not needed here |
+
 ### `SpacesimKepler` — `RefCounted`
 
 Where a body is, from its elements. A **pure function of time**: no integration, no state, nothing
