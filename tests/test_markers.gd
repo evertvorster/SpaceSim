@@ -5,6 +5,18 @@ const Markers := preload("res://addons/spacesim/navigation/markers.gd")
 const Overlay := preload("res://addons/spacesim/navigation/overlay.gd")
 
 
+## **A marker target is a position and a name, not a node** — bodies and fragments arrive the same way.
+## Most of these tests only care about the keyed union and the ordering, so they build targets directly.
+static func _target(
+	id: int, priority: int, distance: float, text := "thing",
+	parent := -1, ring := true
+) -> Dictionary:
+	return {
+		"id": id, "position": Vector3.ZERO, "text": text, "priority": priority,
+		"parent": parent, "ring": ring, "distance": distance,
+	}
+
+
 func run(h, root: Node) -> void:
 	print("  navigation markers")
 	_test_keyed_union(h)
@@ -25,53 +37,48 @@ func run(h, root: Node) -> void:
 func _test_keyed_union(h) -> void:
 	# A body that is both an ambient object and a mission target must get one marker, not two
 	# stacked on the same planet.
-	var node := Node3D.new()
 	var candidates: Array[Dictionary] = [
-		{"node": node, "priority": Markers.Priority.CONTEXT, "distance": 100.0},
-		{"node": node, "priority": Markers.Priority.MISSION, "distance": 500.0},
+		_target(7, Markers.Priority.CONTEXT, 100.0),
+		_target(7, Markers.Priority.MISSION, 500.0),
 	]
 	var chosen := Markers.choose(candidates, 10)
 	h.check(chosen.size() == 1, "an object in two groups gets one marker")
 	h.check(int(chosen[0]["priority"]) == Markers.Priority.MISSION, "and the higher priority survives")
-	node.free()
 
 
 func _test_priority_ordering(h) -> void:
-	var nearby := Node3D.new()
-	var distant := Node3D.new()
 	var chosen := Markers.choose(
 		[
-			{"node": nearby, "priority": Markers.Priority.CONTEXT, "distance": 10.0},
-			{"node": distant, "priority": Markers.Priority.SELECTED, "distance": 1.0e9},
+			_target(1, Markers.Priority.CONTEXT, 10.0),
+			_target(2, Markers.Priority.SELECTED, 1.0e9),
 		],
 		10
 	)
-	h.check(chosen.size() == 2 and chosen[0]["node"] == distant, "a selected target outranks a nearer one")
-	nearby.free()
-	distant.free()
+	h.check(chosen.size() == 2 and int(chosen[0]["id"]) == 2, "a selected target outranks a nearer one")
+	# **A fragment never takes a slot from anything else**, which is what makes the pool the only count.
+	var mixed := Markers.choose(
+		[
+			_target(3, Markers.Priority.ASTEROID, 10.0),
+			_target(4, Markers.Priority.CONTEXT, 1.0e6),
+		],
+		10
+	)
+	h.check(int(mixed[0]["id"]) == 4, "and a nearer fragment is still below a place")
 
 
 func _test_cap_keeps_what_matters(h) -> void:
-	var a := Node3D.new()
-	var b := Node3D.new()
-	var c := Node3D.new()
-	var chosen_target := Node3D.new()
 	var chosen := Markers.choose(
 		[
-			{"node": a, "priority": Markers.Priority.CONTEXT, "distance": 300.0},
-			{"node": b, "priority": Markers.Priority.CONTEXT, "distance": 100.0},
-			{"node": c, "priority": Markers.Priority.CONTEXT, "distance": 200.0},
-			{"node": chosen_target, "priority": Markers.Priority.SELECTED, "distance": 1.0e9},
+			_target(1, Markers.Priority.CONTEXT, 300.0),
+			_target(2, Markers.Priority.CONTEXT, 100.0),
+			_target(3, Markers.Priority.CONTEXT, 200.0),
+			_target(4, Markers.Priority.SELECTED, 1.0e9),
 		],
 		2
 	)
 	h.check(chosen.size() == 2, "the pool size is the cap")
-	h.check(chosen[0]["node"] == chosen_target, "the selected target survives it")
-	h.check(chosen[1]["node"] == b, "and the nearest ambient object fills the rest")
-	a.free()
-	b.free()
-	c.free()
-	chosen_target.free()
+	h.check(int(chosen[0]["id"]) == 4, "the selected target survives it")
+	h.check(int(chosen[1]["id"]) == 2, "and the nearest ambient object fills the rest")
 
 
 func _test_pointer_is_the_smallest_turn(h) -> void:
@@ -274,31 +281,46 @@ func _test_a_moon_gives_up_its_label_only_when_crowded(h, root: Node) -> void:
 	body.node = planet
 	markers.orbits[moon] = body
 
-	# Both marked: the moon's label goes, the planet's stays.
-	var marked := {planet.get_instance_id(): true, moon.get_instance_id(): true}
-	h.check(
-		markers._orbits_a_marked_body(moon, Markers.Priority.CONTEXT, marked),
-		"a moon whose planet is also marked is the crowding case"
-	)
-	h.check(
-		not markers._orbits_a_marked_body(moon, Markers.Priority.SELECTED, marked),
-		"unless it is the target, which is when you asked for that moon in particular"
-	)
-	h.check(
-		not markers._orbits_a_marked_body(planet, Markers.Priority.CONTEXT, marked),
-		"the planet itself orbits nothing, so it never gives way"
-	)
-	h.check(
-		not markers._orbits_a_marked_body(other, Markers.Priority.CONTEXT, marked),
-		"and neither does a body with no parent"
-	)
+	# **Both marked, with the moon's ring on the planet's: the moon's label goes and its mark stays.**
+	# Driven through `_place`, because that is where the rule now lives — a helper that answered the
+	# same question was deleted with the node-shaped candidate.
+	var space := Vector2(1372.0, 720.0)
+	var square := Rect2(24.0, 24.0, 1324.0, 672.0)
+	var planet_entry := _target(1, Markers.Priority.PRIMARY, 100.0, "planet")
+	planet_entry["circle"] = Vector2(690.0, 360.0)
+	var moon_entry := _target(2, Markers.Priority.CONTEXT, 100.0, "moon", 1)
+	moon_entry["circle"] = Vector2(686.0, 360.0)
+	var marked := {1: true, 2: true}
+	var crowded_taken: Array[Rect2] = []
+	var crowded_placed := {}
+	var planet_label := Label.new()
+	var moon_label := Label.new()
+	markers._place(planet_entry, planet_label, marked, space, square, crowded_taken, crowded_placed)
+	var crowded := markers._place(moon_entry, moon_label, marked, space, square, crowded_taken, crowded_placed)
+	h.check(not moon_label.visible, "a moon on its planet's ring gives up its label")
+	h.check(crowded.has("circle"), "but keeps its ring")
+	h.check(planet_label.visible, "while the planet's label stays")
+
+	# **The target is drawn regardless**: you asked for that moon in particular.
+	var selected_taken: Array[Rect2] = []
+	var selected_placed := {}
+	var chosen_label := Label.new()
+	var replacement_label := Label.new()
+	markers._place(planet_entry, replacement_label, marked, space, square, selected_taken, selected_placed)
+	var target_entry := _target(2, Markers.Priority.SELECTED, 100.0, "moon", 1)
+	target_entry["circle"] = Vector2(686.0, 360.0)
+	markers._place(target_entry, chosen_label, marked, space, square, selected_taken, selected_placed)
+	h.check(chosen_label.visible, "unless it is the target, which is when you asked for that moon")
 
 	# The planet is not marked at all: there is nothing to compete with, so the moon keeps its name.
-	var only_moon := {moon.get_instance_id(): true}
-	h.check(
-		not markers._orbits_a_marked_body(moon, Markers.Priority.CONTEXT, only_moon),
-		"and is not the crowding case when the body it orbits is not marked"
-	)
+	var only_moon := {2: true}
+	var alone_taken: Array[Rect2] = []
+	var alone_placed := {}
+	var alone_label := Label.new()
+	markers._place(moon_entry, alone_label, only_moon, space, square, alone_taken, alone_placed)
+	h.check(alone_label.visible, "and it keeps its name when the body it orbits is not marked")
+	for label in [planet_label, moon_label, chosen_label, alone_label, replacement_label]:
+		label.free()
 
 	# --- and the half that decides it: is the planet's label what took the moon's space?
 	var bounds := Rect2(24.0, 24.0, 1324.0, 672.0)
@@ -411,7 +433,7 @@ func _test_a_place_has_no_range_limit(h, root: Node) -> void:
 			places += 1
 	h.check(places == 1, "the star is a place and is a candidate at a terametre (%d)" % places)
 	var chosen := Markers.choose(gathered, maxi(4, places))
-	h.check(chosen.size() > 0 and chosen[0]["node"] == star,
+	h.check(chosen.size() > 0 and int(chosen[0]["id"]) == star.get_instance_id(),
 		"and it is the FIRST marker chosen, ahead of twenty nearer moons")
 	container.free()
 
@@ -449,10 +471,13 @@ func _test_the_nearest_moons_are_marked(h, root: Node) -> void:
 	var chosen := Markers.choose(gathered, 4)
 	var picked: Array = []
 	for entry in chosen:
-		picked.append(entry["node"])
-	h.check(picked.size() == 4 and picked[0] == planet,
+		picked.append(int(entry["id"]))
+	h.check(picked.size() == 4 and picked[0] == planet.get_instance_id(),
 		"the planet is a place, so it is marked even though every moon is nearer")
-	h.check(picked.has(moons[0]) and picked.has(moons[1]) and picked.has(moons[2]),
-		"and the pool goes to the three NEAREST moons (%d marked)" % picked.size())
-	h.check(not picked.has(moons[5]), "not to the furthest one")
+	h.check(
+		picked.has(moons[0].get_instance_id()) and picked.has(moons[1].get_instance_id())
+		and picked.has(moons[2].get_instance_id()),
+		"and the pool goes to the three NEAREST moons (%d marked)" % picked.size()
+	)
+	h.check(not picked.has(moons[5].get_instance_id()), "not to the furthest one")
 	container.free()

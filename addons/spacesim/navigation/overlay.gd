@@ -44,8 +44,13 @@ func _draw() -> void:
 		var colour: Color = mark["color"]
 		if mark.has("start"):
 			draw_line(mark["start"], mark["end"], colour, LINE_WIDTH, true)
-		# After the line, so the ring sits on top of it.
-		draw_arc(mark["circle"], RING_RADIUS, 0.0, TAU, RING_SEGMENTS, colour, RING_WIDTH, true)
+		# **A ring only where there is a ring to draw.** A fragment of an asteroid population is
+		# sub-pixel at any distance it is marked from, so a ring round it would claim "this is where it
+		# is on screen", which is false: twenty-four empty rings read as twenty-four things you failed
+		# to see. Its label and the line to it are the whole marker.
+		if bool(mark.get("ring", true)):
+			# After the line, so the ring sits on top of it.
+			draw_arc(mark["circle"], RING_RADIUS, 0.0, TAU, RING_SEGMENTS, colour, RING_WIDTH, true)
 
 
 # --- placement -------------------------------------------------------------------------------------

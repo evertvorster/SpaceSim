@@ -23,7 +23,15 @@ extends Node3D
 ## the HUD. There should be no range limit. Moons and such can be hidden when they are far away, but the body they are
 ## orbiting should be marked."* A star or a planet is a **place** — being 900 Gm from it is exactly when its name
 ## matters — while a moon is a detail of the place it orbits.
-enum Priority { CONTEXT = 0, PRIMARY = 1, MISSION = 2, SELECTED = 3 }
+##
+## **`ASTEROID` is below `CONTEXT` so that a fragment never takes a slot from anything else**, and because
+## the pool is the only budget there is: the number of fragments on screen is `pool_size` minus whatever
+## the places and moons took, and a second setting for it would split one budget into two unpredictable
+## halves.
+enum Priority { ASTEROID = 0, CONTEXT = 1, PRIMARY = 2, MISSION = 3, SELECTED = 4 }
+
+## The `parent` of a target that orbits nothing this overlay knows about.
+const NO_PARENT := -1
 
 const Overlay := preload("res://addons/spacesim/navigation/overlay.gd")
 
@@ -65,6 +73,15 @@ var orbits: Dictionary = {}
 var context_targets: Array[Node3D] = []
 var mission_targets: Array[Node3D] = []
 var selected: Node3D = null
+
+## **Markers for things that have no node at all** — a fragment of an asteroid population, which is a
+## position and a name and nothing else in the world. Each entry is a target:
+## `{id: int, position: Vector3, text: String, priority: int, parent: int, ring: bool}`.
+##
+## **The drawing path knows nothing about either source.** Bodies are gathered from nodes because that
+## is where their positions are; fragments arrive already gathered. Everything downstream — the
+## projection, the ring, the line, the label packing — works on a position and a string.
+var targets: Array[Dictionary] = []
 
 var _labels: Array[Label] = []
 var _overlay: SpacesimOverlay
@@ -165,7 +182,7 @@ func refresh(camera: Camera3D, band := Rect2()) -> void:
 	# The set is not thinned by that: a moon that gives up its label is still marked.
 	var marked := {}
 	for candidate in gathered:
-		marked[(candidate["node"] as Node3D).get_instance_id()] = true
+		marked[int(candidate["id"])] = true
 
 	# **Every place gets a marker, whatever the pool is set to.** The cap is a budget for the *details* — moons,
 	# mission targets — and the number of stars and planets in a system is content, not something a slider should be
@@ -178,7 +195,7 @@ func refresh(camera: Camera3D, band := Rect2()) -> void:
 	_ensure_labels(limit)
 	var entries := _parents_before_their_moons(choose(gathered, limit))
 	for entry in entries:
-		entry["circle"] = to_canvas(_project(entry["node"], camera, drawn), drawn, band)
+		entry["circle"] = to_canvas(_project(entry["position"], camera, drawn), drawn, band)
 
 	# Only other labels: a label is placed against its own object, and the HUD is not reserved around.
 	var taken: Array[Rect2] = []
@@ -207,10 +224,8 @@ func _parents_before_their_moons(entries: Array[Dictionary]) -> Array[Dictionary
 	var first: Array[Dictionary] = []
 	var last: Array[Dictionary] = []
 	for entry in entries:
-		var node: Node3D = entry["node"]
-		var parent: SpacesimSceneBody = orbits.get(node, null)
-		var parent_here := parent != null and parent.node != null and _in(entries, parent.node)
-		if parent_here:
+		var parent := int(entry["parent"])
+		if parent != NO_PARENT and _in(entries, parent):
 			last.append(entry)
 		else:
 			first.append(entry)
@@ -218,21 +233,21 @@ func _parents_before_their_moons(entries: Array[Dictionary]) -> Array[Dictionary
 	return first
 
 
-static func _in(entries: Array[Dictionary], node: Node3D) -> bool:
+static func _in(entries: Array[Dictionary], id: int) -> bool:
 	for entry in entries:
-		if entry["node"] == node:
+		if int(entry["id"]) == id:
 			return true
 	return false
 
 
 ## An object's own screen position, **not clamped**: the ring marks where the thing is, and it is the
 ## label that stays in view.
-func _project(node: Node3D, camera: Camera3D, viewport_size: Vector2) -> Vector2:
-	if is_behind(camera, node.global_position):
+func _project(position: Vector3, camera: Camera3D, viewport_size: Vector2) -> Vector2:
+	if is_behind(camera, position):
 		# unproject_position mirrors for anything behind the camera, so that case is computed from
 		# the camera's own transform instead.
-		return viewport_size * 0.5 + screen_direction(camera, node.global_position) * OFF_SCREEN_REACH
-	return camera.unproject_position(node.global_position)
+		return viewport_size * 0.5 + screen_direction(camera, position) * OFF_SCREEN_REACH
+	return camera.unproject_position(position)
 
 
 ## One marker: the ring where the object is, and its label placed clear of everything else.
@@ -245,11 +260,11 @@ func _place(
 	taken: Array[Rect2],
 	placed: Dictionary
 ) -> Dictionary:
-	var target: Node3D = entry["node"]
 	var circle: Vector2 = entry["circle"]
 	var colour := colour_of(int(entry["priority"]))
+	var has_ring := bool(entry["ring"])
 
-	label.text = "%s  %s" % [target.name, format_distance(entry["distance"])]
+	label.text = "%s  %s" % [entry["text"], format_distance(entry["distance"])]
 	label.size = label.get_minimum_size()
 	# An object over the edge still wants its label in view, so the label gathers at the edge point in
 	# the object's direction.
@@ -261,17 +276,17 @@ func _place(
 	# by Jupiter, where Io is a pixel from the planet, the moon's nearest spot is the one Jupiter's
 	# label already has. **The ring is always drawn**: this is a fact about two names, not about whether
 	# the moon is there.
-	var parent: SpacesimSceneBody = orbits.get(target, null)
-	var parent_box: Variant = null
-	if parent != null and parent.node != null:
-		parent_box = placed.get(parent.node.get_instance_id())
+	var parent_id := int(entry["parent"])
+	var parent_box: Variant = placed.get(parent_id) if parent_id != NO_PARENT else null
 	if (
-		_orbits_a_marked_body(target, int(entry["priority"]), marked)
+		int(entry["priority"]) != Priority.SELECTED
+		and parent_id != NO_PARENT
+		and marked.has(parent_id)
 		and parent_box is Rect2
 		and _crowds_its_parent(anchor, label.size, taken, parent_box, bounds)
 	):
 		label.visible = false
-		return {"circle": circle, "color": colour}
+		return {"circle": circle, "color": colour, "ring": has_ring}
 
 	var box := Overlay.place_label(anchor, label.size, taken, bounds)
 	taken.append(box)
@@ -279,16 +294,16 @@ func _place(
 	label.position = box.position
 	label.add_theme_color_override("font_color", colour)
 	label.visible = true
-	placed[target.get_instance_id()] = box
+	placed[int(entry["id"])] = box
 
-	var mark := {"circle": circle, "color": colour}
+	var mark := {"circle": circle, "color": colour, "ring": has_ring}
 	# **A line only where there is a ring to draw it from.** Off screen the ring is not there, so the
 	# label at the edge is the whole marker — and a line to a ring nobody can see points at nothing.
 	if Rect2(Vector2.ZERO, viewport_size).has_point(circle):
 		var ring := Rect2(
 			circle - Vector2.ONE * Overlay.RING_RADIUS, Vector2.ONE * Overlay.RING_RADIUS * 2.0
 		)
-		mark["start"] = Overlay.border_point(ring, box.get_center())
+		mark["start"] = circle if not has_ring else Overlay.border_point(ring, box.get_center())
 		mark["end"] = Overlay.border_point(box, circle)
 	return mark
 
@@ -326,24 +341,37 @@ func _crowds_its_parent(
 ## two are competing for the same space. A moon is drawn regardless when it is the target — you asked
 ## for that moon in particular — and when the body it orbits is not marked at all there is nothing to
 ## compete with.
-func _orbits_a_marked_body(node: Node3D, priority: int, marked: Dictionary) -> bool:
-	if priority == Priority.SELECTED:
-		return false
-	var parent: SpacesimSceneBody = orbits.get(node, null)
-	if parent == null or parent.node == null:
-		return false
-	return marked.has(parent.node.get_instance_id())
-
-
 func _candidates(eye: Vector3) -> Array[Dictionary]:
 	var list: Array[Dictionary] = []
 	_gather(list, context_targets, Priority.CONTEXT, eye)
 	_gather(list, mission_targets, Priority.MISSION, eye)
 	if selected != null:
-		list.append(
-			{"node": selected, "priority": Priority.SELECTED, "distance": eye.distance_to(selected.global_position)}
-		)
+		list.append(_target_of(selected, Priority.SELECTED, eye))
+	# The caller's own targets, which have no node behind them. Copied rather than mutated: the array
+	# belongs to the caller and is handed over again next frame.
+	for target in targets:
+		var entry: Dictionary = target.duplicate()
+		entry["distance"] = eye.distance_to(entry["position"] as Vector3)
+		list.append(entry)
 	return list
+
+
+## **A marker target is a position and a name, not a node.** Bodies and fragments arrive the same way,
+## so the drawing path never has to know which is which.
+func _target_of(node: Node3D, priority: int, eye: Vector3) -> Dictionary:
+	var parent: SpacesimSceneBody = orbits.get(node, null)
+	var parent_id := NO_PARENT
+	if parent != null and parent.node != null:
+		parent_id = parent.node.get_instance_id()
+	return {
+		"id": node.get_instance_id(),
+		"position": node.global_position,
+		"text": node.name,
+		"priority": priority,
+		"parent": parent_id,
+		"ring": true,
+		"distance": eye.distance_to(node.global_position),
+	}
 
 
 func _gather(list: Array[Dictionary], nodes: Array[Node3D], priority: int, eye: Vector3) -> void:
@@ -355,7 +383,7 @@ func _gather(list: Array[Dictionary], nodes: Array[Node3D], priority: int, eye: 
 			rank = _context_priority(node, eye)
 			if rank < 0:
 				continue
-		list.append({"node": node, "priority": rank, "distance": eye.distance_to(node.global_position)})
+		list.append(_target_of(node, rank, eye))
 
 
 ## **What an ambient object is worth** — a place, or a detail.
@@ -384,8 +412,7 @@ func _context_priority(node: Node3D, _eye: Vector3) -> int:
 static func choose(candidates: Array[Dictionary], limit: int) -> Array[Dictionary]:
 	var best := {}
 	for candidate in candidates:
-		var node: Node3D = candidate["node"]
-		var key := node.get_instance_id()
+		var key := int(candidate["id"])
 		var held: Variant = best.get(key)
 		if held == null or int(candidate["priority"]) > int(held["priority"]):
 			best[key] = candidate

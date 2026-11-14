@@ -99,6 +99,12 @@ var _bodies_visible := true
 ## Whether the body meshes are being drawn as wireframes — see [method set_wireframe].
 var _wireframe := false
 
+## **One field per population, each with the body it orbits.** A population is not a body, so it has no
+## node, no frame and no geometry — it has a density, and the field makes fragments out of it around
+## the ship. The parent is what the fragments orbit, so the two arrays are parallel.
+var _fields: Array[SpacesimPopulationField] = []
+var _field_parents: Array[SpacesimSceneBody] = []
+
 
 func _ready() -> void:
 	_print_build()
@@ -107,6 +113,7 @@ func _ready() -> void:
 		push_error("cannot load %s" % SYSTEM_PATH)
 		return
 	_system.build(self)
+	_build_fields()
 	_ship = PlayerShip.create()
 	PlayerShip.place(_system, _ship)
 	_markers = SpacesimMarkers.new()
@@ -540,6 +547,7 @@ func _physics_process(delta: float) -> void:
 	}
 
 	_ship.step(delta, input)
+	_update_fields(delta)
 	# **Both clocks, one second at a time** — Evert, 2026-11-08. The world's runs faster only when
 	# relativistic travel lands, and `SpacesimSession.advance` is the one place either of them moves.
 	_session.advance(delta)
@@ -741,6 +749,64 @@ func _place_observer_from_session() -> void:
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and
 ## stop mattering once you are busy landing on one of them.
+## **A population is not a body**: it has no node, no frame and no geometry. It has a density, and a
+## field makes fragments out of that density around the ship — one field per population, each paired
+## with the body its fragments orbit, because that orbit is what gives them their motion.
+func _build_fields() -> void:
+	for population in _system.content.populations:
+		var parent_id := population.parent_id
+		if parent_id.is_empty():
+			var star := _system.content.star()
+			parent_id = star.id if star != null else ""
+		var parent := _system.body_by_id(parent_id)
+		if parent == null:
+			push_warning("%s orbits '%s', which is not in the system" % [population.id, parent_id])
+			continue
+		_fields.append(SpacesimPopulationField.new(population))
+		_field_parents.append(parent)
+
+
+## Advance every population. **In the physics tick**, because a fragment is what sets the local travel
+## unit — where it is belongs to the same clock as the ship it is slowing down.
+func _update_fields(delta: float) -> void:
+	var eye := _ship.global_position
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		_fields[index].update(
+			parent.node.global_position, SpacesimKepler.mu_of(parent.content.mass), eye, delta
+		)
+
+
+## Every fragment the fields hold, as a marker target. **No node, no ring, and the label is the whole
+## marker**: a rock is a fraction of a pixel at every distance it is worth marking from.
+##
+## The ids are negative so that they cannot collide with a node's instance id in the same frame, which
+## is all `choose` and the label placement need them for.
+func _fragment_targets() -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		var origin := parent.node.global_position
+		var fragments := _fields[index].fragments()
+		for slot in fragments.size():
+			var fragment: SpacesimPopulationField.Fragment = fragments[slot]
+			list.append({
+				"id": -(index * 4096 + slot + 1),
+				"position": _fields[index].position_of(fragment, origin),
+				"text": "%s  %s" % [
+					fragment.designation, SpacesimMarkers.format_distance(fragment.diameter)
+				],
+				"priority": SpacesimMarkers.Priority.ASTEROID,
+				"parent": SpacesimMarkers.NO_PARENT,
+				"ring": false,
+			})
+	return list
+
+
 func _update_markers(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var in_space: bool = frame.kind == Frame.Kind.SPACE or frame.kind == Frame.Kind.ORBITAL
@@ -748,6 +814,7 @@ func _update_markers(camera: Camera3D) -> void:
 	if in_space:
 		context = _system.significant_nodes()
 	_markers.context_targets = context
+	_markers.targets = _fragment_targets()
 	# **The band, because the camera draws into it.** The camera is inside the band's `SubViewport`, so
 	# `unproject_position` answers in the band's pixels while the labels are laid out in the root canvas;
 	# `refresh` converts with this rect. See `SpacesimMarkers.to_canvas`.
