@@ -24,14 +24,19 @@ extends Node3D
 ## orbiting should be marked."* A star or a planet is a **place** — being 900 Gm from it is exactly when its name
 ## matters — while a moon is a detail of the place it orbits.
 ##
-## **`ASTEROID` is below `CONTEXT` so that a fragment never takes a slot from anything else**, and because
-## the pool is the only budget there is: the number of fragments on screen is `pool_size` minus whatever
-## the places and moons took, and a second setting for it would split one budget into two unpredictable
-## halves.
-enum Priority { ASTEROID = 0, CONTEXT = 1, PRIMARY = 2, MISSION = 3, SELECTED = 4 }
+## **`ASTEROID` sits above `CONTEXT` and below `PRIMARY`.** A fragment you are flying among outranks a moon
+## on the far side of the system, and nothing outranks a place.
+##
+## **It used to be at the bottom, and that was wrong on the first flight** (2026-11-14): Sol has 40
+## significant bodies — nine places and thirty-one moons — all of them candidates at any distance, so a
+## 24-slot pool was filled before a fragment was ever considered. The ship slowed down for an asteroid and
+## the HUD showed nothing. Priority-then-distance means a tier at the bottom can never be reached while a
+## bigger tier exists, and every system has more moons than the pool has slots.
+enum Priority { CONTEXT = 0, ASTEROID = 1, PRIMARY = 2, MISSION = 3, SELECTED = 4 }
 
-## The `parent` of a target that orbits nothing this overlay knows about.
-const NO_PARENT := -1
+## The `parent` of a target that orbits nothing this overlay knows about. **Not -1**: a fragment's id is a
+## negative integer of its own (it has no node to borrow one from), and the first of them would collide.
+const NO_PARENT := 0
 
 const Overlay := preload("res://addons/spacesim/navigation/overlay.gd")
 

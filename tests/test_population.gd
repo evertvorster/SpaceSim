@@ -23,6 +23,7 @@ func run(h, root: Node) -> void:
 	_test_sol_authors_the_belt(h)
 	_test_a_fragment_is_significant(h)
 	_test_a_fragment_earns_its_shape(h)
+	_test_the_belt_reaches_the_marker_pool(h, root)
 
 
 func _belt() -> SpacesimPopulation:
@@ -267,3 +268,65 @@ func _belt_with_composition() -> SpacesimPopulation:
 	var belt := _belt()
 	belt.composition = {"carbonaceous": 0.75, "iron": 0.08, "silicate": 0.17}
 	return belt
+
+
+## **Evert's flight, reproduced headlessly.** Fly from Phobos towards Jupiter: the ship slows down, *Closest*
+## reads an asteroid, and **no asteroid markers appear**.
+##
+## Sol has 40 significant bodies — nine places at `PRIMARY` and thirty-one moons at `CONTEXT`, every one of
+## them a candidate at any distance — so a 24-slot pool was filled before a fragment was ever considered.
+## The gathering and the drawing were both right; the tier ordering was not. This builds the real scene, the
+## real field and the real 40 candidates, so the next regression of it fails here rather than in flight.
+func _test_the_belt_reaches_the_marker_pool(h, root: Node) -> void:
+	var sol: SpacesimSolarSystem = load("res://systems/sol.tres")
+	var scene := SpacesimSystemScene.from_content(sol)
+	h.check(scene != null, "the Sol scene wraps the content")
+	if scene == null:
+		return
+	scene.build(root)
+
+	var belt := sol.population_by_id("population:main_belt")
+	var field := SpacesimPopulationField.new(belt)
+	var ship := Vector3(2.5 * AU, 0.0, 0.0)
+	field.update(Vector3.ZERO, SUN_MU, ship, 0.0)
+	h.check(field.fragments().size() == SpacesimPopulationField.FIELD_COUNT,
+		"the field is full at 2.5 AU (%d fragments)" % field.fragments().size())
+
+	var markers := SpacesimMarkers.new()
+	root.add_child(markers)
+	markers.orbits = scene.orbit_parents()
+	markers.context_targets = scene.significant_nodes()
+
+	var targets: Array[Dictionary] = []
+	for slot in field.fragments().size():
+		var fragment: SpacesimPopulationField.Fragment = field.fragments()[slot]
+		targets.append({
+			"id": -(slot + 1),
+			"position": field.position_of(fragment, Vector3.ZERO),
+			"text": fragment.designation,
+			"priority": SpacesimMarkers.Priority.ASTEROID,
+			"parent": SpacesimMarkers.NO_PARENT,
+			"ring": false,
+		})
+	markers.targets = targets
+
+	var gathered := markers._candidates(ship)
+	h.check(gathered.size() > 24, "a whole system is more candidates than the pool holds (%d)" % gathered.size())
+
+	var chosen := SpacesimMarkers.choose(gathered, 24)
+	var places := 0
+	var moons := 0
+	var rocks := 0
+	for entry in chosen:
+		match int(entry["priority"]):
+			SpacesimMarkers.Priority.PRIMARY:
+				places += 1
+			SpacesimMarkers.Priority.CONTEXT:
+				moons += 1
+			SpacesimMarkers.Priority.ASTEROID:
+				rocks += 1
+	h.check(places == 9, "all nine places are marked (%d)" % places)
+	h.check(rocks > 0, "**the belt reaches the pool** (%d rocks)" % rocks)
+	h.check(rocks + moons + places == 24, "and the rest of the pool is a choice between moons and rocks")
+	root.remove_child(markers)
+	markers.free()

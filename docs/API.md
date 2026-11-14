@@ -812,16 +812,19 @@ screen-space budget in one place.
 
 | Member | |
 |---|---|
-| `Priority` | `CONTEXT`, `MISSION`, `SELECTED` |
+| `Priority` | `CONTEXT`, `ASTEROID`, `PRIMARY`, `MISSION`, `SELECTED` — **a candidate is `{id, position, text, priority, parent, ring}`, not a `Node3D`**, so a thing with no node (a fragment) is as drawable as a planet. **`ASTEROID` is above `CONTEXT`**: a rock you are flying among outranks a moon on the far side of the system, and nothing outranks a place. At the bottom it was unreachable — Sol has 40 significant bodies, so a 24-slot pool was full before a fragment was considered, and the first flight showed a slowed ship and no asteroid markers |
 | `pool_size: int` | the cap, and the screen-space budget |
 | `font_size: int`, `margin: float` | applied from the settings; `margin` is the inset the labels are fitted inside |
 | `selected_color: Color` | the selected target's own colour — see `markers.selected_color` |
 | `colour_of(priority) -> Color` | that colour for `SELECTED`, `SpacesimOverlay.COLOR` otherwise |
 | `context_targets`, `mission_targets: Array[Node3D]` | ambient group, then mission objectives |
 | `selected: Node3D` | the selected target, or null |
+| `targets: Array[Dictionary]` | markers for things with no node — fragments. Each is `{id, position, text, priority, parent, ring}`; `id` is negative so it cannot collide with a node's instance id, and `parent` is `NO_PARENT` (0) |
+| `const NO_PARENT` | the parent id of a target that orbits nothing this overlay knows about |
 | `refresh(camera) -> void` | rebuild the set, place its labels, hand the rings to the overlay; call once a frame |
 | `orbits: Dictionary` | moon node → the [SpacesimSceneBody] it orbits; handed in once, a fact about the system |
-| `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame |
+| `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame, by `id`; highest priority wins, then nearest |
+| `ring: bool` on a mark | whether the overlay draws a ring at it. **False for a fragment**: a ring round something sub-pixel claims a position on screen that is not true |
 | `static clamp_to_edge(point, size, margin) -> Vector2` | the edge point in a direction — **and the point itself when it is already inside** |
 | `static screen_direction(camera, target) -> Vector2` | viewport direction, valid behind the camera |
 | `static format_distance(metres) -> String` | `1.50 Gm`, `2.5 km`, `12 m` |

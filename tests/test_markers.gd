@@ -32,6 +32,7 @@ func run(h, root: Node) -> void:
 	_test_a_projection_in_a_subviewport_is_converted(h)
 	_test_a_place_has_no_range_limit(h, root)
 	_test_the_nearest_moons_are_marked(h, root)
+	_test_a_whole_system_leaves_room_for_the_belt(h)
 
 
 func _test_keyed_union(h) -> void:
@@ -55,15 +56,20 @@ func _test_priority_ordering(h) -> void:
 		10
 	)
 	h.check(chosen.size() == 2 and int(chosen[0]["id"]) == 2, "a selected target outranks a nearer one")
-	# **A fragment never takes a slot from anything else**, which is what makes the pool the only count.
+	# **A rock you are flying among outranks a moon on the far side of the system.** It used to be the
+	# other way round, and on the first flight the HUD showed no asteroids at all: Sol has 40 significant
+	# bodies, so a 24-slot pool was full before a fragment was ever considered.
 	var mixed := Markers.choose(
 		[
-			_target(3, Markers.Priority.ASTEROID, 10.0),
-			_target(4, Markers.Priority.CONTEXT, 1.0e6),
+			_target(3, Markers.Priority.ASTEROID, 1.0e6),
+			_target(4, Markers.Priority.CONTEXT, 10.0),
+			_target(5, Markers.Priority.PRIMARY, 1.0e12),
 		],
 		10
 	)
-	h.check(int(mixed[0]["id"]) == 4, "and a nearer fragment is still below a place")
+	h.check(int(mixed[0]["id"]) == 5, "a place outranks both")
+	h.check(int(mixed[1]["id"]) == 3, "the fragment outranks the nearer moon")
+	h.check(int(mixed[2]["id"]) == 4, "which is last")
 
 
 func _test_cap_keeps_what_matters(h) -> void:
@@ -481,3 +487,36 @@ func _test_the_nearest_moons_are_marked(h, root: Node) -> void:
 	)
 	h.check(not picked.has(moons[5].get_instance_id()), "not to the furthest one")
 	container.free()
+
+
+## **The flight that found this, 2026-11-14**: Evert flew from Phobos towards Jupiter, the ship slowed
+## down about halfway, *Closest* read an asteroid — and no asteroid markers appeared.
+##
+## Sol has **40 significant bodies**: the star and eight planets at `PRIMARY`, and thirty-one moons at
+## `CONTEXT`, every one of them a candidate at any distance. Fragments sat at the bottom of the ladder, so a
+## 24-slot pool was filled by the places and the moons before a fragment was ever considered. The tier
+## ordering is what was wrong, not the gathering.
+func _test_a_whole_system_leaves_room_for_the_belt(h) -> void:
+	var candidates: Array[Dictionary] = []
+	for index in 9:
+		candidates.append(_target(1 + index, Markers.Priority.PRIMARY, 1.0e11 * float(index + 1)))
+	for index in 31:
+		candidates.append(_target(100 + index, Markers.Priority.CONTEXT, 1.0e9))
+	# The belt, as the field hands it over: nearer than anything else, and with no node behind it.
+	for index in 24:
+		candidates.append(_target(-1 - index, Markers.Priority.ASTEROID, 4.6e7 + float(index)))
+
+	var chosen := Markers.choose(candidates, 24)
+	var places := 0
+	var rocks := 0
+	for entry in chosen:
+		if int(entry["priority"]) == Markers.Priority.PRIMARY:
+			places += 1
+		elif int(entry["priority"]) == Markers.Priority.ASTEROID:
+			rocks += 1
+	h.check(places == 9, "all nine places are marked")
+	h.check(rocks == 15, "and the rest of the pool goes to the belt (%d rocks)" % rocks)
+	h.check(int(chosen[8]["priority"]) == Markers.Priority.PRIMARY,
+		"the places come first, in distance order")
+	h.check(int(chosen[9]["priority"]) == Markers.Priority.ASTEROID,
+		"and the rocks take the pool after them")
