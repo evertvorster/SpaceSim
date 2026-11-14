@@ -96,6 +96,7 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 |---|---|
 | `node: Node3D` | the body's origin, or **null** for something with no node at all |
 | `position: Vector3`, `name: String` | where it is and what it is called **when `node` is null** — a fragment is arithmetic, not a node |
+| `velocity: Vector3` | **how fast it is moving in the system frame, and therefore what a ship near it inherits.** The ship's velocity is relative to the body it is nearest, so this is what makes a moving target reachable at all. Zero is correct for anything that stands still — everything but a fragment at present. Fill it where the body is moved, in the same tick |
 | `radius: float` | metres |
 | `surface_distance_to(position) -> float` | distance to the *surface*, never negative — the cheap comparison the proximity scan uses |
 | `surface_distance_mesh(position) -> float` | distance to the nearest *vertex* of a body's own mesh; the sphere when there is no mesh to ask |
@@ -114,9 +115,24 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 | `TRAVERSE_SECONDS: float` | seconds to cross the local neighbourhood at full throttle |
 | `local_length(distance, length_min, length_max) -> float` | the local neighbourhood, in metres, held within the frame's band; `INF` reads as the largest scale, never zero |
 | `speed_for(throttle, distance, length_min, length_max, traverse_seconds) -> float` | m/s for a throttle in [0, 1] |
+| `carried_step(reference_velocity, closing_velocity, delta) -> Vector3` | **where the ship is one step later: carried by whatever it is nearest, plus its own closing speed** |
 
 Speed is *derived*, never integrated: there is no speed to desync and no way to arrive too
 fast, because the limit falls with the remaining distance by construction.
+
+**Velocity is relative to the reference body, and the reference is whatever is nearest** — Evert,
+2026-11-14: *"At launch, it inherits the movement of Earth... then as it travels to an asteroid, it
+matches the movement of the asteroid."* A ship in flight is carried by the thing it is nearest, so the
+distance the unit is derived from behaves as if that thing stood still and the approach arrives
+exponentially, whether the target orbits at 18.8 km/s or not at all. Crossing from one reference to
+another simply changes whose motion is inherited, and at the speeds travelled between planets the change
+is invisible — so nothing about it is shown.
+
+**Without the carried term the whole model only works in a frozen world.** A fragment at 2.5 AU orbits
+at 18.8 km/s, faster than `distance / 10` below 188 km, so the ship stalled there and could reach
+nothing that moved. That was the first flight's report (2026-11-14) and `tests/test_travel_scale.gd`
+now drives the real integration both ways: the carried ship arrives, the uncarried one stalls at
+**188 km** — the number the arithmetic predicts.
 
 ## Solar system
 

@@ -15,6 +15,13 @@ extends RefCounted
 var node: Node3D
 ## Where it is in the system frame, when [member node] is null.
 var position: Vector3 = Vector3.ZERO
+## **How fast it is moving, in the system frame** — and therefore what a ship near it inherits.
+##
+## The ship's velocity is relative to the body it is nearest, so this is what makes a moving target
+## reachable at all: it is carried along with its reference and only has to close the remaining distance.
+## Fill it from whatever moves the body, in the same place and the same tick; **zero is correct for
+## anything that stands still**, which is everything but a fragment at present.
+var velocity: Vector3 = Vector3.ZERO
 ## What it is called in the readout, when [member node] is null.
 var name: String = ""
 var radius: float

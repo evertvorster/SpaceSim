@@ -65,8 +65,14 @@ func step(delta: float, input: Dictionary) -> void:
 
 	# Forward is -Z, as everywhere in Godot, so a negative throttle moves along +Z.
 	landed = false
+	var closing := Vector3.ZERO
 	if speed != 0.0:
-		global_position -= global_transform.basis.z * speed * delta
+		closing = -global_transform.basis.z * speed
+	# **The ship is carried by whatever it is nearest to**, so its speed is relative to that body and
+	# the world does not need to stand still for it to arrive. See `SpacesimTravelScale.carried_step`.
+	var carried := Vector3.ZERO if _nearest_body == null else _nearest_body.velocity
+	if closing != Vector3.ZERO or carried != Vector3.ZERO:
+		global_position += TravelScale.carried_step(carried, closing, delta)
 
 	_constrain_to_surface()
 

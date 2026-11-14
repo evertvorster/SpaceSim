@@ -47,6 +47,13 @@ class Fragment:
 	var designation: String ## `A-0007` — the address is gone, so this is its identity for a session
 
 
+	## **How fast it is going, and which way** — the derivative of the circle it rides. A ship near it
+	## inherits this, which is what lets a ship that can only close at `distance/10` ever reach something
+	## orbiting at 18.8 km/s.
+	func velocity() -> Vector3:
+		return radius * rate * (-sin(phase) * u + cos(phase) * v)
+
+
 var population: SpacesimPopulation
 
 var _fragments: Array[Fragment] = []
