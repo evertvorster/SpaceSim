@@ -70,6 +70,7 @@ Owns the rules and moves an observer between frames as it crosses thresholds.
 | `add_rule(rule) -> void` | |
 | `enter_frame(frame) -> void` | move the observer into a frame without consulting rules (initial placement) |
 | `evaluate() -> void` | switch frames if a threshold has been crossed; safe to call every tick |
+| `discard(frame) -> void` | **let a frame that exists at runtime go**: drop it from the registry, take its rules with it, and if the observer was standing in it put them in the nearest *enclosing* frame, keeping the global transform. A population's rock is built and freed as the ship moves, so its `orbital` frame is created and discarded in flight |
 
 A switch is a `reparent()` that preserves the observer's pose, so the observer does not move when
 its coordinate space changes.
