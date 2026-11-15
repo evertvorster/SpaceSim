@@ -15,6 +15,9 @@ const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 ## sphere of constant radius and its only silhouette is the one at the limb: level 5 is 20,480 triangles and a
 ## facet dips 1 km below the band's outer radius between vertices, which at 100 km is a density change of one
 ## part in a thousand — invisible, where the patch walk's own selection was not.
+## **How much further out the exit threshold sits than the entry**, so a crossing has hysteresis rather
+## than flickering. The band's ceiling is the exit threshold, so the local unit has no step either side.
+const ORBITAL_EXIT_FACTOR := 1.2
 const AIR_SHELL_LEVEL := 5
 const FrameTree := preload("res://addons/spacesim/coordinate/frame_tree.gd")
 const TransitionRule := preload("res://addons/spacesim/coordinate/transition_rule.gd")
@@ -589,6 +592,39 @@ func add_body(content: SpacesimSystemBody, where: Vector3) -> SpacesimSceneBody:
 	return body
 
 
+## **A rock's neighbourhood: the frame entered `orbital_radii` radii above its surface.** Only bodies that
+## have nothing else get one — see the call site. Sized by the body, so a 28 m rock's is 560 m wide, which
+## is what lets a population of two dozen each have one: **two of them can never both contain the ship**. The band's ceiling is the exit threshold, so the unit never has a step at a
+## crossing, and its floor is the surface band's, which is where the crawl comes from.
+func _add_orbital_frame(body: SpacesimSceneBody) -> void:
+	var altitude := body.radius * _framing.orbital_radii
+	if altitude <= 0.0:
+		return
+	body.orbital = Frame.new()
+	body.orbital.name = "Orbital"
+	body.orbital.kind = Frame.Kind.ORBITAL
+	body.orbital.frame_id = "%s/orbital" % body.id
+	body.orbital.travel_length_min = _framing.surface_band.x
+	body.orbital.travel_length_max = altitude * ORBITAL_EXIT_FACTOR
+	body.node.add_child(body.orbital)
+	frame_tree.register(body.orbital)
+	frame_tree.add_rule(
+		TransitionRule.new(
+			system_frame, body.orbital, body.node, body.radius, altitude, TransitionRule.Direction.ENTER
+		)
+	)
+	frame_tree.add_rule(
+		TransitionRule.new(
+			body.orbital,
+			system_frame,
+			body.node,
+			body.radius,
+			altitude * ORBITAL_EXIT_FACTOR,
+			TransitionRule.Direction.EXIT
+		)
+	)
+
+
 func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
 	body.node.name = body.name
@@ -602,6 +638,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# smaller bodies are something fundamentally different."* Nothing below this line runs for one, so there is no
 	# walk to lose its vertices in, no field to displace it, and no switch for any of the code further down to read.
 	if SpacesimIrregularBody.is_irregular(body, _materials()):
+		# **The one frame a rock gets, and the only bodies that need it.** Evert, 2026-11-14: *"units that
+		# already had atmospheres ... does not need this; it's only for small things in orbit."* A planet or
+		# a round moon has its atmosphere and surface frames, and the crawl at its surface; a rock has
+		# nothing, so without this it left the ship on the system frame's 10 km floor and the throttle could
+		# not go slow enough to stop beside it — 1,000 m/s against a moon's 10.
+		_add_orbital_frame(body)
 		SpacesimIrregularBody.build(body.node, body, _materials())
 		return
 

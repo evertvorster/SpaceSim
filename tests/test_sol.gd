@@ -25,6 +25,7 @@ func run(h, root: Node) -> void:
 	_test_species_are_known(h, sol)
 	_test_orbits_from_real_data(h, sol)
 	_test_moons(h, sol)
+	_test_orbital_frames(h, sol, root)
 	_test_the_scene_places_them(h, sol, root)
 	_test_internal_heat(h, sol)
 
@@ -241,6 +242,28 @@ func _test_orbits_from_real_data(h, sol: SpacesimSolarSystem) -> void:
 ## The moons check the hierarchy. A moon's period comes from its **planet's** mass and its own
 ## semi-major axis, so it only solves correctly if the parent lookup, the two-body parameter and
 ## the solver are all right together.
+## **Only the bodies that have nothing else get an orbital frame.** Evert, 2026-11-14: *"units that already
+## had atmospheres ... does not need this; it's only for small things in orbit."* A planet has its atmosphere
+## and surface frames and the crawl at its surface; a rock has none of that and needs the neighbourhood.
+func _test_orbital_frames(h, sol: SpacesimSolarSystem, root: Node) -> void:
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var earth := scene.body_by_id("planet:earth")
+	var phobos := scene.body_by_id("moon:phobos")
+	h.check(earth != null and earth.orbital == null,
+		"a planet with an atmosphere gets no orbital frame")
+	h.check(earth != null and earth.surface != null, "and keeps its surface frame")
+	h.check(phobos != null and phobos.orbital != null,
+		"a rock gets an orbital frame — it has no other")
+	if phobos != null and phobos.orbital != null:
+		h.check_near(phobos.orbital.travel_length_min, 100.0,
+			"its floor is the surface band's", 1.0e-9)
+		# 20 radii above an 11.08 km body, times the exit factor.
+		h.check_near(phobos.orbital.travel_length_max, 11080.0 * 20.0 * 1.2,
+			"and its ceiling is the exit threshold, sized by the body", 1.0e-3)
+
+
 func _test_moons(h, sol: SpacesimSolarSystem) -> void:
 	var expected := {
 		"moon:luna": [27.284, "Luna"],

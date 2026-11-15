@@ -384,6 +384,22 @@ func _test_a_fragment_becomes_a_body(h, root: Node) -> void:
 			found += 1
 	h.check(found == bodies.count(), "and they live in the system frame with the other bodies (%d)" % found)
 
+	# **A rock gets the one frame a small body needs**, sized by itself: without it the ship is left on the
+	# system frame's 10 km floor and cannot go slow enough to stop beside it.
+	var rock: Node3D = null
+	for child in scene.system_frame.get_children():
+		if String(child.name).begins_with("A-"):
+			rock = child
+			break
+	h.check(rock != null, "a fragment has a node in the system frame")
+	if rock != null:
+		var orbital: SpacesimFrame = rock.get_node_or_null("Orbital")
+		h.check(orbital != null, "and an orbital frame of its own")
+		if orbital != null:
+			h.check_near(orbital.travel_length_min, 100.0,
+				"whose floor is the surface band's, so the throttle can crawl", 1.0e-9)
+			h.check(orbital.kind == SpacesimFrame.Kind.ORBITAL, "and it is an orbital frame")
+
 	# **Not places**: nothing else in the engine may learn about them.
 	var places := 0
 	for node in scene.significant_nodes():
