@@ -22,7 +22,7 @@ func run(h, root: Node) -> void:
 	_test_sizes_follow_the_power_law(h)
 	_test_sol_authors_the_belt(h)
 	_test_a_fragment_is_significant(h)
-	_test_a_fragment_earns_its_shape(h)
+	_test_a_fragment_is_an_irregular_body(h)
 	_test_the_belt_reaches_the_marker_pool(h, root)
 
 
@@ -257,27 +257,42 @@ func _test_a_fragment_is_significant(h) -> void:
 			% [String.num(near_unit), String.num(far_unit)])
 
 
-## **A rock has no geometry until the eye can resolve one.** Four pixels is where a shape is worth
-## extracting, and a fragment of diameter d is one pixel across at 900 d.
-func _test_a_fragment_earns_its_shape(h) -> void:
-	h.check_near(SpacesimFragmentRenderer.resolve_distance(100.0), 22500.0,
-		"a 100 m fragment earns its shape inside 22.5 km", 1.0e-6)
-	h.check_near(SpacesimFragmentRenderer.resolve_distance(10.0), 2250.0,
-		"and a 10 m one inside 2.25 km", 1.0e-6)
-
-	var material := SpacesimFragmentRenderer.material_for(_belt_with_composition())
-	h.check(material.roughness == 1.0 and material.metallic_specular == 0.0,
-		"a rock scatters rather than reading as glass")
-	h.check(material.albedo_color.is_equal_approx(Color(0.18, 0.16, 0.15)),
-		"and is the colour of what it is mostly made of")
-
-
 func _belt_with_composition() -> SpacesimPopulation:
 	var belt := _belt()
 	belt.composition = {"carbonaceous": 0.75, "iron": 0.08, "silicate": 0.17}
 	return belt
 
 
+## **A fragment is built by the builder the moons use, and it is a real body.** Evert, 2026-11-14: *"I was
+## under the impression that asteroids would be created in the same way that other irregular bodies would
+## be created, like the moons of mars."* So the claims are: the content it becomes is shaped like a moon's,
+## it lands on the irregular builder rather than the planet one, and it is as lumpy as the taper allows.
+func _test_a_fragment_is_an_irregular_body(h) -> void:
+	var belt := _belt_with_composition()
+	var content := SpacesimFragmentBodies.content_for(belt, "A-0007", 17.0)
+	h.check_near(content.radius, 8.5, "its radius is half the diameter", 1.0e-9)
+	h.check(content.id == "A-0007", "its id is the designation — which is what seeds the shape")
+	h.check(content.layers.size() == 1, "it has one layer, its bulk")
+	if content.layers.size() == 1:
+		h.check_near(float(content.layers[0].composition.get("carbonaceous", 0.0)), 0.75,
+			"and that layer is what the population says it is made of", 1.0e-9)
+		h.check_near(content.layers[0].radius, content.radius, "with its boundary the body's own", 1.0e-9)
+
+	# **The builder is chosen by radius against the material's own rounding radius**, the same rule that
+	# decides a moon — and a 17 m rock of this stuff is four orders of magnitude below it.
+	var materials := SpacesimMaterialTable.engine_table()
+	var rounding := SpacesimIrregularBody.rounding_radius(content, materials)
+	h.check(rounding > 1.0e5, "carbonaceous rock rounds at %.0f km" % (rounding / 1.0e3))
+	h.check(content.radius < rounding, "so a fragment goes to the irregular builder, not the planet one")
+
+	# **At full lumpiness**: the taper is `1 - radius/rounding`, so a fragment is at the top of it.
+	var body := SpacesimSceneBody.from_content(content, materials)
+	h.check_near(SpacesimIrregularBody.irregularity(body, materials), 1.0,
+		"and it is as irregular as the taper allows", 1.0e-4)
+
+	# **The seed is the designation**, so the same rock is the same shape every time it is extracted, and two
+	# fragments of one population are different rocks.
+	h.check(hash("A-0007") != hash("A-0008"), "two designations seed two shapes")
 ## **Evert's flight, reproduced headlessly.** Fly from Phobos towards Jupiter: the ship slows down, *Closest*
 ## reads an asteroid, and **no asteroid markers appear**.
 ##

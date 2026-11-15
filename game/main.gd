@@ -109,10 +109,10 @@ var _field_parents: Array[SpacesimSceneBody] = []
 ## array and rewritten in place, because the proximity scan runs every tick and a fresh array — or a
 ## fresh `SpacesimScaleBody` — per tick is garbage for nothing. The fragment entries are pooled and
 ## reused for the same reason.
-## **The rock you arrive at**: one fragment's mesh, extracted when the eye is close enough to resolve it.
-## A population's fragments have no geometry at all until one of them is near enough to look at.
-var _fragment_renderer: SpacesimFragmentRenderer
-var _fragment_materials: Array[StandardMaterial3D] = []
+## **The rocks you can see**: one [SpacesimFragmentBodies] per population, each holding a real
+## [SpacesimSceneBody] per live fragment and driving it through the same builder, extraction, LOD and
+## wireframe the moons use. Parallel arrays with `_fields`.
+var _fragment_bodies: Array[SpacesimFragmentBodies] = []
 
 var _system_scale: Array[SpacesimScaleBody] = []
 var _scale_bodies: Array[SpacesimScaleBody] = []
@@ -531,7 +531,6 @@ func _process(delta: float) -> void:
 	# A screen is open, so the world is frozen and there is nothing to redraw it against.
 	if _screen == null:
 		_update_view(delta)
-		_update_fragment_mesh()
 
 
 func _physics_process(delta: float) -> void:
@@ -716,6 +715,9 @@ func _update_view(delta: float) -> void:
 	# **The ship's origin, not the camera's** — the camera's offset swings on a 32 m arm as the ship rotates, and at low
 	# altitude that re-cut the mesh every frame. The level is a property of where the observer is.
 	_system.update_lod(_camera, observer)
+	# **The rocks, advanced with the same rules and in the same frame as the bodies** — `update_lod` is
+	# where a moon's extraction threshold and wireframe are decided, so a fragment's belong beside it.
+	_update_fragment_bodies(observer)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
@@ -780,10 +782,10 @@ func _build_fields() -> void:
 			continue
 		_fields.append(SpacesimPopulationField.new(population))
 		_field_parents.append(parent)
-		_fragment_materials.append(SpacesimFragmentRenderer.material_for(population))
-	_fragment_renderer = SpacesimFragmentRenderer.new()
-	_fragment_renderer.name = "Fragment"
-	add_child(_fragment_renderer)
+		var bodies := SpacesimFragmentBodies.new(population)
+		bodies.name = "Fragments_%s" % population.id.replace(":", "_")
+		add_child(bodies)
+		_fragment_bodies.append(bodies)
 	_system_scale = _ship.bodies.duplicate()
 	_scale_bodies.append_array(_system_scale)
 	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a
@@ -838,36 +840,16 @@ func _refresh_scale_bodies() -> void:
 			cursor += 1
 
 
-## **The nearest fragment, if it is close enough to have a shape worth extracting.** One at a time: the
-## rock you are about to fly past is the only one whose geometry can be seen, and the marker is the whole
-## of the others. Presentation, so it runs in the drawn frame rather than the physics tick.
-func _update_fragment_mesh() -> void:
-	var eye := _ship.global_position
-	var best: SpacesimPopulationField.Fragment = null
-	var best_index := -1
-	var best_distance := INF
-	var best_position := Vector3.ZERO
+## Every population's fragments, as bodies: extraction only when a rock is close enough to resolve, and
+## the wireframe honoured the moment it is on.
+func _update_fragment_bodies(eye: Vector3) -> void:
 	for index in _fields.size():
 		var parent := _field_parents[index]
 		if parent.node == null:
 			continue
-		var origin := parent.node.global_position
-		for fragment in _fields[index].fragments():
-			var where := _fields[index].position_of(fragment, origin)
-			var distance := where.distance_to(eye)
-			if distance < best_distance:
-				best_distance = distance
-				best = fragment
-				best_index = index
-				best_position = where
-	if best == null or best_distance > SpacesimFragmentRenderer.resolve_distance(best.diameter):
-		_fragment_renderer.hide_fragment()
-	else:
-		_fragment_renderer.draw_at(
-			best_position, best.designation, best.seed_value, best.diameter,
-			_fragment_materials[best_index]
+		_fragment_bodies[index].update(
+			_fields[index], parent.node.global_position, eye, _camera, _system.wireframe
 		)
-	_fragment_renderer.poll()
 
 
 ## One pooled scale body per fragment slot. **Reused rather than made and thrown away**: the array is

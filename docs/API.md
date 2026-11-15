@@ -289,22 +289,26 @@ vectors — where it is and the direction of travel), `phase`, `rate` (radians/s
 fragments per cubic metre — a mean spacing of **105,000 km** — and the field draws two dozen of them inside
 **188,000 km**.
 
-### `SpacesimFragmentRenderer` — `Node3D`
+### `SpacesimFragmentBodies` — `Node3D`
 
-**The rock you arrive at.** A population's fragments have no geometry at all until one is close enough to
-look at, so this draws **one** — the nearest — and rebuilds when the ship moves on to another. The
-extraction is on the worker pool (`SpacesimBlobShape.arrays`) and the publish is on the main thread
-(`mesh_from`), the same split `SpacesimIrregularBody` uses.
+**The rocks you can see, as bodies.** One `SpacesimSceneBody` per live fragment, built by
+`SpacesimIrregularBody` — the same builder, generator, taper, extraction threshold and **wireframe** the
+moons get. A fragment is a body for exactly as long as the field holds it: created when the field makes
+one, freed when it drops it.
 
 | Member | |
 |---|---|
-| `draw_at(where, designation, seed_value, diameter, material)` | show this fragment here; a request arriving while another extraction is in flight is dropped and asked again next frame |
-| `hide_fragment()` | take the shape away and forget which fragment it belonged to |
-| `poll()` | publish a finished extraction — once a frame, on the main thread |
-| `is_showing(designation) -> bool` | whether the fragment being drawn is the one asked for |
-| `static resolve_distance(diameter) -> float` | `diameter · 900 / 4` — four pixels of disc, the same 900-diameter-per-pixel rule `SpacesimLod` uses. A 100 m rock earns a shape inside 22.5 km |
-| `static material_for(population) -> StandardMaterial3D` | the bulk solid of the composition: full roughness, no specular, the species' own colour |
-| `const RESOLUTION` | 24 cells across — a rock is one to two orders of magnitude across against a planet's eight, so the subdivision a planet needs is not needed here |
+| `update(field, parent_position, eye, camera, wireframe)` | mirror the field: create, free, and advance each body |
+| `static content_for(population, designation, diameter) -> SpacesimSystemBody` | **a fragment as content** — its radius and one layer of the population's composition. That is all the builder needs: colour, strength and density follow, so a rock's lumpiness is derived rather than chosen. **`id` is the designation**, because `request()` seeds the shape from `hash(body.id)` — the same rock is the same shape every time it is extracted |
+| per-body advance | `poll` → `request` once the screen radius reaches `RESOLVE_PIXELS` (2 px, half the point tier) → `mesh.visible` → `show_wireframe(body, wireframe)`. **`SpacesimSystemScene.update_lod`'s own four calls, in its own order** |
+
+**Nothing is extracted until the eye can resolve it.** A 17 m fragment is 2 px of radius at about 22 km, so
+a field of two dozen rocks costs nothing until one is close, and then the cost is one body's extraction on
+the worker pool — the same bargain the moons struck.
+
+The fragment's point of light is left hidden: it would be one or two pixels, and placing a splat belongs to
+`SpacesimSystemScene._place_point`, so an unbuilt rock is not drawn rather than drawn as a wrongly-sized
+white disc.
 
 ### `SpacesimKepler` — `RefCounted`
 
