@@ -99,6 +99,25 @@ var _bodies_visible := true
 ## Whether the body meshes are being drawn as wireframes — see [method set_wireframe].
 var _wireframe := false
 
+## **One field per population, each with the body it orbits.** A population is not a body, so it has no
+## node, no frame and no geometry — it has a density, and the field makes fragments out of it around
+## the ship. The parent is what the fragments orbit, so the two arrays are parallel.
+var _fields: Array[SpacesimPopulationField] = []
+var _field_parents: Array[SpacesimSceneBody] = []
+
+## **The scale bodies the ship is slowed by**: the system's own, then one per live fragment. Kept in one
+## array and rewritten in place, because the proximity scan runs every tick and a fresh array — or a
+## fresh `SpacesimScaleBody` — per tick is garbage for nothing. The fragment entries are pooled and
+## reused for the same reason.
+## **The rocks you can see**: one [SpacesimFragmentBodies] per population, each holding a real
+## [SpacesimSceneBody] per live fragment and driving it through the same builder, extraction, LOD and
+## wireframe the moons use. Parallel arrays with `_fields`.
+var _fragment_bodies: Array[SpacesimFragmentBodies] = []
+
+var _system_scale: Array[SpacesimScaleBody] = []
+var _scale_bodies: Array[SpacesimScaleBody] = []
+var _fragment_scale: Array[SpacesimScaleBody] = []
+
 
 func _ready() -> void:
 	_print_build()
@@ -109,6 +128,7 @@ func _ready() -> void:
 	_system.build(self)
 	_ship = PlayerShip.create()
 	PlayerShip.place(_system, _ship)
+	_build_fields()
 	_markers = SpacesimMarkers.new()
 	_markers.name = "Markers"
 	# The HUD is built after this, and the marker overlay needs its rectangles to place labels clear
@@ -119,7 +139,6 @@ func _ready() -> void:
 	_camera = _ship.get_node("Camera")
 	_camera_mount = Node3D.new()
 	_camera_mount.name = "CameraMount"
-	_camera_mount.position = PlayerShip.CAMERA_OFFSET
 	_ship.add_child(_camera_mount)
 	# Exposure is a camera property, and it is ours: the star's light is physical, so the exposure that
 	# puts a lit body at middle grey is arithmetic. Settled at once rather than transitioned into, so
@@ -451,10 +470,6 @@ func _cycle_target() -> void:
 ## change, so nothing here is read once at startup and then forgotten.
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
-	# **The camera sits in the ship's frame and there is no hull** — see `PlayerShip.CAMERA_OFFSET` for why the box that
-	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting. It is the
-	# MOUNT's now: the camera lives in the band's viewport and is handed this transform every frame.
-	_camera_mount.position = PlayerShip.CAMERA_OFFSET
 	# The exposure's ceiling, hot like everything else here: `exposure.range_stops` is in stops above
 	# the light-adapted floor, and 32.0 is the whole window with no cap on the derived value.
 	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
@@ -539,6 +554,9 @@ func _physics_process(delta: float) -> void:
 		"roll": roll,
 	}
 
+	# **Before the step**, so the ship is slowed by the fragments that are there now rather than by the
+	# ones that were there last tick.
+	_update_fields(delta)
 	_ship.step(delta, input)
 	# **Both clocks, one second at a time** — Evert, 2026-11-08. The world's runs faster only when
 	# relativistic travel lands, and `SpacesimSession.advance` is the one place either of them moves.
@@ -556,6 +574,13 @@ func _physics_process(delta: float) -> void:
 ## per field and a `PackedStringArray` to join it, sixty times a second, for a display. Measured at
 ## 0.12% of a frame it is not a cost problem; it is a *shape* problem, and this is the shape.
 const HUD_INTERVAL := 0.1
+
+## **The near plane is a thousandth of the gap to the nearest surface** — see `_update_camera`. The margin is
+## deliberately large: the plane has to sit in front of the nearest *point* of a body whose near surface is
+## already the thing being measured.
+const NEAR_PER_GAP := 1000.0
+## The floor, because a landed ship's gap is zero and a zero near plane is not a plane.
+const MINIMUM_NEAR := 0.001
 var _hud_since := 0.0
 
 ## **Which code is running, said once at startup.**
@@ -692,6 +717,9 @@ func _update_view(delta: float) -> void:
 	# **The ship's origin, not the camera's** — the camera's offset swings on a 32 m arm as the ship rotates, and at low
 	# altitude that re-cut the mesh every frame. The level is a property of where the observer is.
 	_system.update_lod(_camera, observer)
+	# **The rocks, advanced with the same rules and in the same frame as the bodies** — `update_lod` is
+	# where a moon's extraction threshold and wireframe are decided, so a fragment's belong beside it.
+	_update_fragment_bodies(observer)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
@@ -741,6 +769,126 @@ func _place_observer_from_session() -> void:
 
 ## The ambient group is the frame's business: other bodies matter while you are out in space, and
 ## stop mattering once you are busy landing on one of them.
+## **A population is not a body**: it has no node, no frame and no geometry. It has a density, and a
+## field makes fragments out of that density around the ship — one field per population, each paired
+## with the body its fragments orbit, because that orbit is what gives them their motion.
+func _build_fields() -> void:
+	for population in _system.content.populations:
+		var parent_id := population.parent_id
+		if parent_id.is_empty():
+			var star := _system.content.star()
+			parent_id = star.id if star != null else ""
+		var parent := _system.body_by_id(parent_id)
+		if parent == null:
+			push_warning("%s orbits '%s', which is not in the system" % [population.id, parent_id])
+			continue
+		_fields.append(SpacesimPopulationField.new(population))
+		_field_parents.append(parent)
+		var bodies := SpacesimFragmentBodies.new(population, _system)
+		bodies.name = "Fragments_%s" % population.id.replace(":", "_")
+		add_child(bodies)
+		_fragment_bodies.append(bodies)
+	_system_scale = _ship.bodies.duplicate()
+	_scale_bodies.append_array(_system_scale)
+	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a
+	# copy of it.
+	_ship.bodies = _scale_bodies
+
+
+## Advance every population. **In the physics tick**, because a fragment is what sets the local travel
+## unit — where it is belongs to the same clock as the ship it is slowing down.
+func _update_fields(delta: float) -> void:
+	var eye := _ship.global_position
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		_fields[index].update(
+			parent.node.global_position, SpacesimKepler.mu_of(parent.content.mass), eye, delta
+		)
+	_refresh_scale_bodies()
+
+
+## **A fragment is significant from the moment it exists**, so the ship's own proximity scan has to see
+## it: it sets the local travel unit, which means the speed at full throttle drops as the belt is
+## entered, and the readout can name what is nearest.
+func _refresh_scale_bodies() -> void:
+	var wanted := _system_scale.size()
+	for index in _fields.size():
+		wanted += _fields[index].fragments().size()
+	_scale_bodies.resize(wanted)
+
+	var cursor := 0
+	for body in _system_scale:
+		_scale_bodies[cursor] = body
+		cursor += 1
+	var slot := 0
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		var origin := parent.node.global_position
+		for fragment in _fields[index].fragments():
+			var scale := _scale_for(slot)
+			slot += 1
+			scale.position = _fields[index].position_of(fragment, origin)
+			# **Zero, because nothing moves yet.** The fragment knows the velocity it will have
+			# (`Fragment.velocity()`), and feeding it to the ship now would carry the ship along with a
+			# motion that is not happening. When bodies start moving, this is the line that changes.
+			scale.velocity = Vector3.ZERO
+			scale.radius = fragment.diameter * 0.5
+			scale.name = fragment.designation
+			_scale_bodies[cursor] = scale
+			cursor += 1
+
+
+## Every population's fragments, as bodies: extraction only when a rock is close enough to resolve, and
+## the wireframe honoured the moment it is on.
+func _update_fragment_bodies(eye: Vector3) -> void:
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		_fragment_bodies[index].update(
+			_fields[index], parent.node.global_position, eye, _camera, _system.wireframe
+		)
+
+
+## One pooled scale body per fragment slot. **Reused rather than made and thrown away**: the array is
+## rewritten every physics tick.
+func _scale_for(slot: int) -> SpacesimScaleBody:
+	while _fragment_scale.size() <= slot:
+		_fragment_scale.append(SpacesimScaleBody.new(null, 0.0))
+	return _fragment_scale[slot]
+
+
+## Every fragment the fields hold, as a marker target. **No node, no ring, and the label is the whole
+## marker**: a rock is a fraction of a pixel at every distance it is worth marking from.
+##
+## The ids are negative so that they cannot collide with a node's instance id in the same frame, which
+## is all `choose` and the label placement need them for.
+func _fragment_targets() -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	for index in _fields.size():
+		var parent := _field_parents[index]
+		if parent.node == null:
+			continue
+		var origin := parent.node.global_position
+		var fragments := _fields[index].fragments()
+		for slot in fragments.size():
+			var fragment: SpacesimPopulationField.Fragment = fragments[slot]
+			list.append({
+				"id": -(index * 4096 + slot + 1),
+				"position": _fields[index].position_of(fragment, origin),
+				"text": "%s  %s" % [
+					fragment.designation, SpacesimMarkers.format_distance(fragment.diameter)
+				],
+				"priority": SpacesimMarkers.Priority.ASTEROID,
+				"parent": SpacesimMarkers.NO_PARENT,
+			})
+	return list
+
+
 func _update_markers(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var in_space: bool = frame.kind == Frame.Kind.SPACE or frame.kind == Frame.Kind.ORBITAL
@@ -748,6 +896,7 @@ func _update_markers(camera: Camera3D) -> void:
 	if in_space:
 		context = _system.significant_nodes()
 	_markers.context_targets = context
+	_markers.targets = _fragment_targets()
 	# **The band, because the camera draws into it.** The camera is inside the band's `SubViewport`, so
 	# `unproject_position` answers in the band's pixels while the labels are laid out in the root canvas;
 	# `refresh` converts with this rect. See `SpacesimMarkers.to_canvas`.
@@ -760,10 +909,19 @@ func _update_markers(camera: Camera3D) -> void:
 func _update_camera(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
-	# **The frame kind alone sets the near plane.** It used to be pulled inside the ship's hull while the hull was
-	# drawn, which is what made a placeholder box appear as a plate on the ground on approach; there is no hull now, so
-	# the plane is a depth-precision knob and nothing else.
-	camera.near = range_for_frame.x
+	# **The near plane follows what is nearest, and the frame's setting is its CEILING.**
+	#
+	# The plane used to be the setting outright, and in space that is 100 m — so a small body inside 100 m lost its
+	# near side to the clip. A 28 m asteroid at 99 m had its silhouette 3 m behind the plane and drew as a cap;
+	# at 86 m it vanished altogether, and turning the camera cut a different part of it. **Nothing was wrong with
+	# the rock**: a moon is kilometres in radius, so its near side can never be inside 100 m of the eye, and a
+	# fragment is the first body small enough for the plane to be the thing that cuts it.
+	#
+	# The rule is the travel unit's rule — the local neighbourhood sets the scale — with a thousandth of the gap
+	# as the plane, so the whole body always sits in front of it while the depth range stays as tight as the
+	# distance allows. Farther than a thousand times the ceiling's gap nothing changes at all: `nearest / 1000`
+	# only falls under the setting's 100 m within 100 km of something.
+	camera.near = clampf(_ship.altitude() / NEAR_PER_GAP, MINIMUM_NEAR, range_for_frame.x)
 	var far: float = range_for_frame.y
 	# **Never let the far plane be smaller than what must be drawn.** For space that is the system: the
 	# space range is a player quality knob whose 1e11 m default is *less than one au*, so every body

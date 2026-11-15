@@ -19,6 +19,10 @@ extends Resource
 @export var start_direction: Vector3 = Vector3.ZERO
 @export var start_world_time: float = 0.0 ## seconds from the world epoch
 @export var bodies: Array[SpacesimSystemBody] = []
+## Swarms of small bodies that are **not** bodies: the asteroid belt, a ring. A population is a
+## distribution rather than a list, so it cannot be a [SpacesimSystemBody] — it has no radius, no mass
+## and nothing orbits it. See [SpacesimPopulation].
+@export var populations: Array[SpacesimPopulation] = []
 
 ## How far a fraction may be from 1 before it is a mistake rather than rounding.
 const FRACTION_TOLERANCE := 1.0e-3
@@ -43,6 +47,13 @@ func body_by_id(id: String) -> SpacesimSystemBody:
 	for body in bodies:
 		if body.id == id:
 			return body
+	return null
+
+
+func population_by_id(id: String) -> SpacesimPopulation:
+	for population in populations:
+		if population.id == id:
+			return population
 	return null
 
 
@@ -100,6 +111,60 @@ func validate() -> PackedStringArray:
 		problems.append_array(_check_fractions(body))
 
 	problems.append_array(_check_cycles())
+	problems.append_array(_check_populations())
+	return problems
+
+
+## A population's band has to describe a place: inside it, and not inside the body it orbits.
+##
+## **The counts are checked rather than clamped**, by the same rule as everything else here: a
+## population whose numbers do not add up is a wrong belt, and a wrong belt nobody notices is worse
+## than one that refuses to load.
+func _check_populations() -> PackedStringArray:
+	var problems := PackedStringArray()
+	var seen := {}
+	for population in populations:
+		var where := population.id if not population.id.is_empty() else "a population"
+		if population.id.is_empty():
+			problems.append("a population has no id")
+		elif seen.has(population.id):
+			problems.append("%s appears twice" % where)
+		seen[population.id] = true
+
+		# Empty means the primary star, exactly as for a body.
+		var parent_id := population.parent_id
+		if parent_id.is_empty():
+			var primary := star()
+			parent_id = primary.id if primary != null else ""
+		var parent := body_by_id(parent_id)
+		if parent == null:
+			problems.append("%s orbits '%s', which is not a body here" % [where, parent_id])
+
+		var inner := population.semi_major_axis.x
+		var outer := population.semi_major_axis.y
+		if inner <= 0.0 or outer <= inner:
+			problems.append("%s has no band (%s to %s m)"
+				% [where, String.num(inner), String.num(outer)])
+		elif parent != null and inner <= parent.radius:
+			problems.append("%s starts inside the body it orbits (%s m <= %s m)"
+				% [where, String.num(inner), String.num(parent.radius)])
+
+		if population.inclination.x < 0.0 or population.inclination.y > 90.0:
+			problems.append("%s has an inclination outside [0, 90]" % where)
+		elif population.inclination.y < population.inclination.x:
+			problems.append("%s has an inclination band that runs backwards" % where)
+
+		if population.count <= 0:
+			problems.append("%s holds no fragments" % where)
+		if population.reference_size <= 0.0:
+			problems.append("%s has no reference size" % where)
+		if population.size_index <= 0.0:
+			problems.append("%s has a size index of %s" % [where, String.num(population.size_index)])
+		if population.size_floor <= 0.0 or population.size_floor >= population.size_ceiling:
+			problems.append("%s has no size range (%s to %s m)"
+				% [where, String.num(population.size_floor), String.num(population.size_ceiling)])
+
+		problems.append_array(_sum_check(where, "composition", population.composition, PackedStringArray()))
 	return problems
 
 

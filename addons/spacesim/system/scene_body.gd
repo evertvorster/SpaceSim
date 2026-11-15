@@ -223,6 +223,11 @@ var patch_walk_tinted := false
 ## Whether an empty selection has already been reported for this body, so the reason is printed once
 ## rather than once a second for the rest of the session.
 var patch_empty_reported := false
+## **The body's own neighbourhood, sized by the body** — entered at `orbital_radii × radius` above its
+## surface, and where the local travel unit bottoms out at the surface band's floor. **Every body gets
+## one**, irregular ones included: a rock you can fly up to is a neighbourhood even though you cannot
+## land on it, and without this a small body left the ship on the system frame's 10 km floor.
+var orbital: SpacesimFrame
 var atmosphere: SpacesimFrame
 var surface: SpacesimFrame
 var scale_body: SpacesimScaleBody

@@ -65,8 +65,14 @@ func step(delta: float, input: Dictionary) -> void:
 
 	# Forward is -Z, as everywhere in Godot, so a negative throttle moves along +Z.
 	landed = false
+	var closing := Vector3.ZERO
 	if speed != 0.0:
-		global_position -= global_transform.basis.z * speed * delta
+		closing = -global_transform.basis.z * speed
+	# **The ship is carried by whatever it is nearest to**, so its speed is relative to that body and
+	# the world does not need to stand still for it to arrive. See `SpacesimTravelScale.carried_step`.
+	var carried := Vector3.ZERO if _nearest_body == null else _nearest_body.velocity
+	if closing != Vector3.ZERO or carried != Vector3.ZERO:
+		global_position += TravelScale.carried_step(carried, closing, delta)
 
 	_constrain_to_surface()
 
@@ -104,7 +110,11 @@ func _update_proximity() -> void:
 	nearest_distance = (
 		INF if _nearest_body == null else _nearest_body.surface_distance_mesh(global_position)
 	)
-	nearest_name = _nearest_body.node.name if _nearest_body != null and _nearest_body.node != null else "—"
+	# **A fragment has no node**, so it answers with its own designation — it is the only thing in range
+	# out there, and the readout has to be able to name it.
+	nearest_name = "—"
+	if _nearest_body != null:
+		nearest_name = _nearest_body.name if _nearest_body.node == null else _nearest_body.node.name
 
 
 ## Altitude above the nearest significant surface, in metres.
@@ -118,9 +128,15 @@ func altitude() -> float:
 ## from it is left alone, so the ship can slide and can take off. Latching here instead is
 ## what made landing a one-way trip.
 func _constrain_to_surface() -> void:
-	if _nearest_body == null or _nearest_body.node == null:
+	if _nearest_body == null:
 		return
-	var offset := global_position - _nearest_body.node.global_position
+	# **A rock has no node, and is still solid.** Evert, 2026-11-14: *"while not exactly landable, they
+	# should be dockable, which amounts to the same thing."* The constraint is a sphere test against the
+	# nearest body's own radius, and a `SpacesimScaleBody` carries a position whether or not a node does.
+	var origin: Vector3 = (
+		_nearest_body.node.global_position if _nearest_body.node != null else _nearest_body.position
+	)
+	var offset := global_position - origin
 	var distance := offset.length()
 	if distance >= _nearest_body.radius:
 		return
@@ -128,5 +144,5 @@ func _constrain_to_surface() -> void:
 	var outward := Vector3.UP
 	if distance > 0.0:
 		outward = offset / distance
-	global_position = _nearest_body.node.global_position + outward * _nearest_body.radius
+	global_position = origin + outward * _nearest_body.radius
 	landed = true

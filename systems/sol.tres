@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://addons/spacesim/system/content/overrides.gd" id="overrides"]
 [ext_resource type="Script" path="res://addons/spacesim/system/content/cloud_layer.gd" id="cloud_layer"]
 [ext_resource type="Script" path="res://addons/spacesim/system/content/clouds.gd" id="clouds"]
+[ext_resource type="Script" path="res://addons/spacesim/system/content/population.gd" id="population"]
 
 ; SOL — the development and calibration system.
 ;
@@ -2161,6 +2162,25 @@ surface = SubResource("S_oberon")
 landable = true
 significant = true
 
+[sub_resource type="Resource" id="P_main_belt"]
+script = ExtResource("population")
+id = "population:main_belt"
+display_name = "Main Belt"
+parent_id = "star:sol"
+seed_value = 108
+composition = Dictionary[String, float]({
+"carbonaceous": 0.75,
+"iron": 0.08,
+"silicate": 0.17
+})
+semi_major_axis = Vector2(314155528470.0, 493672973310.0)
+inclination = Vector2(0.0, 20.0)
+reference_size = 1000.0
+count = 1100000
+size_index = 2.5
+size_floor = 10.0
+size_ceiling = 500000.0
+
 [resource]
 script = ExtResource("system")
 content_version = 1
@@ -2172,3 +2192,4 @@ start_altitude = 20000000.0
 ; its elements are stated for is what makes the m0 values mean what JPL says they mean.
 start_world_time = 63113947200.0
 bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton"), SubResource("B_phobos"), SubResource("B_deimos"), SubResource("B_metis"), SubResource("B_adrastea"), SubResource("B_amalthea"), SubResource("B_thebe"), SubResource("B_pan"), SubResource("B_daphnis"), SubResource("B_atlas"), SubResource("B_prometheus"), SubResource("B_pandora"), SubResource("B_epimetheus"), SubResource("B_janus"), SubResource("B_mimas"), SubResource("B_enceladus"), SubResource("B_tethys"), SubResource("B_dione"), SubResource("B_rhea"), SubResource("B_iapetus"), SubResource("B_miranda"), SubResource("B_ariel"), SubResource("B_umbriel"), SubResource("B_titania"), SubResource("B_oberon")])
+populations = Array[ExtResource("population")]([SubResource("P_main_belt")])

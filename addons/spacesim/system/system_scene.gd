@@ -15,6 +15,9 @@ const Frame := preload("res://addons/spacesim/coordinate/frame.gd")
 ## sphere of constant radius and its only silhouette is the one at the limb: level 5 is 20,480 triangles and a
 ## facet dips 1 km below the band's outer radius between vertices, which at 100 km is a density change of one
 ## part in a thousand — invisible, where the patch walk's own selection was not.
+## **How much further out the exit threshold sits than the entry**, so a crossing has hysteresis rather
+## than flickering. The band's ceiling is the exit threshold, so the local unit has no step either side.
+const ORBITAL_EXIT_FACTOR := 1.2
 const AIR_SHELL_LEVEL := 5
 const FrameTree := preload("res://addons/spacesim/coordinate/frame_tree.gd")
 const TransitionRule := preload("res://addons/spacesim/coordinate/transition_rule.gd")
@@ -138,6 +141,19 @@ static func _materials() -> SpacesimMaterialTable:
 ## than silent.
 func content_version() -> int:
 	return content.content_version if content != null else 0
+
+
+## **Let a body go that was built for a moment** — a rock that has left the field. Its frame goes first,
+## so the observer is never left standing in a coordinate space that is about to be freed, and
+## [method FrameTree.discard] puts them back in the enclosing one if they were.
+func discard_body(body: SpacesimSceneBody) -> void:
+	if body == null:
+		return
+	if body.orbital != null:
+		frame_tree.discard(body.orbital)
+		body.orbital = null
+	if body.node != null:
+		body.node.queue_free()
 
 
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set
@@ -571,6 +587,57 @@ func _phase_offset(body: SpacesimSceneBody, mu: float) -> float:
 	return period * float(absi(hash(body.id)) % 100000) / 100000.0
 
 
+## **Build one more body into the scene, outside the system's own list.**
+##
+## A population's fragments are bodies and are built by [method _build_body] — the same node, the same
+## frame, the same dispatch, the same placement Evert, 2026-11-14: *"We wrote the irregular body
+## function to be re-used, not copied."* The first version of the fragment path copied the node creation
+## and the builder call into a second class instead.
+##
+## **They are not places**, which is why they are not appended to [member bodies]: markers,
+## `significant_nodes()` and the save all read that list, and 24 transient rocks in it would be wrong.
+func add_body(content: SpacesimSystemBody, where: Vector3) -> SpacesimSceneBody:
+	if content == null:
+		return null
+	var body := SpacesimSceneBody.from_content(content, _materials())
+	body.position = where
+	_build_body(body)
+	return body
+
+
+## **A rock's neighbourhood: the frame entered `orbital_radii` radii above its surface.** Only bodies that
+## have nothing else get one — see the call site. Sized by the body, so a 28 m rock's is 560 m wide, which
+## is what lets a population of two dozen each have one: **two of them can never both contain the ship**. The band's ceiling is the exit threshold, so the unit never has a step at a
+## crossing, and its floor is the surface band's, which is where the crawl comes from.
+func _add_orbital_frame(body: SpacesimSceneBody) -> void:
+	var altitude := body.radius * _framing.orbital_radii
+	if altitude <= 0.0:
+		return
+	body.orbital = Frame.new()
+	body.orbital.name = "Orbital"
+	body.orbital.kind = Frame.Kind.ORBITAL
+	body.orbital.frame_id = "%s/orbital" % body.id
+	body.orbital.travel_length_min = _framing.surface_band.x
+	body.orbital.travel_length_max = altitude * ORBITAL_EXIT_FACTOR
+	body.node.add_child(body.orbital)
+	frame_tree.register(body.orbital)
+	frame_tree.add_rule(
+		TransitionRule.new(
+			system_frame, body.orbital, body.node, body.radius, altitude, TransitionRule.Direction.ENTER
+		)
+	)
+	frame_tree.add_rule(
+		TransitionRule.new(
+			body.orbital,
+			system_frame,
+			body.node,
+			body.radius,
+			altitude * ORBITAL_EXIT_FACTOR,
+			TransitionRule.Direction.EXIT
+		)
+	)
+
+
 func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
 	body.node.name = body.name
@@ -584,6 +651,12 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	# smaller bodies are something fundamentally different."* Nothing below this line runs for one, so there is no
 	# walk to lose its vertices in, no field to displace it, and no switch for any of the code further down to read.
 	if SpacesimIrregularBody.is_irregular(body, _materials()):
+		# **The one frame a rock gets, and the only bodies that need it.** Evert, 2026-11-14: *"units that
+		# already had atmospheres ... does not need this; it's only for small things in orbit."* A planet or
+		# a round moon has its atmosphere and surface frames, and the crawl at its surface; a rock has
+		# nothing, so without this it left the ship on the system frame's 10 km floor and the throttle could
+		# not go slow enough to stop beside it — 1,000 m/s against a moon's 10.
+		_add_orbital_frame(body)
 		SpacesimIrregularBody.build(body.node, body, _materials())
 		return
 
@@ -1305,20 +1378,9 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# extracted yet. There is no walk to gate, no decks, no air, no field and no star-facing uniform — the
 		# engine's own light does the shading — so it leaves here rather than being switched off piece by piece.
 		if body.irregular:
-			SpacesimIrregularBody.poll(body)
-			# **Extracted when the eye is close enough to resolve it, and not before.** The threshold is half the point
-			# tier, so the work starts while the body is still a splat and is finished before the handover.
-			if not body.irregular_built and screen >= SpacesimIrregularBody.RESOLVE_PIXELS:
-				SpacesimIrregularBody.request(body)
-			body.mesh.visible = body.irregular_built and not is_point
-			if body.mesh.visible:
-				SpacesimIrregularBody.show_wireframe(body, wireframe)
-			if body.point != null:
-				# **The splat stands in for the geometry until there is some**, so a body is never a hole while it is being
-				# extracted — the same publish-over rule the patch walk and the cloud maps follow.
-				body.point.visible = is_point or not body.irregular_built
-				if body.point.visible:
-					_place_point(body, observer, energy, distance, pixel, screen, camera)
+			# **The whole lifecycle is one method**, because a population's fragments are bodies too and they
+			# must take the same steps — extraction, the splat that stands in while it runs, and the wireframe.
+			advance_irregular(body, observer, camera, pixel, wireframe)
 			continue
 		# How much of the air this body's shell draws, from the gate below — read again when it is published.
 		var air_strength := 0.0
@@ -2244,6 +2306,33 @@ func await_patch_builds(rounds: int = 8) -> void:
 			return
 
 
+## **The whole irregular-body lifecycle, for one body of this scene** — and the one entry point, because a
+## population's fragments are bodies too. Evert, 2026-11-14: *"We wrote the irregular body function to be
+## re-used, not copied."*
+##
+## The thresholds and the order are [method SpacesimIrregularBody.advance]'s; what belongs here is the
+## splat, because placing one needs the camera and this scene's star. **The splat stands in for the
+## geometry until there is some**, so a body — or a rock — is never a hole while it is being extracted:
+## the same publish-over rule the patch walk and the cloud maps follow.
+##
+## A rock's splat is naturally far fainter than a planet's, by construction: the quad is sized to the disc
+## the body would have, so a 10 m fragment is a fraction of a pixel at any distance it is worth drawing,
+## and [method _place_point] fades it by its own area below 0.56 px of radius.
+func advance_irregular(
+	body: SpacesimSceneBody, observer: Vector3, camera: Camera3D, pixel: float, wireframe: bool
+) -> void:
+	if body == null or body.mesh == null:
+		return
+	var distance := observer.distance_to(body.position)
+	var angular := SpacesimLod.angular_radius(body.radius, distance)
+	var screen := SpacesimLod.screen_radius_pixels(angular, pixel)
+	SpacesimIrregularBody.advance(body, screen, wireframe)
+	if body.point != null:
+		body.point.visible = not body.mesh.visible
+		if body.point.visible:
+			_place_point(body, observer, angular, distance, pixel, screen, camera)
+
+
 ## Size and colour a body's point of light.
 ##
 ## **Sized to the disc, floored at one pixel** — not pinned at one pixel — so a body is one continuous
@@ -2256,13 +2345,12 @@ func await_patch_builds(rounds: int = 8) -> void:
 ## receives none of Godot's per-path baking — the flight test that found that is in
 ## `Lighting and Exposure`.
 ##
-## **Still missing, and named rather than hidden:** §5 of the plan has the splat carry the body's whole
-## flux into one pixel — `L * omega_disc / omega_px` — which for a disc under the floor falls as `1/d^2`,
-## because a point source on a fixed pixel gets fainter and that is the correct behaviour. This carries
-## `L` alone, so its value does not fall with the observer's distance once the disc is under the floor: a
-## body at 0.077 px is about 170x brighter than the law says. Not applied yet because it makes distant
-## bodies *dimmer* and the flight test says they are already too dim, so the splat's absolute level has
-## to be settled first. Two renders — one body at 0.8 px and the same body at 0.4 px — would measure it.
+## **The flux term is applied, and floored.** Below one pixel the disc cannot shrink, so the splat carries
+## the disc's share of the pixel's solid angle — `π · r_px²` — and dims as `1/d²`. That is the correct law
+## and it makes anything small invisible long before it resolves, so
+## [method SpacesimBodyRenderer.splat_fade] floors it at `render.splat_floor`: a dot of the body's own
+## colour that can be found before its shape can be seen. Evert, 2026-11-14: *"The eye can resolve light
+## long before shape, you know."*
 func _place_point(
 	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float,
 	screen: float, camera: Camera3D
@@ -2288,7 +2376,9 @@ func _place_point(
 	# the splat covers the disc, which it does from about 0.56 px of radius. This is the same term the
 	# star field carries as `lux / d_omega`, and it is what makes a distant body *faint* rather than a
 	# full-brightness dot: without it a body at 0.077 px is some 170x brighter than the law says.
-	var fade := minf(1.0, PI * screen * screen)
+	var fade := SpacesimBodyRenderer.splat_fade(
+		screen, float(SpacesimSettings.get_value("render.splat_floor"))
+	)
 	var radiance := body_luminance(body, observer, star_body.node.global_position) * fade
 	# **No exposure here.** This used to be the one place in the 3D pass that applied the camera's exposure
 	# by hand, because an `unshaded` material receives none of Godot's per-path baking and a splat is the

@@ -26,6 +26,7 @@ const CENTRE_PIXEL_ANGLE := 1.2966806e-3 ## Radians subtended by the centre pixe
 func run(h, root: Node) -> void:
 	print("  lod")
 	_test_the_law(h)
+	_test_a_splat_carries_its_flux(h)
 	_test_the_scene_applies_it(h, root)
 
 
@@ -577,3 +578,24 @@ static func _triangles_under_eye(body: SpacesimSceneBody, to_eye: Vector3) -> in
 		if centre.dot(to_eye) > 0.95:
 			count += 1
 	return count
+
+
+## **The splat carries the disc's share of the pixel** — `π · r_px²` below one pixel, capped at 1 — **and is
+## floored so a small body can be found before it can be seen.** Evert, 2026-11-14: *"I would also like to
+## see a little splat for the asteroid much earlier... The eye can resolve light long before shape."*
+func _test_a_splat_carries_its_flux(h) -> void:
+	var floor := 0.05
+	h.check_near(SpacesimBodyRenderer.splat_fade(1.0, floor), 1.0,
+		"a splat that covers the disc carries the whole radiance", 1.0e-9)
+	h.check_near(SpacesimBodyRenderer.splat_fade(0.4, floor), PI * 0.16,
+		"and at 0.4 px it carries pi*r^2 = 0.50", 1.0e-9)
+	# The cap: a splat covers the disc at 1/sqrt(pi) = 0.564 px of radius, and past that the law is 1.
+	h.check_near(SpacesimBodyRenderer.splat_fade(0.5642, floor), 1.0, "while the cap is reached at 0.564 px", 1.0e-3)
+	# A tenth of a pixel of radius: pi * 0.01 = 0.031, under the floor.
+	h.check_near(SpacesimBodyRenderer.splat_fade(0.1, floor), floor,
+		"below the floor a splat keeps a findable dot", 1.0e-9)
+	# At 0.14 px the law gives pi * 0.0196 = 0.0616, above it: the law wins.
+	h.check_near(SpacesimBodyRenderer.splat_fade(0.14, floor), PI * 0.14 * 0.14,
+		"above the floor the law is what is drawn", 1.0e-9)
+	h.check_near(SpacesimBodyRenderer.splat_fade(0.0, 0.0), 0.0,
+		"and with no floor, a body with no disc delivers nothing", 1.0e-9)

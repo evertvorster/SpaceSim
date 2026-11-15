@@ -7,23 +7,18 @@ extends RefCounted
 
 const FlightController := preload("res://game/flight_controller.gd")
 
-## **Where the viewpoint sits in the ship's frame** — five metres up and thirty-two behind the origin. There is no
-## hull: the placeholder box was an 18 m slab floating in front of the camera, and at a low altitude it appeared as a
-## plate on the ground — Evert, 2026-10-28: *"There is some sort of landing pad that pops up when I am close to the
-## surface. Strip that out, and clear out the mechanism that makes it."* It came back because deep space's near plane is
-## 100 m and clipped it away, and `_update_camera` pulled that plane inside the hull once it was drawn — so the box was
-## invisible from orbit and popped into view on approach. With no hull there is nothing to clip and no reason to move the
-## near plane, so both go.
-const CAMERA_OFFSET := Vector3(0.0, 5.0, 32.0)
-
-
 static func create(ship_name := "Ship") -> Node3D:
 	var ship := FlightController.new()
 	ship.name = ship_name
 
+	# **The viewpoint is the ship's origin.** It used to sit five metres up and thirty-two behind, because a
+	# placeholder hull was drawn and the eye had to clear it. The hull went on 2026-10-28 and the offset stayed,
+	# and it is 32 m of arm: beside a 28 m asteroid, turning the ship swung the eye right around the rock.
+	# Evert, 2026-11-14: *"the observer should be in the ship in all frames."* `_camera_mount` still carries the
+	# view basis (the six-sided screenshot views), and that is a rotation about the observer, which is what it
+	# should be.
 	var camera := Camera3D.new()
 	camera.name = "Camera"
-	camera.position = CAMERA_OFFSET
 	camera.fov = 70.0
 	# Exposure is NOT set here: it is physics-computed and kept up to date by the game
 	# (SpacesimExposure), so the ship does not guess at it.

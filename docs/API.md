@@ -70,6 +70,7 @@ Owns the rules and moves an observer between frames as it crosses thresholds.
 | `add_rule(rule) -> void` | |
 | `enter_frame(frame) -> void` | move the observer into a frame without consulting rules (initial placement) |
 | `evaluate() -> void` | switch frames if a threshold has been crossed; safe to call every tick |
+| `discard(frame) -> void` | **let a frame that exists at runtime go**: drop it from the registry, take its rules with it, and if the observer was standing in it put them in the nearest *enclosing* frame, keeping the global transform. A population's rock is built and freed as the ship moves, so its `orbital` frame is created and discarded in flight |
 
 A switch is a `reparent()` that preserves the observer's pose, so the observer does not move when
 its coordinate space changes.
@@ -83,8 +84,10 @@ of the unit rather than being imposed on top of a flight model.
 
 ### `SpacesimScaleBody` — `RefCounted`
 
-Something whose proximity sets the travel unit. Which bodies count as significant is
-content's decision.
+Something whose proximity sets the travel unit. Which bodies count as significant is content's
+decision — and **a fragment of an asteroid population counts from the moment it exists**, which
+reverses the older rule here (*"a pebble should not slow you down"*): in an empty belt a rock is the
+only thing there is, and slowing down is how you arrive somewhere instead of passing through it.
 
 ```gdscript
 SpacesimScaleBody.new(node: Node3D, radius: float)
@@ -92,9 +95,12 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 
 | Member | |
 |---|---|
-| `node: Node3D` | the body's origin |
+| `node: Node3D` | the body's origin, or **null** for something with no node at all |
+| `position: Vector3`, `name: String` | where it is and what it is called **when `node` is null** — a fragment is arithmetic, not a node |
+| `velocity: Vector3` | **how fast it is moving in the system frame, and therefore what a ship near it inherits.** The ship's velocity is relative to the body it is nearest, so this is what makes a moving target reachable at all. Zero is correct for anything that stands still — everything but a fragment at present. Fill it where the body is moved, in the same tick |
 | `radius: float` | metres |
-| `surface_distance_to(position) -> float` | distance to the *surface*, never negative |
+| `surface_distance_to(position) -> float` | distance to the *surface*, never negative — the cheap comparison the proximity scan uses |
+| `surface_distance_mesh(position) -> float` | distance to the nearest *vertex* of a body's own mesh; the sphere when there is no mesh to ask |
 
 ### `SpacesimProximity` — `RefCounted` (static)
 
@@ -110,9 +116,24 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 | `TRAVERSE_SECONDS: float` | seconds to cross the local neighbourhood at full throttle |
 | `local_length(distance, length_min, length_max) -> float` | the local neighbourhood, in metres, held within the frame's band; `INF` reads as the largest scale, never zero |
 | `speed_for(throttle, distance, length_min, length_max, traverse_seconds) -> float` | m/s for a throttle in [0, 1] |
+| `carried_step(reference_velocity, closing_velocity, delta) -> Vector3` | **where the ship is one step later: carried by whatever it is nearest, plus its own closing speed** |
 
 Speed is *derived*, never integrated: there is no speed to desync and no way to arrive too
 fast, because the limit falls with the remaining distance by construction.
+
+**Velocity is relative to the reference body, and the reference is whatever is nearest** — Evert,
+2026-11-14: *"At launch, it inherits the movement of Earth... then as it travels to an asteroid, it
+matches the movement of the asteroid."* A ship in flight is carried by the thing it is nearest, so the
+distance the unit is derived from behaves as if that thing stood still and the approach arrives
+exponentially, whether the target orbits at 18.8 km/s or not at all. Crossing from one reference to
+another simply changes whose motion is inherited, and at the speeds travelled between planets the change
+is invisible — so nothing about it is shown.
+
+**Without the carried term the whole model only works in a frozen world.** A fragment at 2.5 AU orbits
+at 18.8 km/s, faster than `distance / 10` below 188 km, so the ship stalled there and could reach
+nothing that moved. That was the first flight's report (2026-11-14) and `tests/test_travel_scale.gd`
+now drives the real integration both ways: the carried ship arrives, the uncarried one stalls at
+**188 km** — the number the arithmetic predicts.
 
 ## Solar system
 
@@ -133,7 +154,8 @@ worth flying to without being worth a label, and every rock in a belt is the lat
 
 | Class | |
 |---|---|
-| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_direction`, `start_world_time`, `bodies`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
+| `SpacesimSolarSystem` | `content/solar_system.gd` — the system: `content_version`, `epoch`, `framing`, `start_body_id`, `start_altitude`, `start_direction`, `start_world_time`, `bodies`, `populations`. `system_name()` reads the primary star's name; `validate()` returns problems as prose |
+| `SpacesimPopulation` | `content/population.gd` — **a swarm of small bodies that is not a body**: the asteroid belt, a ring. `id`, `display_name`, `parent_id` (empty means the primary star, so a ring is the same type with a planet as its parent), `seed_value`, `composition`, `semi_major_axis` (Vector2, metres), `inclination` (Vector2, degrees — **this is the belt's thickness**, not a per-fragment tilt), `reference_size`, `count` (**fragments at or above `reference_size`** — Sol's published figure is 1.1 million above 1 km, and the addressable count at the 10 m floor follows from `size_index`), `size_index` (cumulative `N(>D) ∝ D^-index`, Dohnanyi's 2.5), `size_floor` (**the smallest fragment that exists at all**; below it the material is dust and part of no object) and `size_ceiling`. A population is a **distribution, not a list** — see `SpacesimPopulationField` |
 | `SpacesimSystemBody` | `content/system_body.gd` — one body: `id`, `display_name`, `kind`, `parent_id`, `primary`, `radius`, `mass`, `internal_heat_flux` (**W/m2 of radiogenic and primordial heat, added to the absorbed flux before the equilibrium temperature's fourth root** — Jupiter's 5.44 against 6.25 of sunlight takes it from 102 K to 120 K; **authored, because nothing in an orbit or an atmosphere yields it**, and zero for the rocky bodies), `rotation_period`, `axial_tilt`, `layers`, `orbit`, `fixed_position`, `atmosphere`, `surface`, `clouds`, `overrides`, `landable`, `significant` |
 | `SpacesimLayer` | `content/layer.gd` — `layer_name`, `radius` (outer boundary), `composition` |
 | `SpacesimOrbit` | `content/orbit.gd` — the six Keplerian elements, degrees. **`mean_anomaly_at_epoch = 0.0` means "derive it"**, the same convention `mass = 0.0` uses: the phase comes from the body's own address (a shift of one turn's fraction of the period), so a whole planet's moons are not on one straight line out of it and nothing is authored. The planets keep their real J2000 values, which is why the shift is conditional on the authored value being zero |
@@ -159,7 +181,7 @@ body with no `orbit` is fixed, so "orbiting *and* fixed" cannot happen rather th
 reference values for condensables), layer boundaries that do not ascend with the outermost equal to
 the body radius, layer or surface fractions that are empty where they are required, a body that is
 its own parent, a parent that is not in the system, a moon of a star, a parent chain that is a
-cycle, a negative rotation period, and an axial tilt outside `[0, 180]`. It reports rather than
+cycle, a negative rotation period, an axial tilt outside `[0, 180]`, and for each **population** a band that is empty or runs backwards, a band that starts inside the body it orbits, an inclination outside `[0, 90]` or backwards, no fragments, a size range that is empty or upside down, and a composition that does not sum to 1. It reports rather than
 corrects: a silently repaired world is a wrong world nobody notices.
 
 A body with **no `orbit` does not move** — it stands at its `fixed_position` — and that is a
@@ -224,6 +246,72 @@ and otherwise leaves it alone.
 **The datum is still the sphere** (`SpacesimScaleBody` answers altitude from `body.radius`), so on a
 lump the altitude is wrong by up to the lump's height. `SpacesimBlobShape.radius_at` is the shape's
 own datum and it belongs with landing rather than with placing.
+
+### `SpacesimPopulationField` — `RefCounted`
+
+**The fragments a population actually has — made up around the observer and forgotten when they leave.**
+Nothing about a fragment is stored anywhere but here and only while it is in range: the population is a
+density, a fragment is drawn from that density inside a ball around the ship, given a circular orbit that
+passes through the point it was drawn at, and dropped once it is outside the ball again.
+Evert, 2026-11-14: *"you calculate the chances of an asteroid being in a position, make up a few that are
+in range, and forget about them when they go out of range again."*
+
+**There is no address lattice and no query inverse.** The design that had one could not be queried: the
+orbital period depends on the semi-major axis alone, so the radius is the only dimension that localises
+anything, and a population whose fragments each carry their own phase cannot be inverted from a position.
+Making the fragments up deletes that problem — nothing is inverted, and the density is a number rather
+than a structure. The cost, accepted and named: **coming back to a place gives different rocks.**
+
+| Member | |
+|---|---|
+| `population: SpacesimPopulation` | the distribution being drawn from |
+| `fragments() -> Array[Fragment]` | what the field holds now |
+| `position_of(fragment, parent_position) -> Vector3` | the system-frame position |
+| `update(parent_position, mu, ship_position, delta)` | **drop** the fragments outside the ball and make up enough to fill the field again. **Nothing is advanced**: a fragment stands where it was made |
+| `static density_of(pop) -> float` | fragments per cubic metre above the size floor |
+| `static addressable_count(pop) -> float` | `count · (size_floor/reference_size)^-size_index` — Sol's 1.1 million above 1 km becomes 1.1 × 10¹¹ above 10 m |
+| `static volume_of(pop) -> float` | the shell between the two semi-major axes, as thick as the inclination band makes it |
+| `static spawn_radius_of(pop) -> float` | **the ball the field is drawn in**: the radius that holds `FIELD_COUNT` fragments at that density, so the nearest fragment is as far away as the real belt would put it rather than as far as a rendering decision would |
+| `static in_band(pop, local) -> bool` | whether a point relative to the parent is inside the population |
+| `const FIELD_COUNT` | 24 — how many fragments *exist*; the marker pool decides how many are *shown* |
+
+**Nothing moves yet, deliberately — exactly as nothing else in the world moves.** A fragment's orbit is
+known and correct and none of it is applied. Evert, 2026-11-14: *"in theory we know which direction and
+speed they will be traveling in, but for simplicity's sake nothing is moving yet, that is for a different
+time when we will focus just on that."* So `Fragment.velocity()` is what the rock **will** do, and nothing
+may feed it to a ship's travel unit until bodies move.
+
+`Fragment` is an inner class: `radius` (metres from the parent, also the semi-major axis), `u` and `v` (unit
+vectors — where it is and the direction of travel), `phase`, `rate` (radians/s, the circular rate
+`sqrt(mu/r³)`), `seed_value` (what its shape is extracted from), `diameter`, `designation` (`A-0007`).
+
+**Sol's main belt is authored** in `systems/sol.tres` as `population:main_belt`: 2.1 to 3.3 AU, inclination
+0 to 20°, 1.1 million fragments above 1 km, a 10 m floor. At those numbers the density is 8.6 × 10⁻²⁵
+fragments per cubic metre — a mean spacing of **105,000 km** — and the field draws two dozen of them inside
+**188,000 km**.
+
+### `SpacesimFragmentBodies` — `Node3D`
+
+**The rocks you can see, as bodies.** One `SpacesimSceneBody` per live fragment, built by
+`SpacesimIrregularBody` — the same builder, generator, taper, extraction threshold and **wireframe** the
+moons get. A fragment is a body for exactly as long as the field holds it: created when the field makes
+one, freed when it drops it.
+
+| Member | |
+|---|---|
+| `update(field, parent_position, eye, camera, wireframe)` | mirror the field: create, free, and advance each body |
+| `static content_for(population, designation, diameter) -> SpacesimSystemBody` | **a fragment as content** — its radius and one layer of the population's composition. That is all the builder needs: colour, strength and density follow, so a rock's lumpiness is derived rather than chosen. **`id` is the designation**, because `request()` seeds the shape from `hash(body.id)` — the same rock is the same shape every time it is extracted |
+| per-body advance | **`SpacesimSystemScene.advance_irregular`** — the same call `update_lod` makes for a moon: extraction at `RESOLVE_PIXELS`, the splat that stands in while it runs, the wireframe |
+
+**Nothing is extracted until the eye can resolve it.** A 17 m fragment is 2 px of radius at about 22 km, so
+a field of two dozen rocks costs nothing until one is close, and then the cost is one body's extraction on
+the worker pool — the same bargain the moons struck.
+
+**A rock gets a splat, and it is far fainter than a planet's by construction** — the quad is sized to the
+disc the body would have, so a 10 m fragment is a fraction of a pixel at any distance it is worth drawing,
+and `_place_point` fades it by its own area below 0.56 px of radius. Evert, 2026-11-14: *"It would actually
+be nice to see splats for asteroids, but of course they will be far dimmer and not as visible as planetary
+splats."*
 
 ### `SpacesimKepler` — `RefCounted`
 
@@ -587,7 +675,7 @@ derivation**, so a shader cannot quietly disagree with the model.
 | `surface_params.gdshaderinc` | **the plan's push-constant block and the `SurfacePlan` assembly, in one place** — shared by `surface_kernel.gdshaderinc` (the map bake) and `surface_heights_kernel.gdshaderinc` (the geometry's heights). The block is 112 bytes, `ivec2` + two `vec2` + twenty-two 4-byte fields, and the driver rejects both more and less. A second copy would be a second field: the *blocks* would fail loudly if they drifted, but the twenty-two assignments would not — one left out is a field with a zero in it. `size` and the two `vec2`s are the bake's window and are never read by a heights dispatch, which passes zeros. |
 | `surface_heights_kernel.gdshaderinc` | **directions in, heights out** — `layout(set = 0, binding = 0) readonly buffer vec4 dirs[]` and a writeonly float buffer, one `surface_height(unit, surface_plan_params(), 0.0)` per invocation. `local_size_x = 64`, and **the host pads the buffers to a whole workgroup** rather than the kernel carrying a bound, because the bound would need a number in the bake's push-constant block. |
 | `body_star.gdshader` | the star's own surface: **unshaded and emissive**, coloured from its temperature. Unshaded because a star is a source — drawn with the ordinary surface material it was lit by *its own* light, and its near face, the one facing the observer, came out black |
-| `SpacesimBodyRenderer` | `body_renderer.gd` — builds a body's materials from derived values: the surface, the star's own emissive shader, and the point of light. **`point_quad()` and `point_material()`** are the point of light: one shared unit quad, wearing an unshaded additive `StandardMaterial3D`. **The quad is NOT billboarded by the material** — `BILLBOARD_ENABLED` rewrites `MODELVIEW_MATRIX` with `INV_VIEW_MATRIX`, i.e. world-space axes against a camera-relative translation, which is the transform chain the double-precision emulation cannot follow (the same family as `world_vertex_coords` and `triplanar`). The orientation is set each frame in `_place_point` by copying the camera's basis onto the node, with the size on that same basis. `point_colour(body, radiance)` is what it is coloured with — **by kind, the same distinction `material_for` makes**: a planet's is its radiance in `UNIT_LUX_PER_SR` tinted by the body's own colour **at unit luminance** (so the tint cannot change the brightness while the hue survives), and a star's is `star_color * STAR_INTENSITY`, its own emission. **The planet's value is sRGB-encoded on the way out**, because Godot's default spatial material declares `uniform vec4 albedo : source_color` and therefore *decodes* `albedo_color` — which for a linear radiance is `level^2.2`, silent and non-linear. The star field has no such conversion (it writes `COLOR` in a sky shader), so without this encode a splat is in a different currency from the sky it is seen against. The star's branch is deliberately **not** encoded, because it goes into the same property the star's own disc does and the two must convert alike for their handoff to look free — noting that both clip at 24x, which is the only reason it does. **Running the reflector formula on a star gives zero** — a star has no albedo — which is how a Sun with a sub-pixel disc would vanish from its own sky — an overbright albedo, so a splat can be brighter than white and still be tone-mapped with everything else. `UNIT_LUX_PER_SR` is **the same number as `sky_stars.gdshader`'s**, and `tests/test_render.gd` checks the shader still carries it. **The deck material**, merged to `main` on 2026-10-21 — `deck_material(body, level, palette, seed_layer)`, `apply_cloud_map(material, texture, width, threshold, ramp_gain, veil, tau_full)`, `face_deck(material, eye_offset)` and `cloud_gain(albedo, palette, mean)`; see `body_deck.gdshader` below. **`tau_full` is the deck's OPACITY, not its lighting** — `alpha = covered * veil * (1 - exp(-tau_full*thickness/mu))`, so an unpublished `tau_full` is `alpha = 0` and a completely invisible deck. It is published here, in the one place a deck's numbers reach a material, because the function that used to set it (`apply_deck_light`) was deleted as light plumbing on 2026-10-21 and took the deck with it: **a deletion that claims "nothing reads this" must grep each uniform for its readers, not each function.** `SpacesimSurfaceDistribution`' `deck_ramp_gain` became `SpacesimBodyRenderer.cloud_gain` when the deck was rebuilt, and it returns the achieved fraction beside the gain so a clamped deployment reports its shortfall instead of hiding it. **The surface** is `material_for(body, ramp)` — and it is the whole of the ground's material, because **the shader evaluates the field itself**: no height map, no ladder, no tile array and no sea level to publish beside the heights it belongs to. What the renderer hands over is the `colour_ramp` (a `1 x 256` table), `planet_radius`, the land's roughness and specular, the **whole `field_*` set** — every number `SpacesimSurfaceField.plan()` derives, so the shader and the bake are one field — and the sea level, which is the datum the displacement will measure from. `static ramp_image(bands, quantiles, fallback)` is the derivation-to-picture link: each band edge's *percentile* becomes a field value through the measured quantiles, and a body with no bands at all (a gas giant, whose visible surface is its deck) is filled with the colour it was already drawn in. `static deck_ramp_gain(body, ramp_mean)` is that fit, `static uniform_white()` is the one-texel field a `FEATURELESS` body gets (a uniform field cannot carry partial *area*, so its coverage goes into the alpha instead), and the gain **clamps at 1.0** — a cloud cannot reflect more than white, so a low-contrast field falls short of the budget and `tests/test_cloud_deck.gd` reports the shortfall rather than hiding it  `air_shell_material(air, planet_radius, band_outer)` builds the air's shell — the optics and the band's two radii, the half that never changes; the eye, the star, the frame's rotation and the gate are published per frame by the scene.|
+| `SpacesimBodyRenderer` | `body_renderer.gd` — builds a body's materials from derived values: the surface, the star's own emissive shader, and the point of light. **`point_quad()` and `point_material()`** are the point of light: one shared unit quad, wearing an unshaded additive `StandardMaterial3D`. **The quad is NOT billboarded by the material** — `BILLBOARD_ENABLED` rewrites `MODELVIEW_MATRIX` with `INV_VIEW_MATRIX`, i.e. world-space axes against a camera-relative translation, which is the transform chain the double-precision emulation cannot follow (the same family as `world_vertex_coords` and `triplanar`). The orientation is set each frame in `_place_point` by copying the camera's basis onto the node, with the size on that same basis. **`splat_fade(screen, floor)`** is how much of that radiance a sub-pixel splat carries: below one pixel the disc cannot shrink, so it carries the disc's share of the pixel's solid angle, `π·r_px²`, capped at 1 from about 0.56 px of radius — and **floored** at the `render.splat_floor` setting, because the law makes anything small invisible long before it resolves, and a splat exists so a thing can be *found* before it can be seen. Evert, 2026-11-14: *"The eye can resolve light long before shape, you know."* `point_colour(body, radiance)` is what it is coloured with — **by kind, the same distinction `material_for` makes**: a planet's is its radiance in `UNIT_LUX_PER_SR` tinted by the body's own colour **at unit luminance** (so the tint cannot change the brightness while the hue survives), and a star's is `star_color * STAR_INTENSITY`, its own emission. **The planet's value is sRGB-encoded on the way out**, because Godot's default spatial material declares `uniform vec4 albedo : source_color` and therefore *decodes* `albedo_color` — which for a linear radiance is `level^2.2`, silent and non-linear. The star field has no such conversion (it writes `COLOR` in a sky shader), so without this encode a splat is in a different currency from the sky it is seen against. The star's branch is deliberately **not** encoded, because it goes into the same property the star's own disc does and the two must convert alike for their handoff to look free — noting that both clip at 24x, which is the only reason it does. **Running the reflector formula on a star gives zero** — a star has no albedo — which is how a Sun with a sub-pixel disc would vanish from its own sky — an overbright albedo, so a splat can be brighter than white and still be tone-mapped with everything else. `UNIT_LUX_PER_SR` is **the same number as `sky_stars.gdshader`'s**, and `tests/test_render.gd` checks the shader still carries it. **The deck material**, merged to `main` on 2026-10-21 — `deck_material(body, level, palette, seed_layer)`, `apply_cloud_map(material, texture, width, threshold, ramp_gain, veil, tau_full)`, `face_deck(material, eye_offset)` and `cloud_gain(albedo, palette, mean)`; see `body_deck.gdshader` below. **`tau_full` is the deck's OPACITY, not its lighting** — `alpha = covered * veil * (1 - exp(-tau_full*thickness/mu))`, so an unpublished `tau_full` is `alpha = 0` and a completely invisible deck. It is published here, in the one place a deck's numbers reach a material, because the function that used to set it (`apply_deck_light`) was deleted as light plumbing on 2026-10-21 and took the deck with it: **a deletion that claims "nothing reads this" must grep each uniform for its readers, not each function.** `SpacesimSurfaceDistribution`' `deck_ramp_gain` became `SpacesimBodyRenderer.cloud_gain` when the deck was rebuilt, and it returns the achieved fraction beside the gain so a clamped deployment reports its shortfall instead of hiding it. **The surface** is `material_for(body, ramp)` — and it is the whole of the ground's material, because **the shader evaluates the field itself**: no height map, no ladder, no tile array and no sea level to publish beside the heights it belongs to. What the renderer hands over is the `colour_ramp` (a `1 x 256` table), `planet_radius`, the land's roughness and specular, the **whole `field_*` set** — every number `SpacesimSurfaceField.plan()` derives, so the shader and the bake are one field — and the sea level, which is the datum the displacement will measure from. `static ramp_image(bands, quantiles, fallback)` is the derivation-to-picture link: each band edge's *percentile* becomes a field value through the measured quantiles, and a body with no bands at all (a gas giant, whose visible surface is its deck) is filled with the colour it was already drawn in. `static deck_ramp_gain(body, ramp_mean)` is that fit, `static uniform_white()` is the one-texel field a `FEATURELESS` body gets (a uniform field cannot carry partial *area*, so its coverage goes into the alpha instead), and the gain **clamps at 1.0** — a cloud cannot reflect more than white, so a low-contrast field falls short of the budget and `tests/test_cloud_deck.gd` reports the shortfall rather than hiding it  `air_shell_material(air, planet_radius, band_outer)` builds the air's shell — the optics and the band's two radii, the half that never changes; the eye, the star, the frame's rotation and the gate are published per frame by the scene.|
 | `SpacesimLod` | `lod.gd` — **how much of the view a body takes up**, as pure arithmetic so it can be decided with no GPU and no meshes. **`air_ring_pixels(depth, distance, pixel_angle)`** = `(depth/distance)/pixel_angle` is the width of an atmosphere's own limb ring in pixels, with **`AIR_RING_FADE`** (2 → 4 px) the pair it fades in between — `full while a pixel holds four samples of the feature, gone by two`, the same sampling law as every ladder. It is the gate the air march is drawn by, because a disc's size is the wrong question: at 6.95 Gm Jupiter is nine pixels across and its ring is 0.02, so every pixel of it is a grazing chord, the transmittance collapses at the rim, the in-scatter peaks there, and the picture is a sub-pixel ring point sampled. Earth fades in at ~39,000 km, Jupiter at ~78,000, against 1.25 Gm and 13.5 Gm before. **The idea is not new and that is the lesson**: the *shell* had `ATMOSPHERE_RING_MIN_PIXELS` and `shell_ring_pixels()` and it went with the shell on 2026-10-19 — so when a mechanism is replaced, carry its **gates** across as well as its picture. `static angular_radius(radius, distance)` = `asin(R/d)` in radians — **derived rather than stated**, because a value fixed at one au is 2.6x too small at Mercury and 30x too large at Neptune, and **two of its consumers want a diameter**: the drawn disc, the penumbra of a body's shadow and total-versus-annular take the radius, while Godot's `light_angular_distance` takes `rad_to_deg(2 * angular_radius(...))`. `static pixel_angle(fov, render_height)` = `2*tan(fov/2)/H`, **the CENTRE pixel** — a pixel further out subtends more, the frame's average is `fov/H`, and at 1080p/70° the two are 0.0743° and 0.0648°. `static screen_radius_pixels(angular_radius, pixel_angle)` = `tan(theta)/p`, **in pixels** — the projection, not its linearisation. `static triangles_at(level)` = `20 * 4^level`, the closed form `tests/test_icosphere.gd` checks the built meshes against, and `TRIANGLES_PER_SCREEN_RADIUS` = 5.836 is a level's sagitta times its triangle count — **measured from the mesh**, and the relation every pixel error budget descends from. **The per-body level law that used these went on 2026-10-25**: it chose one uniform level per body, and `SpacesimPatches` decides per patch instead, so a body is no longer one level. `POINT_TIER_SCREEN_RADIUS` is where one representation gives way to another rather than a quality budget |
 | `SpacesimIcosphere` | `icosphere.gd` — a unit sphere as a subdivided icosahedron, one `ArrayMesh` per level, **built on first use and then the same object every time**, so a level change is a pointer assignment where a `SphereMesh` would re-tessellate. Triangles are exact (`20 * 4^level`) and vertices are `10 * 4^k + 2` (Euler), because midpoints are **cached on the edge** — without that the two triangles meeting at a seam would each get their own copy and the surface would be cracked, which is the one error the mesh carries. Vertices are on the unit sphere and the position **is** the normal. Built at unit radius so every body scales the same mesh. **Wound the way `SphereMesh` is, which is Godot's convention and not the standard one**, so a mesh wound the other way renders a planet inside out; `tests/test_icosphere.gd` measures the winding against `SphereMesh` so it cannot regress quietly. `static relative_sagitta(level)` measures the built mesh's worst departure from the sphere, which is what the law's constant is read from |
 
@@ -753,16 +841,19 @@ screen-space budget in one place.
 
 | Member | |
 |---|---|
-| `Priority` | `CONTEXT`, `MISSION`, `SELECTED` |
+| `Priority` | `CONTEXT`, `ASTEROID`, `PRIMARY`, `MISSION`, `SELECTED` — **a candidate is `{id, position, text, priority, parent, ring}`, not a `Node3D`**, so a thing with no node (a fragment) is as drawable as a planet. **`ASTEROID` is above `CONTEXT`**: a rock you are flying among outranks a moon on the far side of the system, and nothing outranks a place. At the bottom it was unreachable — Sol has 40 significant bodies, so a 24-slot pool was full before a fragment was considered, and the first flight showed a slowed ship and no asteroid markers |
 | `pool_size: int` | the cap, and the screen-space budget |
 | `font_size: int`, `margin: float` | applied from the settings; `margin` is the inset the labels are fitted inside |
 | `selected_color: Color` | the selected target's own colour — see `markers.selected_color` |
 | `colour_of(priority) -> Color` | that colour for `SELECTED`, `SpacesimOverlay.COLOR` otherwise |
 | `context_targets`, `mission_targets: Array[Node3D]` | ambient group, then mission objectives |
 | `selected: Node3D` | the selected target, or null |
+| `targets: Array[Dictionary]` | markers for things with no node — fragments. Each is `{id, position, text, priority, parent}`; `id` is negative so it cannot collide with a node's instance id, and `parent` is `NO_PARENT` (0) |
+| `const NO_PARENT` | the parent id of a target that orbits nothing this overlay knows about |
 | `refresh(camera) -> void` | rebuild the set, place its labels, hand the rings to the overlay; call once a frame |
 | `orbits: Dictionary` | moon node → the [SpacesimSceneBody] it orbits; handed in once, a fact about the system |
-| `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame |
+| `static choose(candidates, limit) -> Array[Dictionary]` | the keyed union for one frame, by `id`; highest priority wins, then nearest |
+| every mark draws a ring | **there is no fragment-shaped marker.** The ring is the object's screen position and that is as true of a rock as of a moon; Evert, 2026-11-14: *"I like the ring."* The only thing a fragment's label adds is its diameter, which is in the entry's `text` |
 | `static clamp_to_edge(point, size, margin) -> Vector2` | the edge point in a direction — **and the point itself when it is already inside** |
 | `static screen_direction(camera, target) -> Vector2` | viewport direction, valid behind the camera |
 | `static format_distance(metres) -> String` | `1.50 Gm`, `2.5 km`, `12 m` |

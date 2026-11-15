@@ -21,6 +21,8 @@ func run(h, root: Node) -> void:
 	_test_surface_distance_is_radius_aware(h, root)
 	_test_nearest_of_several(h, root)
 	_test_handover_is_continuous(h, root)
+	_test_a_moving_target_is_reachable(h)
+	_test_the_carried_motion_is_the_reference_s(h)
 
 
 func _test_band_clamps(h) -> void:
@@ -187,3 +189,56 @@ func _test_handover_is_continuous(h, root: Node) -> void:
 		worst_speed_step <= 1.0 / T * 1.001, "and does not jump the travel unit"
 	)
 	container.free()
+
+
+## **A target that moves is reachable only because the ship is carried by it.**
+##
+## Evert flew to the asteroid belt and could not catch a rock: the ship stalled about 188 km away and the
+## rock ran. The arithmetic is that the closing speed is `distance / TRAVERSE_SECONDS`, and a fragment at
+## 2.5 AU orbits at 18.8 km/s — so below 188 km the target is simply faster than the ship. Nothing about
+## the unit is wrong; the world was assumed to stand still.
+##
+## This drives the real integration, one 1/60 s step at a time, from a start well outside the stall.
+func _test_a_moving_target_is_reachable(h) -> void:
+	var delta := 1.0 / 60.0
+	var orbital_speed := 18800.0 # a fragment at 2.5 AU
+	var start := Vector3(0.0, 0.0, 46.0e9)
+
+	# **The ship aims at the target every step**, which is what a pilot does — a fixed heading overshoots
+	# once the step can cover the remaining distance, and the loop then diverges for a reason that has
+	# nothing to do with the model.
+	var reached := _chase(start, orbital_speed, delta, true, 40000)
+	h.check(reached < 1.0e5, "a carried ship arrives at a target moving at 18.8 km/s (%.0f m)" % reached)
+
+	# **The same chase without the carried term is the bug**, and it must not arrive: that is what makes
+	# the check above a measurement rather than a tautology. It stalls where the target outruns the ship.
+	var stalled := _chase(start, orbital_speed, delta, false, 40000)
+	h.check(stalled > 1.0e5, "and without it the ship stalls at %.0f km, which is the report" % (stalled / 1.0e3))
+
+
+## Chase a target running away along +Z, and answer the distance it ends at.
+func _chase(start: Vector3, target_speed: float, delta: float, carried: bool, steps: int) -> float:
+	var ship := Vector3.ZERO
+	var target := start
+	for _step in steps:
+		var distance: float = ship.distance_to(target)
+		var aim: Vector3 = (target - ship) / maxf(distance, 1.0)
+		var closing: Vector3 = aim * TravelScale.speed_for(1.0, distance, BAND_MIN, BAND_MAX)
+		var reference := Vector3(0.0, 0.0, target_speed) if carried else Vector3.ZERO
+		target += Vector3(0.0, 0.0, target_speed * delta)
+		ship += TravelScale.carried_step(reference, closing, delta)
+	return ship.distance_to(target)
+
+
+## The step is the reference's motion **plus** the closing speed, and nothing else.
+func _test_the_carried_motion_is_the_reference_s(h) -> void:
+	var carried := Vector3(20.0, 0.0, 0.0)
+	var closing := Vector3(0.0, 0.0, -30.0)
+	h.check_vector_near(
+		TravelScale.carried_step(carried, closing, 2.0), Vector3(40.0, 0.0, -60.0),
+		"one step is carried plus closing, times the step", 1.0e-9
+	)
+	h.check_vector_near(
+		TravelScale.carried_step(Vector3.ZERO, Vector3.ZERO, 2.0), Vector3.ZERO,
+		"a ship near nothing and going nowhere does not move", 1.0e-9
+	)

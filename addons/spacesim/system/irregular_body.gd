@@ -197,6 +197,27 @@ static func poll(body: SpacesimSceneBody) -> void:
 	body.irregular_built = true
 
 
+## **Advance one body: publish, ask for the extraction when the eye can resolve it, and draw it in the
+## current mode.** `screen` is its radius in pixels, which the caller has already computed — every caller
+## has it, and deriving it here as well would be the same arithmetic twice.
+##
+## **This is the whole irregular lifecycle and it is deliberately in one place.** A population's fragments
+## are bodies too, and the first version of them copied these six lines instead of calling this — which is
+## how a rock ended up with no wireframe: the copied half never called [method show_wireframe].
+##
+## The splat that stands in while the extraction runs is NOT here: placing one is
+## `SpacesimSystemScene._place_point`'s job, and it needs the camera and the frame's light.
+static func advance(body: SpacesimSceneBody, screen: float, wireframe: bool) -> void:
+	poll(body)
+	# **Extracted when the eye is close enough to resolve it, and not before.** The threshold is half the
+	# point tier, so the work starts while the body is still a splat and finishes before the handover.
+	if not body.irregular_built and screen >= RESOLVE_PIXELS:
+		request(body)
+	body.mesh.visible = body.irregular_built and screen >= SpacesimLod.POINT_TIER_SCREEN_RADIUS
+	if body.mesh.visible:
+		show_wireframe(body, wireframe)
+
+
 ## **The body in the debug view — its own mesh, as lines.**
 ##
 ## Evert, 2026-11-12: *"in wireframe mode, I want to see the meshes of EVERYTHING."* In this engine a wireframe is

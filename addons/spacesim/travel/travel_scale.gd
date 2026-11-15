@@ -35,6 +35,27 @@ static func local_length(
 	return clampf(distance, length_min, length_max)
 
 
+## Where the ship is one step later: **carried by whatever is nearest, plus its own closing speed.**
+##
+## Velocity is relative to the reference body — Evert, 2026-11-14: *"At launch, it inherits the movement
+## of Earth... then as it travels to an asteroid, it matches the movement of the asteroid."* So the
+## reference's motion and the closing speed add, and the distance that the unit is derived from then
+## behaves as if the target stood still: `unit / TRAVERSE_SECONDS` closes on it exponentially and it
+## always arrives, whether the target orbits at 18.8 km/s or not at all.
+##
+## **Without the carried term the whole model only works in a frozen world.** A target moving at 18.8 km/s
+## — a fragment at 2.5 AU — is faster than `distance / 10` once the distance falls below 188 km, so the
+## ship stalls there and can never reach anything that moves. That is where the first flight of the
+## asteroid belt stalled, 2026-11-14.
+##
+## The reference is **the nearest body, whatever it is**; crossing from one to another simply changes
+## whose motion is inherited, and at the speeds travelled between planets that change is invisible.
+static func carried_step(
+	reference_velocity: Vector3, closing_velocity: Vector3, delta: float
+) -> Vector3:
+	return (reference_velocity + closing_velocity) * delta
+
+
 ## Speed in metres per second for a throttle position in [0, 1].
 ##
 ## Derived, never integrated: there is no speed to desync, and no way to arrive too fast,

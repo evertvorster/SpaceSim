@@ -57,6 +57,33 @@ func add_rule(rule: SpacesimTransitionRule) -> void:
 	_rules.append(rule)
 
 
+## **Let a frame go.** A frame that exists only while something else does — a body that comes and goes,
+## a rock in a population — owes the tree its rules back, and may be the observer's own coordinate space
+## when it goes.
+##
+## The observer is put back in the system frame, keeping its global transform: that is the same path a
+## save load uses, and it is the only place left to stand. A rule that outlived its frame would hold a
+## reference to a freed node and be asked about a position in it.
+func discard(frame: SpacesimFrame) -> void:
+	if frame == null:
+		return
+	if not frame.frame_id.is_empty() and _frames.get(frame.frame_id) == frame:
+		_frames.erase(frame.frame_id)
+	for index in range(_rules.size() - 1, -1, -1):
+		var rule: SpacesimTransitionRule = _rules[index]
+		if rule.from_frame == frame or rule.to_frame == frame:
+			_rules.remove_at(index)
+	if active_frame == frame:
+		# **The nearest enclosing frame, found by walking the tree rather than the registry** — a frame
+		# need not be registered (a rock's is not), and the parent of a body's frame is the body's node,
+		# whose own parent is the system frame.
+		var enclosing: Node = frame.get_parent()
+		while enclosing != null and not (enclosing is SpacesimFrame):
+			enclosing = enclosing.get_parent()
+		if enclosing != null:
+			enter_frame(enclosing as SpacesimFrame)
+
+
 ## Put a node into a frame at a position in that frame. Continuity is not wanted here: a save says
 ## where something is, so the transform is set from it rather than preserved — which is what
 ## [method enter_frame] does for the observer when it crosses a threshold.
