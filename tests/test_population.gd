@@ -240,6 +240,15 @@ func _test_a_fragment_is_significant(h) -> void:
 	h.check_near(rock.surface_distance_mesh(Vector3.ZERO), 995.0,
 		"and its altitude, without a mesh to ask", 1.0e-6)
 
+	# **A rock is solid**, so "dockable" means what it says: flying into one stops the ship at its surface.
+	var heading := SpacesimScaleBody.new(null, 14.0)
+	heading.position = Vector3(100.0, 0.0, 0.0)
+	var probe: Array[SpacesimScaleBody] = [heading]
+	h.check_near(SpacesimProximity.nearest_surface_distance(Vector3(90.0, 0.0, 0.0), probe), 0.0,
+		"inside a rock, the nearest surface is behind you", 1.0e-9)
+	h.check_near(SpacesimProximity.nearest_surface_distance(Vector3(120.0, 0.0, 0.0), probe), 6.0,
+		"and outside it, the distance to its surface", 1.0e-9)
+
 	var planet := SpacesimScaleBody.new(null, 6.371e6)
 	planet.position = Vector3(1.0e11, 0.0, 0.0)
 	var bodies: Array[SpacesimScaleBody] = [planet, rock]
