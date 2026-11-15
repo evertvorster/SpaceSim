@@ -66,6 +66,13 @@ a 20-pixel moon pays for one octave, the ground at walking height for eighteen. 
 vertices are translated on the CPU to their height, so the light falls on the slope that was drawn. The sea is a
 level on its own mesh at the datum, coplanar with the land and complementary to it by one threshold.
 
+**The asteroid belt is a density, not a list.** A population is a band, an inclination and a size
+distribution; the field makes two dozen fragments out of it around the observer, keeps them while they are
+in range and forgets them when they leave. Each one is a real body built by the same builder the moons use —
+lazily, at two pixels — marked through the same overlay as a planet, solid to fly into, and given a frame of
+its own entered at twenty of its radii, so the throttle can crawl beside it. Coming back gives different
+rocks, which is the design and not a bug.
+
 **The air is a stack of shells, one band per shell, worn by the body.** Each marches its own ray's chord through
 its band, which is why bands sum to the column and no shell needs to know the eye's altitude. It draws the far
 face as well as the near one (`cull_front`), so **the air in front of a mountain is drawable**, and where the
@@ -113,7 +120,10 @@ is the only way one happens, and the same screen browses the histories and their
 addons/spacesim/   the engine library (idiomatic Godot addon layout)
   coordinate/      compartmentalised coordinate spaces and threshold transitions
   travel/          the local unit of travel (speed scales with distance to the nearest body)
-  system/          the built scene (SpacesimSystemScene), the Kepler solver, and beneath it:
+  system/          the built scene (SpacesimSystemScene), the Kepler solver, the builder a rock gets
+                   instead of a planet (SpacesimIrregularBody), and a population of small bodies as a
+                   DENSITY (SpacesimPopulationField) whose fragments are made up around the observer
+                   and forgotten when they leave. Beneath it:
     content/       the authored content as Godot Resources — bodies, orbits, layers, species
     model/         the derivation: what a body's numbers are, from what it is made of
   lighting/        the star as a physical light (lux), and the camera exposure that keeps it readable
