@@ -68,8 +68,9 @@ func update(
 			continue
 		var gone: SpacesimSceneBody = _bodies[designation]
 		_bodies.erase(designation)
-		if gone.node != null:
-			gone.node.queue_free()
+		# **The frame goes with it**, through the scene that made both — a frame that outlived its rock
+		# would be a coordinate space with nothing at the origin of it.
+		_system.discard_body(gone)
 
 
 ## How many rocks are bodies right now — one per fragment the field holds.

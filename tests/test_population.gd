@@ -407,10 +407,13 @@ func _test_a_fragment_becomes_a_body(h, root: Node) -> void:
 			places += 1
 	h.check(places == 0, "so no marker or save sees one")
 
-	# The field drops them when the ship leaves, and the bodies go with them.
+	# The field drops them when the ship leaves, and the bodies go with them — **and the frames with those**,
+	# or the tree would accumulate a coordinate space per rock ever approached.
+	var rules_before := scene.frame_tree._rules.size()
 	field.update(Vector3.ZERO, SUN_MU, Vector3(AU, 0.0, 0.0), 1.0)
 	bodies.update(field, Vector3.ZERO, Vector3(AU, 0.0, 0.0), camera, false)
 	h.check(bodies.count() == 0, "and a body is freed when the field drops its fragment")
+	h.check(scene.frame_tree._rules.size() < rules_before, "and its frame's rules go with it")
 
 	root.remove_child(bodies)
 	bodies.free()

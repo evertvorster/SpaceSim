@@ -143,6 +143,19 @@ func content_version() -> int:
 	return content.content_version if content != null else 0
 
 
+## **Let a body go that was built for a moment** — a rock that has left the field. Its frame goes first,
+## so the observer is never left standing in a coordinate space that is about to be freed, and
+## [method FrameTree.discard] puts them back in the enclosing one if they were.
+func discard_body(body: SpacesimSceneBody) -> void:
+	if body == null:
+		return
+	if body.orbital != null:
+		frame_tree.discard(body.orbital)
+		body.orbital = null
+	if body.node != null:
+		body.node.queue_free()
+
+
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set
 ## `frame_tree.observer` and call `enter_frame()` afterwards.
 func build(parent: Node) -> SpacesimSystemScene:
