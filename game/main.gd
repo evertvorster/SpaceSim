@@ -828,9 +828,10 @@ func _refresh_scale_bodies() -> void:
 			var scale := _scale_for(slot)
 			slot += 1
 			scale.position = _fields[index].position_of(fragment, origin)
-			# **A rock is moving, and a ship near it inherits that** — otherwise nothing in a belt could
-			# ever be reached, because the closing speed falls below the orbital speed before contact.
-			scale.velocity = fragment.velocity()
+			# **Zero, because nothing moves yet.** The fragment knows the velocity it will have
+			# (`Fragment.velocity()`), and feeding it to the ship now would carry the ship along with a
+			# motion that is not happening. When bodies start moving, this is the line that changes.
+			scale.velocity = Vector3.ZERO
 			scale.radius = fragment.diameter * 0.5
 			scale.name = fragment.designation
 			_scale_bodies[cursor] = scale

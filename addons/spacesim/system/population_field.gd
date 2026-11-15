@@ -5,9 +5,17 @@ extends RefCounted
 ##
 ## Nothing about a fragment is stored anywhere but here and only while it is in range. The population
 ## is a density; a fragment is drawn from that density inside a ball around the ship, given a circular
-## orbit that passes through the point it was drawn at, moved along that orbit, and dropped once it is
-## outside the ball again. Evert, 2026-11-14: *"you calculate the chances of an asteroid being in a
-## position, make up a few that are in range, and forget about them when they go out of range again."*
+## orbit that passes through the point it was drawn at, and dropped once it is outside the ball again.
+## Evert, 2026-11-14: *"you calculate the chances of an asteroid being in a position, make up a few that
+## are in range, and forget about them when they go out of range again."*
+##
+## **Nothing moves yet — deliberately, and exactly as the planets and moons do not move.** A fragment's
+## orbit is known and correct (its radius, its rate, the direction it will travel), and none of it is
+## applied: the position is solved once when the fragment is made, and then it stands still. Evert,
+## 2026-11-14: *"in theory we know which direction and speed they will be traveling in, but for
+## simplicity's sake nothing is moving yet, that is for a different time when we will focus just on
+## that."* `Fragment.velocity()` is therefore what the rock *will* do, not what it is doing, and nothing
+## may feed it to a ship's travel unit until the motion lands.
 ##
 ## **This is why there is no address lattice and no query inverse.** An earlier design had the
 ## population indexed by orbital elements so that a fragment's position was a function of its address
@@ -47,9 +55,9 @@ class Fragment:
 	var designation: String ## `A-0007` — the address is gone, so this is its identity for a session
 
 
-	## **How fast it is going, and which way** — the derivative of the circle it rides. A ship near it
-	## inherits this, which is what lets a ship that can only close at `distance/10` ever reach something
-	## orbiting at 18.8 km/s.
+	## **How fast it will be going, and which way, when bodies move** — the derivative of the circle it
+	## rides. **Nothing reads this while the world is still**: it is the motion that is known and not
+	## applied, and a ship must not inherit it until the rock actually moves.
 	func velocity() -> Vector3:
 		return radius * rate * (-sin(phase) * u + cos(phase) * v)
 
@@ -78,19 +86,19 @@ func position_of(fragment: Fragment, parent_position: Vector3) -> Vector3:
 	)
 
 
-## Advance every fragment, drop the ones that have left, and make up enough to fill the field again.
+## Drop the fragments that have left, and make up enough to fill the field again.
+##
+## **Nothing is advanced**: a fragment stands where it was made. `_delta` is kept in the signature
+## because the tick it belongs to is what will move the rock once bodies move — see the class comment.
 ##
 ## `mu` is the **parent's** gravitational parameter: a fragment's orbit is the parent's, and a
-## fragment has no gravity worth adding to it.
+## fragment has no gravity worth adding to it. It is used when a fragment is made, to give it the rate
+## it *will* orbit at.
 func update(
-	parent_position: Vector3, mu: float, ship_position: Vector3, delta: float
+	parent_position: Vector3, mu: float, ship_position: Vector3, _delta: float
 ) -> void:
 	if population == null:
 		return
-	if delta > 0.0:
-		for fragment in _fragments:
-			fragment.phase = fposmod(fragment.phase + fragment.rate * delta, TAU)
-
 	var reach := spawn_radius_of(population)
 	if reach <= 0.0 or not is_finite(reach):
 		_fragments.clear()

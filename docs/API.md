@@ -251,7 +251,7 @@ own datum and it belongs with landing rather than with placing.
 **The fragments a population actually has — made up around the observer and forgotten when they leave.**
 Nothing about a fragment is stored anywhere but here and only while it is in range: the population is a
 density, a fragment is drawn from that density inside a ball around the ship, given a circular orbit that
-passes through the point it was drawn at, moved along it, and dropped once it is outside the ball again.
+passes through the point it was drawn at, and dropped once it is outside the ball again.
 Evert, 2026-11-14: *"you calculate the chances of an asteroid being in a position, make up a few that are
 in range, and forget about them when they go out of range again."*
 
@@ -266,7 +266,7 @@ than a structure. The cost, accepted and named: **coming back to a place gives d
 | `population: SpacesimPopulation` | the distribution being drawn from |
 | `fragments() -> Array[Fragment]` | what the field holds now |
 | `position_of(fragment, parent_position) -> Vector3` | the system-frame position |
-| `update(parent_position, mu, ship_position, delta)` | advance every fragment, drop the ones outside the ball, make up enough to fill the field again |
+| `update(parent_position, mu, ship_position, delta)` | **drop** the fragments outside the ball and make up enough to fill the field again. **Nothing is advanced**: a fragment stands where it was made |
 | `static density_of(pop) -> float` | fragments per cubic metre above the size floor |
 | `static addressable_count(pop) -> float` | `count · (size_floor/reference_size)^-size_index` — Sol's 1.1 million above 1 km becomes 1.1 × 10¹¹ above 10 m |
 | `static volume_of(pop) -> float` | the shell between the two semi-major axes, as thick as the inclination band makes it |
@@ -274,9 +274,15 @@ than a structure. The cost, accepted and named: **coming back to a place gives d
 | `static in_band(pop, local) -> bool` | whether a point relative to the parent is inside the population |
 | `const FIELD_COUNT` | 24 — how many fragments *exist*; the marker pool decides how many are *shown* |
 
+**Nothing moves yet, deliberately — exactly as nothing else in the world moves.** A fragment's orbit is
+known and correct and none of it is applied. Evert, 2026-11-14: *"in theory we know which direction and
+speed they will be traveling in, but for simplicity's sake nothing is moving yet, that is for a different
+time when we will focus just on that."* So `Fragment.velocity()` is what the rock **will** do, and nothing
+may feed it to a ship's travel unit until bodies move.
+
 `Fragment` is an inner class: `radius` (metres from the parent, also the semi-major axis), `u` and `v` (unit
-vectors — where it is at phase 0 and the direction of travel), `phase`, `rate` (radians/s, the circular rate
-`sqrt(mu/r³)`), `diameter`, `designation` (`A-0007`).
+vectors — where it is and the direction of travel), `phase`, `rate` (radians/s, the circular rate
+`sqrt(mu/r³)`), `seed_value` (what its shape is extracted from), `diameter`, `designation` (`A-0007`).
 
 **Sol's main belt is authored** in `systems/sol.tres` as `population:main_belt`: 2.1 to 3.3 AU, inclination
 0 to 20°, 1.1 million fragments above 1 km, a 10 m floor. At those numbers the density is 8.6 × 10⁻²⁵

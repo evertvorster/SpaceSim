@@ -18,7 +18,7 @@ func run(h, root: Node) -> void:
 	_test_validation(h)
 	_test_the_field_fills_where_the_belt_is(h)
 	_test_the_field_empties_away_from_the_belt(h)
-	_test_a_fragment_orbits(h)
+	_test_a_fragment_does_not_move(h)
 	_test_sizes_follow_the_power_law(h)
 	_test_sol_authors_the_belt(h)
 	_test_a_fragment_is_significant(h)
@@ -165,27 +165,35 @@ func _test_the_field_empties_away_from_the_belt(h) -> void:
 	h.check(field.fragments().is_empty(), "no fragments at 1 AU")
 
 
-## **The fragments have to move.** A circular orbit at r has a rate of sqrt(mu/r^3), so one period
-## returns a fragment to where it started — and a quarter of one puts it a quarter of the way round.
-func _test_a_fragment_orbits(h) -> void:
+## **Nothing moves yet, and the orbit is known anyway** — the same arrangement the planets and moons
+## have. Evert, 2026-11-14: *"in theory we know which direction and speed they will be traveling in, but
+## for simplicity's sake nothing is moving yet."*
+##
+## So there are two halves to check: the position does not change, and the motion that is *known* is the
+## right one, waiting to be applied.
+func _test_a_fragment_does_not_move(h) -> void:
 	var field := SpacesimPopulationField.new(_belt())
 	var ship := Vector3(2.5 * AU, 0.0, 0.0)
 	field.update(Vector3.ZERO, SUN_MU, ship, 0.0)
 	var fragment: SpacesimPopulationField.Fragment = field.fragments()[0]
 	var start := field.position_of(fragment, Vector3.ZERO)
 
-	var rate := sqrt(SUN_MU / pow(fragment.radius, 3.0))
-	h.check_near(fragment.rate, rate, "the fragment's rate is the circular one for its radius", 1.0e-15)
-
-	field.update(Vector3.ZERO, SUN_MU, ship, TAU / rate)
+	# A minute of the tick, five times over, and the rock is where it was.
+	for _step in 300:
+		field.update(Vector3.ZERO, SUN_MU, ship, 1.0)
 	h.check_vector_near(field.position_of(fragment, Vector3.ZERO), start,
-		"one period returns it to where it started", 1.0)
+		"a fragment does not move across five minutes of ticks", 1.0e-6)
 
-	field.update(Vector3.ZERO, SUN_MU, ship, 0.25 * TAU / rate)
-	var quarter := field.position_of(fragment, Vector3.ZERO)
-	h.check_near(quarter.distance_to(start), sqrt(2.0) * fragment.radius,
-		"a quarter period is a quarter turn", 1.0)
-
+	# **The motion it will have is still the right one**: a circular orbit at its radius, in the parent's
+	# field. Asserted so that the knowledge cannot rot while nothing uses it.
+	var rate := sqrt(SUN_MU / pow(fragment.radius, 3.0))
+	h.check_near(fragment.rate, rate, "its rate is the circular one for its radius", 1.0e-15)
+	h.check_near(fragment.velocity().length(), rate * fragment.radius,
+		"and its speed is rate x radius", 1.0e-6)
+	h.check(fragment.velocity().dot(fragment.u) < 1.0e-6,
+		"travelling across the radius, not along it")
+	h.check(fragment.velocity().length() > 1.0e3,
+		"which at 2.5 AU is kilometres per second, not metres")
 
 ## N(>D) ~ D^-2.5, so a 10 m floor makes almost everything 10 to 20 metres across. That is what the
 ## real size distribution says, and the field has to draw from it rather than around it.
