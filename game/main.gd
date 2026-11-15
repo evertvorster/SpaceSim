@@ -885,7 +885,6 @@ func _fragment_targets() -> Array[Dictionary]:
 				],
 				"priority": SpacesimMarkers.Priority.ASTEROID,
 				"parent": SpacesimMarkers.NO_PARENT,
-				"ring": false,
 			})
 	return list
 

@@ -81,7 +81,7 @@ var selected: Node3D = null
 
 ## **Markers for things that have no node at all** — a fragment of an asteroid population, which is a
 ## position and a name and nothing else in the world. Each entry is a target:
-## `{id: int, position: Vector3, text: String, priority: int, parent: int, ring: bool}`.
+## `{id: int, position: Vector3, text: String, priority: int, parent: int}`.
 ##
 ## **The drawing path knows nothing about either source.** Bodies are gathered from nodes because that
 ## is where their positions are; fragments arrive already gathered. Everything downstream — the
@@ -267,7 +267,6 @@ func _place(
 ) -> Dictionary:
 	var circle: Vector2 = entry["circle"]
 	var colour := colour_of(int(entry["priority"]))
-	var has_ring := bool(entry["ring"])
 
 	label.text = "%s  %s" % [entry["text"], format_distance(entry["distance"])]
 	label.size = label.get_minimum_size()
@@ -291,7 +290,7 @@ func _place(
 		and _crowds_its_parent(anchor, label.size, taken, parent_box, bounds)
 	):
 		label.visible = false
-		return {"circle": circle, "color": colour, "ring": has_ring}
+		return {"circle": circle, "color": colour}
 
 	var box := Overlay.place_label(anchor, label.size, taken, bounds)
 	taken.append(box)
@@ -301,14 +300,14 @@ func _place(
 	label.visible = true
 	placed[int(entry["id"])] = box
 
-	var mark := {"circle": circle, "color": colour, "ring": has_ring}
+	var mark := {"circle": circle, "color": colour}
 	# **A line only where there is a ring to draw it from.** Off screen the ring is not there, so the
 	# label at the edge is the whole marker — and a line to a ring nobody can see points at nothing.
 	if Rect2(Vector2.ZERO, viewport_size).has_point(circle):
 		var ring := Rect2(
 			circle - Vector2.ONE * Overlay.RING_RADIUS, Vector2.ONE * Overlay.RING_RADIUS * 2.0
 		)
-		mark["start"] = circle if not has_ring else Overlay.border_point(ring, box.get_center())
+		mark["start"] = Overlay.border_point(ring, box.get_center())
 		mark["end"] = Overlay.border_point(box, circle)
 	return mark
 
@@ -374,7 +373,6 @@ func _target_of(node: Node3D, priority: int, eye: Vector3) -> Dictionary:
 		"text": node.name,
 		"priority": priority,
 		"parent": parent_id,
-		"ring": true,
 		"distance": eye.distance_to(node.global_position),
 	}
 

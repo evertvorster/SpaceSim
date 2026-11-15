@@ -214,6 +214,22 @@ static func material_for(body: SpacesimSceneBody, ramp: ImageTexture) -> Materia
 ## `source_color`, and `SpacesimStarModel.color` already linearises), which is a real defect belonging to
 ## the star's own colour and the lighting plan. It does not show here: both the disc and the splat clip at
 ## 24x whatever the conversion does, which is also the only reason their handoff looks free.
+## **How much of a body's radiance its splat carries**, given its screen radius in pixels.
+##
+## Below one pixel the disc cannot shrink any further, so the flux it delivers into that pixel falls as
+## `1/d²`: this is the disc's share of the pixel's solid angle, `π · r_px²`, capped at 1 once the splat
+## covers the disc (about 0.56 px of radius).
+##
+## **`floor` is the departure from the law, made deliberately** — Evert, 2026-11-14: *"I would also like to
+## see a little splat for the asteroid much earlier... The eye can resolve light long before shape, you
+## know."* A 28 m rock at 46,000 km delivers a fifteen-millionth of a pixel's worth of flux and would be
+## invisible, which is honest and useless: the splat is there so a thing can be found before it can be
+## seen. The floor keeps a dot of the body's own colour visible well before its shape resolves, and it is
+## a setting because it is a judgement about the picture rather than about the light.
+static func splat_fade(screen: float, floor: float) -> float:
+	return maxf(minf(1.0, PI * screen * screen), floor)
+
+
 static func point_colour(body: SpacesimSceneBody, radiance: float) -> Color:
 	if body.content != null and body.content.kind == SpacesimSystemBody.Kind.STAR:
 		return star_color_of(body) * STAR_INTENSITY

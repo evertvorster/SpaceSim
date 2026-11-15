@@ -2345,13 +2345,12 @@ func advance_irregular(
 ## receives none of Godot's per-path baking — the flight test that found that is in
 ## `Lighting and Exposure`.
 ##
-## **Still missing, and named rather than hidden:** §5 of the plan has the splat carry the body's whole
-## flux into one pixel — `L * omega_disc / omega_px` — which for a disc under the floor falls as `1/d^2`,
-## because a point source on a fixed pixel gets fainter and that is the correct behaviour. This carries
-## `L` alone, so its value does not fall with the observer's distance once the disc is under the floor: a
-## body at 0.077 px is about 170x brighter than the law says. Not applied yet because it makes distant
-## bodies *dimmer* and the flight test says they are already too dim, so the splat's absolute level has
-## to be settled first. Two renders — one body at 0.8 px and the same body at 0.4 px — would measure it.
+## **The flux term is applied, and floored.** Below one pixel the disc cannot shrink, so the splat carries
+## the disc's share of the pixel's solid angle — `π · r_px²` — and dims as `1/d²`. That is the correct law
+## and it makes anything small invisible long before it resolves, so
+## [method SpacesimBodyRenderer.splat_fade] floors it at `render.splat_floor`: a dot of the body's own
+## colour that can be found before its shape can be seen. Evert, 2026-11-14: *"The eye can resolve light
+## long before shape, you know."*
 func _place_point(
 	body: SpacesimSceneBody, observer: Vector3, angular: float, distance: float, pixel: float,
 	screen: float, camera: Camera3D
@@ -2377,7 +2376,9 @@ func _place_point(
 	# the splat covers the disc, which it does from about 0.56 px of radius. This is the same term the
 	# star field carries as `lux / d_omega`, and it is what makes a distant body *faint* rather than a
 	# full-brightness dot: without it a body at 0.077 px is some 170x brighter than the law says.
-	var fade := minf(1.0, PI * screen * screen)
+	var fade := SpacesimBodyRenderer.splat_fade(
+		screen, float(SpacesimSettings.get_value("render.splat_floor"))
+	)
 	var radiance := body_luminance(body, observer, star_body.node.global_position) * fade
 	# **No exposure here.** This used to be the one place in the 3D pass that applied the camera's exposure
 	# by hand, because an `unshaded` material receives none of Godot's per-path baking and a splat is the

@@ -8,12 +8,11 @@ const Overlay := preload("res://addons/spacesim/navigation/overlay.gd")
 ## **A marker target is a position and a name, not a node** — bodies and fragments arrive the same way.
 ## Most of these tests only care about the keyed union and the ordering, so they build targets directly.
 static func _target(
-	id: int, priority: int, distance: float, text := "thing",
-	parent := -1, ring := true
+	id: int, priority: int, distance: float, text := "thing", parent := -1
 ) -> Dictionary:
 	return {
 		"id": id, "position": Vector3.ZERO, "text": text, "priority": priority,
-		"parent": parent, "ring": ring, "distance": distance,
+		"parent": parent, "distance": distance,
 	}
 
 

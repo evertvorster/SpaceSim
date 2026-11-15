@@ -339,7 +339,6 @@ func _test_the_belt_reaches_the_marker_pool(h, root: Node) -> void:
 			"text": fragment.designation,
 			"priority": SpacesimMarkers.Priority.ASTEROID,
 			"parent": SpacesimMarkers.NO_PARENT,
-			"ring": false,
 		})
 	markers.targets = targets
 

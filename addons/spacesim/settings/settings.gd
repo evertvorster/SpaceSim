@@ -191,6 +191,10 @@ const REGISTRY := {
 		"tab": "troubleshooting"},
 	# **Tint each patch by its chunk's depth**, so the tree is legible at a glance: where it refines, where it stops, and
 	# whether a boundary is a step or a crack. Off by default, so `flat` stays exactly the picture it was.
+	## **How much of a body's radiance a sub-pixel splat carries at the least**, as a fraction — see
+	## `SpacesimBodyRenderer.splat_fade`. The law dims a splat as 1/d^2 below one pixel, which is honest and
+	## makes a rock invisible long before its shape resolves; the floor keeps a findable dot.
+	"render.splat_floor": {"default": 0.05, "scope": Scope.PLAYER, "min": 0.0, "max": 1.0, "tab": "troubleshooting"},
 	"render.depth_tint": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
 	# **EV compensation, as a switch rather than a replacement.** On is the frame's own metre (a compute pass on the
 	# rendered pixels); off disables it, so the frame is drawn at Godot's reference — 100,000 lux on a white Lambertian
