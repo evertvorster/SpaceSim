@@ -139,7 +139,6 @@ func _ready() -> void:
 	_camera = _ship.get_node("Camera")
 	_camera_mount = Node3D.new()
 	_camera_mount.name = "CameraMount"
-	_camera_mount.position = PlayerShip.CAMERA_OFFSET
 	_ship.add_child(_camera_mount)
 	# Exposure is a camera property, and it is ours: the star's light is physical, so the exposure that
 	# puts a lit body at middle grey is arithmetic. Settled at once rather than transitioned into, so
@@ -471,10 +470,6 @@ func _cycle_target() -> void:
 ## change, so nothing here is read once at startup and then forgotten.
 func _apply_settings() -> void:
 	_camera.fov = SpacesimSettings.get_value("camera.fov")
-	# **The camera sits in the ship's frame and there is no hull** — see `PlayerShip.CAMERA_OFFSET` for why the box that
-	# used to be here went. The offset is a constant, so nothing about the viewpoint is a setting. It is the
-	# MOUNT's now: the camera lives in the band's viewport and is handed this transform every frame.
-	_camera_mount.position = PlayerShip.CAMERA_OFFSET
 	# The exposure's ceiling, hot like everything else here: `exposure.range_stops` is in stops above
 	# the light-adapted floor, and 32.0 is the whole window with no cap on the derived value.
 	_exposure_pass.max_multiplier = SpacesimExposure.max_multiplier_for_stops(
