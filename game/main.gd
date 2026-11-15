@@ -579,6 +579,13 @@ func _physics_process(delta: float) -> void:
 ## per field and a `PackedStringArray` to join it, sixty times a second, for a display. Measured at
 ## 0.12% of a frame it is not a cost problem; it is a *shape* problem, and this is the shape.
 const HUD_INTERVAL := 0.1
+
+## **The near plane is a thousandth of the gap to the nearest surface** — see `_update_camera`. The margin is
+## deliberately large: the plane has to sit in front of the nearest *point* of a body whose near surface is
+## already the thing being measured.
+const NEAR_PER_GAP := 1000.0
+## The floor, because a landed ship's gap is zero and a zero near plane is not a plane.
+const MINIMUM_NEAR := 0.001
 var _hud_since := 0.0
 
 ## **Which code is running, said once at startup.**
@@ -908,10 +915,19 @@ func _update_markers(camera: Camera3D) -> void:
 func _update_camera(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var range_for_frame: Vector2 = SpacesimSettings.get_value(_range_key(frame.kind))
-	# **The frame kind alone sets the near plane.** It used to be pulled inside the ship's hull while the hull was
-	# drawn, which is what made a placeholder box appear as a plate on the ground on approach; there is no hull now, so
-	# the plane is a depth-precision knob and nothing else.
-	camera.near = range_for_frame.x
+	# **The near plane follows what is nearest, and the frame's setting is its CEILING.**
+	#
+	# The plane used to be the setting outright, and in space that is 100 m — so a small body inside 100 m lost its
+	# near side to the clip. A 28 m asteroid at 99 m had its silhouette 3 m behind the plane and drew as a cap;
+	# at 86 m it vanished altogether, and turning the camera cut a different part of it. **Nothing was wrong with
+	# the rock**: a moon is kilometres in radius, so its near side can never be inside 100 m of the eye, and a
+	# fragment is the first body small enough for the plane to be the thing that cuts it.
+	#
+	# The rule is the travel unit's rule — the local neighbourhood sets the scale — with a thousandth of the gap
+	# as the plane, so the whole body always sits in front of it while the depth range stays as tight as the
+	# distance allows. Farther than a thousand times the ceiling's gap nothing changes at all: `nearest / 1000`
+	# only falls under the setting's 100 m within 100 km of something.
+	camera.near = clampf(_ship.altitude() / NEAR_PER_GAP, MINIMUM_NEAR, range_for_frame.x)
 	var far: float = range_for_frame.y
 	# **Never let the far plane be smaller than what must be drawn.** For space that is the system: the
 	# space range is a player quality knob whose 1e11 m default is *less than one au*, so every body
