@@ -27,6 +27,7 @@ func run(h, root: Node) -> void:
 	_test_hysteresis(h, root)
 	_test_pose_survives_switch(h, root)
 	_test_frame_position_math(h, root)
+	_test_a_discarded_frame_lets_go_of_the_observer(h, root)
 
 
 func _test_stays_in_frame_above_threshold(h, root: Node) -> void:
@@ -177,3 +178,30 @@ func _apparent_radius(world: Dictionary) -> float:
 	var ship: Node3D = world["ship"]
 	var distance := ship.global_position.distance_to(planet.global_position)
 	return asin(PLANET_RADIUS / distance)
+
+
+## **A frame that comes and goes owes the tree its rules back.** A population's rock is built and freed as
+## the ship moves, so its orbital frame is created and discarded in flight — and if the observer happens to
+## be standing in it when it goes, there has to be somewhere left to stand.
+func _test_a_discarded_frame_lets_go_of_the_observer(h, root: Node) -> void:
+	var world := _build(root)
+	var tree: SpacesimFrameTree = world["tree"]
+	var system: SpacesimFrame = world["system"]
+	var atmosphere: SpacesimFrame = world["atmosphere"]
+
+	# Down into the frame, so it is the active one.
+	_place_at_altitude(world, 50_000.0)
+	tree.evaluate()
+	h.check(tree.active_frame == atmosphere, "the observer is in the atmosphere frame")
+
+	var position_before: Vector3 = world["ship"].global_position
+	tree.discard(atmosphere)
+	h.check(tree.active_frame == system, "and discarding it puts the observer back in the system frame")
+	h.check_vector_near(tree.observer.global_position, position_before,
+		"without moving it — the coordinate space changed, not the place", POSITION_EPSILON)
+
+	# **Its rules went with it**, or they would be asked about a position in a frame nobody is in any more.
+	_place_at_altitude(world, 50_000.0)
+	tree.evaluate()
+	h.check(tree.active_frame == system, "and nothing can move the observer into it again")
+	world["container"].free()
