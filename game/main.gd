@@ -782,7 +782,7 @@ func _build_fields() -> void:
 			continue
 		_fields.append(SpacesimPopulationField.new(population))
 		_field_parents.append(parent)
-		var bodies := SpacesimFragmentBodies.new(population)
+		var bodies := SpacesimFragmentBodies.new(population, _system)
 		bodies.name = "Fragments_%s" % population.id.replace(":", "_")
 		add_child(bodies)
 		_fragment_bodies.append(bodies)

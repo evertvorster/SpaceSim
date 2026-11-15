@@ -20,12 +20,13 @@ extends Node3D
 ## One body per live fragment, keyed by the fragment's designation — the id `hash()` seeds the shape with.
 var _bodies: Dictionary = {}
 var _population: SpacesimPopulation
-var _materials: SpacesimMaterialTable
+## **The scene builds them**, through its own body path — this class only asks and then keeps the tally.
+var _system: SpacesimSystemScene
 
 
-func _init(population: SpacesimPopulation = null) -> void:
+func _init(population: SpacesimPopulation = null, system: SpacesimSystemScene = null) -> void:
 	_population = population
-	_materials = SpacesimMaterialTable.engine_table()
+	_system = system
 
 
 ## **Mirror the field**: a body for every fragment it holds, none for one it has dropped, and each of
@@ -37,7 +38,7 @@ func update(
 	field: SpacesimPopulationField, parent_position: Vector3, eye: Vector3, camera: Camera3D,
 	wireframe: bool
 ) -> void:
-	if field == null or _population == null or camera == null:
+	if field == null or _population == null or _system == null or camera == null:
 		return
 	var viewport := camera.get_viewport()
 	if viewport == null:
@@ -51,9 +52,16 @@ func update(
 		live[fragment.designation] = true
 		var body: SpacesimSceneBody = _bodies.get(fragment.designation)
 		if body == null:
-			body = _make(fragment, field.position_of(fragment, parent_position))
+			body = _system.add_body(
+				content_for(_population, fragment.designation, fragment.diameter),
+				field.position_of(fragment, parent_position)
+			)
 			_bodies[fragment.designation] = body
-		_advance(body, eye, pixel, wireframe)
+		if body != null:
+			# **The whole lifecycle, from the scene that owns it** — extraction, the splat that stands in
+			# while it runs, and the wireframe. A rock's splat is far fainter than a planet's by
+			# construction: it is sized to the disc a 10 m body would have.
+			_system.advance_irregular(body, eye, camera, pixel, wireframe)
 
 	for designation in _bodies.keys():
 		if live.has(designation):
@@ -64,20 +72,9 @@ func update(
 			gone.node.queue_free()
 
 
-## **The four calls an irregular body gets, in `update_lod`'s own order.** Extracted when the eye is close
-## enough to resolve it — 2 px of radius, half the point tier — published on the main thread, drawn from
-## then on, and in whichever mode is current.
-func _advance(body: SpacesimSceneBody, eye: Vector3, pixel: float, wireframe: bool) -> void:
-	var distance := body.position.distance_to(eye)
-	var screen := SpacesimLod.screen_radius_pixels(
-		SpacesimLod.angular_radius(body.radius, distance), pixel
-	)
-	SpacesimIrregularBody.poll(body)
-	if not body.irregular_built and screen >= SpacesimIrregularBody.RESOLVE_PIXELS:
-		SpacesimIrregularBody.request(body)
-	body.mesh.visible = body.irregular_built and screen >= SpacesimLod.POINT_TIER_SCREEN_RADIUS
-	if body.mesh.visible:
-		SpacesimIrregularBody.show_wireframe(body, wireframe)
+## How many rocks are bodies right now — one per fragment the field holds.
+func count() -> int:
+	return _bodies.size()
 
 
 ## **A fragment as content**, so it can be a body: its radius, and what the population says it is made
@@ -100,21 +97,3 @@ static func content_for(
 	layer.composition = population.composition.duplicate()
 	content.layers.append(layer)
 	return content
-
-
-## The body, its node, and the builder's own mesh material — nothing else.
-func _make(fragment: SpacesimPopulationField.Fragment, where: Vector3) -> SpacesimSceneBody:
-	var body := SpacesimSceneBody.from_content(
-		content_for(_population, fragment.designation, fragment.diameter), _materials
-	)
-	body.position = where
-	body.node = Node3D.new()
-	body.node.name = fragment.designation
-	body.node.position = where
-	add_child(body.node)
-	SpacesimIrregularBody.build(body.node, body, _materials)
-	# **The splat stands down.** A fragment's point of light would be one or two pixels, and placing it is
-	# `SpacesimSystemScene._place_point`'s job — so an unbuilt rock is simply not drawn for the moment its
-	# extraction takes, rather than drawn as a wrongly-sized white disc.
-	body.point.visible = false
-	return body

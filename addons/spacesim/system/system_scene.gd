@@ -571,6 +571,24 @@ func _phase_offset(body: SpacesimSceneBody, mu: float) -> float:
 	return period * float(absi(hash(body.id)) % 100000) / 100000.0
 
 
+## **Build one more body into the scene, outside the system's own list.**
+##
+## A population's fragments are bodies and are built by [method _build_body] — the same node, the same
+## frame, the same dispatch, the same placement Evert, 2026-11-14: *"We wrote the irregular body
+## function to be re-used, not copied."* The first version of the fragment path copied the node creation
+## and the builder call into a second class instead.
+##
+## **They are not places**, which is why they are not appended to [member bodies]: markers,
+## `significant_nodes()` and the save all read that list, and 24 transient rocks in it would be wrong.
+func add_body(content: SpacesimSystemBody, where: Vector3) -> SpacesimSceneBody:
+	if content == null:
+		return null
+	var body := SpacesimSceneBody.from_content(content, _materials())
+	body.position = where
+	_build_body(body)
+	return body
+
+
 func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
 	body.node.name = body.name
@@ -1305,20 +1323,9 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# extracted yet. There is no walk to gate, no decks, no air, no field and no star-facing uniform — the
 		# engine's own light does the shading — so it leaves here rather than being switched off piece by piece.
 		if body.irregular:
-			SpacesimIrregularBody.poll(body)
-			# **Extracted when the eye is close enough to resolve it, and not before.** The threshold is half the point
-			# tier, so the work starts while the body is still a splat and is finished before the handover.
-			if not body.irregular_built and screen >= SpacesimIrregularBody.RESOLVE_PIXELS:
-				SpacesimIrregularBody.request(body)
-			body.mesh.visible = body.irregular_built and not is_point
-			if body.mesh.visible:
-				SpacesimIrregularBody.show_wireframe(body, wireframe)
-			if body.point != null:
-				# **The splat stands in for the geometry until there is some**, so a body is never a hole while it is being
-				# extracted — the same publish-over rule the patch walk and the cloud maps follow.
-				body.point.visible = is_point or not body.irregular_built
-				if body.point.visible:
-					_place_point(body, observer, energy, distance, pixel, screen, camera)
+			# **The whole lifecycle is one method**, because a population's fragments are bodies too and they
+			# must take the same steps — extraction, the splat that stands in while it runs, and the wireframe.
+			advance_irregular(body, observer, camera, pixel, wireframe)
 			continue
 		# How much of the air this body's shell draws, from the gate below — read again when it is published.
 		var air_strength := 0.0
@@ -2242,6 +2249,33 @@ func await_patch_builds(rounds: int = 8) -> void:
 		_triangles = _count_drawn_triangles()
 		if not waiting:
 			return
+
+
+## **The whole irregular-body lifecycle, for one body of this scene** — and the one entry point, because a
+## population's fragments are bodies too. Evert, 2026-11-14: *"We wrote the irregular body function to be
+## re-used, not copied."*
+##
+## The thresholds and the order are [method SpacesimIrregularBody.advance]'s; what belongs here is the
+## splat, because placing one needs the camera and this scene's star. **The splat stands in for the
+## geometry until there is some**, so a body — or a rock — is never a hole while it is being extracted:
+## the same publish-over rule the patch walk and the cloud maps follow.
+##
+## A rock's splat is naturally far fainter than a planet's, by construction: the quad is sized to the disc
+## the body would have, so a 10 m fragment is a fraction of a pixel at any distance it is worth drawing,
+## and [method _place_point] fades it by its own area below 0.56 px of radius.
+func advance_irregular(
+	body: SpacesimSceneBody, observer: Vector3, camera: Camera3D, pixel: float, wireframe: bool
+) -> void:
+	if body == null or body.mesh == null:
+		return
+	var distance := observer.distance_to(body.position)
+	var angular := SpacesimLod.angular_radius(body.radius, distance)
+	var screen := SpacesimLod.screen_radius_pixels(angular, pixel)
+	SpacesimIrregularBody.advance(body, screen, wireframe)
+	if body.point != null:
+		body.point.visible = not body.mesh.visible
+		if body.point.visible:
+			_place_point(body, observer, angular, distance, pixel, screen, camera)
 
 
 ## Size and colour a body's point of light.

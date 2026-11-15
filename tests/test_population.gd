@@ -24,6 +24,7 @@ func run(h, root: Node) -> void:
 	_test_a_fragment_is_significant(h)
 	_test_a_fragment_is_an_irregular_body(h)
 	_test_the_belt_reaches_the_marker_pool(h, root)
+	_test_a_fragment_becomes_a_body(h, root)
 
 
 func _belt() -> SpacesimPopulation:
@@ -353,3 +354,49 @@ func _test_the_belt_reaches_the_marker_pool(h, root: Node) -> void:
 	h.check(rocks + moons + places == 24, "and the rest of the pool is a choice between moons and rocks")
 	root.remove_child(markers)
 	markers.free()
+
+
+## **A fragment is built by the scene's own body path**, so it is a body like a moon: same node, same
+## frame, same dispatch, same builder. What this checks is the thing a class of its own got wrong — that
+## nothing was re-implemented — and that the bodies come and go with the field.
+func _test_a_fragment_becomes_a_body(h, root: Node) -> void:
+	var sol: SpacesimSolarSystem = load("res://systems/sol.tres")
+	var scene := SpacesimSystemScene.from_content(sol)
+	scene.build(root)
+	var belt := sol.population_by_id("population:main_belt")
+	var field := SpacesimPopulationField.new(belt)
+	var bodies := SpacesimFragmentBodies.new(belt, scene)
+	root.add_child(bodies)
+	var camera := Camera3D.new()
+	root.add_child(camera)
+
+	var ship := Vector3(2.5 * AU, 0.0, 0.0)
+	field.update(Vector3.ZERO, SUN_MU, ship, 0.0)
+	bodies.update(field, Vector3.ZERO, ship, camera, false)
+	h.check(bodies.count() == SpacesimPopulationField.FIELD_COUNT,
+		"one body per fragment the field holds (%d)" % bodies.count())
+
+	# **Under the system frame, beside the planets** — not in a container of its own, where a frame
+	# transform would apply to the bodies and not to the rocks.
+	var found := 0
+	for child in scene.system_frame.get_children():
+		if String(child.name).begins_with("A-"):
+			found += 1
+	h.check(found == bodies.count(), "and they live in the system frame with the other bodies (%d)" % found)
+
+	# **Not places**: nothing else in the engine may learn about them.
+	var places := 0
+	for node in scene.significant_nodes():
+		if String(node.name).begins_with("A-"):
+			places += 1
+	h.check(places == 0, "so no marker or save sees one")
+
+	# The field drops them when the ship leaves, and the bodies go with them.
+	field.update(Vector3.ZERO, SUN_MU, Vector3(AU, 0.0, 0.0), 1.0)
+	bodies.update(field, Vector3.ZERO, Vector3(AU, 0.0, 0.0), camera, false)
+	h.check(bodies.count() == 0, "and a body is freed when the field drops its fragment")
+
+	root.remove_child(bodies)
+	bodies.free()
+	root.remove_child(camera)
+	camera.free()

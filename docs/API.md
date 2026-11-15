@@ -300,15 +300,17 @@ one, freed when it drops it.
 |---|---|
 | `update(field, parent_position, eye, camera, wireframe)` | mirror the field: create, free, and advance each body |
 | `static content_for(population, designation, diameter) -> SpacesimSystemBody` | **a fragment as content** — its radius and one layer of the population's composition. That is all the builder needs: colour, strength and density follow, so a rock's lumpiness is derived rather than chosen. **`id` is the designation**, because `request()` seeds the shape from `hash(body.id)` — the same rock is the same shape every time it is extracted |
-| per-body advance | `poll` → `request` once the screen radius reaches `RESOLVE_PIXELS` (2 px, half the point tier) → `mesh.visible` → `show_wireframe(body, wireframe)`. **`SpacesimSystemScene.update_lod`'s own four calls, in its own order** |
+| per-body advance | **`SpacesimSystemScene.advance_irregular`** — the same call `update_lod` makes for a moon: extraction at `RESOLVE_PIXELS`, the splat that stands in while it runs, the wireframe |
 
 **Nothing is extracted until the eye can resolve it.** A 17 m fragment is 2 px of radius at about 22 km, so
 a field of two dozen rocks costs nothing until one is close, and then the cost is one body's extraction on
 the worker pool — the same bargain the moons struck.
 
-The fragment's point of light is left hidden: it would be one or two pixels, and placing a splat belongs to
-`SpacesimSystemScene._place_point`, so an unbuilt rock is not drawn rather than drawn as a wrongly-sized
-white disc.
+**A rock gets a splat, and it is far fainter than a planet's by construction** — the quad is sized to the
+disc the body would have, so a 10 m fragment is a fraction of a pixel at any distance it is worth drawing,
+and `_place_point` fades it by its own area below 0.56 px of radius. Evert, 2026-11-14: *"It would actually
+be nice to see splats for asteroids, but of course they will be far dimmer and not as visible as planetary
+splats."*
 
 ### `SpacesimKepler` — `RefCounted`
 
