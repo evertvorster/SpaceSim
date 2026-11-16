@@ -448,28 +448,30 @@ static func deck_material(
 ## The deck shader's simplest case with no map at all: one colour, lit by the star through the same air and the
 ## same occlusion every other layer uses. **It carries no map and no alpha** — it is the floor, and a floor that
 ## could become transparent would put the stars back.
-## **Where each transparent draw of a body sits, and there must be no ties.**
+## **Where a body's own transparent draws sit, and what is NOT settled about them.**
 ##
-## Godot sorts transparent draws by `render_priority` and then by distance — and every one of these is a child of
-## the body's own node, so their distances are equal to the metre. **Equal priority therefore means no order at
-## all**, and which one wins is decided by nothing. Evert, 2026-11-15: *"I still see ordering effects, but not
-## always... there is more than just the atmosphere, there are cloud decks and the internal surface of Saturn as
-## well, and they need to be properly ordered."* That is a tie: the air shell and the first cloud deck were both
-## at 0.
+## Godot sorts transparent draws by `render_priority` and then by distance — and every layer of a body is a
+## child of that body's node, so their distances are equal to the metre. Equal priority therefore means no
+## order at all. Evert, 2026-11-15: *"I still see ordering effects, but not always... there is more than just
+## the atmosphere, there are cloud decks and the internal surface of Saturn as well, and they need to be
+## properly ordered."*
 ##
-## The whole range is **−128 to +128**; outside it a priority is refused outright and the material keeps 0, which
-## is the tie this exists to break (measured 2026-11-03). Furthest first:
+## **The sea is the one that is settled**, because it was measured: `OCEAN_RENDER_PRIORITY` = −8 puts it under
+## every deck (below, and 2026-11-03 records the tie it broke). The rest of the stack — interior, air, decks —
+## is unchanged from `main` and is **known to tie**: the air and the first deck are both at 0.
 ##
-##     ring far    −100   (SpacesimRingView.FAR_PRIORITY)
-##     interior     −90
-##     ocean         −8
-##     decks          −index … 0   (one per condensed species)
-##     air           +8
-##     ring near   +100   (SpacesimRingView.NEAR_PRIORITY)
+## **A table that reorders them was tried and reverted, 2026-11-16.** Moving the air above the decks left a
+## thick atmosphere drawing `blend_mix` with an alpha near 1 *over* the clouds, so Saturn and Earth rendered as
+## a solid blue shell with its decks invisible — Evert: *"The atmosphere lost its translucency, so it renders
+## as solid blue rather than show the cloud decks inside."* That is the same failure the first attempt at this
+## produced, and the lesson is that the air's place in this stack is **not** the one geometry suggests: it
+## draws before the decks today, and that is the picture that works.
 ##
-## `tests/test_rings.gd` asserts the table is strictly increasing and inside the range, so a tie cannot return.
-const INTERIOR_RENDER_PRIORITY := -90
-const AIR_RENDER_PRIORITY := 8
+## So this file claims only what has been flown. `tests/test_rings.gd` asserts the ring's two bands sit outside
+## every layer a body draws — which is what the rings need — and asserts nothing about the order among the
+## body's own layers, because that order is still being found.
+const INTERIOR_RENDER_PRIORITY := 0
+const AIR_RENDER_PRIORITY := 0
 
 
 static func interior_material(body: SpacesimSceneBody, palette: Color) -> ShaderMaterial:
@@ -637,8 +639,8 @@ static func air_shell_material(
 	# Evert, 2026-11-02, flying Saturn: *"there is something exactly on the sphere"* — this is that.
 	material.set_shader_parameter("u_band_inner", band_inner)
 	material.set_shader_parameter("u_band_outer", band_outer)
-	# **Over the cloud tops**, which is where air is — and over every deck, so the haze reads across the clouds
-	# from outside and from inside alike.
+	# **Unchanged from `main`, and it ties with the first deck.** See the table above: this is the picture that
+	# works, and reordering it was tried and reverted.
 	material.render_priority = AIR_RENDER_PRIORITY
 	return material
 

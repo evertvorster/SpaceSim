@@ -55,38 +55,33 @@ static func cosine(plane_normal: Vector3, direction: Vector3) -> float:
 	return maxf(absf(normal.dot(direction / length)), MIN_COSINE)
 
 
-## **The slab's reflectance**, as a fraction of a bright Lambert surface — the band's brightness, and the
-## one number the picture is judged by.
+## **The slab's reflectance**, as a fraction of the star's own flux — single scattering out of a sheet of
+## optical depth `tau`:
 ##
-##     R = (tau / (1 + tau)) · 2 · mu0 / (mu0 + mu)
+##     R = (1/4) · mu0/(mu0 + mu) · (1 - exp(-tau · (1/mu0 + 1/mu)))
 ##
-## The first factor is the **two-stream (diffuse) reflectance** of a slab, which is what a band of
-## scatterers at optical depth `tau` returns, and it is where the three Saturn values come from: C `0.1`
-## gives 9 %, A `0.7` gives 41 %, B `1.2` gives 55 %.
+## lit at cosine `mu0` and seen at cosine `mu`. It is the classic single-scattering answer and it has the
+## behaviour the picture needs without a tuned constant: **near-linear in `tau` while the band is thin**,
+## **saturating** once a ray has scattered, and **brighter at grazing incidence** (the eye looks along the
+## sheet and sees more of it) while dimmer when the star grazes too.
 ##
-## The second factor is **the geometry of a slab**, normalised to 1 when the star is overhead and the eye is
-## overhead, which is where the band is at its stated brightness. It does two things a constant cannot:
-## a ring **brightens towards grazing incidence** (the eye looking along the sheet sees more of it), and it
-## dims when the star grazes. Both are real, and both are what make a ring's brightness change as the
-## season does.
+## **It is deliberately dimmer than a Lambert surface.** Evert, 2026-11-16, flying the first build of this:
+## *"The particles are way, way too bright."* That build used the two-stream diffuse reflectance,
+## `tau/(1+tau)`, which is roughly what a thick scattering slab returns in total — and at `tau = 1.2` it is
+## twice what one scattering delivers, so the band came out brighter than Saturn's own disc. Single scattering
+## puts it where the physics of *one* bounce does: below a bright surface, and below the planet.
 ##
-## **Clamped at 1** because nothing reflects more than a bright surface: with a thick band seen edge-on the
-## product exceeds it, and an unclamped reflectance is exactly how a ring ends up brighter than the planet
-## it orbits. Evert, 2026-11-15: *"the little splats are way too bright, far brighter than Saturn itself."*
-##
-## **What this is not.** Single scattering out of the slab — `(w/4)·mu0/(mu0+mu)·(1-exp(-tau(1/mu0+1/mu)))`
-## — is the sharper law, and it is a factor of a few dimmer at low phase because it has no opposition surge.
-## The diffuse form is used because it is the one the engine's own lighting language speaks, it agrees with
-## the band values the project already quotes, and the surge needs measured phase parameters this game has
-## no way to judge yet. `SpacesimRingModel`'s class comment carries the same note.
+## **What it is missing is the reason real rings look bright.** The opposition surge — the sharp brightening
+## within a few degrees of back-scatter — is worth a factor of two or more on Saturn's rings, and it needs a
+## measured phase function and a game with a phase-angle dial to judge it. Naming it is why the number here is
+## allowed to be low rather than tuned up to a picture.
 static func reflectance(tau: float, sun_cosine: float, eye_cosine: float) -> float:
 	var mu0 := maxf(sun_cosine, MIN_COSINE)
 	var mu := maxf(eye_cosine, MIN_COSINE)
 	if tau <= 0.0:
 		return 0.0
-	var diffuse := tau / (1.0 + tau)
-	var geometry := 2.0 * mu0 / (mu0 + mu)
-	return clampf(diffuse * geometry, 0.0, 1.0)
+	var slab := 0.25 * mu0 / (mu0 + mu) * (1.0 - exp(-tau * (1.0 / mu0 + 1.0 / mu)))
+	return clampf(slab, 0.0, 1.0)
 
 
 ## **The band's own radiance**, in the engine's units: the light falling on it, the fraction of it the

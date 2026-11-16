@@ -64,6 +64,10 @@ var wire_mesh: ArrayMesh
 ## radius. Both the extraction and the altitude datum use it, and they must use the same number or the ground and the
 ## height above it disagree.
 var irregularity := 1.0
+## **The grid the shape is extracted on**, in cells across the body. A moon is seen as a disc and gets the
+## full grid; a rock is a handful of pixels for all but the last second of an approach, and the extraction is
+## cubic in this number — 0.8 s at 64, 0.1 s at 32 (`SpacesimBlobShape`'s measured table).
+var irregular_resolution := SpacesimIrregularBody.RESOLUTION
 var irregular_built := false
 var irregular_task := -1
 ## Where a worker leaves the extracted arrays, and where the main thread picks them up when the task is joined.

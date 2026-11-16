@@ -64,6 +64,7 @@ func update(
 			# **A rock, not a place**: ranked as an asteroid on the HUD, and it never stops the ship — there is no
 			# physics yet, and a rock that stopped the ship would be a collision by accident.
 			body.rock = true
+			body.irregular_resolution = SpacesimIrregularBody.ROCK_RESOLUTION
 			if body.scale_body != null:
 				body.scale_body.solid = false
 			_version += 1

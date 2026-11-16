@@ -76,6 +76,13 @@ void vertex() {
 	// **The cut.** A particle on the other side of the planet belongs to the other draw, so this one collapses
 	// it to a point of no area — `return` is not allowed in a vertex stage, and a degenerate quad rasterises
 	// nothing.
+	//
+	// **A hidden particle is collapsed too, and that is a frame-rate fix rather than a look.** A spot that has a
+	// body has its splat switched off (`R26`), and switching it off by alpha alone still rasterises a quad the
+	// size of the shape it was replaced by — 300,000 of those, twice, is the fill rate the ring cannot afford.
+	if (v_alpha <= 0.0) {
+		offset = vec3(0.0);
+	}
 	if (split_side != 0.0) {
 		vec3 world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
 		if (dot(world - planet_origin, split_direction) * split_side < 0.0) {
@@ -90,10 +97,11 @@ void vertex() {
 void fragment() {
 	// **A disc, not a quad**: the quad is a place to draw the disc on. The edge is one texel wide, because a
 	// particle resolved to a few pixels must look round rather than square.
+	//
+	// **No `discard`.** It is the obvious way to clip the corners and it costs more than it saves: a shader that
+	// discards cannot use early depth culling on the hardware that has it, and this draws 300,000 quads twice a
+	// frame. An alpha of zero at the corners looks the same and blends nothing.
 	float radial = length(UV * 2.0 - 1.0);
-	if (radial > 1.0) {
-		discard;
-	}
 	float edge = 1.0 - smoothstep(1.0 - max(fwidth(radial), 0.01), 1.0, radial);
 	// **The accumulated radiance must come out at `glow`, however many particles land on the pixel.** With
 	// `n` layers each `alpha` and radiance `S`, the sum is `S * (1 - (1-alpha)^n)`, and `(1-alpha)^n` is the
