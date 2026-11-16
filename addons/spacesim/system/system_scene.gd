@@ -225,16 +225,8 @@ func _build_rings() -> void:
 		if parent == null or parent.node == null:
 			push_warning("%s orbits '%s', which has no node" % [population.id, population.parent_id])
 			continue
-		# **A planet's pole is the axis of its rings.** The engine has no obliquity — a body's node is only ever
-		# translated — so a body's mesh is drawn with model-space +Y as its pole, and a ring laid in the authored
-		# plane alone would cross the planet's poles instead of encircling its equator. Evert, 2026-11-16: *"are
-		# Saturn's rings not around its equator? On this screen it looks like they go across the poles."*
-		#
-		# So the ring's authored axis **tilts the planet**, once, and the ring is then `UP` in the parent's own
-		# frame. A body with no rings keeps +Y. That also makes the inclination a season: as the planet moves
-		# round its orbit the star's angle to its pole changes, exactly as a real axial tilt does.
-		var pole := population.ring_axis.normalized() if population.ring_axis.length_squared() > 0.0 else Vector3.UP
-		parent.node.basis = Basis(Quaternion(Vector3.UP, pole))
+		# **A ring lies in its planet's equator**, which is now a derived thing: the parent is rotated to its
+		# pole, so the sheet is `UP` in the parent's own frame and a ring needs no axis of its own.
 		var cloud := SpacesimParticleCloud.of(population)
 		var view := SpacesimRingView.of(population, cloud, Vector3.UP)
 		parent.node.add_child(view)
@@ -529,7 +521,18 @@ func sky_reach(frame: SpacesimFrame) -> float:
 ## The Coordinate doc's surface frame is "relative to landing zone", so the zone sits wherever
 ## the ship came down rather than at one fixed site — otherwise landing anywhere but that site
 ## would put the ship millions of metres from its frame's origin, which defeats the frame.
-func place_landing_zone(body: SpacesimSceneBody, point: Vector3) -> void:
+## **The SURFACE FRAME's origin, put on the ground under a point** — and nothing else.
+##
+## **There is no landing-zone quad and there has not been one since 2026-10-28.** It was a dark 4 km
+## `PlaneMesh` with five amber boxes round it at a 600 m radius, a scale reference from before the ground
+## subdivided; Evert, flying it: *"there is a box that pops up on the surface of the planet once you are close
+## enough… It has some yellow pillars standing on it, all of that must go."* It went, `SpacesimFraming.pad_size`
+## went with it, and **nothing replaced it** — the subdivision is the instrument now.
+##
+## What this function moves is a `SpacesimFrame` of kind `SURFACE`: the coordinate space that makes "landed on
+## Nix" a frame and gives the last metre of travel its own band. The name says `surface_frame` because the old
+## one said `landing_zone` and misled a reader into hunting for the quad that no longer exists.
+func place_surface_frame(body: SpacesimSceneBody, point: Vector3) -> void:
 	if body.surface == null or body.node == null:
 		return
 	var outward := (point - body.node.global_position).normalized()
@@ -557,7 +560,7 @@ func _aim_zone_under(subject: Node3D, frame: SpacesimFrame) -> void:
 	if body == null:
 		return
 	var keep := subject.global_transform
-	place_landing_zone(body, keep.origin)
+	place_surface_frame(body, keep.origin)
 	subject.global_transform = keep
 	# **And reset the interpolator AGAIN, because the subject's PARENT moved — not the subject.**
 	#
@@ -740,6 +743,16 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.node.name = body.name if not body.name.is_empty() else body.id
 	body.node.position = body.position
 	body.node.set_meta("spacesim_body", body.id)
+	# **A body's pole is its orbit's normal tilted by its `axial_tilt`** — the content format's own definition,
+	# read for the first time here. Nothing is "up" in space: a planet's equator is perpendicular to its axis,
+	# and its axis is perpendicular to the orbital plane unless its obliquity says otherwise. So the MESH, whose
+	# model-space +Y is its pole, is rotated to the body's real axis, and everything that hangs off the node —
+	# bands, decks, air, a ring — inherits it. Evert, 2026-11-16: *"I want the planets to have their proper
+	# tilts. If it breaks stuff, we fix the broken stuff. No shortcuts."*
+	body.node.basis = Basis(Quaternion(Vector3.UP, SpacesimKepler.pole(
+		body.content.orbit if body.content != null else null,
+		body.content.axial_tilt if body.content != null else 0.0
+	)))
 	system_frame.add_child(body.node)
 
 	# **A non-planet is not a small planet.** Below the potato radius a body's own gravity never rounded it, and
@@ -907,7 +920,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.surface.travel_length_max = _framing.surface_band.y
 	body.node.add_child(body.surface)
 	frame_tree.register(body.surface)
-	place_landing_zone(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
+	place_surface_frame(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
 
 	frame_tree.add_rule(
 		TransitionRule.new(
@@ -2041,7 +2054,13 @@ func _update_decks(
 		return
 	# **No level to pick any more**: the deck's sphere IS the ground's mesh, so it is refined by the same walk that
 	# refines the surface under it, and there is no second tessellation to size (see `_build_decks`).
-	var to_eye := observer - body.node.global_position
+	# **In the BODY's frame**, not the world's: `face_deck` compares this against model-space directions, so a body
+	# that is ever rotated (an axial tilt — see `SpacesimSystemScene._build_rings`) would sample its own map from
+	# the wrong direction and its coverage would land where the planet is not.
+	var to_eye: Vector3 = (
+		body.node.global_transform.basis.orthonormalized().inverse()
+		* (observer - body.node.global_position)
+	)
 	for deck in body.decks:
 		# **Divided by the radius the deck's OWN points sit at**, because `eye_local` is compared against
 		# `length(p)` where `p` is a direction: `eye_radius < 1` is the test for being inside the deck's sphere. That
@@ -2535,8 +2554,8 @@ func triangles() -> int:
 ## yellow pillars standing on it, all of that must go."* Nothing replaced it: it was a measurement aid from before the
 ## ground subdivided, and the subdivision is now its own instrument.
 ##
-## `SpacesimFraming.pad_size` went with it, and the two `.tres` lines that set it. **What stays is `place_landing_zone`**,
-## which puts the *frame* on the surface — that is coordinate machinery, not scenery.
+## `SpacesimFraming.pad_size` went with it, and the two `.tres` lines that set it. **What stays is
+## `place_surface_frame`**, which puts the *frame* on the surface — coordinate machinery, not scenery.
 
 
 ## How a system frame reads: "landed on Nix", "above Nix". Empty for a frame this system does not

@@ -264,11 +264,24 @@ func _test_the_rings_encircle_the_equator(h, root: Node) -> void:
 	var view := scene.rings[1]
 	var ring_normal := (view.global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
 	var planet_pole := saturn.node.global_transform.basis.y.normalized()
-	var authored := (band.ring_axis as Vector3).normalized()
+	var derived := SpacesimKepler.pole(saturn.content.orbit, saturn.content.axial_tilt)
 	h.check_near(ring_normal.dot(planet_pole), 1.0,
 		"the ring's plane is the planet's equator (%.4f)" % ring_normal.dot(planet_pole), 0.001)
-	h.check_near(planet_pole.dot(authored), 1.0,
-		"and the planet's pole is the axis the content authored (%.4f)" % planet_pole.dot(authored), 0.001)
+	h.check_near(planet_pole.dot(derived), 1.0,
+		"and the planet's pole is its orbit's normal tilted by its axial_tilt (%.4f)"
+			% planet_pole.dot(derived), 0.001)
+	# **The tilt is the content's own**: Saturn's 26.73 degrees off its orbital plane, and the tilt is what makes
+	# the rings a season rather than a fixed picture.
+	var orbit_normal := SpacesimKepler.pole(saturn.content.orbit, 0.0)
+	h.check_near(rad_to_deg(planet_pole.angle_to(orbit_normal)), 26.73,
+		"Saturn leans 26.73 degrees off its orbit", 0.05)
+	# **And a body with no tilt sits on its orbit's normal**, which is very nearly the engine's +Y for a planet
+	# in the ecliptic — the reason nothing looked wrong before there was a ring to see.
+	var earth := scene.body_by_id("planet:earth")
+	var earth_pole: Vector3 = earth.node.global_transform.basis.y.normalized()
+	h.check_near(rad_to_deg(earth_pole.angle_to(Vector3.UP)), 23.44,
+		"Earth leans 23.44 degrees off the ecliptic's north (%.2f, the orbit's own 0)"
+			% rad_to_deg(earth_pole.angle_to(Vector3.UP)), 0.05)
 	# **The bands follow the pole**: the body's model-space +Y is its axis, so a vertex at the pole is along it.
 	h.check(planet_pole.dot(Vector3.UP) < 0.999,
 		"the planet is actually tilted, not left on the engine's axis (%s)" % str(planet_pole))
@@ -413,7 +426,7 @@ func _test_the_split_agrees_with_the_geometry(h, root: Node) -> void:
 	# **A grazing view**, because that is the pose in which the ring's near half passes in front of the disc at
 	# all: seen face-on, the sheet through the planet's centre crosses every ray *behind* the near surface, so
 	# nothing of it is in front. Near the ring plane, the near half crosses the disc and the split has real work.
-	var normal := (band.ring_axis as Vector3).normalized()
+	var normal := (view.global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
 	var across_bearing := Vector3.UP.cross(normal).normalized()
 	var eye := centre + (across_bearing + normal * 0.12).normalized() * 1.4e8
 	var direction := (eye - centre).normalized()

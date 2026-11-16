@@ -68,7 +68,9 @@ func surface_distance_mesh(where: Vector3) -> float:
 	# radius is the honest answer and its relief is tens of metres at most.
 	if node == null:
 		return maxf(0.0, position.distance_to(where) - radius)
-	var local := where - node.global_position
+	# **In the body's own frame**, because that is where its vertices are binned — a tilted body (every body now
+	# has its real pole) would otherwise measure its relief from a direction it is not oriented along.
+	var local := node.global_transform.basis.orthonormalized().inverse() * (where - node.global_position)
 	if surface != null and local.length() <= surface.reach * 1.35:
 		return surface.nearest_distance(local)
 	return maxf(0.0, local.length() - radius)

@@ -40,7 +40,7 @@ func run(h, root: Node) -> void:
 	# The landing zone goes wherever the ship came down, with local up pointing outwards.
 	# Anywhere else would leave the ship millions of metres from its own frame's origin.
 	var point: Vector3 = terra.node.global_position + Vector3(0.0, 0.0, terra.radius)
-	system.place_landing_zone(terra, point)
+	system.place_surface_frame(terra, point)
 	h.check_near(
 		terra.surface.global_position.distance_to(terra.node.global_position),
 		terra.radius,

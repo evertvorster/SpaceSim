@@ -79,3 +79,34 @@ static func position_at(orbit: SpacesimOrbit, mu: float, t: float, epoch_time: f
 	# The ecliptic frame has its own z through the north pole; the engine's is Y-up and
 	# right-handed, so x stays, ecliptic y becomes -z, and ecliptic z becomes y.
 	return Vector3(x, z, -y)
+
+
+## **A body's rotation axis**, in the engine's frame: the normal of its orbital plane, tilted by its `axial_tilt`
+## about the orbit's own ascending node.
+##
+## **This is what `axial_tilt` has always meant**, and until now nothing read it: the content format states it as
+## *"degrees, obliquity in `[0, 180]`, from the body's orbital plane"*, and every planet was drawn with the
+## engine's +Y as its pole. Evert, 2026-11-16: *"There is no up in space. Most planets rotate with their axis
+## perpendicular to the orbit. So, these should have been authored and tested long ago when we first drew
+## planets"* — right on both counts.
+##
+## The engine's +Y is the ecliptic's north (the mapping below sends ecliptic `z` to engine `y`), so a body with
+## no tilt already has its pole along +Y and the correction is the tilt alone — which is why this changes so
+## little in the picture and so much in what the picture means: a tilted pole is what gives a ringed planet its
+## season, and its rings their plane.
+##
+## **The direction of the tilt** is the ascending node's, which is deterministic, perpendicular to the orbit
+## normal, and fixed in the orbit's frame — so as the body travels round its orbit the star's angle to its pole
+## changes exactly as a real axial tilt makes a season. `axial_tilt > 90` is retrograde content, and rotating by
+## more than a right angle is exactly how a retrograde planet's pole ends up on the other side.
+static func pole(orbit: SpacesimOrbit, axial_tilt_degrees: float) -> Vector3:
+	if orbit == null:
+		return Vector3.UP
+	var i := deg_to_rad(orbit.inclination)
+	var o := deg_to_rad(orbit.ascending_node)
+	# The orbit normal in the reference plane, then in the engine's frame — the same mapping `position_at`
+	# applies, `(x, z, -y)`, so the two cannot disagree about which way is up.
+	var normal := Vector3(sin(i) * sin(o), cos(i), -sin(i) * cos(o)).normalized()
+	# The ascending node's direction: ecliptic `(cos o, sin o, 0)` mapped the same way.
+	var node := Vector3(cos(o), 0.0, -sin(o)).normalized()
+	return normal.rotated(node, deg_to_rad(clampf(axial_tilt_degrees, 0.0, 180.0))).normalized()

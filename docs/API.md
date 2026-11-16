@@ -442,7 +442,7 @@ and not its gate.)
 | `body_for_surface_frame(frame) -> SpacesimSceneBody` | |
 | `air_body(frame) -> SpacesimSceneBody` | the body whose air that frame is inside — its atmosphere or surface frame — or null in space |
 | `sky_reach(frame) -> float` | **how far the sky can be, in metres** — `sqrt(2) * sqrt(outer^2 - planet^2)`, or 0 in space. See **The far plane** below |
-| `place_landing_zone(body, point) -> void` | puts a body's landing zone on the surface under `point` |
+| `place_surface_frame(body, point) -> void` | **puts a body's SURFACE FRAME on the ground under `point`** — coordinate machinery, and nothing else. **There is no landing-zone quad and has not been one since 2026-10-28**: it was a dark 4 km `PlaneMesh` with amber boxes round it, a scale reference from before the ground subdivided, ripped out on Evert's instruction (*"It has some yellow pillars standing on it, all of that must go"*), `SpacesimFraming.pad_size` with it, and nothing replaced it. The frame is what makes "landed on Nix" a space and gives the last metre of travel its own band |
 
 **Placement.** Bodies go down in dependency order rather than file order — a moon is placed relative
 to its planet — and a body whose parent is not in the system says so instead of quietly landing at
