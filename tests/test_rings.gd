@@ -24,6 +24,7 @@ func run(h, root: Node) -> void:
 	_test_the_closest_point_is_trigonometry(h)
 	_test_the_band_is_as_bright_as_saturn_says(h)
 	_test_the_rings_encircle_the_equator(h, root)
+	_test_every_body_shader_is_told_the_same_sun(h, root)
 	_test_the_shadow_is_the_planets(h, root)
 	_test_the_split_is_two_draws_of_everything(h, root)
 	_test_the_split_agrees_with_the_geometry(h, root)
@@ -291,6 +292,51 @@ func _test_the_rings_encircle_the_equator(h, root: Node) -> void:
 		h.check_near(titan.node.global_transform.basis.y.dot(Vector3.UP), 1.0,
 			"a moon with no rings keeps the engine's pole", 0.001)
 
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
+## **Every shader of a body is told the same sun, in the same frame.** Evert, 2026-11-16, over Jupiter: *"there
+## seems to be two shadows, as if the air shader and the body shader disagree where the light is coming from...
+## They are off by about 20 ish degrees."*
+##
+## A body's own geometry is MODEL space, and its node is now rotated to its real pole, so a direction published to
+## a body shader has to be taken into that space. This asserts it against both consumers at once: the air's
+## `u_sun_local` and the surface's `body_sun` must name the same direction in the world after the node's own basis
+## is put back on them.
+func _test_every_body_shader_is_told_the_same_sun(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	var eye := scene.body_by_id("planet:jupiter").node.global_position + Vector3(0.0, 0.0, 6.0e8)
+	camera.global_position = eye
+	scene.update_lod(camera, eye)
+
+	for id in ["planet:jupiter", "planet:saturn", "planet:earth"]:
+		var body := scene.body_by_id(id)
+		if body == null or body.air_shell_material == null or body.mesh_material == null:
+			continue
+		# **A body too small to be a disc is drawn as a point of light and publishes nothing** — its materials keep
+		# the uniform's default, so there is nothing to compare and nothing wrong.
+		var air_raw: Variant = body.air_shell_material.get_shader_parameter("u_sun_local")
+		var surface_raw: Variant = body.mesh_material.get_shader_parameter("body_sun")
+		if not (air_raw is Vector3) or not (surface_raw is Vector3):
+			continue
+		var basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
+		var air_local: Vector3 = air_raw
+		var surface_local: Vector3 = surface_raw
+		# Both are meant to be directions in the body's own space; put each back in the world and compare.
+		var air_world := (basis * air_local).normalized()
+		var surface_world := (basis * surface_local).normalized()
+		h.check_near(rad_to_deg(air_world.angle_to(surface_world)), 0.0,
+			"%s: the air and the surface are told one sun (%.2f deg apart)"
+				% [id, rad_to_deg(air_world.angle_to(surface_world))], 0.01)
+
+	root.remove_child(camera)
+	camera.free()
 	root.remove_child(scene.container)
 	scene.container.free()
 

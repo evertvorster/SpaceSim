@@ -1552,8 +1552,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_face_bodies_at_star(body, observer, pixel)
-		_publish_air_shell(body, camera, observer, air_strength)
+		_publish_body_frame(body, camera, observer, pixel, air_strength)
 		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
@@ -1960,73 +1959,72 @@ func _publish_air(body: SpacesimSceneBody) -> void:
 ##
 ## **This is not `_publish_air`'s job.** That one publishes what does not change — the optics, the band's radii
 ## — once, at build. These three change whenever the ship turns.
-func _publish_air_shell(body: SpacesimSceneBody, camera: Camera3D, observer: Vector3, strength: float) -> void:
-	if body.air_shell_material == null:
+## **ONE sun, ONE frame, ONE writer.**
+##
+## Every shader of a body that reasons about light — the ground, the sea, the inside of a planet, each cloud deck
+## and the air — needs the same three things: **where the star is, how wide it looks, and where the eye is**, all
+## in the body's **model** space, because that is the space their geometry lives in and the space their own
+## occlusion maths measures along.
+##
+## **They used to be computed twice, by two functions, each doing its own inverse.** While every body pointed
+## along the engine's +Y both frames were identical and the duplication was invisible; the moment bodies took
+## their real poles the air was handed the sun in the body's frame and the surface was handed it in the world's,
+## and the two drew their terminators a tilt apart. Evert, 2026-11-16: *"there seems to be two shadows, as if the
+## air shader and the body shader disagree where the light is coming from... They are off by about 20 ish
+## degrees"* — Saturn's axial tilt. And then the right question: *"Why do they get different suns? Would it not
+## be more robust to just have one actual sun?"* Yes: one computation, written to every consumer below.
+##
+## The star's DIRECTION is taken from the star body's position, not from the engine's `DirectionalLight` — the
+## light is a rasteriser input for the BRDF, while these shaders compute shadows analytically against their own
+## geometry and need a number they can multiply. `star_angle` is the same `asin(R_star / d)` the light's own
+## `light_angular_distance` uses, so a penumbra and the light's softness cannot disagree either.
+func _publish_body_frame(
+	body: SpacesimSceneBody, camera: Camera3D, observer: Vector3, pixel_angle: float, air_strength: float
+) -> void:
+	if body.node == null:
 		return
+	# **Interpolated**, or the shell turns one tick behind the frame it is drawn in: `u_to_local` is what turns a
+	# fragment into the ray that decides both the chord and the sun angle, and a rotating camera read a tick stale
+	# gave a brightness that flickered. Same trap, same fix, as every other transform in a drawn frame.
 	var body_basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
-	# **The INTERPOLATED camera, or the shell turns one tick behind the frame it is drawn in.** Evert,
-	# 2026-11-03: *"when I rotate my camera, it sometimes flashes slightly darker or lighter."* `global_transform`
-	# is accurate to the most recent physics tick and this runs once per drawn frame, so a rotating camera gave the
-	# shader a basis from the previous tick — and `u_to_local` is what turns the fragment into the ray that decides
-	# both the chord and the sun angle. Stationary, the two agree; rotating, they differ by one tick of rotation,
-	# which is a brightness that flickers. Same trap, same fix, as `main.gd` records for every other transform here.
-	var to_local := body_basis.inverse() * (
+	var camera_basis: Basis = (
 		camera.get_global_transform_interpolated().basis as Basis
-	).orthonormalized()
-	var sun := Vector3.UP
-	var star_body := star()
-	if star_body != null:
-		sun = (star_body.position - body.position).normalized()
-	body.air_shell_material.set_shader_parameter("u_to_local", to_local)
-	body.air_shell_material.set_shader_parameter(
-		"u_eye_local", body_basis.inverse() * (observer - body.node.global_position)
-	)
-	body.air_shell_material.set_shader_parameter("u_sun_local", body_basis.inverse() * sun)
-	body.air_shell_material.set_shader_parameter("u_strength", strength)
-	if not _air_shell_reported:
-		_air_shell_reported = true
-		var eye_local := body_basis.inverse() * (observer - body.node.global_position)
-		SpacesimDebug.say(
-			"AIR SHELL: %s eye_radius=%.0f m band=(%.0f, %.0f) sun_local=(%.2f, %.2f, %.2f) strength=%.2f" % [
-				body.name, eye_local.length(), body.radius, body.radius + body.sky_top,
-				(body_basis.inverse() * sun).x, (body_basis.inverse() * sun).y,
-				(body_basis.inverse() * sun).z, strength
-			]
-		)
-
-
-## **Where the star is, and how wide it looks, for every drawn body** — per frame, and NOT inside `_update_decks`.
-##
-## **The move is the fix for a real trap, and the trap is why the name changed.** The publish used to sit after
-## `_update_decks`' `decks.is_empty()` early return, so a body with no deck — Luna, Mercury, Mars — never got it
-## and kept the uniform's default `Vector3.UP`. That was harmless while the only reader was a deck's shadow, and
-## it is a shading error the moment the surface's own star occlusion reads it: every airless body would have had
-## its terminator computed against a northern sun. Nothing would have reported it.
-##
-## `star_angle` is `asin(R_star / d)` off `SpacesimLod.angular_radius`, the same call the light's own
-## `light_angular_distance` makes, so a body's penumbra and its light's softness are one number.
-func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angle: float) -> void:
-	var star_body := star()
+	).orthonormalized() if camera != null else Basis.IDENTITY
+	var to_local := body_basis.inverse()
 	var sun := Vector3.UP
 	var star_angle := 0.0
+	var star_body := star()
 	if star_body != null:
 		var to_star: Vector3 = star_body.position - body.position
 		sun = to_star.normalized()
 		star_angle = SpacesimLod.angular_radius(star_body.radius, to_star.length())
-	var materials := [body.mesh_material]
+	var sun_model := to_local * sun
+	var offset := observer - body.node.global_position
+	var eye_model := to_local * offset
+
+	# The eye in body radii, because the upward ray needs a position and not a direction: the camera is a few
+	# radii away, which is what makes a glint sit under its own cloud rather than over the body's zenith.
+	var eye_radii := eye_model / maxf(body.radius, 1.0)
+	var materials: Array = [body.mesh_material]
 	if body.ocean_material != null:
 		materials.append(body.ocean_material)
 	if body.interior_material != null:
 		materials.append(body.interior_material)
-	# **A deck is lit by the same star**, and its own shader does its own air and occlusion maths, so it needs
-	# the direction and the width as well as the ground does.
 	for deck in body.decks:
 		materials.append(deck.material)
-	# The eye in body radii — the model space every surface direction is measured in, and the same units the
-	# deck's own material is handed as `eye_local`.
-	var eye_local := (observer - body.node.global_position) / maxf(body.radius, 1.0)
 	for material in materials:
-		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle, eye_local, pixel_angle)
+		SpacesimBodyRenderer.face_surface_star(material, sun_model, star_angle, eye_radii, pixel_angle)
+	# **Each deck's eye is divided by ITS OWN radius** — `eye_radius < 1` is the test for being inside that
+	# deck's sphere, and the deck's points sit at `radius + height`, not at the body's radius.
+	for deck in body.decks:
+		SpacesimBodyRenderer.face_deck(
+			deck.material, eye_model / maxf(body.radius + deck.height, 1.0)
+		)
+	if body.air_shell_material != null:
+		body.air_shell_material.set_shader_parameter("u_to_local", to_local * camera_basis)
+		body.air_shell_material.set_shader_parameter("u_eye_local", eye_model)
+		body.air_shell_material.set_shader_parameter("u_sun_local", sun_model)
+		body.air_shell_material.set_shader_parameter("u_strength", air_strength)
 
 
 ## **A deck, per frame, per layer**: the eye in the deck's own frame, and the map it should be sampling.
@@ -2057,16 +2055,11 @@ func _update_decks(
 	# **In the BODY's frame**, not the world's: `face_deck` compares this against model-space directions, so a body
 	# that is ever rotated (an axial tilt — see `SpacesimSystemScene._build_rings`) would sample its own map from
 	# the wrong direction and its coverage would land where the planet is not.
-	var to_eye: Vector3 = (
-		body.node.global_transform.basis.orthonormalized().inverse()
-		* (observer - body.node.global_position)
-	)
 	for deck in body.decks:
 		# **Divided by the radius the deck's OWN points sit at**, because `eye_local` is compared against
 		# `length(p)` where `p` is a direction: `eye_radius < 1` is the test for being inside the deck's sphere. That
 		# radius is now exactly `radius + height` — the walk's own subdivision is under the error budget in pixels,
 		# so there is no sagitta to pad and no `shell_scale` to undo.
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(body.radius + deck.height, 1.0))
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
