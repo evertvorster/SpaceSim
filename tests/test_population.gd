@@ -328,19 +328,25 @@ func _test_the_belt_reaches_the_marker_pool(h, root: Node) -> void:
 	var markers := SpacesimMarkers.new()
 	root.add_child(markers)
 	markers.orbits = scene.orbit_parents()
-	markers.context_targets = scene.significant_nodes()
 
-	var targets: Array[Dictionary] = []
-	for slot in field.fragments().size():
-		var fragment: SpacesimPopulationField.Fragment = field.fragments()[slot]
-		targets.append({
-			"id": -(slot + 1),
-			"position": field.position_of(fragment, Vector3.ZERO),
-			"text": fragment.designation,
-			"priority": SpacesimMarkers.Priority.ASTEROID,
-			"parent": SpacesimMarkers.NO_PARENT,
-		})
-	markers.targets = targets
+	# **Rocks are nodes now, exactly like the moons beside them**: the manager makes a body per fragment, and
+	# the marker path reads one list. This is the real route rather than a hand-built one.
+	var bodies := SpacesimFragmentBodies.new(belt, scene)
+	root.add_child(bodies)
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	bodies.update(field.pieces(Vector3.ZERO), ship, camera, _pixel(camera), false)
+	var context: Array[Node3D] = scene.significant_nodes()
+	var rock_nodes := {}
+	for rock in bodies.rocks():
+		if rock.node == null:
+			continue
+		context.append(rock.node)
+		rock_nodes[rock.node] = true
+	h.check(rock_nodes.size() == SpacesimPopulationField.FIELD_COUNT,
+		"every fragment is a body with a node (%d)" % rock_nodes.size())
+	markers.context_targets = context
+	markers.rocks = rock_nodes
 
 	var gathered := markers._candidates(ship)
 	h.check(gathered.size() > 24, "a whole system is more candidates than the pool holds (%d)" % gathered.size())
@@ -360,6 +366,10 @@ func _test_the_belt_reaches_the_marker_pool(h, root: Node) -> void:
 	h.check(places == 9, "all nine places are marked (%d)" % places)
 	h.check(rocks > 0, "**the belt reaches the pool** (%d rocks)" % rocks)
 	h.check(rocks + moons + places == 24, "and the rest of the pool is a choice between moons and rocks")
+	root.remove_child(bodies)
+	bodies.free()
+	root.remove_child(camera)
+	camera.free()
 	root.remove_child(markers)
 	markers.free()
 
@@ -380,7 +390,7 @@ func _test_a_fragment_becomes_a_body(h, root: Node) -> void:
 
 	var ship := Vector3(2.5 * AU, 0.0, 0.0)
 	field.update(Vector3.ZERO, SUN_MU, ship, 0.0)
-	bodies.update(field, Vector3.ZERO, ship, camera, false)
+	bodies.update(field.pieces(Vector3.ZERO), ship, camera, _pixel(camera), false)
 	h.check(bodies.count() == SpacesimPopulationField.FIELD_COUNT,
 		"one body per fragment the field holds (%d)" % bodies.count())
 
@@ -419,7 +429,7 @@ func _test_a_fragment_becomes_a_body(h, root: Node) -> void:
 	# or the tree would accumulate a coordinate space per rock ever approached.
 	var rules_before := scene.frame_tree._rules.size()
 	field.update(Vector3.ZERO, SUN_MU, Vector3(AU, 0.0, 0.0), 1.0)
-	bodies.update(field, Vector3.ZERO, Vector3(AU, 0.0, 0.0), camera, false)
+	bodies.update(field.pieces(Vector3.ZERO), Vector3(AU, 0.0, 0.0), camera, _pixel(camera), false)
 	h.check(bodies.count() == 0, "and a body is freed when the field drops its fragment")
 	h.check(scene.frame_tree._rules.size() < rules_before, "and its frame's rules go with it")
 
@@ -427,3 +437,12 @@ func _test_a_fragment_becomes_a_body(h, root: Node) -> void:
 	bodies.free()
 	root.remove_child(camera)
 	camera.free()
+
+
+## The camera's pixel angle, as `update_lod` computes it — the tests hand their own camera in, so they need the
+## same number rather than a made-up one.
+func _pixel(camera: Camera3D) -> float:
+	var viewport := camera.get_viewport()
+	if viewport == null:
+		return 0.0
+	return SpacesimLod.pixel_angle(camera.fov, float(viewport.size.y))

@@ -448,9 +448,34 @@ static func deck_material(
 ## The deck shader's simplest case with no map at all: one colour, lit by the star through the same air and the
 ## same occlusion every other layer uses. **It carries no map and no alpha** — it is the floor, and a floor that
 ## could become transparent would put the stars back.
+## **Where each transparent draw of a body sits, and there must be no ties.**
+##
+## Godot sorts transparent draws by `render_priority` and then by distance — and every one of these is a child of
+## the body's own node, so their distances are equal to the metre. **Equal priority therefore means no order at
+## all**, and which one wins is decided by nothing. Evert, 2026-11-15: *"I still see ordering effects, but not
+## always... there is more than just the atmosphere, there are cloud decks and the internal surface of Saturn as
+## well, and they need to be properly ordered."* That is a tie: the air shell and the first cloud deck were both
+## at 0.
+##
+## The whole range is **−128 to +128**; outside it a priority is refused outright and the material keeps 0, which
+## is the tie this exists to break (measured 2026-11-03). Furthest first:
+##
+##     ring far    −100   (SpacesimRingView.FAR_PRIORITY)
+##     interior     −90
+##     ocean         −8
+##     decks          −index … 0   (one per condensed species)
+##     air           +8
+##     ring near   +100   (SpacesimRingView.NEAR_PRIORITY)
+##
+## `tests/test_rings.gd` asserts the table is strictly increasing and inside the range, so a tie cannot return.
+const INTERIOR_RENDER_PRIORITY := -90
+const AIR_RENDER_PRIORITY := 8
+
+
 static func interior_material(body: SpacesimSceneBody, palette: Color) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = INTERIOR_SHADER
+	material.render_priority = INTERIOR_RENDER_PRIORITY
 	material.set_shader_parameter("planet_radius", body.radius)
 	# Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing — the same rule the
 	# deck's `cloud_color` follows.
@@ -612,6 +637,9 @@ static func air_shell_material(
 	# Evert, 2026-11-02, flying Saturn: *"there is something exactly on the sphere"* — this is that.
 	material.set_shader_parameter("u_band_inner", band_inner)
 	material.set_shader_parameter("u_band_outer", band_outer)
+	# **Over the cloud tops**, which is where air is — and over every deck, so the haze reads across the clouds
+	# from outside and from inside alike.
+	material.render_priority = AIR_RENDER_PRIORITY
 	return material
 
 

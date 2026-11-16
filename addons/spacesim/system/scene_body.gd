@@ -19,6 +19,9 @@ var parent_id: String
 var fixed_position: Vector3
 var orbit: SpacesimOrbit
 var landable: bool
+## **A rock, not a place**: a body made for a spot in a population rather than authored into the system. It is
+## ranked as an asteroid on the HUD, it never stops the ship, and nothing persists it — see `S2`, `S7`, `R24`.
+var rock := false
 var significant: bool
 
 # Built by SpacesimSystemScene.

@@ -105,18 +105,17 @@ var _wireframe := false
 var _fields: Array[SpacesimPopulationField] = []
 var _field_parents: Array[SpacesimSceneBody] = []
 
-## **The scale bodies the ship is slowed by**: the system's own, then one per live fragment. Kept in one
-## array and rewritten in place, because the proximity scan runs every tick and a fresh array — or a
-## fresh `SpacesimScaleBody` — per tick is garbage for nothing. The fragment entries are pooled and
-## reused for the same reason.
-## **The rocks you can see**: one [SpacesimFragmentBodies] per population, each holding a real
-## [SpacesimSceneBody] per live fragment and driving it through the same builder, extraction, LOD and
-## wireframe the moons use. Parallel arrays with `_fields`.
+## **The rocks you can see**: one [SpacesimFragmentBodies] per belt population, each holding a real
+## [SpacesimSceneBody] per live fragment. The rings' managers live on the scene, because a ring is built whole
+## — and both are read through [method rocks], so a rock is one object rather than a marker entry and a scale
+## body and a node that might disagree.
 var _fragment_bodies: Array[SpacesimFragmentBodies] = []
 
+## **The scale bodies the ship is slowed by**: the system's own, then one per live rock. Rebuilt only when the
+## set of rocks changes — a rock's position does not, so rewriting this every tick would be garbage for nothing.
 var _system_scale: Array[SpacesimScaleBody] = []
 var _scale_bodies: Array[SpacesimScaleBody] = []
-var _fragment_scale: Array[SpacesimScaleBody] = []
+var _rocks_version := -1
 
 
 func _ready() -> void:
@@ -717,9 +716,13 @@ func _update_view(delta: float) -> void:
 	# **The ship's origin, not the camera's** — the camera's offset swings on a 32 m arm as the ship rotates, and at low
 	# altitude that re-cut the mesh every frame. The level is a property of where the observer is.
 	_system.update_lod(_camera, observer)
-	# **The rocks, advanced with the same rules and in the same frame as the bodies** — `update_lod` is
-	# where a moon's extraction threshold and wireframe are decided, so a fragment's belong beside it.
-	_update_fragment_bodies(observer)
+	# **The rings, once a drawn frame**: the eye's angle, the band's own radiance, and the few uniforms its
+	# shader reads. Everything else about a ring was baked when the system was built.
+	var pixel := _pixel_angle()
+	_system.update_rings(pixel, observer)
+	# **The rocks, advanced with the same rules and in the same frame as the bodies** — `update_lod` is where a
+	# moon's extraction threshold and wireframe are decided, so a rock's belong beside it.
+	_update_rocks(observer, pixel)
 	# **The exposure is no longer decided here.** It is the metre's, on the GPU, applied to the finished
 	# frame — see `SpacesimExposurePass` and the lighting plan's §6a. What this function owes the pass is
 	# the frame's own delta, because `_render_callback` has no clock of its own.
@@ -790,8 +793,8 @@ func _build_fields() -> void:
 		_fragment_bodies.append(bodies)
 	_system_scale = _ship.bodies.duplicate()
 	_scale_bodies.append_array(_system_scale)
-	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a
-	# copy of it.
+	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a copy of
+	# it; [method _sync_rocks] replaces it wholesale when the rocks change.
 	_ship.bodies = _scale_bodies
 
 
@@ -806,60 +809,72 @@ func _update_fields(delta: float) -> void:
 		_fields[index].update(
 			parent.node.global_position, SpacesimKepler.mu_of(parent.content.mass), eye, delta
 		)
-	_refresh_scale_bodies()
+	_sync_rocks()
 
 
-## **A fragment is significant from the moment it exists**, so the ship's own proximity scan has to see
-## it: it sets the local travel unit, which means the speed at full throttle drops as the belt is
-## entered, and the readout can name what is nearest.
-func _refresh_scale_bodies() -> void:
-	var wanted := _system_scale.size()
-	for index in _fields.size():
-		wanted += _fields[index].fragments().size()
-	_scale_bodies.resize(wanted)
+## **A rock is significant from the moment it exists**: it sets the local travel unit, so full throttle drops as
+## a belt is entered or a band is approached, and the readout can name what is nearest.
+##
+## **One array, rebuilt only when the rocks change.** The ship's proximity scan runs every tick and reads it, so
+## it is replaced rather than mutated, and the version test is what keeps that from being a per-tick allocation.
+func _sync_rocks() -> void:
+	var version := 0
+	for manager in _fragment_bodies + _system.ring_bodies:
+		version = version * 31 + manager.version()
+	if version == _rocks_version:
+		return
+	_rocks_version = version
+	var wanted: Array[SpacesimScaleBody] = _system_scale.duplicate()
+	for body in rocks():
+		if body.scale_body != null:
+			wanted.append(body.scale_body)
+	_scale_bodies = wanted
+	_ship.bodies = _scale_bodies
 
-	var cursor := 0
-	for body in _system_scale:
-		_scale_bodies[cursor] = body
-		cursor += 1
-	var slot := 0
-	for index in _fields.size():
+
+## **Every rock in the game, from the two places they are made.** A belt's fragment and a ring's spot are the
+## same kind of object — a `SpacesimSceneBody` built by [SpacesimFragmentBodies] — so the marker path, the
+## travel unit and the mesh all read this one list.
+func rocks() -> Array[SpacesimSceneBody]:
+	var list: Array[SpacesimSceneBody] = []
+	for manager in _fragment_bodies + _system.ring_bodies:
+		list.append_array(manager.rocks())
+	return list
+
+
+## The pixel's angular size for the camera the frame is drawn with — the one number every screen-size rule is
+## expressed in, so it is computed once a frame and passed down rather than re-derived.
+func _pixel_angle() -> float:
+	var viewport := _camera.get_viewport()
+	if viewport == null:
+		return 0.0
+	return SpacesimLod.pixel_angle(_camera.fov, float(viewport.size.y))
+
+
+## **Every rock, once a drawn frame**: the belt's fragments from its field, and each ring's spots by the rule
+## that a resolvable spot is a body and the nearest one always is. Extraction happens only when a rock is close
+## enough to resolve, and the wireframe is honoured the moment it is on.
+func _update_rocks(eye: Vector3, pixel: float) -> void:
+	if _camera == null or pixel <= 0.0:
+		return
+	for index in _fragment_bodies.size():
 		var parent := _field_parents[index]
-		if parent.node == null:
-			continue
-		var origin := parent.node.global_position
-		for fragment in _fields[index].fragments():
-			var scale := _scale_for(slot)
-			slot += 1
-			scale.position = _fields[index].position_of(fragment, origin)
-			# **Zero, because nothing moves yet.** The fragment knows the velocity it will have
-			# (`Fragment.velocity()`), and feeding it to the ship now would carry the ship along with a
-			# motion that is not happening. When bodies start moving, this is the line that changes.
-			scale.velocity = Vector3.ZERO
-			scale.radius = fragment.diameter * 0.5
-			scale.name = fragment.designation
-			_scale_bodies[cursor] = scale
-			cursor += 1
-
-
-## Every population's fragments, as bodies: extraction only when a rock is close enough to resolve, and
-## the wireframe honoured the moment it is on.
-func _update_fragment_bodies(eye: Vector3) -> void:
-	for index in _fields.size():
-		var parent := _field_parents[index]
-		if parent.node == null:
+		if parent == null or parent.node == null:
 			continue
 		_fragment_bodies[index].update(
-			_fields[index], parent.node.global_position, eye, _camera, _system.wireframe
+			_fields[index].pieces(parent.node.global_position), eye, _camera, pixel, _system.wireframe
 		)
+	for index in _system.ring_bodies.size():
+		var view := _system.rings[index]
+		var manager := _system.ring_bodies[index]
+		manager.update(
+			view.pieces(eye, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES),
+			eye, _camera, pixel, _system.wireframe
+		)
+		# **The shape replaces the dot** (`R26`): a splat left behind grows through the shape it stood in for.
+		view.set_hidden_ids(manager.ids())
+	_sync_rocks()
 
-
-## One pooled scale body per fragment slot. **Reused rather than made and thrown away**: the array is
-## rewritten every physics tick.
-func _scale_for(slot: int) -> SpacesimScaleBody:
-	while _fragment_scale.size() <= slot:
-		_fragment_scale.append(SpacesimScaleBody.new(null, 0.0))
-	return _fragment_scale[slot]
 
 
 ## Every fragment the fields hold, as a marker target. **No node, no ring, and the label is the whole
@@ -867,36 +882,22 @@ func _scale_for(slot: int) -> SpacesimScaleBody:
 ##
 ## The ids are negative so that they cannot collide with a node's instance id in the same frame, which
 ## is all `choose` and the label placement need them for.
-func _fragment_targets() -> Array[Dictionary]:
-	var list: Array[Dictionary] = []
-	for index in _fields.size():
-		var parent := _field_parents[index]
-		if parent.node == null:
-			continue
-		var origin := parent.node.global_position
-		var fragments := _fields[index].fragments()
-		for slot in fragments.size():
-			var fragment: SpacesimPopulationField.Fragment = fragments[slot]
-			list.append({
-				"id": -(index * 4096 + slot + 1),
-				"position": _fields[index].position_of(fragment, origin),
-				"text": "%s  %s" % [
-					fragment.designation, SpacesimMarkers.format_distance(fragment.diameter)
-				],
-				"priority": SpacesimMarkers.Priority.ASTEROID,
-				"parent": SpacesimMarkers.NO_PARENT,
-			})
-	return list
-
-
 func _update_markers(camera: Camera3D) -> void:
 	var frame: Frame = _system.frame_tree.active_frame
 	var in_space: bool = frame.kind == Frame.Kind.SPACE or frame.kind == Frame.Kind.ORBITAL
 	var context: Array[Node3D] = []
 	if in_space:
 		context = _system.significant_nodes()
+	# **Rocks are places' equals on the HUD and are ranked as asteroids within it** — one list, from the one
+	# registry, so a ring's spot and a belt's fragment travel the same path as a moon and differ only in rank.
+	var rock_nodes := {}
+	for body in rocks():
+		if body.node == null:
+			continue
+		context.append(body.node)
+		rock_nodes[body.node] = true
+	_markers.rocks = rock_nodes
 	_markers.context_targets = context
-	_markers.targets = _fragment_targets()
 	# **The band, because the camera draws into it.** The camera is inside the band's `SubViewport`, so
 	# `unproject_position` answers in the band's pixels while the labels are laid out in the root canvas;
 	# `refresh` converts with this rect. See `SpacesimMarkers.to_canvas`.

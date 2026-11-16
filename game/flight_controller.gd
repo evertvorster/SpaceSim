@@ -128,7 +128,7 @@ func altitude() -> float:
 ## from it is left alone, so the ship can slide and can take off. Latching here instead is
 ## what made landing a one-way trip.
 func _constrain_to_surface() -> void:
-	if _nearest_body == null:
+	if _nearest_body == null or not _nearest_body.solid:
 		return
 	# **A rock has no node, and is still solid.** Evert, 2026-11-14: *"while not exactly landable, they
 	# should be dockable, which amounts to the same thing."* The constraint is a sphere test against the

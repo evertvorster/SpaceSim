@@ -186,6 +186,8 @@ func build(parent: Node) -> SpacesimSystemScene:
 	# `RenderingDevice` alive for the length of a session is both the teardown segfault and the risk
 	# `SpacesimSurfaceDistribution.prepare()` exists to remove.
 	_distributions.close()
+	_build_rings()
+	_bake_ring_shadows()
 	# **Every task added must be awaited before the engine goes away**, or the exit segfaults with no
 	# output at all — the pool has to free what the task allocated. A rebuild is milliseconds, so the join
 	# is one poll long.
@@ -195,6 +197,87 @@ func build(parent: Node) -> SpacesimSystemScene:
 	# own `--quit-after` tears the tree down without going anywhere near `main.gd`'s exit button.
 	container.tree_exiting.connect(close)
 	return self
+
+
+## **A ring is one object seen from every angle, so it is built whole** — its particles are generated in the
+## planet's frame at build and never touched again. That is the opposite of the belt, which is a density and
+## can only be seen where the observer is.
+##
+## Every ring also owns a body manager, so its spots become rocks through the same lifecycle a moon has.
+var rings: Array[SpacesimRingView] = []
+var ring_bodies: Array[SpacesimFragmentBodies] = []
+## How many spots a ring offers for resolution at once. Several large components are in view together, and each
+## must become geometry as it resolves.
+const RING_ROCK_CANDIDATES := 12
+var _ring_parents: Array[SpacesimSceneBody] = []
+var _ring_probes: Array[SpacesimSystemBody] = []
+
+
+## **Every band whose content says it is a sheet**: a particle cloud, a view that draws it, and a body manager
+## for the spots that resolve into rocks.
+func _build_rings() -> void:
+	for population in content.populations:
+		if population.particle_count <= 0:
+			continue
+		var parent := body_by_id(population.parent_id)
+		if parent == null or parent.node == null:
+			push_warning("%s orbits '%s', which has no node" % [population.id, population.parent_id])
+			continue
+		var cloud := SpacesimParticleCloud.of(population)
+		var view := SpacesimRingView.of(population, cloud)
+		parent.node.add_child(view)
+		rings.append(view)
+		var bodies := SpacesimFragmentBodies.new(population, self)
+		bodies.name = "RingRocks_%s" % population.id.replace(":", "_")
+		parent.node.add_child(bodies)
+		ring_bodies.append(bodies)
+		_ring_parents.append(parent)
+		# **The particles are made of something**, and its bond albedo is what makes a ring of ice brighter than
+		# one of rock. A probe carries the composition to the same derivation a moon's colour takes, so there is
+		# no second palette. It needs a SURFACE and not just a layer: `bond_albedo` reads the coverage, and a body
+		# with none has an albedo of zero — which drew every ring black once.
+		var probe := SpacesimFragmentBodies.content_for(population, "%s/particle" % population.id, 1.0)
+		var surface := SpacesimSurface.new()
+		surface.coverage = population.composition.duplicate()
+		probe.surface = surface
+		_ring_probes.append(probe)
+
+
+## **Bake each band's shadow from its planet**, after the lighting exists so the star has a position. A ring's
+## shadow is static — the particles and the star do not move — so it is computed once with the engine's own
+## two-circle law rather than drawn with a shadow map. Evert, 2026-11-15: *"Saturn itself casts shadows on the
+## rings."*
+func _bake_ring_shadows() -> void:
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	var star_position := star_body.node.global_position
+	for index in rings.size():
+		var parent := _ring_parents[index]
+		if parent == null or parent.node == null:
+			continue
+		rings[index].bake_shadow(
+			star_position, parent.node.global_position, parent.radius, star_body.radius
+		)
+
+
+## **The rings, once a drawn frame**: the eye's angle, the band's own radiance, and the few uniforms the shader
+## needs. Everything else was baked.
+func update_rings(pixel: float, observer: Vector3) -> void:
+	if rings.is_empty() or star_light == null:
+		return
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	var star_position := star_body.node.global_position
+	for index in rings.size():
+		var parent := _ring_parents[index]
+		if parent == null or parent.node == null:
+			continue
+		var centre := parent.node.global_position
+		var albedo := SpacesimSurfaceModel.bond_albedo(_ring_probes[index], _materials())
+		var illuminance := star_light.lux_at((centre - star_position).length())
+		rings[index].update(pixel, illuminance, albedo, centre, star_position, observer)
 
 
 func body_by_id(id: String) -> SpacesimSceneBody:

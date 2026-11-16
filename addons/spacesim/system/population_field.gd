@@ -80,6 +80,19 @@ func fragments() -> Array[Fragment]:
 
 
 ## Where a fragment is, in the system frame.
+## **The fragments as pieces** — an id, where it is in the system frame, and how big it is. The shape
+## [SpacesimFragmentBodies] takes, so a belt and a ring hand rocks to one manager.
+func pieces(parent_position: Vector3) -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	for fragment in _fragments:
+		list.append({
+			"id": fragment.designation,
+			"position": position_of(fragment, parent_position),
+			"diameter": fragment.diameter,
+		})
+	return list
+
+
 func position_of(fragment: Fragment, parent_position: Vector3) -> Vector3:
 	return parent_position + fragment.radius * (
 		cos(fragment.phase) * fragment.u + sin(fragment.phase) * fragment.v

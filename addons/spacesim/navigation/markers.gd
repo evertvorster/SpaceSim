@@ -73,20 +73,13 @@ var selected_color := Color(1.0, 0.9, 0.3)
 ## body's node. Handed over once by the caller, because it is a fact about the system rather than
 ## about a frame. Used by [method eclipsed].
 var orbits: Dictionary = {}
+## The nodes that are **rocks rather than places**, so the HUD ranks them with the other rocks.
+var rocks: Dictionary = {}
 
 ## Rebuilt every frame by the caller. Later entries outrank earlier ones.
 var context_targets: Array[Node3D] = []
 var mission_targets: Array[Node3D] = []
 var selected: Node3D = null
-
-## **Markers for things that have no node at all** — a fragment of an asteroid population, which is a
-## position and a name and nothing else in the world. Each entry is a target:
-## `{id: int, position: Vector3, text: String, priority: int, parent: int}`.
-##
-## **The drawing path knows nothing about either source.** Bodies are gathered from nodes because that
-## is where their positions are; fragments arrive already gathered. Everything downstream — the
-## projection, the ring, the line, the label packing — works on a position and a string.
-var targets: Array[Dictionary] = []
 
 var _labels: Array[Label] = []
 var _overlay: SpacesimOverlay
@@ -351,12 +344,6 @@ func _candidates(eye: Vector3) -> Array[Dictionary]:
 	_gather(list, mission_targets, Priority.MISSION, eye)
 	if selected != null:
 		list.append(_target_of(selected, Priority.SELECTED, eye))
-	# The caller's own targets, which have no node behind them. Copied rather than mutated: the array
-	# belongs to the caller and is handed over again next frame.
-	for target in targets:
-		var entry: Dictionary = target.duplicate()
-		entry["distance"] = eye.distance_to(entry["position"] as Vector3)
-		list.append(entry)
 	return list
 
 
@@ -401,6 +388,10 @@ func _gather(list: Array[Dictionary], nodes: Array[Node3D], priority: int, eye: 
 ## is nearer than its planet is a moon you may be flying past, and a moon farther than its planet is still the one
 ## you are heading for from the other side.
 func _context_priority(node: Node3D, _eye: Vector3) -> int:
+	# **A rock is not a place.** It competes with everything else for a slot — Evert, 2026-11-15: *"the close rocks
+	# need to outrank the far moons"* — and it sits where a belt's fragment does: above a moon, below a planet.
+	if rocks.has(node):
+		return Priority.ASTEROID
 	if orbits.get(node, null) == null:
 		return Priority.PRIMARY
 	return Priority.CONTEXT

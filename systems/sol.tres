@@ -2181,6 +2181,85 @@ size_index = 2.5
 size_floor = 10.0
 size_ceiling = 500000.0
 
+; **Saturn's main rings, as three populations.** The gaps are the space between populations rather than a
+; density profile, because the bands ARE separate objects: the C ring, the B ring, and the A ring outside the
+; Cassini division. Numbers are the measured ones — 74,658 to 91,975 km, 91,975 to 117,580 km, and 122,170 to
+; 136,775 km — and the optical depths are what each band is known by.
+;
+; **The drawn particles are the embedded objects, not the dust**: Evert, 2026-11-15: *"the top 300,000 largest
+; objects embedded within Saturn's main rings range from roughly 100 meters to 30 kilometers across."* The
+; count is split by each band's share of the total area so the drawn density is even across the system.
+;
+; **`ring_axis` puts the star 20 degrees above the plane**, which is a season: the planet's shadow is a
+; cylinder along the star's direction and so reaches `R/sin(elevation)` = 176,000 km, crossing all three
+; bands. At the true 26.7 degree solstice it would reach 134,000 km and stop inside the A ring.
+;
+; **The axis is in the ENGINE's frame, not the orbital elements' frame.** This scene places Saturn at
+; (9.596e11, -5.522e10, -9.792e11) — the elements' (X, Y, Z) arrive here as (X, -Z, -Y) — and an axis
+; authored in the other convention put the star *in* the ring plane, which is a shadow that reaches
+; nothing and a band seen edge-on. `tests/test_rings.gd` asserts the elevation from the loaded positions,
+; so the two conventions cannot drift apart again.
+
+[sub_resource type="Resource" id="P_ring_c"]
+script = ExtResource("population")
+id = "population:ring_c"
+display_name = "C ring"
+parent_id = "planet:saturn"
+seed_value = 4711
+composition = Dictionary[String, float]({
+"water_ice": 0.9,
+"silicate": 0.1
+})
+semi_major_axis = Vector2(74658000.0, 91975000.0)
+particle_count = 9000
+optical_depth = 0.1
+ring_axis = Vector3(-0.91034, 0.01376, -0.41364)
+reference_size = 100.0
+count = 9000
+size_index = 2.5
+size_floor = 100.0
+size_ceiling = 30000.0
+
+[sub_resource type="Resource" id="P_ring_b"]
+script = ExtResource("population")
+id = "population:ring_b"
+display_name = "B ring"
+parent_id = "planet:saturn"
+seed_value = 4712
+composition = Dictionary[String, float]({
+"water_ice": 0.95,
+"silicate": 0.05
+})
+semi_major_axis = Vector2(91975000.0, 117580000.0)
+particle_count = 207000
+optical_depth = 1.2
+ring_axis = Vector3(-0.91034, 0.01376, -0.41364)
+reference_size = 100.0
+count = 207000
+size_index = 2.5
+size_floor = 100.0
+size_ceiling = 30000.0
+
+[sub_resource type="Resource" id="P_ring_a"]
+script = ExtResource("population")
+id = "population:ring_a"
+display_name = "A ring"
+parent_id = "planet:saturn"
+seed_value = 4713
+composition = Dictionary[String, float]({
+"water_ice": 0.92,
+"silicate": 0.08
+})
+semi_major_axis = Vector2(122170000.0, 136775000.0)
+particle_count = 84000
+optical_depth = 0.7
+ring_axis = Vector3(-0.91034, 0.01376, -0.41364)
+reference_size = 100.0
+count = 84000
+size_index = 2.5
+size_floor = 100.0
+size_ceiling = 30000.0
+
 [resource]
 script = ExtResource("system")
 content_version = 1
@@ -2192,4 +2271,4 @@ start_altitude = 20000000.0
 ; its elements are stated for is what makes the m0 values mean what JPL says they mean.
 start_world_time = 63113947200.0
 bodies = Array[ExtResource("body")]([SubResource("B_sol"), SubResource("B_mercury"), SubResource("B_venus"), SubResource("B_earth"), SubResource("B_mars"), SubResource("B_jupiter"), SubResource("B_saturn"), SubResource("B_uranus"), SubResource("B_neptune"), SubResource("B_luna"), SubResource("B_io"), SubResource("B_europa"), SubResource("B_ganymede"), SubResource("B_callisto"), SubResource("B_titan"), SubResource("B_triton"), SubResource("B_phobos"), SubResource("B_deimos"), SubResource("B_metis"), SubResource("B_adrastea"), SubResource("B_amalthea"), SubResource("B_thebe"), SubResource("B_pan"), SubResource("B_daphnis"), SubResource("B_atlas"), SubResource("B_prometheus"), SubResource("B_pandora"), SubResource("B_epimetheus"), SubResource("B_janus"), SubResource("B_mimas"), SubResource("B_enceladus"), SubResource("B_tethys"), SubResource("B_dione"), SubResource("B_rhea"), SubResource("B_iapetus"), SubResource("B_miranda"), SubResource("B_ariel"), SubResource("B_umbriel"), SubResource("B_titania"), SubResource("B_oberon")])
-populations = Array[ExtResource("population")]([SubResource("P_main_belt")])
+populations = Array[ExtResource("population")]([SubResource("P_main_belt"), SubResource("P_ring_c"), SubResource("P_ring_b"), SubResource("P_ring_a")])

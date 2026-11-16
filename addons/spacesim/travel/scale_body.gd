@@ -24,6 +24,11 @@ var position: Vector3 = Vector3.ZERO
 var velocity: Vector3 = Vector3.ZERO
 ## What it is called in the readout, when [member node] is null.
 var name: String = ""
+## **Whether flying into it stops the ship.** A scale body sets the local travel unit either way — that is what
+## makes a rock slow the ship as it is approached — but not everything is worth colliding with. A population's
+## rock is the case: it sets the unit so the ship can crawl up to one, and there is no physics yet.
+## Evert, 2026-11-15: *"I told you many times we are not doing physics yet, so no collisions."*
+var solid := true
 var radius: float
 ## **A body's own surface, when it has an irregular one** — the vertices of its mesh, binned for a per-tick query.
 ## Null for a body that really is a sphere. See [method surface_distance_mesh].
