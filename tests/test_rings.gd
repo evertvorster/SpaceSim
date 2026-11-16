@@ -97,12 +97,14 @@ func _test_the_cloud_fills_its_band(h) -> void:
 	var smallest := INF
 	var largest := 0.0
 	var squared := 0.0
+	var flat := true
 	for index in cloud.size():
 		var local := cloud.positions[index]
 		var radius := sqrt(local.x * local.x + local.y * local.y)
 		inner = minf(inner, radius)
 		outer = maxf(outer, radius)
-		h.check_near(local.z, 0.0, "the sheet has no thickness", 1.0e-6) if index % 5000 == 0 else null
+		if absf(local.z) > 1.0e-6:
+			flat = false
 		smallest = minf(smallest, cloud.radii[index] * 2.0)
 		largest = maxf(largest, cloud.radii[index] * 2.0)
 		squared += cloud.radii[index] * cloud.radii[index]
@@ -110,6 +112,7 @@ func _test_the_cloud_fills_its_band(h) -> void:
 	h.check(inner >= band.semi_major_axis.x - 1.0 and outer <= band.semi_major_axis.y + 1.0,
 		"every particle is inside the band (%.0f to %.0f km)"
 			% [inner / 1.0e3, outer / 1.0e3])
+	h.check(flat, "the sheet has no thickness, for every one of %d particles" % cloud.size())
 	h.check(smallest >= 100.0 * 0.999, "none is below the floor (%.1f m)" % smallest)
 	h.check(largest <= 30000.0 * 1.001, "none is above the ceiling (%.0f m)" % largest)
 	h.check_near(

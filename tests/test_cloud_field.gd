@@ -334,7 +334,8 @@ func _test_what_a_bake_costs(h, earth: SpacesimCloudModel.Morphology) -> void:
 	# top of it. An 8192x4096 map is 33.5 M pixels.
 	var eight_k := per_pixel * 8192.0 * 4096.0 / 1.0e6
 	print("    ---   which extrapolates to %.1f seconds for one 8192x4096 map" % eight_k)
-	h.check(true, "and the cost is printed above, because it decides what is baked and by whom")
+	# **No assertion here.** The number above is the point — it says what a map costs and therefore who bakes it —
+	# and a `check(true)` beside it would only inflate the count with something that cannot fail.
 
 
 ## The mean of each row — the latitude structure with the weather averaged out of it.

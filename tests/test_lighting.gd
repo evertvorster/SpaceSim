@@ -70,7 +70,8 @@ func run(h, root: Node) -> void:
 	if not bool(ProjectSettings.get_setting("rendering/lights_and_shadows/use_physical_light_units", false)):
 		h.check(false, "physical light units are ON — with them off Godot ignores light_intensity_lux")
 		return
-	h.check(true, "physical light units are on, so a lux means something")
+	# The check above fails the suite when the setting is off, so there is nothing to assert here: a `check(true)`
+	# after a guard is a count that cannot fail.
 
 	var sol: SpacesimSolarSystem = load(SOL_PATH)
 	h.check(sol != null, "Sol loads")
