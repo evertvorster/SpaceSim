@@ -174,6 +174,24 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 	return list
 
 
+## **How far the nearest spot of this band is**, in the band's own plane — the one query the HUD's rule needs.
+##
+## Evert, 2026-11-15: *"when the nearest spot on the ring is nearer than any of the other bodies, you can then
+## check for and mark the next 24 rocks on the HUD."* So the pool is only worth asking for when this band is
+## what the ship is actually flying through, and the answer is what decides it.
+func nearest_distance(eye: Vector3) -> float:
+	if _cloud == null or _population == null:
+		return INF
+	var plane_eye := global_transform.affine_inverse() * eye
+	var on_sheet := SpacesimParticleCloud.closest_point(
+		plane_eye, _population.semi_major_axis.x, _population.semi_major_axis.y
+	)
+	var found := _cloud.nearest(on_sheet, 1, INF)
+	if found.is_empty():
+		return INF
+	return plane_eye.distance_to(_cloud.positions[found[0]])
+
+
 ## **The one identity a spot has.** The particle index is the truth; the string is what a body can be keyed by
 ## and what seeds its shape, so the same spot is the same rock every time it is resolved.
 func spot_id(index: int) -> String:

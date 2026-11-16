@@ -864,13 +864,23 @@ func _update_rocks(eye: Vector3, pixel: float) -> void:
 		_fragment_bodies[index].update(
 			_fields[index].pieces(parent.node.global_position), eye, _camera, pixel, _system.wireframe
 		)
+	# **What else is near**, so a ring can tell whether it is what the ship is flying through. The system's own
+	# bodies only: a rock's nearest spot is what is being compared, not another rock.
+	var other := INF
+	for scale in _system_scale:
+		other = minf(other, scale.surface_distance_to(eye))
 	for index in _system.ring_bodies.size():
 		var view := _system.rings[index]
 		var manager := _system.ring_bodies[index]
-		manager.update(
-			view.pieces(eye, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES),
-			eye, _camera, pixel, _system.wireframe
-		)
+		# **`R23`, and it is also the frame-rate argument**: the pool of 24 spots is asked for only while this
+		# band is nearer than everything else — Evert, 2026-11-15: *"when the nearest spot on the ring is nearer
+		# than any of the other bodies, you can then check for and mark the next 24 rocks on the HUD."* From
+		# anywhere else a band offers its nearest spot and nothing more, which is one body instead of
+		# twenty-four per ring, each with a node, a material and a point of light.
+		var count := 1
+		if view.nearest_distance(eye) <= other:
+			count = SpacesimSystemScene.RING_ROCK_CANDIDATES
+		manager.update(view.pieces(eye, pixel, count), eye, _camera, pixel, _system.wireframe)
 		# **The shape replaces the dot** (`R26`): a splat left behind grows through the shape it stood in for.
 		view.set_hidden_ids(manager.ids())
 	_sync_rocks()

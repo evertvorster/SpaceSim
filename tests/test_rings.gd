@@ -516,6 +516,16 @@ func _test_a_rock_is_a_body_that_sets_the_unit(h, root: Node) -> void:
 			var unit := SpacesimTravelScale.local_length(to_surface, 10.0, 1.0e11)
 			h.check(unit < 1.0e6, "the local unit really is small near it (%.0f m)" % unit)
 
+	# **`R23`: the pool is only offered while the band is what the ship is flying through.** From beside a
+	# particle the band wins; from a tenth of an AU out, Saturn does, and a band offers its nearest spot alone.
+	h.check(view.nearest_distance(eye) < 1.0e6,
+		"from inside the band, its nearest spot is close (%.0f km)" % [view.nearest_distance(eye) / 1.0e3])
+	var far_eye: Vector3 = view.global_transform * Vector3(0.0, 0.0, 1.5e10)
+	var saturn_range := eye.distance_to(scene.body_by_id("planet:saturn").node.global_position)
+	h.check(view.nearest_distance(far_eye) > saturn_range,
+		"and from far away, Saturn is nearer than any spot (%.0f Mm against %.0f Mm)"
+			% [view.nearest_distance(far_eye) / 1e6, saturn_range / 1e6])
+
 	# **And it goes when the eye does**, with its body — nothing is left behind.
 	manager.update([], eye, camera, pixel, false)
 	h.check(manager.count() == 0, "the rock is let go when the spot is no longer offered")
