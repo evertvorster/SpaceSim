@@ -206,9 +206,11 @@ func build(parent: Node) -> SpacesimSystemScene:
 ## Every ring also owns a body manager, so its spots become rocks through the same lifecycle a moon has.
 var rings: Array[SpacesimRingView] = []
 var ring_bodies: Array[SpacesimFragmentBodies] = []
-## How many spots a ring offers for resolution at once. Several large components are in view together, and each
-## must become geometry as it resolves.
-const RING_ROCK_CANDIDATES := 12
+## **How many spots a ring offers as bodies at once** — Evert, 2026-11-15: *"when the nearest spot on the ring is
+## nearer than any of the other bodies, you can then check for and mark the next 24 rocks on the HUD."* Each one
+## is a rock: a node, a marker, a splat, and a scale body; the ones that resolve become geometry, and the rest
+## stay dots with names until they do.
+const RING_ROCK_CANDIDATES := 24
 var _ring_parents: Array[SpacesimSceneBody] = []
 var _ring_probes: Array[SpacesimSystemBody] = []
 

@@ -104,10 +104,14 @@ func _build_draws() -> void:
 ## **The particles worth being rocks**, in the shape [SpacesimFragmentBodies] takes — an id, a world position,
 ## a diameter and a label.
 ##
-## **Two rules, and they are the whole of "which spots are bodies"**: every spot whose own disc has passed
-## `RESOLVE_PIXELS`, and the single nearest spot whatever its size. The first makes the sheet resolve into
-## rocks as the eye approaches (`R1`, `R22`); the second lets a dot slow the ship and start resolving before
-## it is a shape (`R17`, `R18`).
+## **One list, and it is the nearest few spots.** A spot that is a body is a rock: it has a node, a marker, a
+## splat sized to the disc it would have, and a scale body that sets the travel unit — and it is `RESOLVE_PIXELS`
+## away from becoming geometry. Nothing else promotes anything, so "every spot is a rock you can fly to" (`R16`)
+## and "the next 24 are marked" (`R23`) are the same list at different zoom levels.
+##
+## **Ordered resolvable-first, then nearest**, because both matter and they are different questions: a big
+## component resolves long before a small one at the same distance (`R22`), and the nearest one is what the
+## ship is closing on and what the HUD's *Closest* line names (`R17`, `R18`).
 ##
 ## Evert, 2026-11-15: *"You already know the position of each spot on the ring, right? Can't we just range to
 ## the closest one? Then, when the camera gets close enough to start resolving the rocks, we can mark the
@@ -139,18 +143,26 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 				< _cloud.positions[b].distance_squared_to(from_ship)
 			)
 	)
-	for slot in candidates.size():
-		if list.size() >= count:
-			break
-		var index := candidates[slot]
+	# **Which of them have earned geometry already**, so those come first and the rest fill the list by distance.
+	var resolvable: Array[int] = []
+	var ordered: Array[int] = []
+	for index in candidates:
 		var distance := plane_eye.distance_to(_cloud.positions[index])
-		# **The nearest is always offered** — it competes for the travel unit and the HUD from far out, and
-		# `advance_irregular` decides when it earns a mesh. Everything else has to have earned one.
-		if slot > 0:
-			var angular := SpacesimLod.angular_radius(_cloud.radii[index], distance)
-			var screen := SpacesimLod.screen_radius_pixels(angular, pixel_angle)
-			if screen < SpacesimIrregularBody.RESOLVE_PIXELS:
-				continue
+		var screen := SpacesimLod.screen_radius_pixels(
+			SpacesimLod.angular_radius(_cloud.radii[index], distance), pixel_angle
+		)
+		if screen >= SpacesimIrregularBody.RESOLVE_PIXELS:
+			resolvable.append(index)
+		ordered.append(index)
+	var chosen: Array[int] = []
+	for index in resolvable + ordered:
+		if chosen.size() >= count:
+			break
+		if chosen.has(index):
+			continue
+		chosen.append(index)
+	for index in chosen:
+		var distance := plane_eye.distance_to(_cloud.positions[index])
 		list.append({
 			"id": spot_id(index),
 			"position": global_transform * _cloud.positions[index],

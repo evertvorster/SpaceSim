@@ -99,6 +99,7 @@ SpacesimScaleBody.new(node: Node3D, radius: float)
 | `position: Vector3`, `name: String` | where it is and what it is called **when `node` is null** — a fragment is arithmetic, not a node |
 | `velocity: Vector3` | **how fast it is moving in the system frame, and therefore what a ship near it inherits.** The ship's velocity is relative to the body it is nearest, so this is what makes a moving target reachable at all. Zero is correct for anything that stands still — everything but a fragment at present. Fill it where the body is moved, in the same tick |
 | `radius: float` | metres |
+| `solid: bool` | **whether flying into it stops the ship.** A scale body sets the local unit either way — that is what makes a rock slow the ship as it is approached — but not everything is worth colliding with. A population's rock is the case: it sets the unit so the ship can crawl up to one, and there is no physics yet. Evert, 2026-11-15: *"I told you many times we are not doing physics yet, so no collisions."* |
 | `surface_distance_to(position) -> float` | distance to the *surface*, never negative — the cheap comparison the proximity scan uses |
 | `surface_distance_mesh(position) -> float` | distance to the nearest *vertex* of a body's own mesh; the sphere when there is no mesh to ask |
 
@@ -273,6 +274,7 @@ than a structure. The cost, accepted and named: **coming back to a place gives d
 | `static volume_of(pop) -> float` | the shell between the two semi-major axes, as thick as the inclination band makes it |
 | `static spawn_radius_of(pop) -> float` | **the ball the field is drawn in**: the radius that holds `FIELD_COUNT` fragments at that density, so the nearest fragment is as far away as the real belt would put it rather than as far as a rendering decision would |
 | `static in_band(pop, local) -> bool` | whether a point relative to the parent is inside the population |
+| `pieces(parent_position) -> Array[Dictionary]` | the fragments as `{id, position, diameter}` — the shape `SpacesimFragmentBodies` takes, so a belt and a ring hand rocks to one manager |
 | `const FIELD_COUNT` | 24 — how many fragments *exist*; the marker pool decides how many are *shown* |
 
 **Nothing moves yet, deliberately — exactly as nothing else in the world moves.** A fragment's orbit is
@@ -299,8 +301,11 @@ one, freed when it drops it.
 
 | Member | |
 |---|---|
-| `update(field, parent_position, eye, camera, wireframe)` | mirror the field: create, free, and advance each body |
-| `static content_for(population, designation, diameter) -> SpacesimSystemBody` | **a fragment as content** — its radius and one layer of the population's composition. That is all the builder needs: colour, strength and density follow, so a rock's lumpiness is derived rather than chosen. **`id` is the designation**, because `request()` seeds the shape from `hash(body.id)` — the same rock is the same shape every time it is extracted |
+| `update(pieces, eye, camera, pixel, wireframe)` | mirror the source — a belt's field or a ring's view — creating a body per piece, freeing one per dropped piece, and advancing each as `advance_irregular` advances a moon. **`pixel` is the pixel's angular size**, because the extraction threshold is a screen size |
+| `rocks() -> Array[SpacesimSceneBody]` | **the rocks themselves**, for the marker path and the ship's travel unit. One list read by both: a rock is one object, not a marker entry and a scale body and a node that could disagree |
+| `ids() -> Array[String]` | what the bodies are keyed by, so a renderer can stop drawing the splat each one replaced |
+| `count()`, `version()` | how many exist, and a counter bumped when one appears or is let go, so a caller's list of scale bodies can be rebuilt only when it is stale |
+| `static content_for(population, designation, diameter, label) -> SpacesimSystemBody` | **a fragment as content** — its radius and one layer of the population's composition. That is all the builder needs: colour, strength and density follow, so a rock's lumpiness is derived rather than chosen. **`id` is the designation**, because `request()` seeds the shape from `hash(body.id)` — the same rock is the same shape every time it is extracted |
 | per-body advance | **`SpacesimSystemScene.advance_irregular`** — the same call `update_lod` makes for a moon: extraction at `RESOLVE_PIXELS`, the splat that stands in while it runs, the wireframe |
 
 **Nothing is extracted until the eye can resolve it.** A 17 m fragment is 2 px of radius at about 22 km, so
@@ -312,6 +317,76 @@ disc the body would have, so a 10 m fragment is a fraction of a pixel at any dis
 and `_place_point` fades it by its own area below 0.56 px of radius. Evert, 2026-11-14: *"It would actually
 be nice to see splats for asteroids, but of course they will be far dimmer and not as visible as planetary
 splats."*
+
+### `SpacesimRingModel` — `RefCounted` (static)
+
+**What a band of small bodies is worth** — its radiance, its shadow, and the two directions that matter. No
+geometry and no nodes: every number is a function of the band's optical depth and the camera's angle, which
+is why it can be checked against Saturn on paper.
+
+| Member | |
+|---|---|
+| `reflectance(tau, sun_cosine, eye_cosine) -> float` | **the band's brightness as a fraction of a bright Lambert surface**: `tau/(1+tau)` times the geometry of a slab, `2·mu0/(mu0+mu)`, normalised to 1 at normal incidence. **Clamped at 1** — nothing reflects more than a bright surface, and an unclamped reflectance is how a ring ends up brighter than the planet it orbits. Saturn's three bands come out at 9 %, 41 % and 55 % from tau 0.1, 0.7 and 1.2 |
+| `radiance(illuminance, bond_albedo, tau, sun_cosine, eye_cosine) -> float` | the same law in the engine's currency, `illuminance · albedo · reflectance / pi` — the same expression a body's disc uses, so a ring and a planet are compared on one scale |
+| `unlit_radiance(radiance) -> float` | **the floor a shadowed particle keeps**, `UNLIT` = 4 % — `R33`: dark, never absent |
+| `transmittance(tau, eye_cosine) -> float` | `exp(-tau/mu)`, what gets through the sheet; its complement is the alpha the splat blend needs |
+| `cosine(plane_normal, direction) -> float` | the cosine above the plane, floored at `MIN_COSINE` = 0.02 — a division by `mu` needs a floor that is a statement, not a guard |
+| `static diameter(draw, floor, ceiling, index) -> float` | the size law inverted: `N(>D) ∝ D^-index` is a collisional cascade's own distribution |
+| `static addressable(population) -> float` | how many objects exist at or above the size floor |
+| `static area(population) -> float` | `pi (r_out² - r_in²)` — the band's area, which the overlap count and the shader's alpha both need |
+
+**What it deliberately does not model**: the opposition surge, the forward-scattering peak at high phase,
+and multiple scattering. Those need a phase function with measured parameters and a phase-angle sampling
+this game has no way to judge yet.
+
+### `SpacesimParticleCloud` — `RefCounted`
+
+**A ring's particles, made once and never touched again** — the ring half of what `SpacesimPopulationField`
+is for a belt. A belt is 6 × 10²⁵ m³ of nothing and can only be seen where the observer is; a ring is
+4 × 10¹⁶ m² of sheet that is *there*, whole, from any angle, so it is generated at build in the planet's
+frame and stays. Nothing moves, so the instance transforms are written once.
+
+Positions are the parent's frame with the ring's plane as x-y; `z` is zero, because a real ring's 10–100 m
+thickness is 10⁻⁸ of a pixel at every distance a ring is visible from.
+
+| Member | |
+|---|---|
+| `static of(population) -> SpacesimParticleCloud` | generate: **uniform by area** across the band, not by radius, and sized by `SpacesimRingModel.diameter` |
+| `positions`, `radii`, `size()`, `mean_radius()` | the particles; the mean is `sqrt(mean(r²))`, because a particle's flux goes as its area |
+| `nearest(where, count, reach) -> Array[int]` | **the nearest `count` particles, no further than `reach`.** Both stops are exact: radius buckets so the walk starts at the query's own radius, and a bearing-sorted list inside each bucket so a direction stops when `4·r_min·r0·sin²(Δ/2)` alone exceeds the worst kept. Measured at 207,000 particles: **116 µs** for the 25 nearest (563 µs with the radius ordering alone) |
+| `static closest_point(where, inner, outer) -> Vector3` | **the closest point on the band is trigonometry** — clamp the ship's radius into the band, keep its bearing. Evert, 2026-11-15: *"The ring is a geometric shape."* It is why a query from a million kilometres costs what one from a hundred does: the search starts where the answer is, not where the ship is |
+| `const RADIUS_BUCKETS` | 256 — a couple of hundred buckets over the band, so one holds a thousand particles and the bearing walk inside it reaches the answer in a few dozen |
+
+### `SpacesimRingView` — `Node3D`
+
+**A band, drawn**: one `MultiMesh` of point quads written once, and **two draw nodes holding it** — the half
+in front of the planet and the half behind, cut on the plane through the planet's centre at right angles to
+the eye. A planet's air is transparent with the depth test off, so one draw cannot be both in front of it
+and behind it; both draws hold every particle and each collapses the other side in its vertex stage.
+
+| Member | |
+|---|---|
+| `static of(population, cloud) -> SpacesimRingView` | build it, oriented by `population.ring_axis` |
+| `update(pixel_angle, illuminance, albedo, centre, star_position, observer)` | **per frame**: the two cosines, the band's radiance, the unlit floor, and the overlap count that turns a share of `tau` into an alpha |
+| `pieces(eye, pixel_angle, count) -> Array[Dictionary]` | **which spots are bodies** — every spot whose disc has passed `RESOLVE_PIXELS`, plus the nearest spot whatever its size |
+| `set_hidden_ids(ids)` | stop drawing the splats a body stands for; `R26`, because a splat left behind grows through the shape it replaced |
+| `bake_shadow(star_position, caster_position, caster_radius, star_radius) -> float` | **once**: the planet's shadow per particle, with `SpacesimLuminance.shadow_fraction`. Returns the shaded fraction, so a caller can say what happened |
+| `spot_id(index)`, `static index_of(id)` | **one identity per spot**: `population:ring_b#12345` is the particle index, the body key and the shape seed at once |
+| `light()`, `shader_parameter(name)`, `shaded_fraction` | what the shader is told, for the tests |
+| `const FAR_PRIORITY` / `NEAR_PRIORITY` | −100 / +100 — outside the planet's whole transparent stack, see Render layers |
+
+**The shader blends, it does not add.** `blend_mix` is `R33`: an additive draw cannot show a dark thing, so a
+particle in the planet's shadow would add nothing and stop existing. Each particle carries a share of
+`tau/mu` as its alpha and hands over the band's radiance divided by the fraction of the frame the sheet
+takes over, so the composition of however many land on a pixel is exactly the band's reflectance over its
+own transmittance — **brightness independent of distance by construction**, which no per-splat scale factor
+can be.
+
+**The three bands are content** — `population:ring_c`, `:ring_b` and `:ring_a` in `systems/sol.tres`, at
+74,658–91,975, 91,975–117,580 and 122,170–136,775 km, with tau 0.1, 1.2 and 0.7 and the Cassini division as
+the space between the last two. The 300,000 drawn particles are **the largest embedded objects, 100 m to
+30 km** (Evert, 2026-11-15). `ring_axis` is in the **engine's frame**, not the orbital elements' — see the
+content's own comment, and the test that derives the elevation from the loaded positions.
 
 ### `SpacesimKepler` — `RefCounted`
 
@@ -349,6 +424,7 @@ have no derived mass yet, so a moon of one stands still.
 | `star() -> SpacesimSceneBody` | |
 | `update_sky(camera) -> void` | points the sky at the camera, hands it the depth and the gain, and re-sums the ambient when the depth changes. Called once a frame |
 | `update_lod(camera) -> void` | **hands every body the representation its angular size has earned**, once a frame: the screen radius from `camera`'s field, the render target's height and the observer's distance, a level from `SpacesimLod`, and a mesh assignment. **Below `SpacesimLod.POINT_TIER_SCREEN_RADIUS` the body stops being geometry** — mesh hidden, point of light shown, **the star included**, since its disc is a fraction of a pixel from any distance and what it puts on the screen is its own emission over the same area — and `lod.error_budget` is read here, so it is hot. **Nothing about the cull is visible outside this function**: a hidden body is still an entry in `bodies`, and nothing else reads whether it is drawn |
+| `SpacesimLuminance.shadow_fraction(point, star, caster, caster_radius, star_radius) -> float` | **how much of the star a point can see**: 1 in full light, 0 in the umbra, the fraction of the star's disc the caster does not cover, from two circles on the sky (the star's angular radius, the caster's, the angle between them). Partial overlap is the penumbra, which falls out. **The engine's shadow law, and there are no shadow maps in it.** A ring bakes it per particle — see `SpacesimRingView.bake_shadow` |
 | `body_luminance(body, observer, star_position) -> float` | **what the eye sees of a body**, lux/sr: `illuminance · albedo · lambert_phase(α) / π`. The gathering is here; **the expression itself is `SpacesimLuminance.disc_luminance`**, so the number the point of light is coloured by has one home |
 | `_place_point(…)` | sizes and colours a body's point of light. **It carries the body's whole flux into the pixel once the disc is under one**: `min(1, pi * r_px^2)`, the disc's share of the pixel's solid angle — the same term `sky_stars.gdshader` carries as `lux / d_omega`. Without it a receding body keeps its full surface brightness instead of fading as `1/d^2` (a body at 0.077 px is ~170x over the law), and with it a distant planet lands in the same currency as the star field, which is where it is judged. **It applies no exposure at all** — `SpacesimExposurePass` scales the finished frame, which covers the splat and every disc together, and a second application would be one too many. It used to be applied by hand here because an `unshaded` material receives none of Godot's per-path baking, and the flight test that found that is in `Lighting and Exposure` |
 | `triangles() -> int` | triangles the bodies and points are currently drawn with — the instrument for "the picture is unchanged and so is the cost", which means the policy is not being consulted |
@@ -657,6 +733,29 @@ tests: vault `SpaceSim/Lighting Plan` §6a and §9.
 
 Luminosity and effective temperature come from `SpacesimStarModel` — see **Derivation — `model/`**
 under Solar system above.
+
+## Render layers
+
+**The transparent stack is a declared contract, and an order that is a tie is not an order.** Godot sorts
+transparent draws by `render_priority` and then by distance — and every layer of a planet is a child of that
+planet's node, so their distances are equal to the metre. Equal priority therefore means *no* order at all.
+
+| Draw | Priority |
+|---|---|
+| a ring's far half | **−100** (`SpacesimRingView.FAR_PRIORITY`) |
+| a body's interior surface | **−90** (`SpacesimBodyRenderer.INTERIOR_RENDER_PRIORITY`) |
+| the sea | **−8** (`OCEAN_RENDER_PRIORITY`) |
+| cloud decks, one per condensed species | **−index**, so 0 and down |
+| a body's air shell | **+8** (`AIR_RENDER_PRIORITY`) |
+| a ring's near half | **+100** (`SpacesimRingView.NEAR_PRIORITY`) |
+
+The engine's whole range is **−128 … +128**; outside it a priority is *refused* and the material keeps 0,
+which is exactly the tie this table exists to prevent (measured 2026-11-03). `tests/test_rings.gd` asserts
+the table is strictly increasing and inside the range, so a tie cannot come back.
+
+**The air at 0 and the first cloud deck at 0 is what that cost.** Evert, 2026-11-15: *"I still see ordering
+effects, but not always... there is more than just the atmosphere, there are cloud decks and the internal
+surface of Saturn as well, and they need to be properly ordered."*
 
 ## Render layers
 

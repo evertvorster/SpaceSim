@@ -416,27 +416,45 @@ func _test_a_spot_becomes_a_rock_by_one_rule(h, root: Node) -> void:
 		h.check(String(first["label"]).begins_with("Saturn Rock"),
 			"and a label a person reads (%s)" % String(first["label"]))
 
-	# **Far away, nothing resolves**: one spot (the nearest), and no others, because none is two pixels across.
+	# **From far away the same list is offered** — every one a rock to navigate to, none of them geometry yet,
+	# which is `R23`: the next 24 rocks are marked so the band can be crossed by name.
 	var far := view.global_transform * Vector3(middle, 0.0, 3.0e10)
 	var far_pieces := view.pieces(far, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES)
-	h.check(far_pieces.size() == 1,
-		"from far away only the nearest spot is a body (%d)" % far_pieces.size())
-
-	# **Close in, several do** — the rule is the disc, so big components near the eye become geometry rather than
-	# splats that fill the frame.
-	var near_pieces := view.pieces(eye, pixel * 8.0, SpacesimSystemScene.RING_ROCK_CANDIDATES)
-	h.check(near_pieces.size() >= pieces.size(),
-		"a coarse pixel makes more of them resolvable (%d >= %d)" % [near_pieces.size(), pieces.size()])
-	for piece in near_pieces:
+	h.check(far_pieces.size() == SpacesimSystemScene.RING_ROCK_CANDIDATES,
+		"from far away a full pool of spots is offered (%d)" % far_pieces.size())
+	var unreachable := 0
+	for piece in far_pieces:
 		var index := SpacesimRingView.index_of(String(piece["id"]))
-		if index < 0:
-			continue
-		var distance: float = (view.global_transform.affine_inverse() * eye).distance_to(cloud.positions[index])
+		var distance: float = (view.global_transform.affine_inverse() * far).distance_to(cloud.positions[index])
 		var screen := SpacesimLod.screen_radius_pixels(
-			SpacesimLod.angular_radius(cloud.radii[index], distance), pixel * 8.0
+			SpacesimLod.angular_radius(cloud.radii[index], distance), pixel
 		)
-		if screen < SpacesimIrregularBody.RESOLVE_PIXELS and piece != near_pieces[0]:
-			h.check(false, "a spot that is not resolvable should not be a body (%.2f px)" % screen)
+		if screen < SpacesimIrregularBody.RESOLVE_PIXELS:
+			unreachable += 1
+	h.check(unreachable > 0, "and none of them has earned geometry yet (%d of %d)"
+		% [unreachable, far_pieces.size()])
+
+	# **Close in, the resolvable ones come first** — the rule is the disc, so a big component near the eye is
+	# offered before a small one, whatever their distances. The eye is put 5 km from the band's biggest
+	# particle, which is where a real approach ends up.
+	var biggest := 0
+	for index in cloud.size():
+		if cloud.radii[index] > cloud.radii[biggest]:
+			biggest = index
+	var close_eye: Vector3 = view.global_transform * (cloud.positions[biggest] + Vector3(0.0, 0.0, 5000.0))
+	var near_pieces := view.pieces(close_eye, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES)
+	h.check(near_pieces.size() >= 1, "and close in, some are resolvable (%d offered)" % near_pieces.size())
+	if near_pieces.size() > 0:
+		var first_index := SpacesimRingView.index_of(String(near_pieces[0]["id"]))
+		h.check(first_index == biggest,
+			"the first offered is the big component the eye is beside (chose %d of %d)"
+				% [first_index, biggest])
+		var across: float = (view.global_transform.affine_inverse() * close_eye).distance_to(cloud.positions[first_index])
+		var first_screen := SpacesimLod.screen_radius_pixels(
+			SpacesimLod.angular_radius(cloud.radii[first_index], across), pixel
+		)
+		h.check(first_screen >= SpacesimIrregularBody.RESOLVE_PIXELS,
+			"and it has earned a mesh (%.1f px)" % first_screen)
 
 	# **The splat is switched off for the ones that are** (`R26`) — and only for those.
 	var ids: Array = []
