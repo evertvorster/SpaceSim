@@ -1,8 +1,24 @@
 class_name SpacesimRingModel
 extends RefCounted
-## **What a ring is worth** — its radiance, its shadow, and the camera's two angles. No geometry, no nodes,
-## no drawing: every number here is a function of the band's optical depth and the two directions that
-## matter, which is why it can be checked against Saturn on paper.
+## **What a band of small bodies is worth**, and **what it is not**.
+##
+## Two things live here and they are deliberately different:
+##
+## 1. **A rock's own surface brightness** — the same `disc_luminance` a body uses, so a ring's particles are
+##    drawn as what they are. This is what the renderer uses today.
+## 2. **A sheet's reflectance** — the slab's answer for an optical depth, which is the *dust's* law. It is
+##    here, tested, and **not used by the rocks**, because the rocks are not the sheet.
+##
+## **The drawn particles are not the band's opacity, and this is the correction of 2026-11-16.** The 300,000
+## particles that are drawn are the *largest embedded objects*, 100 m to 30 km; Evert's instruction when the
+## band came out orders of magnitude too bright: *"We don't want these rocks to make up the entire
+## reflectance, we'll add the dust layer later."*
+##
+## [method drawn_optical_depth] is the number that says it: those objects span `N·pi·<r²>/A`, which for the B
+## ring is **2 x 10⁻⁷** — the whole drawn sample is a sixth of a millionth of the band's `tau = 1.2`. Treating
+## it as the sheet made every particle carry the band's brightness, which is why the first two builds were
+## far too bright. **The band's light is the dust's**, and until the dust layer exists there is no band, only
+## a scatter of rocks.
 ##
 ## ## The sheet's surface brightness
 ##
@@ -55,8 +71,11 @@ static func cosine(plane_normal: Vector3, direction: Vector3) -> float:
 	return maxf(absf(normal.dot(direction / length)), MIN_COSINE)
 
 
-## **The slab's reflectance**, as a fraction of the star's own flux — single scattering out of a sheet of
-## optical depth `tau`:
+## **The slab's reflectance** — **the dust layer's law, not the rocks'.** A drawn rock's radiance is its own
+## surface brightness; this is what a *sheet* of optical depth `tau` returns, and it is here because the
+## numbers Saturn is known by belong somewhere, and because the dust slice will call exactly this.
+##
+## As a fraction of the star's own flux — single scattering out of a sheet:
 ##
 ##     R = (1/4) · mu0/(mu0 + mu) · (1 - exp(-tau · (1/mu0 + 1/mu)))
 ##
@@ -84,10 +103,9 @@ static func reflectance(tau: float, sun_cosine: float, eye_cosine: float) -> flo
 	return clampf(slab, 0.0, 1.0)
 
 
-## **The band's own radiance**, in the engine's units: the light falling on it, the fraction of it the
-## material reflects, and the slab's brightness. `bond_albedo` comes from what the particles are made of —
-## the same derivation a moon's colour uses, so a ring of ice is brighter than a ring of rock without a
-## second palette.
+## **The sheet's radiance**, in the engine's units — the dust's, not the rocks'. `bond_albedo` comes from what
+## the particles are made of: the same derivation a moon's colour uses, so a ring of ice is brighter than one
+## of rock without a second palette.
 static func radiance(
 	illuminance: float, bond_albedo: float, tau: float, sun_cosine: float, eye_cosine: float
 ) -> float:
@@ -102,13 +120,18 @@ static func unlit_radiance(radiance_lit: float) -> float:
 	return radiance_lit * UNLIT
 
 
-## **How much light gets through the sheet**, `exp(-tau/mu)` — the fraction of what is behind it that
-## survives. The complement, `1 - T`, is how much of the frame the sheet takes over, which is the alpha the
-## splat blend needs.
-static func transmittance(tau: float, eye_cosine: float) -> float:
-	if tau <= 0.0:
-		return 1.0
-	return exp(-tau / maxf(eye_cosine, MIN_COSINE))
+## **How much of the band's opacity the DRAWN particles actually are** — `N·pi·<r²>/A`, with `r` the mean
+## drawn radius and `A` the band's area.
+##
+## **It is the number that keeps this honest.** The drawn sample is the largest embedded objects, so its own
+## optical depth is a fractional millionth of the band's: for Saturn's B ring, `2.0 x 10⁻⁷` against a `tau` of
+## 1.2. The remaining 99.99998 % is the dust, which is not modelled yet, which is why the sky is not filled
+## with a bright sheet and why the rocks must not be drawn as one.
+static func drawn_optical_depth(population: SpacesimPopulation, mean_radius: float) -> float:
+	var area := area(population)
+	if area <= 0.0 or mean_radius <= 0.0:
+		return 0.0
+	return float(population.particle_count) * PI * mean_radius * mean_radius / area
 
 
 ## **The size distribution, inverted.** `N(>D)` proportional to `D^-index` is a collisional cascade's own

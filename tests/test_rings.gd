@@ -225,6 +225,20 @@ func _test_the_band_is_as_bright_as_saturn_says(h) -> void:
 	h.check(ring_b > saturn_disc * 0.3,
 		"but not so dim that it disappears against it (%.2f of it)" % (ring_b / saturn_disc))
 
+	# **The rocks are not the band.** Evert, 2026-11-16: *"We don't want these rocks to make up the entire
+	# reflectance, we'll add the dust layer later."* The drawn sample is the largest embedded objects, and its own
+	# optical depth is a fractional millionth of the band's — which is the number that says a rock must be drawn
+	# as a rock and not as a piece of a bright sheet.
+	var band := _sol().population_by_id("population:ring_b")
+	var cloud := SpacesimParticleCloud.of(band)
+	var drawn := SpacesimRingModel.drawn_optical_depth(band, cloud.mean_radius())
+	h.check(drawn < 1.0e-5,
+		"the 300,000 drawn particles are %.8f of an optical depth, against the band's %.1f — not the band"
+			% [drawn, band.optical_depth])
+	h.check(band.optical_depth / drawn > 1.0e6,
+		"and what is missing is more than a million times that much dust (%.0f×)"
+			% (band.optical_depth / drawn))
+
 	# **A shadowed particle keeps a floor** — `R33`: visible and dark, never absent.
 	var lit := SpacesimRingModel.radiance(1.0, 0.4, 1.2, 1.0, 1.0)
 	var unlit := SpacesimRingModel.unlit_radiance(lit)

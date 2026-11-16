@@ -264,46 +264,36 @@ func bake_shadow(
 
 ## **Per frame**: everything the shader needs that changes with the eye.
 ##
-## `illuminance` is the star's light at the ring and `albedo` the particles' bond albedo — the same derivation a
-## moon's colour comes from — so the band's brightness is a physical quantity rather than a tuned scale.
+## **A rock's own surface brightness, not a sheet's.** `illuminance` is the star's light at the band and
+## `albedo` the particles' bond albedo — the same derivation a moon's colour comes from — and the number handed
+## over is `disc_luminance`, the same expression that colours a body's point of light. The shader turns that
+## into a disc's share of each pixel, so what is drawn is 300,000 rocks rather than a band.
+##
+## **The band's own light is not here on purpose.** The drawn particles are the largest embedded objects: their
+## own optical depth is 2 x 10⁻⁷ against the band's `tau = 1.2` (see `SpacesimRingModel.drawn_optical_depth`),
+## so drawing them as the sheet made the ring orders of magnitude too bright. Evert, 2026-11-16: *"We don't want
+## these rocks to make up the entire reflectance, we'll add the dust layer later."*
 func update(
 	pixel_angle: float, illuminance: float, albedo: float, centre: Vector3, star_position: Vector3,
 	observer: Vector3
 ) -> void:
 	if _materials.is_empty() or _cloud == null:
 		return
-	var normal := (global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
-	var sun_cosine := SpacesimRingModel.cosine(normal, star_position - centre)
-	var eye_cosine := SpacesimRingModel.cosine(normal, observer - centre)
-	var tau := _population.optical_depth
-	var distance := maxf((observer - centre).length(), 1.0)
-	# **How many particles land on one pixel**, which is what turns a share of `tau` into an alpha: the band's
-	# projected area in pixels against the particles' own screen area. It is a host computation because it needs
-	# the band's area, the mean size and the geometry, none of which a vertex stage has.
-	var mean := maxf(_cloud.mean_radius(), 1.0)
-	var pixel_length := maxf(distance * pixel_angle, 1.0e-9)
-	var overlaps := (
-		float(_cloud.size()) * PI * pow(maxf(mean, pixel_length), 2.0)
-		/ maxf(SpacesimRingModel.area(_population) * maxf(eye_cosine, 0.02), 1.0)
-	)
-	var radiance := SpacesimRingModel.radiance(illuminance, albedo, tau, sun_cosine, eye_cosine)
+	# **`disc_luminance` with the phase left out**, because the phase is per particle and the shader computes it:
+	# what is handed over is the light arriving divided by pi times the albedo, which is everything Lambert's law
+	# needs that is the same for the whole band.
+	var radiance := illuminance * albedo / PI
 	var split := observer - centre
 	var direction := split.normalized() if split.length_squared() > 0.0 else Vector3.RIGHT
 	for material in _materials:
 		material.set_shader_parameter("pixel_angle", pixel_angle)
-		material.set_shader_parameter("tau", tau)
-		material.set_shader_parameter("eye_cosine", eye_cosine)
-		material.set_shader_parameter("overlaps", maxf(overlaps, 1.0e-6))
-		material.set_shader_parameter("mean_radius_px", maxf(mean / pixel_length, 1.0))
 		material.set_shader_parameter("glow_linear", Color(radiance, radiance, radiance))
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
 		material.set_shader_parameter("unlit_linear", Color(floor, floor, floor))
 		material.set_shader_parameter("planet_origin", centre)
 		material.set_shader_parameter("split_direction", direction)
-	_uniforms = {
-		"radiance": radiance, "sun_cosine": sun_cosine, "eye_cosine": eye_cosine,
-		"overlaps": overlaps, "transmittance": SpacesimRingModel.transmittance(tau, eye_cosine),
-	}
+		material.set_shader_parameter("star_position", star_position)
+	_uniforms = {"radiance": radiance}
 
 
 ## **What the shader is being told** — for the tests, because "it draws nothing" is answered by reading the

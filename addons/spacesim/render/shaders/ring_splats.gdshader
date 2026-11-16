@@ -1,54 +1,54 @@
 shader_type spatial;
-// **A ring's particles, drawn as a sheet of discs.** Unshaded, depth-tested and depth-writing-never: the
-// particles are light and a medium, not geometry, and 300,000 of them must not fight over the depth buffer.
-// No culling, because a billboard has no winding.
+// **A ring's particles, each drawn as the rock it is.** Unshaded, depth-tested, never writing depth: 300,000
+// of them must not fight over the depth buffer, and a billboard has no winding.
 //
-// **`blend_mix`, and that is the whole of requirement `R33`.** An additive draw cannot show a dark thing:
-// a particle in the planet's shadow has no star light, so it would add nothing and stop existing — which
-// is exactly what the first attempt did, and what Evert rejected (*"I don't want the rocks in the shadow of
-// the planet disappearing, they should just not be lit from the sun"*). Mixing means a particle **extinguishes
-// what is behind it by its own transmittance and replaces it with its own radiance**, so an unlit one is a
-// dark particle over a bright planet, and an invisible one is impossible.
+// **`blend_mix`, because a dark thing must be able to occlude.** Evert, 2026-11-16: *"I don't want the rocks in
+// the shadow of the planet disappearing, they should just not be lit from the sun."* An additive draw cannot
+// show that — a particle with no star light would add nothing and stop existing. Mixing makes a rock an opaque
+// disc that replaces what is behind it by its own coverage and hands over its own radiance, so an unlit one is
+// **a dark rock in front of a bright planet**.
 //
-// **The optical depth is the only brightness number.** One drawn particle stands in for many real ones, so
-// it carries a share of the sheet's `tau`:
+// **And it is a rock, not a sheet.** The 300,000 drawn particles are the largest embedded objects; their own
+// optical depth is `2 x 10⁻⁷` against the band's `tau = 1.2`, so they carry a sixth of a millionth of the
+// band's light. Drawing them as the sheet is what made the first two builds orders of magnitude too bright —
+// the band itself is the *dust*, which is not modelled yet. So each particle contributes
 //
-//     alpha = 1 - exp(-(tau/mu) * share / overlaps)      share = r_px^2 / mean_r_px^2
+//     alpha     = its own coverage of the pixel,  min(1, pi * r_px^2)
+//     radiance  = the light IT receives and reflects, per particle
 //
-// and the radiance it hands over is `L / (1 - exp(-tau/mu))`. With `overlaps` particles landing on a pixel
-// those two compose to exactly `L` over a background dimmed by `exp(-tau/mu)` — the sheet's own reflectance
-// and its own transmittance, however many particles the pixel happens to catch. That is what makes the
-// brightness **independent of distance**, which is the property no per-splat scale factor can have.
+// and a pixel's light is the sum of the coverage the rocks give it. At a million kilometres that is a faint
+// scatter of dots, which is what 300,000 rocks *are*; the solid band waits for the dust.
+//
+// **The per-particle radiance is Lambert's own law, the same one the engine uses for a body's disc**
+// (`SpacesimLuminance.disc_luminance`): the light arriving at the particle, the fraction its material
+// reflects, and `(sin a + (pi - a) cos a)/pi` for the angle `a` between the star and the eye as seen FROM the
+// particle. That angle is why it cannot be one number for the band: from inside the rings the near particles
+// are lit from behind and the far ones from in front, and a flat uniform would draw a band that is equally
+// bright everywhere — which is the one thing a ring never is.
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, fog_disabled;
 
 // The pixel's angular size, from the camera's fov and the render target's height: a vertex stage has no
 // derivatives, so it cannot measure its own footprint.
 uniform float pixel_angle = 0.00122;
-// The band's optical depth, and the cosine of the eye's direction above the ring plane. Together they are
-// the path length through the slab, `tau / mu`.
-uniform float tau = 0.0;
-uniform float eye_cosine = 1.0;
-// **How many particles are expected to land on one pixel** — the count that makes the above compose to the
-// sheet rather than to a cloud of discs. Computed on the host each frame, because it needs the band's
-// projected area and the mean particle size, and a vertex stage knows neither.
-uniform float overlaps = 1.0;
-// The mean particle's screen radius, floored at one pixel — the denominator of each particle's share.
-uniform float mean_radius_px = 1.0;
-// The band's radiance in the engine's linear currency, and the floor a shadowed particle keeps.
+// **The light arriving at the band divided by pi, times the particles' bond albedo** — everything in
+// `disc_luminance` that is the same for every particle. The phase term is per particle, below.
 uniform vec3 glow_linear = vec3(1.0);
+// The floor a shadowed particle keeps: dark, and never absent.
 uniform vec3 unlit_linear = vec3(0.04);
-// **Which half of the ring this draw is.** A planet's air is transparent with the depth test off, so one
-// draw cannot be both in front of it and behind it. Evert, 2026-11-15: *"Cut the rings exactly on the
-// planet's centre so you split it into a front half that faces the camera and goes in front of the planet,
-// and a back half that goes behind the planet."*
+// Where the star is, in world space — the other half of the phase angle.
+uniform vec3 star_position = vec3(0.0);
+// **Which half of the ring this draw is.** A planet's air is transparent with the depth test off, so one draw
+// cannot be both in front of it and behind it. Evert, 2026-11-15: *"Cut the rings exactly on the planet's
+// centre so you split it into a front half that faces the camera and goes in front of the planet, and a back
+// half that goes behind the planet."*
 uniform vec3 split_direction = vec3(0.0, 0.0, 1.0);
 uniform float split_side = 0.0;
 uniform vec3 planet_origin = vec3(0.0);
 
-varying float v_alpha;
+varying float v_coverage;
+varying vec3 v_radiance;
 // Constant across a quad, but a hard shadow edge must not be interpolated across two instances that
-// disagree, so it is `flat` — an interpolated 0/1 pair would draw a smear of half-lit particles along the
-// shadow's edge.
+// disagree, so it is `flat`.
 varying flat float v_shadow;
 
 void vertex() {
@@ -58,36 +58,48 @@ void vertex() {
 	float distance = max(length(centre.xyz), 1.0);
 	// Its radius in metres, carried by the instance's own basis scale. **MODELVIEW, not MODEL_MATRIX**: for a
 	// MultiMesh the instance transform is folded into MODELVIEW_MATRIX and MODEL_MATRIX reads back as the
-	// identity, which is how every splat in the first attempt came out 400x too bright.
+	// identity, which is how every splat in an earlier build came out 400x too bright.
 	float radius = length(MODELVIEW_MATRIX[0].xyz);
 	// **One pixel of radius when its own disc is smaller** — a quad narrower than a pixel rasterises
-	// unreliably, and the flux it cannot deliver at that size is carried by `alpha` instead.
+	// unreliably — while the coverage below keeps the particle's TRUE area, so the floor costs nothing in
+	// light. This is the difference between a bright dot and the light a 100 m rock actually delivers.
 	float half_size = max(radius, distance * pixel_angle);
-	float radius_px = half_size / max(distance * pixel_angle, 1.0e-9);
-
-	float share = (radius_px * radius_px) / (mean_radius_px * mean_radius_px);
-	float depth = (tau / max(eye_cosine, 0.02)) * share / max(overlaps, 1.0e-6);
-	// `.g` is "draw this one": zero once a body stands for the spot, so the shape replaces the splat rather
-	// than growing through it, and **zero alpha also stops it occluding**, which is what hiding means here.
-	v_alpha = (1.0 - exp(-max(depth, 0.0))) * INSTANCE_CUSTOM.g;
+	float radius_px = radius / max(distance * pixel_angle, 1.0e-9);
+	// **The particle's share of the pixel it lands on**, and `1` once it covers the pixel outright. This is the
+	// whole of the flux law: a rock smaller than a pixel dims what is behind it by its own area and adds its own
+	// radiance times that area, which is exactly what a small opaque disc does.
+	//
+	// `.g` is "draw this one": zero once a body stands for the spot, so the shape replaces the splat rather than
+	// growing through it.
+	v_coverage = min(1.0, PI * radius_px * radius_px) * INSTANCE_CUSTOM.g;
 	v_shadow = INSTANCE_CUSTOM.r;
 
+	// **How much light this particle receives and reflects.** The phase angle is at the particle: the
+	// direction to the star against the direction to the eye. `INV_VIEW_MATRIX[3]` is the camera's own world
+	// position, so nothing has to be handed in twice.
+	vec3 to_world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
+	vec3 to_star = normalize(star_position - to_world);
+	vec3 to_eye = normalize(INV_VIEW_MATRIX[3].xyz - to_world);
+	float phase = acos(clamp(dot(to_star, to_eye), -1.0, 1.0));
+	float lambert = (sin(phase) + (PI - phase) * cos(phase)) / PI;
+	v_radiance = mix(unlit_linear, glow_linear * lambert, v_shadow);
+
 	vec3 offset = vec3(VERTEX.xy * 2.0 * half_size, 0.0);
-	// **The cut.** A particle on the other side of the planet belongs to the other draw, so this one collapses
-	// it to a point of no area — `return` is not allowed in a vertex stage, and a degenerate quad rasterises
+	// **The cut.** A particle on the other side of the planet belongs to the other draw, so this one collapses it
+	// to a point of no area — `return` is not allowed in a vertex stage, and a degenerate quad rasterises
 	// nothing.
 	//
-	// **A hidden particle is collapsed too, and that is a frame-rate fix rather than a look.** A spot that has a
-	// body has its splat switched off (`R26`), and switching it off by alpha alone still rasterises a quad the
-	// size of the shape it was replaced by — 300,000 of those, twice, is the fill rate the ring cannot afford.
-	if (v_alpha <= 0.0) {
+	// **A hidden particle is collapsed too, and that is a frame-rate fix rather than a look.** Switching a spot
+	// off by alpha alone still rasterises a quad the size of the shape it was replaced by, and 300,000 of those
+	// twice a frame is fill the ring cannot afford.
+	if (v_coverage <= 0.0) {
 		offset = vec3(0.0);
 	}
 	if (split_side != 0.0) {
 		vec3 world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
 		if (dot(world - planet_origin, split_direction) * split_side < 0.0) {
 			offset = vec3(0.0);
-			v_alpha = 0.0;
+			v_coverage = 0.0;
 		}
 	}
 	// A view-space offset in x and y is already screen-aligned, which is the whole of billboarding.
@@ -95,20 +107,12 @@ void vertex() {
 }
 
 void fragment() {
-	// **A disc, not a quad**: the quad is a place to draw the disc on. The edge is one texel wide, because a
-	// particle resolved to a few pixels must look round rather than square.
-	//
-	// **No `discard`.** It is the obvious way to clip the corners and it costs more than it saves: a shader that
-	// discards cannot use early depth culling on the hardware that has it, and this draws 300,000 quads twice a
-	// frame. An alpha of zero at the corners looks the same and blends nothing.
+	// **A disc, not a quad**: the quad is a place to draw the disc on, and the edge is one texel wide so a rock
+	// resolved to a few pixels looks round rather than square. **No `discard`** — a shader that discards cannot
+	// use early depth culling on hardware that has it, and this draws 300,000 quads twice a frame; an alpha of
+	// zero at the corners looks the same and blends nothing.
 	float radial = length(UV * 2.0 - 1.0);
 	float edge = 1.0 - smoothstep(1.0 - max(fwidth(radial), 0.01), 1.0, radial);
-	// **The accumulated radiance must come out at `glow`, however many particles land on the pixel.** With
-	// `n` layers each `alpha` and radiance `S`, the sum is `S * (1 - (1-alpha)^n)`, and `(1-alpha)^n` is the
-	// slab's transmittance `exp(-tau/mu)` by construction — so `S` is the band's radiance over the fraction
-	// of the frame the sheet takes over. A shadowed particle keeps the unlit floor: dark, and still drawn.
-	vec3 radiance = mix(unlit_linear, glow_linear, v_shadow);
-	float absorbed = max(1.0 - exp(-tau / max(eye_cosine, 0.02)), 1.0e-4);
-	ALBEDO = radiance / absorbed;
-	ALPHA = v_alpha * edge;
+	ALBEDO = v_radiance;
+	ALPHA = v_coverage * edge;
 }
