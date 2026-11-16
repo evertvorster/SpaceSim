@@ -448,47 +448,33 @@ static func deck_material(
 ## The deck shader's simplest case with no map at all: one colour, lit by the star through the same air and the
 ## same occlusion every other layer uses. **It carries no map and no alpha** — it is the floor, and a floor that
 ## could become transparent would put the stars back.
-## **Where every transparent draw sits, in the order the engine actually sorts them.**
+## **The transparent draws of a body, and the one thing that is NOT mine to change here.**
 ##
-## **The rule, from the source** (`servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h`,
-## 4.7.2-stable):
+## **The engine's rule**, from the source (`forward_clustered/render_forward_clustered.h`, 4.7.2-stable):
 ##
 ##     SortByReverseDepthAndPriority: (priority equal) ? depth greater first : priority smaller first
 ##
-## So the alpha list is sorted by **ascending `render_priority`**, and a tie is broken by the surface's own
-## depth, farthest first. **A tie is the danger, not a slowness**: every layer below is a child of the body's
-## node, so their depths are equal to the millimetre, and `SortArray` is not stable — the outcome then depends
-## on the order the culler happened to add them in, which changes with the smallest camera movement.
+## so the alpha list is sorted by **ascending `render_priority`**, and a tie is broken by depth — which for two
+## children of one node is equal to the millimetre, and `SortArray` is not stable. A tie is therefore decided by
+## nothing at all.
 ##
-## That is exactly what Evert saw, and it is why the fault was intermittent. 2026-11-16: *"In the first image,
-## the shaders are drawn in the correct order. In the second image, the atmosphere shader is drawn last, or
-## closest to the eye, and is overlapping the ring shader."* and *"The translation between good and bad is tiny.
-## There is something that shifts when I cross the terminator line."* Two layers were both at 0 — the air shell
-## and the first cloud deck — so a 0.47 Mm drift could put the air on top of everything, which is a blue shell
-## over the planet, its clouds and the ring's far half, or put the deck on top and leave the picture correct.
+## **The sea is the value this file has earned the hard way**, and it is the one recorded lesson: it was 0 while
+## the decks run `0 … −(n−1)`, so on Earth the sea and the single deck tied and the glint composited over the
+## cloud. `OCEAN_RENDER_PRIORITY = −8` fixed it (`b0d7c78`, 2026-11-03).
 ##
-## **The order below is the picture that works, with every value distinct.** Furthest first:
+## **The air and the decks are a settled stack that must not be reordered.** Their ordering was fought over for
+## weeks — the segmented atmosphere pass, the depth clip, the deck as a segment, the undersides — and Evert,
+## 2026-11-16: *"We spent a long, long time optimizing air and cloud decks, don't mess up their order. You can
+## check mempalace for more details there."* So they keep the values they have: air `0`, decks `−index`.
 ##
-##     a ring's far half        −120
-##     a body's interior        −110
-##     the sea                   −50
-##     the air                   −49   ← before every deck, which is the order that draws properly
-##     cloud decks               −(index + 30)   → −30, −31, …
-##     a ring's near half       +100
-##
-## The engine's range is **−128 … +128**; outside it a priority is *refused* and the material keeps 0, which is
-## the tie this exists to prevent. Ten decks and ten more slots of room either side are inside it.
-##
-## **The air before the decks** is not what geometry would suggest — light scatters above the cloud tops — but
-## it is what draws: with the air *after* them, an atmosphere's `blend_mix` alpha is near 1 and it paints a
-## solid blue shell over the clouds. Evert, 2026-11-16: *"The atmosphere lost its translucency, so it renders
-## as solid blue rather than show the cloud decks inside."* That attempt reordered four layers at once; this one
-## changes only the values that were tied.
-const RING_FAR_PRIORITY := -120
-const INTERIOR_RENDER_PRIORITY := -110
-const OCEAN_RENDER_PRIORITY := -50
-const AIR_RENDER_PRIORITY := -49
-const DECK_PRIORITY_BASE := -30
+## **That leaves a tie between the air and the first deck, and it is deliberately left standing.** Two attempts to
+## break it made a thick atmosphere paint a solid blue shell over the planet's own clouds — worse than the fault.
+## Whoever next opens that stack should read the palace first (`SpaceSim`, key `cloud-decks`, `atmosphere`), and
+## fly it on its own branch.
+const INTERIOR_RENDER_PRIORITY := 0
+const OCEAN_RENDER_PRIORITY := -8
+const AIR_RENDER_PRIORITY := 0
+const DECK_PRIORITY_BASE := 0
 
 
 static func interior_material(body: SpacesimSceneBody, palette: Color) -> ShaderMaterial:
@@ -688,8 +674,8 @@ static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
 	# **`RENDER_PRIORITY_MIN` is −128**, and a priority outside that range is *refused outright*
 	# (`material.cpp:71`: "Condition p_priority < RENDER_PRIORITY_MIN is true") — the material then keeps 0, which is
 	# exactly the tie this line exists to break. Measured 2026-11-03: `-1000` printed that error twice per body and
-	# changed no pixel. `OCEAN_RENDER_PRIORITY` is now the file-level −50, which sits below the air (−49) and the
-	# decks (−30 and down) and above a body's interior (−110) — see the table at `RING_FAR_PRIORITY`.
+	# changed no pixel. Eight is below any deck this engine can have (one per condensed species) and leaves the rest
+	# of the range alone — see the note at `INTERIOR_RENDER_PRIORITY` for why the air and the decks are not moved.
 	material.render_priority = OCEAN_RENDER_PRIORITY
 	material.set_shader_parameter("ocean_color", SpacesimSurfaceModel.band_color(liquid))
 	var shading := SpacesimSurfaceModel.band_shading(liquid)

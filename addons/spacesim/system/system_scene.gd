@@ -725,7 +725,9 @@ func _add_orbital_frame(body: SpacesimSceneBody) -> void:
 
 func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
-	body.node.name = body.name
+	# **A node with no name is `@Node3D@1201` on the HUD**, because the markers draw the node's own name and the
+	# readout does too. A body always has an id, so that is the fallback — a labelled body names itself.
+	body.node.name = body.name if not body.name.is_empty() else body.id
 	body.node.position = body.position
 	body.node.set_meta("spacesim_body", body.id)
 	system_frame.add_child(body.node)

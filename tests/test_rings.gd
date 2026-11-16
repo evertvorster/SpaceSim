@@ -448,64 +448,33 @@ func _test_the_layers_cannot_tie(h, root: Node) -> void:
 	h.check(layers.has("interior") and layers.has("air") and layers.has("ocean"),
 		"the planet's own layers are here")
 
-	# **Every layer distinct, ascending, and inside the engine's range.** This is the assertion the previous two
-	# attempts did not have, and the tie it would have caught is what made the fault intermittent: the air and the
-	# first deck were both at 0, the alpha list is sorted by (priority, then depth), every layer is a child of the
-	# same node so their depths are equal, and `SortArray` is not stable. A 0.47 Mm drift was enough to decide
-	# which of the two drew last.
-	var order := ["ring_far", "interior", "ocean", "air"]
-	for name in order:
-		h.check(layers.has(name), "%s is drawn" % name)
-	var previous := -129
-	for name in order:
-		if not layers.has(name):
-			continue
-		var priority := int(layers[name])
-		h.check(priority > previous, "%s sits beyond the one before it (%d > %d)"
-			% [name, priority, previous])
+	# **The claim this branch makes, and the only one**: both halves of a ring sit outside everything a planet
+	# draws, and nothing ties with them. The planet's own stack — sea, air, decks — is NOT asserted in order,
+	# because it is a settled thing that must not be reordered here: Evert, 2026-11-16: *"We spent a long, long
+	# time optimizing air and cloud decks, don't mess up their order."* The air and the first deck tie at 0 to
+	# this day, deliberately; see `SpacesimBodyRenderer.INTERIOR_RENDER_PRIORITY`.
+	h.check(layers.has("interior") and layers.has("air") and layers.has("ocean"),
+		"the planet's own layers are here")
+	var highest_planet := -129
+	var lowest_planet := 129
+	for name in planet_layers:
+		var priority := int(planet_layers[name])
+		highest_planet = maxi(highest_planet, priority)
+		lowest_planet = mini(lowest_planet, priority)
 		h.check(priority >= -128 and priority <= 128, "%s is inside the engine's range (%d)" % [name, priority])
-		previous = priority
-	var deepest_deck := 129
-	var top_deck := -129
+	h.check(SpacesimRingView.FAR_PRIORITY < lowest_planet,
+		"the far half of a ring draws before everything the planet wears (%d < %d)"
+			% [SpacesimRingView.FAR_PRIORITY, lowest_planet])
+	h.check(SpacesimRingView.NEAR_PRIORITY > highest_planet,
+		"and the near half after all of it (%d > %d)"
+			% [SpacesimRingView.NEAR_PRIORITY, highest_planet])
+	var tied := ""
 	for name in layers:
-		var priority := int(layers[name])
-		h.check(priority >= -128 and priority <= 128, "%s is inside the engine's range (%d)" % [name, priority])
-		h.check(layers.keys().count(name) == 1, "%s is named once" % name)
-		if not String(name).begins_with("deck_"):
+		if String(name).begins_with("ring_"):
 			continue
-		h.check(priority > previous, "%s draws after the air (%d > %d)" % [name, priority, previous])
-		h.check(priority < SpacesimRingView.NEAR_PRIORITY,
-			"%s draws before the ring's near half (%d < %d)"
-				% [name, priority, SpacesimRingView.NEAR_PRIORITY])
-		deepest_deck = mini(deepest_deck, priority)
-		top_deck = maxi(top_deck, priority)
-
-	# **A tie only matters between layers that can share a frame**, which means the layers of ONE body plus the
-	# ring — two planets' decks may sit at the same value because their depths differ, and the depth sort
-	# separates those.
-	var ties := ""
-	var groups := {"ring": [], "Saturn": [], "Earth": []}
-	for name in layers:
-		var matched := false
-		for body_name in ["Saturn", "Earth"]:
-			if String(name).ends_with("_" + body_name):
-				(groups[body_name] as Array).append(name)
-				matched = true
-		if not matched:
-			(groups["ring"] as Array).append(name)
-	for group in groups:
-		var values := {}
-		for name in groups[group]:
-			var priority := int(layers[name])
-			if values.has(priority):
-				ties += "%s and %s both at %d; " % [values[priority], name, priority]
-			values[priority] = name
-	h.check(ties.is_empty(), "and no two layers that share a frame tie (%s)"
-		% ("none" if ties.is_empty() else ties))
-	h.check(SpacesimRingView.FAR_PRIORITY < deepest_deck,
-		"the far half is beyond every layer a planet wears (%d < %d)"
-			% [SpacesimRingView.FAR_PRIORITY, deepest_deck])
-	h.check(deepest_deck <= top_deck, "the decks are ordered among themselves (%d … %d)" % [deepest_deck, top_deck])
+		if int(layers[name]) == SpacesimRingView.FAR_PRIORITY or int(layers[name]) == SpacesimRingView.NEAR_PRIORITY:
+			tied = "%s shares a ring's priority (%d)" % [name, int(layers[name])]
+	h.check(tied.is_empty(), "and no planet layer ties with a ring half (%s)" % ("none" if tied.is_empty() else tied))
 
 	root.remove_child(scene.container)
 	scene.container.free()
@@ -627,6 +596,8 @@ func _test_a_rock_is_a_body_that_sets_the_unit(h, root: Node) -> void:
 			var unit := SpacesimTravelScale.local_length(to_surface, 10.0, 1.0e11)
 			h.check(unit < 1.0e6, "the local unit really is small near it (%.0f m)" % unit)
 
+	# **`R25`: the label is what a person reads, and it is the node's own name** — the markers draw `node.name`, so
+	# a body whose node was left unnamed shows as `@Node3D@1201` on the HUD and in the readout.
 	# **`R23`: the pool is only offered while the band is what the ship is flying through.** From beside a
 	# particle the band wins; from a tenth of an AU out, Saturn does, and a band offers its nearest spot alone.
 	h.check(view.nearest_distance(eye) < 1.0e6,
@@ -636,6 +607,12 @@ func _test_a_rock_is_a_body_that_sets_the_unit(h, root: Node) -> void:
 	h.check(view.nearest_distance(far_eye) > saturn_range,
 		"and from far away, Saturn is nearer than any spot (%.0f Mm against %.0f Mm)"
 			% [view.nearest_distance(far_eye) / 1e6, saturn_range / 1e6])
+
+	# **`R25`: the label a person reads is the NODE's own name**, because that is what the markers draw — a body
+	# whose node was left unnamed shows as `@Node3D@1201` on the HUD and in the readout.
+	h.check(rocks.size() > 0 and String(rocks[0].node.name).begins_with("Saturn Rock"),
+		"the rock's node carries the label a person reads (%s)"
+			% (String(rocks[0].node.name) if rocks.size() > 0 else "no rock"))
 
 	# **And it goes when the eye does**, with its body — nothing is left behind.
 	manager.update([], eye, camera, pixel, false)
