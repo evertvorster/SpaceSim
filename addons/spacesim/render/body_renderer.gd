@@ -439,7 +439,7 @@ static func deck_material(
 	# **Every deck is centred on the same body, so a distance sort cannot separate the stack** — the order has
 	# to be stated. The deepest composites first (lower priority is drawn earlier), leaving the highest deck
 	# over the top of it, which is what a belt *is*: a thin bright deck over a browner one.
-	material.render_priority = -seed_layer
+	material.render_priority = DECK_PRIORITY_BASE - seed_layer
 	return material
 
 
@@ -448,30 +448,47 @@ static func deck_material(
 ## The deck shader's simplest case with no map at all: one colour, lit by the star through the same air and the
 ## same occlusion every other layer uses. **It carries no map and no alpha** — it is the floor, and a floor that
 ## could become transparent would put the stars back.
-## **Where a body's own transparent draws sit, and what is NOT settled about them.**
+## **Where every transparent draw sits, in the order the engine actually sorts them.**
 ##
-## Godot sorts transparent draws by `render_priority` and then by distance — and every layer of a body is a
-## child of that body's node, so their distances are equal to the metre. Equal priority therefore means no
-## order at all. Evert, 2026-11-15: *"I still see ordering effects, but not always... there is more than just
-## the atmosphere, there are cloud decks and the internal surface of Saturn as well, and they need to be
-## properly ordered."*
+## **The rule, from the source** (`servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h`,
+## 4.7.2-stable):
 ##
-## **The sea is the one that is settled**, because it was measured: `OCEAN_RENDER_PRIORITY` = −8 puts it under
-## every deck (below, and 2026-11-03 records the tie it broke). The rest of the stack — interior, air, decks —
-## is unchanged from `main` and is **known to tie**: the air and the first deck are both at 0.
+##     SortByReverseDepthAndPriority: (priority equal) ? depth greater first : priority smaller first
 ##
-## **A table that reorders them was tried and reverted, 2026-11-16.** Moving the air above the decks left a
-## thick atmosphere drawing `blend_mix` with an alpha near 1 *over* the clouds, so Saturn and Earth rendered as
-## a solid blue shell with its decks invisible — Evert: *"The atmosphere lost its translucency, so it renders
-## as solid blue rather than show the cloud decks inside."* That is the same failure the first attempt at this
-## produced, and the lesson is that the air's place in this stack is **not** the one geometry suggests: it
-## draws before the decks today, and that is the picture that works.
+## So the alpha list is sorted by **ascending `render_priority`**, and a tie is broken by the surface's own
+## depth, farthest first. **A tie is the danger, not a slowness**: every layer below is a child of the body's
+## node, so their depths are equal to the millimetre, and `SortArray` is not stable — the outcome then depends
+## on the order the culler happened to add them in, which changes with the smallest camera movement.
 ##
-## So this file claims only what has been flown. `tests/test_rings.gd` asserts the ring's two bands sit outside
-## every layer a body draws — which is what the rings need — and asserts nothing about the order among the
-## body's own layers, because that order is still being found.
-const INTERIOR_RENDER_PRIORITY := 0
-const AIR_RENDER_PRIORITY := 0
+## That is exactly what Evert saw, and it is why the fault was intermittent. 2026-11-16: *"In the first image,
+## the shaders are drawn in the correct order. In the second image, the atmosphere shader is drawn last, or
+## closest to the eye, and is overlapping the ring shader."* and *"The translation between good and bad is tiny.
+## There is something that shifts when I cross the terminator line."* Two layers were both at 0 — the air shell
+## and the first cloud deck — so a 0.47 Mm drift could put the air on top of everything, which is a blue shell
+## over the planet, its clouds and the ring's far half, or put the deck on top and leave the picture correct.
+##
+## **The order below is the picture that works, with every value distinct.** Furthest first:
+##
+##     a ring's far half        −120
+##     a body's interior        −110
+##     the sea                   −50
+##     the air                   −49   ← before every deck, which is the order that draws properly
+##     cloud decks               −(index + 30)   → −30, −31, …
+##     a ring's near half       +100
+##
+## The engine's range is **−128 … +128**; outside it a priority is *refused* and the material keeps 0, which is
+## the tie this exists to prevent. Ten decks and ten more slots of room either side are inside it.
+##
+## **The air before the decks** is not what geometry would suggest — light scatters above the cloud tops — but
+## it is what draws: with the air *after* them, an atmosphere's `blend_mix` alpha is near 1 and it paints a
+## solid blue shell over the clouds. Evert, 2026-11-16: *"The atmosphere lost its translucency, so it renders
+## as solid blue rather than show the cloud decks inside."* That attempt reordered four layers at once; this one
+## changes only the values that were tied.
+const RING_FAR_PRIORITY := -120
+const INTERIOR_RENDER_PRIORITY := -110
+const OCEAN_RENDER_PRIORITY := -50
+const AIR_RENDER_PRIORITY := -49
+const DECK_PRIORITY_BASE := -30
 
 
 static func interior_material(body: SpacesimSceneBody, palette: Color) -> ShaderMaterial:
@@ -671,9 +688,8 @@ static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
 	# **`RENDER_PRIORITY_MIN` is −128**, and a priority outside that range is *refused outright*
 	# (`material.cpp:71`: "Condition p_priority < RENDER_PRIORITY_MIN is true") — the material then keeps 0, which is
 	# exactly the tie this line exists to break. Measured 2026-11-03: `-1000` printed that error twice per body and
-	# changed no pixel. Eight is below any deck this engine can have (one per condensed species) and leaves the rest
-	# of the range alone.
-	const OCEAN_RENDER_PRIORITY := -8
+	# changed no pixel. `OCEAN_RENDER_PRIORITY` is now the file-level −50, which sits below the air (−49) and the
+	# decks (−30 and down) and above a body's interior (−110) — see the table at `RING_FAR_PRIORITY`.
 	material.render_priority = OCEAN_RENDER_PRIORITY
 	material.set_shader_parameter("ocean_color", SpacesimSurfaceModel.band_color(liquid))
 	var shading := SpacesimSurfaceModel.band_shading(liquid)

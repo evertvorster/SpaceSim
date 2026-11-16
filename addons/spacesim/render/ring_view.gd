@@ -24,7 +24,9 @@ extends Node3D
 ## [SpacesimBodyRenderer]. A tie is not an order: Godot sorts by `render_priority` and then by distance, and
 ## every one of these layers is a child of the planet's node, so their distances are equal to the metre. The
 ## previous attempt left the air and a cloud deck both at 0 and took a flight to find out.
-const FAR_PRIORITY := -100
+## **The two halves sit outside the planet's whole stack** — see the table at
+## `SpacesimBodyRenderer.RING_FAR_PRIORITY`, which is where the engine's actual sort rule is written down.
+const FAR_PRIORITY := SpacesimBodyRenderer.RING_FAR_PRIORITY
 const NEAR_PRIORITY := 100
 
 const SHADER := preload("res://addons/spacesim/render/shaders/ring_splats.gdshader")

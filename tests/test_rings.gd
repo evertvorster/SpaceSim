@@ -25,6 +25,7 @@ func run(h, root: Node) -> void:
 	_test_the_band_is_as_bright_as_saturn_says(h)
 	_test_the_shadow_is_the_planets(h, root)
 	_test_the_split_is_two_draws_of_everything(h, root)
+	_test_the_split_agrees_with_the_geometry(h, root)
 	_test_the_layers_cannot_tie(h, root)
 	_test_a_spot_becomes_a_rock_by_one_rule(h, root)
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
@@ -355,6 +356,68 @@ func _test_the_split_is_two_draws_of_everything(h, root: Node) -> void:
 	scene.container.free()
 
 
+## **The split's own contract, in the engine's terms.** A particle that is *visibly in front of the planet* must be
+## in the draw that goes over the planet's air, and one that is behind it must be in the other. That is the whole
+## of `R10`–`R12`, and it is a geometric question with an exact answer — so it is asserted against a ray-sphere
+## test rather than argued about.
+##
+## The engine's transparent sort is **ascending `render_priority`, then far to near on a tie**
+## (`SortByReverseDepthAndPriority`, `render_forward_clustered.h`, 4.7.2-stable), so the near draw must be the
+## higher priority. `tests/test_rings.gd` checks that too.
+func _test_the_split_agrees_with_the_geometry(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var saturn := scene.body_by_id("planet:saturn")
+	var centre := saturn.node.global_position
+	var radius := saturn.radius
+	var view := scene.rings[1]
+	var band: SpacesimPopulation = sol.population_by_id("population:ring_b")
+	var cloud := SpacesimParticleCloud.of(band)
+
+	# **A grazing view**, because that is the pose in which the ring's near half passes in front of the disc at
+	# all: seen face-on, the sheet through the planet's centre crosses every ray *behind* the near surface, so
+	# nothing of it is in front. Near the ring plane, the near half crosses the disc and the split has real work.
+	var normal := (band.ring_axis as Vector3).normalized()
+	var across_bearing := Vector3.UP.cross(normal).normalized()
+	var eye := centre + (across_bearing + normal * 0.12).normalized() * 1.4e8
+	var direction := (eye - centre).normalized()
+	var over_disc := 0
+	var wrong := 0
+	var front := 0
+	var behind := 0
+	for index in range(0, cloud.size(), 97):
+		var world: Vector3 = view.global_transform * cloud.positions[index]
+		var to_particle := world - eye
+		var along := to_particle.dot(-direction)  # distance along the view direction
+		# Where the ray through this particle meets the planet, if it does.
+		var v := to_particle.normalized()
+		var b := (eye - centre).dot(v)
+		var c := (eye - centre).length_squared() - radius * radius
+		var discriminant := b * b - c
+		if discriminant <= 0.0 or along <= 0.0:
+			continue
+		over_disc += 1
+		var t_surface := -b - sqrt(discriminant)
+		var is_front := to_particle.length() < t_surface
+		var in_near_draw := (world - centre).dot(direction) > 0.0
+		if is_front:
+			front += 1
+		else:
+			behind += 1
+		if is_front != in_near_draw:
+			wrong += 1
+	h.check(over_disc > 20, "some particles lie over the planet's disc (%d sampled)" % over_disc)
+	h.check(front > 5 and behind > 5,
+		"with both in front of it and behind it (%d front, %d behind)" % [front, behind])
+	h.check(wrong == 0,
+		"and every one of them is in the draw that matches where it is (%d wrong)" % wrong)
+
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
 ## **`R13`–`R15`** — the transparent stack, declared once and asserted here: **every layer a body draws sits in its
 ## own band, in order, and no two of them can tie.** A tie is not a slow order, it is no order — the layers are all
 ## children of the body's node, so their distances are equal.
@@ -385,30 +448,64 @@ func _test_the_layers_cannot_tie(h, root: Node) -> void:
 	h.check(layers.has("interior") and layers.has("air") and layers.has("ocean"),
 		"the planet's own layers are here")
 
-	# **The two claims the rings need, and no others.** The near half after every layer a planet wears, the far
-	# half before all of them — and every priority inside the engine's range, because outside it a priority is
-	# refused and the material keeps 0, which is a tie.
-	var highest_planet := -129
-	var lowest_planet := 129
-	for name in planet_layers:
-		var priority := int(planet_layers[name])
-		highest_planet = maxi(highest_planet, priority)
-		lowest_planet = mini(lowest_planet, priority)
+	# **Every layer distinct, ascending, and inside the engine's range.** This is the assertion the previous two
+	# attempts did not have, and the tie it would have caught is what made the fault intermittent: the air and the
+	# first deck were both at 0, the alpha list is sorted by (priority, then depth), every layer is a child of the
+	# same node so their depths are equal, and `SortArray` is not stable. A 0.47 Mm drift was enough to decide
+	# which of the two drew last.
+	var order := ["ring_far", "interior", "ocean", "air"]
+	for name in order:
+		h.check(layers.has(name), "%s is drawn" % name)
+	var previous := -129
+	for name in order:
+		if not layers.has(name):
+			continue
+		var priority := int(layers[name])
+		h.check(priority > previous, "%s sits beyond the one before it (%d > %d)"
+			% [name, priority, previous])
 		h.check(priority >= -128 and priority <= 128, "%s is inside the engine's range (%d)" % [name, priority])
-	h.check(SpacesimRingView.FAR_PRIORITY < lowest_planet,
-		"the far half of a ring draws before everything the planet wears (%d < %d)"
-			% [SpacesimRingView.FAR_PRIORITY, lowest_planet])
-	h.check(SpacesimRingView.NEAR_PRIORITY > highest_planet,
-		"and the near half after all of it (%d > %d)"
-			% [SpacesimRingView.NEAR_PRIORITY, highest_planet])
-	h.check(SpacesimRingView.NEAR_PRIORITY >= -128 and SpacesimRingView.NEAR_PRIORITY <= 128
-		and SpacesimRingView.FAR_PRIORITY >= -128 and SpacesimRingView.FAR_PRIORITY <= 128,
-		"both halves are inside the engine's range")
+		previous = priority
+	var deepest_deck := 129
+	var top_deck := -129
+	for name in layers:
+		var priority := int(layers[name])
+		h.check(priority >= -128 and priority <= 128, "%s is inside the engine's range (%d)" % [name, priority])
+		h.check(layers.keys().count(name) == 1, "%s is named once" % name)
+		if not String(name).begins_with("deck_"):
+			continue
+		h.check(priority > previous, "%s draws after the air (%d > %d)" % [name, priority, previous])
+		h.check(priority < SpacesimRingView.NEAR_PRIORITY,
+			"%s draws before the ring's near half (%d < %d)"
+				% [name, priority, SpacesimRingView.NEAR_PRIORITY])
+		deepest_deck = mini(deepest_deck, priority)
+		top_deck = maxi(top_deck, priority)
 
-	# **The order among the planet's own layers is NOT asserted**, and that is deliberate: the air and the first
-	# deck tie today, it is known, and reordering them twice now has rendered the decks and the atmosphere
-	# invisible (Evert: *"the atmosphere lost its translucency, so it renders as solid blue"*). When that stack
-	# can be flown, this is where the table goes back.
+	# **A tie only matters between layers that can share a frame**, which means the layers of ONE body plus the
+	# ring — two planets' decks may sit at the same value because their depths differ, and the depth sort
+	# separates those.
+	var ties := ""
+	var groups := {"ring": [], "Saturn": [], "Earth": []}
+	for name in layers:
+		var matched := false
+		for body_name in ["Saturn", "Earth"]:
+			if String(name).ends_with("_" + body_name):
+				(groups[body_name] as Array).append(name)
+				matched = true
+		if not matched:
+			(groups["ring"] as Array).append(name)
+	for group in groups:
+		var values := {}
+		for name in groups[group]:
+			var priority := int(layers[name])
+			if values.has(priority):
+				ties += "%s and %s both at %d; " % [values[priority], name, priority]
+			values[priority] = name
+	h.check(ties.is_empty(), "and no two layers that share a frame tie (%s)"
+		% ("none" if ties.is_empty() else ties))
+	h.check(SpacesimRingView.FAR_PRIORITY < deepest_deck,
+		"the far half is beyond every layer a planet wears (%d < %d)"
+			% [SpacesimRingView.FAR_PRIORITY, deepest_deck])
+	h.check(deepest_deck <= top_deck, "the decks are ordered among themselves (%d … %d)" % [deepest_deck, top_deck])
 
 	root.remove_child(scene.container)
 	scene.container.free()
