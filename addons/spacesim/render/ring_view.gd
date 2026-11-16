@@ -50,7 +50,15 @@ var shaded_fraction := 0.0
 
 
 ## Build the draw for one population, parented to the node of the body it orbits.
-static func of(population: SpacesimPopulation, cloud: SpacesimParticleCloud) -> SpacesimRingView:
+##
+## **`local_axis` is the ring plane's normal in the PARENT's frame**, and it defaults to the population's own
+## `ring_axis` — which is right only when the parent is not itself tilted. The scene tilts a ringed planet so its
+## own pole is the ring's axis (see `SpacesimSystemScene._build_rings`), because a planet's mesh is drawn with
+## model-space +Y as its pole and an untilted node would put the rings across the poles; once that is done the
+## plane is `Vector3.UP` in the parent's frame and nothing else has to know.
+static func of(
+	population: SpacesimPopulation, cloud: SpacesimParticleCloud, local_axis := Vector3.ZERO
+) -> SpacesimRingView:
 	var view := SpacesimRingView.new()
 	view.name = "Ring_%s" % (population.id if population != null else "?")
 	view._population = population
@@ -59,7 +67,8 @@ static func of(population: SpacesimPopulation, cloud: SpacesimParticleCloud) -> 
 	# than the world's. The particles are generated in this node's own x-y plane, so the basis orients every
 	# one of them and nothing else has to know about the tilt.
 	if population != null:
-		view.basis = basis_for(population.ring_axis)
+		var axis := local_axis if local_axis.length_squared() > 0.0 else population.ring_axis
+		view.basis = basis_for(axis)
 	if cloud == null or cloud.size() == 0:
 		return view
 	view._build_multimesh()

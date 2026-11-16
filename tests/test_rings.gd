@@ -23,6 +23,7 @@ func run(h, root: Node) -> void:
 	_test_the_nearest_is_the_nearest(h)
 	_test_the_closest_point_is_trigonometry(h)
 	_test_the_band_is_as_bright_as_saturn_says(h)
+	_test_the_rings_encircle_the_equator(h, root)
 	_test_the_shadow_is_the_planets(h, root)
 	_test_the_split_is_two_draws_of_everything(h, root)
 	_test_the_split_agrees_with_the_geometry(h, root)
@@ -246,6 +247,39 @@ func _test_the_band_is_as_bright_as_saturn_says(h) -> void:
 	h.check(lit > 0.0, "a lit band has radiance (%.4f)" % lit)
 	h.check(unlit > 0.0 and unlit < lit * 0.2,
 		"and a shadowed one is dark but not gone (%.4f)" % unlit)
+
+
+## **The rings encircle the planet's equator, not its poles.** Evert, 2026-11-16: *"are Saturn's rings not around
+## its equator? On this screen it looks like they go across the poles."* A body's mesh is drawn with model-space
+## +Y as its pole (the engine has no obliquity), so a ring laid in an authored plane that disagreed with +Y crossed
+## the poles. The scene now tilts the planet to the ring's axis, and this asserts the three things that must then
+## agree: the ring's normal, the planet's own pole, and the authored axis.
+func _test_the_rings_encircle_the_equator(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var saturn := scene.body_by_id("planet:saturn")
+	var band: SpacesimPopulation = sol.population_by_id("population:ring_b")
+	var view := scene.rings[1]
+	var ring_normal := (view.global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
+	var planet_pole := saturn.node.global_transform.basis.y.normalized()
+	var authored := (band.ring_axis as Vector3).normalized()
+	h.check_near(ring_normal.dot(planet_pole), 1.0,
+		"the ring's plane is the planet's equator (%.4f)" % ring_normal.dot(planet_pole), 0.001)
+	h.check_near(planet_pole.dot(authored), 1.0,
+		"and the planet's pole is the axis the content authored (%.4f)" % planet_pole.dot(authored), 0.001)
+	# **The bands follow the pole**: the body's model-space +Y is its axis, so a vertex at the pole is along it.
+	h.check(planet_pole.dot(Vector3.UP) < 0.999,
+		"the planet is actually tilted, not left on the engine's axis (%s)" % str(planet_pole))
+	# **A body with no rings is untouched**, or every moon would lean for no reason.
+	var titan := scene.body_by_id("moon:titan")
+	if titan != null:
+		h.check_near(titan.node.global_transform.basis.y.dot(Vector3.UP), 1.0,
+			"a moon with no rings keeps the engine's pole", 0.001)
+
+	root.remove_child(scene.container)
+	scene.container.free()
 
 
 ## **`R8`, `R9`** — the planet's shadow, on the rings and nowhere else.

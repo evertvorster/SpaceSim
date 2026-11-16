@@ -225,8 +225,18 @@ func _build_rings() -> void:
 		if parent == null or parent.node == null:
 			push_warning("%s orbits '%s', which has no node" % [population.id, population.parent_id])
 			continue
+		# **A planet's pole is the axis of its rings.** The engine has no obliquity — a body's node is only ever
+		# translated — so a body's mesh is drawn with model-space +Y as its pole, and a ring laid in the authored
+		# plane alone would cross the planet's poles instead of encircling its equator. Evert, 2026-11-16: *"are
+		# Saturn's rings not around its equator? On this screen it looks like they go across the poles."*
+		#
+		# So the ring's authored axis **tilts the planet**, once, and the ring is then `UP` in the parent's own
+		# frame. A body with no rings keeps +Y. That also makes the inclination a season: as the planet moves
+		# round its orbit the star's angle to its pole changes, exactly as a real axial tilt does.
+		var pole := population.ring_axis.normalized() if population.ring_axis.length_squared() > 0.0 else Vector3.UP
+		parent.node.basis = Basis(Quaternion(Vector3.UP, pole))
 		var cloud := SpacesimParticleCloud.of(population)
-		var view := SpacesimRingView.of(population, cloud)
+		var view := SpacesimRingView.of(population, cloud, Vector3.UP)
 		parent.node.add_child(view)
 		rings.append(view)
 		var bodies := SpacesimFragmentBodies.new(population, self)
