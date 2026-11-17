@@ -1564,7 +1564,15 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# count plus a quantised altitude and direction — which took two faults to get right (a packed int
 		# that collided, then a bucket on `log(d/R)` that went flat near the ground and stopped refining).
 		# A gate on what the law actually depends on cannot go stale in either of those ways.
-		var to_eye := (observer - body.node.global_position).normalized()
+		# **In the body's own frame**, because every patch lives there and the walk measures the eye's direction
+		# against patch directions on the model's sphere. Evert, 2026-11-16: *"The subdivision code for the LOD
+		# meshes don't seem to subdivide exactly below my ship anymore."* It was the last place still subtracting
+		# the body's centre in world space and handing the answer to model-space code — so the refinement followed
+		# the ship round a sphere that is tilted by the body's own obliquity (26.7 degrees on Saturn, 23.4 on
+		# Earth): an edge of detail offset from the ship by an eighth of a radius.
+		var to_eye := (
+			_body_basis(body).inverse() * (observer - body.node.global_position)
+		).normalized()
 		var cover := _cover_angle(body, distance)
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
@@ -1959,6 +1967,15 @@ func _publish_air(body: SpacesimSceneBody) -> void:
 ##
 ## **This is not `_publish_air`'s job.** That one publishes what does not change — the optics, the band's radii
 ## — once, at build. These three change whenever the ship turns.
+## **The frame a body's own geometry is in** — its node's basis, which since the tilts is the body's real pole, not
+## the engine's +Y. Any quantity handed to model-space code (a patch direction, a vertex bin, a shader uniform)
+## goes through here first, and so does anything coming back out.
+func _body_basis(body: SpacesimSceneBody) -> Basis:
+	if body == null or body.node == null:
+		return Basis.IDENTITY
+	return (body.node.global_transform.basis as Basis).orthonormalized()
+
+
 ## **ONE sun, ONE frame, ONE writer.**
 ##
 ## Every shader of a body that reasons about light — the ground, the sea, the inside of a planet, each cloud deck
@@ -1986,7 +2003,7 @@ func _publish_body_frame(
 	# **Interpolated**, or the shell turns one tick behind the frame it is drawn in: `u_to_local` is what turns a
 	# fragment into the ray that decides both the chord and the sun angle, and a rotating camera read a tick stale
 	# gave a brightness that flickered. Same trap, same fix, as every other transform in a drawn frame.
-	var body_basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
+	var body_basis: Basis = _body_basis(body)
 	var camera_basis: Basis = (
 		camera.get_global_transform_interpolated().basis as Basis
 	).orthonormalized() if camera != null else Basis.IDENTITY

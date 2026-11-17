@@ -24,6 +24,7 @@ func run(h, root: Node) -> void:
 	_test_the_closest_point_is_trigonometry(h)
 	_test_the_band_is_as_bright_as_saturn_says(h)
 	_test_the_rings_encircle_the_equator(h, root)
+	_test_the_walk_refines_under_the_ship(h, root)
 	_test_every_body_shader_is_told_the_same_sun(h, root)
 	_test_the_shadow_is_the_planets(h, root)
 	_test_the_split_is_two_draws_of_everything(h, root)
@@ -337,6 +338,41 @@ func _test_every_body_shader_is_told_the_same_sun(h, root: Node) -> void:
 		h.check_near(rad_to_deg(air_world.angle_to(surface_world)), 0.0,
 			"%s: the air and the surface are told one sun (%.2f deg apart)"
 				% [id, rad_to_deg(air_world.angle_to(surface_world))], 0.01)
+
+	root.remove_child(camera)
+	camera.free()
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
+## **The subdivision refines under the ship, on a body that is tilted.** Evert, 2026-11-16: *"The subdivision code
+## for the LOD meshes don't seem to subdivide exactly below my ship anymore."* The walk's eye direction was the last
+## quantity still computed in world space and handed to model-space code, so the detail followed a point an
+## obliquity away from the ship — 23.4 degrees on Earth, 26.7 on Saturn, an eighth of a radius along the surface.
+func _test_the_walk_refines_under_the_ship(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var earth := scene.body_by_id("planet:earth")
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	# Low, and off the pole, so the tilt matters: straight up the axis would hide the fault entirely.
+	var basis: Basis = earth.node.global_transform.basis.orthonormalized()
+	var observer: Vector3 = earth.node.global_position + basis.y * earth.radius + basis.x * 900000.0
+	camera.global_position = observer
+	scene.update_lod(camera, observer)
+
+	var expected := (basis.inverse() * (observer - earth.node.global_position)).normalized()
+	var walked: Vector3 = earth.patch_walk_direction
+	h.check(walked.length() > 0.5, "the walk was asked for (%s)" % str(walked))
+	h.check_near(rad_to_deg(walked.angle_to(expected)), 0.0,
+		"and it refines along the eye's direction IN THE BODY'S FRAME (%.1f deg off)"
+			% rad_to_deg(walked.angle_to(expected)), 0.01)
+	# **And that is not the world direction**, which is the whole point: the two differ by the tilt.
+	h.check(rad_to_deg(expected.angle_to((observer - earth.node.global_position).normalized())) > 10.0,
+		"which is 23.4 degrees away from the world offset, so the two cannot be confused"
+	)
 
 	root.remove_child(camera)
 	camera.free()
