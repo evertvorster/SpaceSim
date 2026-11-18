@@ -38,15 +38,6 @@ extends Node3D
 ## `SpacesimBodyRenderer`.
 const RING_PRIORITY := 100
 
-## **How big a dust sample is drawn**, in pixels of radius — and **the most opaque one may get**.
-##
-## The sample decomposition is exact: `alpha = 1 - T^(1/n)` over the `n` samples a pixel catches, which accumulates
-## to the sheet's own transmittance. But `n` falls as the eye resolves the band, so up close one sample would
-## approach opacity and become a 2-pixel dot of paint. The cap is what turns the fog back into faint specks there —
-## Evert, 2026-11-18: *"a faint fogginess that accumulates over distance, so that when you are up close its almost
-## gone."*
-const DUST_PIXELS := 2.0
-const DUST_MAX_ALPHA := 0.35
 
 const SHADER := preload("res://addons/spacesim/render/shaders/ring_splats.gdshader")
 
@@ -65,9 +56,6 @@ var _uniforms := {}
 var _transmissions := {}
 ## What fraction of the particles ended up in the planet's shadow — reported, so a test can assert it.
 var shaded_fraction := 0.0
-## What the dust is told this frame, for the tests and for anything that wants to know the fog's strength.
-var _dust_alpha := 0.0
-var _dust_glow := 0.0
 
 
 ## Build the draw for one population, parented to the node of the body it orbits.
@@ -112,10 +100,7 @@ func _build_multimesh() -> void:
 			Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * _cloud.radii[index]), _cloud.positions[index])
 		)
 		# `.r` is the baked shadow (full light until it is baked), `.g` is "draw this one".
-		# `.r` is the baked shadow (full light until it is baked), `.g` is "draw this one", `.b` is "this is a dust
-		# sample" — one sheet, two classes, one draw.
-		var is_dust := 1.0 if index >= _cloud.dust_start else 0.0
-		multimesh.set_instance_custom_data(index, Color(1.0, 1.0, is_dust, 0.0))
+		multimesh.set_instance_custom_data(index, Color(1.0, 1.0, 0.0, 0.0))
 	_multimesh = multimesh
 
 
@@ -324,9 +309,7 @@ func set_hidden_ids(ids: Array) -> void:
 
 func _write_visible(index: int, visible: bool) -> void:
 	var shadow := float(_transmissions.get(index, 1.0))
-	_multimesh.set_instance_custom_data(
-		index, Color(shadow, 1.0 if visible else 0.0, 1.0 if index >= _cloud.dust_start else 0.0, 0.0)
-	)
+	_multimesh.set_instance_custom_data(index, Color(shadow, 1.0 if visible else 0.0, 0.0, 0.0))
 
 
 ## **Bake the planet's shadow into the particles.** They never move and neither does the star, so a particle's
@@ -349,10 +332,7 @@ func bake_shadow(
 		)
 		_transmissions[index] = transmission
 		_multimesh.set_instance_custom_data(
-			index, Color(
-				transmission, 0.0 if _hidden.has(index) else 1.0,
-				1.0 if index >= _cloud.dust_start else 0.0, 0.0
-			)
+			index, Color(transmission, 0.0 if _hidden.has(index) else 1.0, 0.0, 0.0)
 		)
 		if transmission < 0.5:
 			shaded += 1
@@ -381,40 +361,7 @@ func update(
 	# what is handed over is the light arriving divided by pi times the albedo, which is everything Lambert's law
 	# needs that is the same for the whole band.
 	var radiance := illuminance * albedo / PI
-	# **The dust is a sample of the sheet.** Its radiance is the sheet's own — `SpacesimRingModel.reflectance`, the law
-	# written for the band's `tau` — and its alpha is the share of that optical depth one sample carries:
-	# `1 - T^(1/n)` over the `n` samples a pixel is expected to catch. Both come out of the band's own numbers, so the
-	# fog thickens exactly where the sheet would and thins where the samples spread out.
-	var plane_normal := (global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
-	var sun_cosine := SpacesimRingModel.cosine(plane_normal, star_position - centre)
-	var eye_cosine := SpacesimRingModel.cosine(plane_normal, observer - centre)
-	# **The dust's LEVEL is a look, and it has to be.** The sample decomposition below says how a sheet is split
-	# between samples, but it says nothing about how bright that sheet should be in *this* picture — and the honest
-	# answer is useless here: the drawn rocks are `drawn_optical_depth` of the band, **4.5e-7 against tau = 1.2**, so
-	# a physically-scaled sheet is two and a half thousand times brighter than the speckle it exists to fill. Evert,
-	# 2026-11-18: *"the rings are still way too bright, no change from what I can see"* — the dust, not the rocks, was
-	# the light.
-	#
-	# So the dust's radiance is a FRACTION OF A ROCK'S OWN, `render.ring_dust`, and the distribution stays physical:
-	# how much of the band a sample covers is `1 - T^(1/n)`, which thickens with distance and thins up close.
-	var gain := float(SpacesimSettings.get_value("render.ring_dust"))
-	var sheet := illuminance * albedo / PI * gain
-	var samples := 1.0
-	if _cloud != null and _cloud.dust_count > 0:
-		var across := maxf((observer - centre).length(), 1.0) * pixel_angle
-		var screen_area := maxf(
-			SpacesimRingModel.area(_population) * eye_cosine / (across * across), 1.0
-		)
-		samples = maxf(float(_cloud.dust_count) * PI * DUST_PIXELS * DUST_PIXELS / screen_area, 1.0)
-	# **A faint fog, not a sheet**: the sample law gives the transmittance, and the cap keeps one sample from
-	# becoming paint up close. Both scale with `gain` so 0 is off.
-	var transmission := SpacesimRingModel.transmittance(_population.optical_depth, eye_cosine)
-	_dust_alpha = minf(1.0 - pow(transmission, 1.0 / samples), DUST_MAX_ALPHA) * gain
-	_dust_glow = sheet
 	for material in _materials:
-		material.set_shader_parameter("dust_alpha", _dust_alpha)
-		material.set_shader_parameter("dust_glow_linear", Color(_dust_glow, _dust_glow, _dust_glow))
-		material.set_shader_parameter("dust_pixels", DUST_PIXELS)
 		material.set_shader_parameter("pixel_angle", pixel_angle)
 		material.set_shader_parameter("glow_linear", Color(radiance, radiance, radiance))
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
@@ -425,14 +372,6 @@ func update(
 
 ## **What the shader is being told** — for the tests, because "it draws nothing" is answered by reading the
 ## numbers rather than by looking at a picture.
-## The dust's own two numbers this frame: the alpha one sample carries, and the sheet radiance it hands over.
-func dust() -> Dictionary:
-	return {
-		"alpha": _dust_alpha, "radiance": _dust_glow,
-		"samples": _cloud.dust_count if _cloud != null else 0,
-	}
-
-
 func light() -> Dictionary:
 	return _uniforms
 

@@ -37,16 +37,6 @@ uniform vec3 glow_linear = vec3(1.0);
 uniform vec3 unlit_linear = vec3(0.04);
 // Where the star is, in world space — the other half of the phase angle.
 uniform vec3 star_position = vec3(0.0);
-// **The dust's own numbers.** A dust sample stands for a great many real grains, so it is not lit like a rock: its
-// alpha is a share of the BAND's optical depth and its radiance is the band's own sheet radiance
-// (`SpacesimRingModel.reflectance`). Both are computed on the host once a frame, because they need the band's area,
-// the view's cosine and how many samples land on a pixel — none of which a vertex stage knows.
-uniform float dust_alpha = 0.0;
-uniform vec3 dust_glow_linear = vec3(0.0);
-// **How big a dust sample is drawn, in pixels of radius.** A real grain is centimetres and would be a
-// ten-thousandth of a pixel; the sample is drawn at this size on purpose, and `dust_alpha` is what keeps its total
-// light honest.
-uniform float dust_pixels = 2.0;
 
 varying float v_coverage;
 varying vec3 v_radiance;
@@ -66,10 +56,7 @@ void vertex() {
 	// **One pixel of radius when its own disc is smaller** — a quad narrower than a pixel rasterises
 	// unreliably — while the coverage below keeps the particle's TRUE area, so the floor costs nothing in
 	// light. This is the difference between a bright dot and the light a 100 m rock actually delivers.
-	// **Which class this instance is.** `.b` is 1 for a dust sample: the two are drawn from one `MultiMesh` because
-	// they are one sheet, and they differ in what they stand for.
-	float is_dust = step(0.5, INSTANCE_CUSTOM.b);
-	float half_size = max(radius, mix(1.0, dust_pixels, is_dust) * distance * pixel_angle);
+	float half_size = max(radius, distance * pixel_angle);
 	// **The number that proves it:** the drawn particles' own optical depth is `SpacesimRingModel.
 	// drawn_optical_depth` — 4.5e-7 for the B ring, against the band's `tau` of 1.2. A rock that covers a whole
 	// pixel at full radiance carries a million times the light it has, and that is what "orders of magnitude too
@@ -88,9 +75,8 @@ void vertex() {
 	//
 	// `.g` is "draw this one": zero once a body stands for the spot, so the shape replaces the splat rather than
 	// growing through it.
-	// **A rock covers with its own disc; a dust sample with its share of the sheet.** `.g` switches either off, which
-	// is what hides a spot that has a body.
-	v_coverage = mix(min(1.0, PI * radius_px * radius_px), dust_alpha, is_dust) * INSTANCE_CUSTOM.g;
+	// **A rock covers with its own disc.** `.g` switches it off, which is what hides a spot that has a body.
+	v_coverage = min(1.0, PI * radius_px * radius_px) * INSTANCE_CUSTOM.g;
 	v_shadow = INSTANCE_CUSTOM.r;
 
 	// **How much light this particle receives and reflects.** The phase angle is at the particle: the
@@ -101,9 +87,7 @@ void vertex() {
 	vec3 to_eye = normalize(INV_VIEW_MATRIX[3].xyz - to_world);
 	float phase = acos(clamp(dot(to_star, to_eye), -1.0, 1.0));
 	float lambert = (sin(phase) + (PI - phase) * cos(phase)) / PI;
-	// The dust has no per-particle phase — it is a sheet, and the sheet's brightness already carries the two
-	// cosines that matter.
-	v_radiance = mix(unlit_linear, mix(glow_linear * lambert, dust_glow_linear, is_dust), v_shadow);
+	v_radiance = mix(unlit_linear, glow_linear * lambert, v_shadow);
 
 	vec3 offset = vec3(VERTEX.xy * 2.0 * half_size, 0.0);
 	// **A hidden particle is collapsed to a point of no area**, which is a frame-rate fix rather than a look:

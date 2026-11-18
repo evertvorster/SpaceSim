@@ -57,16 +57,6 @@ extends Resource
 ## are on a perfect plane?"*
 @export var thickness: float = 0.0
 
-## **How many DUST samples are drawn beside the rocks**, as a sample of the sheet the rocks do not make up.
-##
-## The drawn rocks are the largest embedded objects and their own optical depth is about 10^-7 of the band's: the rest
-## of `optical_depth` is dust, centimetres across and never drawable as an object. So it is drawn as a **sample**:
-## each instance stands for a great many real grains, its alpha is a share of the sheet's optical depth, and its
-## radiance is the sheet's own (`SpacesimRingModel.reflectance`). The accumulation then behaves exactly like a sheet
-## — smooth where the eye cannot resolve it, and fading away as the samples spread out — which is why the band reads
-## as fog at a distance and as rocks up close.
-@export var dust_count: int = 0
-
 ## **How much light the band reflects, as optical depth `tau`** — and the only brightness number a band has.
 ##
 ## The band's own apparent reflectance is `tau/(1 + tau)` of a bright surface before any geometry is
