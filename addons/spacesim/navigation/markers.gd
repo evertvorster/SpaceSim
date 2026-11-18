@@ -76,6 +76,19 @@ var orbits: Dictionary = {}
 ## The nodes that are **rocks rather than places**, so the HUD ranks them with the other rocks.
 var rocks: Dictionary = {}
 
+## **Markers for things that have no node at all** — a spot on a ring, which is a position and a name and nothing
+## else in the world. Each entry is `{id: int, position: Vector3, text: String, priority: int, parent: int}`.
+##
+## **A ring's next 24 rocks are marked, not simulated** (`R23`): a dot earns a name long before it earns a body.
+## Making them bodies instead — which this did for half a day — put 24 nodes, materials, points of light and orbital
+## frames in the scene, created and destroyed as the ship circled. Evert saw the frame rate collapse with it:
+## *"when circling Saturn, quite a few rocks are created and destroyed."*
+##
+## **The drawing path knows nothing about either source.** Bodies are gathered from nodes because that is where
+## their positions are; these arrive already gathered, and everything downstream — the projection, the ring, the
+## line, the label packing — works on a position and a string.
+var targets: Array[Dictionary] = []
+
 ## Rebuilt every frame by the caller. Later entries outrank earlier ones.
 var context_targets: Array[Node3D] = []
 var mission_targets: Array[Node3D] = []
@@ -344,6 +357,12 @@ func _candidates(eye: Vector3) -> Array[Dictionary]:
 	_gather(list, mission_targets, Priority.MISSION, eye)
 	if selected != null:
 		list.append(_target_of(selected, Priority.SELECTED, eye))
+	# **The caller's own targets**, which have no node behind them. Copied rather than mutated: the array belongs
+	# to the caller and is handed over again next frame.
+	for target in targets:
+		var entry: Dictionary = target.duplicate()
+		entry["distance"] = eye.distance_to(entry["position"] as Vector3)
+		list.append(entry)
 	return list
 
 

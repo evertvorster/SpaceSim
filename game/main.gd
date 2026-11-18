@@ -114,6 +114,12 @@ var _fragment_bodies: Array[SpacesimFragmentBodies] = []
 ## **The scale bodies the ship is slowed by**: the system's own, then one per live rock. Rebuilt only when the
 ## set of rocks changes — a rock's position does not, so rewriting this every tick would be garbage for nothing.
 var _system_scale: Array[SpacesimScaleBody] = []
+## **One per ring band: the nearest spot, as a place, with no body behind it.** `S3` — a rock is significant from the
+## moment it exists, so the speed falls as the ship closes on a band before anything resolves. Nothing is created
+## or destroyed: this object lives for the session and its position is updated.
+var _ring_spots: Array[SpacesimScaleBody] = []
+## The ring spots that are NAMED this frame — `R23`'s pool, for the marker overlay.
+var _ring_marked: Array[Dictionary] = []
 var _scale_bodies: Array[SpacesimScaleBody] = []
 var _rocks_version := -1
 
@@ -572,6 +578,11 @@ func _physics_process(delta: float) -> void:
 ## and speed to a centimetre. It was rebuilt every drawn frame, which is a 13-line string with a format
 ## per field and a `PackedStringArray` to join it, sixty times a second, for a display. Measured at
 ## 0.12% of a frame it is not a cost problem; it is a *shape* problem, and this is the shape.
+## **How many spots of one band may be BODIES at once.** A body is a node, a material, a point of light and an
+## orbital frame, so this is a budget for geometry, not for names — the names are `RING_ROCK_CANDIDATES` and cost a
+## position and a string. Four is what a band puts on screen as resolvable shapes at once.
+const BODIES_PER_RING := 4
+
 const HUD_INTERVAL := 0.1
 
 ## **The near plane is a thousandth of the gap to the nearest surface** — see `_update_camera`. The margin is
@@ -791,6 +802,11 @@ func _build_fields() -> void:
 		bodies.name = "Fragments_%s" % population.id.replace(":", "_")
 		add_child(bodies)
 		_fragment_bodies.append(bodies)
+	# One place per band, kept alive for the session: the travel unit's reference near a ring.
+	for _ring in _system.rings:
+		var spot := SpacesimScaleBody.new(null, 0.0)
+		spot.solid = false
+		_ring_spots.append(spot)
 	_system_scale = _ship.bodies.duplicate()
 	_scale_bodies.append_array(_system_scale)
 	# **The ship scans this array every tick**, so it has to be the one that is rewritten rather than a copy of
@@ -828,6 +844,10 @@ func _sync_rocks() -> void:
 	for body in rocks():
 		if body.scale_body != null:
 			wanted.append(body.scale_body)
+	# **And each band's nearest spot**, a place without a body: `S3`, the speed falls as the ship closes on a band,
+	# before anything resolves. It has no marker of its own, so it is not in `rocks()`.
+	for spot in _ring_spots:
+		wanted.append(spot)
 	_scale_bodies = wanted
 	_ship.bodies = _scale_bodies
 
@@ -857,6 +877,7 @@ func _pixel_angle() -> float:
 func _update_rocks(eye: Vector3, pixel: float) -> void:
 	if _camera == null or pixel <= 0.0:
 		return
+	var rings_marked: Array[Dictionary] = []
 	for index in _fragment_bodies.size():
 		var parent := _field_parents[index]
 		if parent == null or parent.node == null:
@@ -869,20 +890,29 @@ func _update_rocks(eye: Vector3, pixel: float) -> void:
 	var other := INF
 	for scale in _system_scale:
 		other = minf(other, scale.surface_distance_to(eye))
-	for index in _system.ring_bodies.size():
+	for index in _system.rings.size():
 		var view := _system.rings[index]
 		var manager := _system.ring_bodies[index]
-		# **`R23`, and it is also the frame-rate argument**: the pool of 24 spots is asked for only while this
-		# band is nearer than everything else — Evert, 2026-11-15: *"when the nearest spot on the ring is nearer
-		# than any of the other bodies, you can then check for and mark the next 24 rocks on the HUD."* From
-		# anywhere else a band offers its nearest spot and nothing more, which is one body instead of
-		# twenty-four per ring, each with a node, a material and a point of light.
-		var count := 1
-		if view.nearest_distance(eye) <= other:
-			count = SpacesimSystemScene.RING_ROCK_CANDIDATES
-		manager.update(view.pieces(eye, pixel, count), eye, _camera, pixel, _system.wireframe)
+		# **The travel unit**: the nearest spot, as a place, updated in place — no node, nothing created.
+		var spot := view.nearest_spot(eye)
+		if not spot.is_empty() and index < _ring_spots.size():
+			_ring_spots[index].position = spot["position"]
+			_ring_spots[index].radius = float(spot["radius"])
+			_ring_spots[index].name = String(spot["name"])
+		# **A body only when it resolves.** Evert, 2026-11-18: *"only create a body when it becomes resolveable."*
+		# A body is a node, a material, a point of light and an orbital frame; a spot that is only worth naming is a
+		# marker below.
+		manager.update(view.pieces(eye, pixel, BODIES_PER_RING), eye, _camera, pixel, _system.wireframe)
 		# **The shape replaces the dot** (`R26`): a splat left behind grows through the shape it stood in for.
 		view.set_hidden_ids(manager.ids())
+		# **`R23`, and the frame-rate argument with it**: the pool of spots is NAMED only while this band is nearer
+		# than everything else — Evert, 2026-11-15: *"when the nearest spot on the ring is nearer than any of the
+		# other bodies, you can then check for and mark the next 24 rocks on the HUD."*
+		if view.nearest_distance(eye) <= other:
+			rings_marked.append_array(
+				view.marker_targets(eye, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES)
+			)
+	_ring_marked = rings_marked
 	_sync_rocks()
 
 
@@ -908,6 +938,7 @@ func _update_markers(camera: Camera3D) -> void:
 		rock_nodes[body.node] = true
 	_markers.rocks = rock_nodes
 	_markers.context_targets = context
+	_markers.targets = _ring_marked
 	# **The band, because the camera draws into it.** The camera is inside the band's `SubViewport`, so
 	# `unproject_position` answers in the band's pixels while the labels are laid out in the root canvas;
 	# `refresh` converts with this rect. See `SpacesimMarkers.to_canvas`.

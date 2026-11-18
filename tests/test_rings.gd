@@ -553,49 +553,39 @@ func _test_a_spot_becomes_a_rock_by_one_rule(h, root: Node) -> void:
 		h.check(String(first["label"]).begins_with("Saturn Rock"),
 			"and a label a person reads (%s)" % String(first["label"]))
 
-	# **From far away the same list is offered** — every one a rock to navigate to, none of them geometry yet,
-	# which is `R23`: the next 24 rocks are marked so the band can be crossed by name.
+	# **From far away only the NEAREST spot is a body** — a body is a node, a material and an orbital frame, and
+	# Evert, 2026-11-18: *"only create a body when it becomes resolveable."* The rest are marked, not simulated.
 	var far := view.global_transform * Vector3(middle, 0.0, 3.0e10)
-	var far_pieces := view.pieces(far, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES)
-	h.check(far_pieces.size() == SpacesimSystemScene.RING_ROCK_CANDIDATES,
-		"from far away a full pool of spots is offered (%d)" % far_pieces.size())
-	var unreachable := 0
-	for piece in far_pieces:
-		var index := SpacesimRingView.index_of(String(piece["id"]))
-		var distance: float = (view.global_transform.affine_inverse() * far).distance_to(cloud.positions[index])
-		var screen := SpacesimLod.screen_radius_pixels(
-			SpacesimLod.angular_radius(cloud.radii[index], distance), pixel
-		)
-		if screen < SpacesimIrregularBody.RESOLVE_PIXELS:
-			unreachable += 1
-	h.check(unreachable > 0, "and none of them has earned geometry yet (%d of %d)"
-		% [unreachable, far_pieces.size()])
+	var far_bodies := view.pieces(far, pixel, 4)
+	h.check(far_bodies.size() == 1,
+		"from far away only the nearest spot is a body (%d)" % far_bodies.size())
+	var far_marked := view.marker_targets(far, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES)
+	h.check(far_marked.size() == SpacesimSystemScene.RING_ROCK_CANDIDATES,
+		"while the pool of 24 is named (%d)" % far_marked.size())
+	# **And the nearest spot is a PLACE for the travel unit, with no body behind it** — `S3`, so the speed falls as
+	# the ship closes on a band before anything resolves.
+	var place := view.nearest_spot(far)
+	h.check(not place.is_empty() and float(place["radius"]) > 0.0,
+		"and the band's nearest spot is a place with a radius (%.0f m)"
+			% float(place.get("radius", 0.0)))
 
-	# **Close in, the resolvable ones come first** — the rule is the disc, so a big component near the eye is
-	# offered before a small one, whatever their distances. The eye is put 5 km from the band's biggest
-	# particle, which is where a real approach ends up.
+	# **A spot that resolves IS a body**, which is the other half of the rule — a big component close in earns
+	# geometry, and only those do. The eye is put 5 km from the band's biggest particle, where a real approach
+	# ends up.
 	var biggest := 0
 	for index in cloud.size():
 		if cloud.radii[index] > cloud.radii[biggest]:
 			biggest = index
 	var close_eye: Vector3 = view.global_transform * (cloud.positions[biggest] + Vector3(0.0, 0.0, 5000.0))
-	var near_pieces := view.pieces(close_eye, pixel, SpacesimSystemScene.RING_ROCK_CANDIDATES)
-	h.check(near_pieces.size() >= 1, "and close in, some are resolvable (%d offered)" % near_pieces.size())
-	if near_pieces.size() > 0:
-		var first_index := SpacesimRingView.index_of(String(near_pieces[0]["id"]))
-		h.check(first_index == biggest,
-			"the first offered is the big component the eye is beside (chose %d of %d)"
-				% [first_index, biggest])
-		var across: float = (view.global_transform.affine_inverse() * close_eye).distance_to(cloud.positions[first_index])
-		var first_screen := SpacesimLod.screen_radius_pixels(
-			SpacesimLod.angular_radius(cloud.radii[first_index], across), pixel
-		)
-		h.check(first_screen >= SpacesimIrregularBody.RESOLVE_PIXELS,
-			"and it has earned a mesh (%.1f px)" % first_screen)
+	var near_bodies := view.pieces(close_eye, pixel, 4)
+	h.check(near_bodies.size() >= 1, "close in, a resolvable spot is a body (%d)" % near_bodies.size())
+	if near_bodies.size() > 0:
+		h.check(SpacesimRingView.index_of(String(near_bodies[0]["id"])) == biggest,
+			"and it is the big component the eye is beside")
 
 	# **The splat is switched off for the ones that are** (`R26`) — and only for those.
 	var ids: Array = []
-	for piece in near_pieces:
+	for piece in near_bodies:
 		ids.append(String(piece["id"]))
 	view.set_hidden_ids(ids)
 	h.check(view.hidden_count() == ids.size(), "each resolved spot's splat is hidden (%d)" % view.hidden_count())

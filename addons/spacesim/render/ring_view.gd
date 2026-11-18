@@ -119,17 +119,16 @@ func _build_draws() -> void:
 	_nodes.append(node)
 
 
-## **The particles worth being rocks**, in the shape [SpacesimFragmentBodies] takes — an id, a world position,
-## a diameter and a label.
+## **The spots that have earned a BODY** — an id, a world position, a diameter and a label, in the shape
+## [SpacesimFragmentBodies] takes.
 ##
-## **One list, and it is the nearest few spots.** A spot that is a body is a rock: it has a node, a marker, a
-## splat sized to the disc it would have, and a scale body that sets the travel unit — and it is `RESOLVE_PIXELS`
-## away from becoming geometry. Nothing else promotes anything, so "every spot is a rock you can fly to" (`R16`)
-## and "the next 24 are marked" (`R23`) are the same list at different zoom levels.
+## **Only what resolves.** Evert, 2026-11-18: *"only create a body when it becomes resolveable."* A body is a node,
+## a material, a point of light and an orbital frame; a spot earns all of that when its own disc passes
+## `RESOLVE_PIXELS` (`R22` — the size decides the range), and not before. A spot that is only worth naming is a
+## **marker**, which costs a position and a string — see [method marker_targets].
 ##
-## **Ordered resolvable-first, then nearest**, because both matter and they are different questions: a big
-## component resolves long before a small one at the same distance (`R22`), and the nearest one is what the
-## ship is closing on and what the HUD's *Closest* line names (`R17`, `R18`).
+## **The nearest spot is always included**, because the ship is closing on it and `advance_irregular` is what
+## decides when it resolves; every other one has to have earned it.
 ##
 ## Evert, 2026-11-15: *"You already know the position of each spot on the ring, right? Can't we just range to
 ## the closest one? Then, when the camera gets close enough to start resolving the rocks, we can mark the
@@ -161,24 +160,22 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 				< _cloud.positions[b].distance_squared_to(from_ship)
 			)
 	)
-	# **Which of them have earned geometry already**, so those come first and the rest fill the list by distance.
-	var resolvable: Array[int] = []
-	var ordered: Array[int] = []
+	# **Only what resolves**, plus the nearest by distance — a big component earns geometry long before a small one
+	# at the same distance, and the nearest is the one the ship is closing on.
+	var chosen: Array[int] = []
+	if candidates.size() > 0:
+		chosen.append(candidates[0])
 	for index in candidates:
+		if chosen.size() >= count:
+			break
+		if chosen.has(index):
+			continue
 		var distance := plane_eye.distance_to(_cloud.positions[index])
 		var screen := SpacesimLod.screen_radius_pixels(
 			SpacesimLod.angular_radius(_cloud.radii[index], distance), pixel_angle
 		)
 		if screen >= SpacesimIrregularBody.RESOLVE_PIXELS:
-			resolvable.append(index)
-		ordered.append(index)
-	var chosen: Array[int] = []
-	for index in resolvable + ordered:
-		if chosen.size() >= count:
-			break
-		if chosen.has(index):
-			continue
-		chosen.append(index)
+			chosen.append(index)
 	for index in chosen:
 		var distance := plane_eye.distance_to(_cloud.positions[index])
 		list.append({
@@ -190,6 +187,68 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 			],
 		})
 	return list
+
+
+## **The spots worth NAMING** — `R23`: the next few rocks on the HUD, as a position and a string and nothing else.
+##
+## **Marked, not simulated.** Each entry is a marker target: `{id, position, text, priority, parent}` with a
+## negative id of its own, because it has no node to borrow one from. The spots that resolve are bodies and arrive
+## through `significant_nodes()` instead, so they are skipped here.
+func marker_targets(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
+	var list: Array[Dictionary] = []
+	if _cloud == null or _population == null or count <= 0:
+		return list
+	var plane_eye := global_transform.affine_inverse() * eye
+	var on_sheet := SpacesimParticleCloud.closest_point(
+		plane_eye, _population.semi_major_axis.x, _population.semi_major_axis.y
+	)
+	var candidates := _cloud.nearest(on_sheet, count + 8, INF)
+	var ship := plane_eye
+	candidates.sort_custom(
+		func(a: int, b: int) -> bool:
+			return (
+				_cloud.positions[a].distance_squared_to(ship)
+				< _cloud.positions[b].distance_squared_to(ship)
+			)
+	)
+	for index in candidates:
+		if list.size() >= count:
+			break
+		if _hidden.has(index):
+			continue
+		list.append({
+			"id": -(index + 1),
+			"position": global_transform * _cloud.positions[index],
+			"text": "%s Rock  %s" % [
+				_band_name(), SpacesimMarkers.format_distance(_cloud.radii[index] * 2.0)
+			],
+			"priority": SpacesimMarkers.Priority.ASTEROID,
+			"parent": SpacesimMarkers.NO_PARENT,
+		})
+	return list
+
+
+## **The nearest spot, as a place with a radius** — the travel unit's reference, with no body behind it.
+##
+## `S3`: a rock is significant from the moment it exists, so the speed falls as the ship closes on the band and
+## **before** anything resolves. A `SpacesimScaleBody` needs a position and a radius and nothing else, so this
+## returns exactly that and no node is created.
+func nearest_spot(eye: Vector3) -> Dictionary:
+	if _cloud == null or _population == null:
+		return {}
+	var plane_eye := global_transform.affine_inverse() * eye
+	var on_sheet := SpacesimParticleCloud.closest_point(
+		plane_eye, _population.semi_major_axis.x, _population.semi_major_axis.y
+	)
+	var found := _cloud.nearest(on_sheet, 1, INF)
+	if found.is_empty():
+		return {}
+	var index := found[0]
+	return {
+		"position": global_transform * _cloud.positions[index],
+		"radius": _cloud.radii[index],
+		"name": "%s Rock" % _band_name(),
+	}
 
 
 ## **How far the nearest spot of this band is**, in the band's own plane — the one query the HUD's rule needs.
