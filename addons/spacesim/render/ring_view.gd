@@ -40,11 +40,28 @@ const RING_PRIORITY := 100
 
 
 const SHADER := preload("res://addons/spacesim/render/shaders/ring_splats.gdshader")
+const DUST_SHADER := preload("res://addons/spacesim/render/shaders/ring_dust.gdshader")
+
+## **The dust's own draw**, one per band: a slab of volume around the planet, marched like the air.
+##
+## **A slab, not particles.** A dust built from drawn samples has to stand in for millions of grains, so its
+## brightness depends on how many of them a pixel catches — which made it thousands of times too bright whenever the
+## count was wrong, and there is no count in a slab. Evert, 2026-11-18: *"Is there any way that we can have it as a
+## volumetric shader, almost like air?"* What the slab buys besides correctness: seen edge-on the chord is long and
+## the band brightens, seen face-on it is the thickness and the band dims — which is what a real ring does, and what
+## `thickness` is authored for.
+##
+## **Under the rocks**: `RING_PRIORITY - 1`, so the drawn components sit on top of the fog they are embedded in.
+const DUST_PRIORITY := RING_PRIORITY - 1
 
 var _population: SpacesimPopulation
 var _cloud: SpacesimParticleCloud
 var _multimesh: MultiMesh
 var _materials: Array[ShaderMaterial] = []
+var _dust_material: ShaderMaterial
+var _dust_node: MeshInstance3D
+## The body the band encircles, for the slab's geometry and its shadow: the ring's own frame has it at the origin.
+var planet_radius := 0.0
 var _nodes: Array[MultiMeshInstance3D] = []
 ## Which particles a body stands for, so their splats are not drawn. Keyed by particle index; the difference
 ## is written to the instance's custom data only when it changes.
@@ -66,7 +83,8 @@ var shaded_fraction := 0.0
 ## model-space +Y as its pole and an untilted node would put the rings across the poles; once that is done the
 ## plane is `Vector3.UP` in the parent's frame and nothing else has to know.
 static func of(
-	population: SpacesimPopulation, cloud: SpacesimParticleCloud, local_axis := Vector3.ZERO
+	population: SpacesimPopulation, cloud: SpacesimParticleCloud, local_axis := Vector3.ZERO,
+	planet_radius := 0.0
 ) -> SpacesimRingView:
 	var view := SpacesimRingView.new()
 	view.name = "Ring_%s" % (population.id if population != null else "?")
@@ -78,6 +96,9 @@ static func of(
 	if population != null:
 		var axis := local_axis if local_axis.length_squared() > 0.0 else population.ring_axis
 		view.basis = basis_for(axis)
+	view.planet_radius = planet_radius
+	if population.dust_enabled:
+		view._build_dust()
 	if cloud == null or cloud.size() == 0:
 		return view
 	view._build_multimesh()
@@ -188,6 +209,79 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 			],
 		})
 	return list
+
+
+## **The dust slab's mesh**: the box that bounds the volume — outer wall, inner wall, top and bottom — so the
+## fragment stage only has to test the hole, never the outside. Built once: the band never changes shape.
+func _build_dust() -> void:
+	var segments := 128
+	var inner := _population.semi_major_axis.x
+	var outer := _population.semi_major_axis.y
+	var half := maxf(_population.thickness * 0.5, 1.0)
+	var points := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var rings: Array[PackedVector3Array] = [
+		_ring_points(inner, outer, half, segments),      # 0: top
+		_ring_points(inner, outer, -half, segments),     # 1: bottom
+	]
+	# **The four walls joined to the caps in one strip each**, so the box is watertight and the fragment shader can
+	# start its chord anywhere the camera is — inside the slab, above it, or beyond the outer edge.
+	for cap in rings:
+		for point in cap:
+			points.append(point)
+	var top := 0
+	var bottom := points.size() / 2
+	for index in segments:
+		var next := (index + 1) % segments
+		# top cap: inner and outer pairs
+		_slab_quad(indices, top + index, top + next, top + segments + next, top + segments + index)
+		_slab_quad(
+			indices, bottom + index, bottom + segments + index, bottom + segments + next, bottom + next
+		)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = points
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+	var material := ShaderMaterial.new()
+	material.shader = DUST_SHADER
+	material.render_priority = DUST_PRIORITY
+	var node := MeshInstance3D.new()
+	node.name = "Dust"
+	node.mesh = mesh
+	node.material_override = material
+	# A volume is a medium, not an obstacle: it casts nothing.
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(node)
+	_dust_material = material
+	_dust_node = node
+
+
+## One ring of the slab's cap: `inner` and `outer` at the same height, as pairs, so a quad can be built between them.
+static func _ring_points(inner: float, outer: float, height: float, segments: int) -> PackedVector3Array:
+	var list := PackedVector3Array()
+	list.resize(segments * 2)
+	for index in segments:
+		var angle := TAU * float(index) / float(segments)
+		var direction := Vector3(cos(angle), sin(angle), 0.0)
+		list[index * 2] = direction * inner + Vector3(0.0, 0.0, height)
+		list[index * 2 + 1] = direction * outer + Vector3(0.0, 0.0, height)
+	return list
+
+
+static func _slab_quad(indices: PackedInt32Array, a: int, b: int, c: int, d: int) -> void:
+	indices.append_array([a, b, c, a, c, d])
+
+
+## The dust, for the tests: its material, and the two numbers the slab is told each frame.
+func dust() -> Dictionary:
+	return {
+		"node": _dust_node, "material": _dust_material,
+		"tau": _dust_material.get_shader_parameter("u_tau") if _dust_material != null else null,
+		"priority": _dust_material.render_priority if _dust_material != null else 0,
+	}
 
 
 ## **The spots worth NAMING** — `R23`: the next few rocks on the HUD, as a position and a string and nothing else.
@@ -367,6 +461,27 @@ func update(
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
 		material.set_shader_parameter("unlit_linear", Color(floor, floor, floor))
 		material.set_shader_parameter("star_position", star_position)
+	if _dust_material != null:
+		# **The slab is told everything it needs to march itself**: where the eye is in the band's frame, where the
+		# star is, the two angles, and the optical depth the setting leaves.
+		var to_local := global_transform.affine_inverse()
+		_dust_material.set_shader_parameter("u_eye_local", to_local * observer)
+		_dust_material.set_shader_parameter(
+			"u_to_local", (to_local.basis as Basis).orthonormalized()
+		)
+		_dust_material.set_shader_parameter(
+			"u_sun_local", (to_local.basis * (star_position - centre)).normalized()
+		)
+		_dust_material.set_shader_parameter("u_sun_glow", Color(radiance, radiance, radiance))
+		_dust_material.set_shader_parameter(
+			"u_tau", _population.optical_depth * float(
+				SpacesimSettings.get_value("render.ring_dust")
+			)
+		)
+		_dust_material.set_shader_parameter("u_thickness", maxf(_population.thickness, 1.0))
+		_dust_material.set_shader_parameter("u_inner", _population.semi_major_axis.x)
+		_dust_material.set_shader_parameter("u_outer", _population.semi_major_axis.y)
+		_dust_material.set_shader_parameter("u_planet_radius", planet_radius)
 	_uniforms = {"radiance": radiance}
 
 

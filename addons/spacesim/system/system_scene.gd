@@ -232,7 +232,7 @@ func _build_rings() -> void:
 		# **A ring lies in its planet's equator**, which is now a derived thing: the parent is rotated to its
 		# pole, so the sheet is `UP` in the parent's own frame and a ring needs no axis of its own.
 		var cloud := SpacesimParticleCloud.of(population)
-		var view := SpacesimRingView.of(population, cloud, Vector3.UP)
+		var view := SpacesimRingView.of(population, cloud, Vector3.UP, parent.radius)
 		parent.node.add_child(view)
 		rings.append(view)
 		var bodies := SpacesimFragmentBodies.new(population, self)
