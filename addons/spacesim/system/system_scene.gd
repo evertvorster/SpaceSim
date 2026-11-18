@@ -232,7 +232,7 @@ func _build_rings() -> void:
 		# **A ring lies in its planet's equator**, which is now a derived thing: the parent is rotated to its
 		# pole, so the sheet is `UP` in the parent's own frame and a ring needs no axis of its own.
 		var cloud := SpacesimParticleCloud.of(population)
-		var view := SpacesimRingView.of(population, cloud, Vector3.UP, parent.radius)
+		var view := SpacesimRingView.of(population, cloud, Vector3.UP)
 		parent.node.add_child(view)
 		rings.append(view)
 		var bodies := SpacesimFragmentBodies.new(population, self)
@@ -271,7 +271,7 @@ func _bake_ring_shadows() -> void:
 
 ## **The rings, once a drawn frame**: the eye's angle, the band's own radiance, and the few uniforms the shader
 ## needs. Everything else was baked.
-func update_rings(pixel: float, observer: Vector3, camera: Camera3D = null) -> void:
+func update_rings(pixel: float, observer: Vector3) -> void:
 	if rings.is_empty() or star_light == null:
 		return
 	var star_body := star()
@@ -285,7 +285,7 @@ func update_rings(pixel: float, observer: Vector3, camera: Camera3D = null) -> v
 		var centre := parent.node.global_position
 		var albedo := SpacesimSurfaceModel.bond_albedo(_ring_probes[index], _materials())
 		var illuminance := star_light.lux_at((centre - star_position).length())
-		rings[index].update(pixel, illuminance, albedo, centre, star_position, observer, camera)
+		rings[index].update(pixel, illuminance, albedo, centre, star_position, observer)
 
 
 func body_by_id(id: String) -> SpacesimSceneBody:

@@ -32,7 +32,6 @@ func run(h, root: Node) -> void:
 	_test_a_spot_becomes_a_rock_by_one_rule(h, root)
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
 	_test_a_rock_body_leaves_nothing_behind(h, root)
-	_test_the_dust_is_a_slab(h, root)
 
 
 func _sol() -> SpacesimSolarSystem:
@@ -718,57 +717,3 @@ func _test_a_rock_body_leaves_nothing_behind(h, root: Node) -> void:
 	camera.free()
 	root.remove_child(scene.container)
 	scene.container.free()
-
-
-## **The dust is a slab of volume, marched like the air.** Evert, 2026-11-18: *"Is there any way that we can have it
-## as a volumetric shader, almost like air?"*
-##
-## What makes it a slab rather than a sheet of samples: its brightness is `tau`, the thickness and the two angles —
-## never a count of instances — and its geometry is the band's own, so a chord through it is short face-on and long
-## edge-on. This asserts the draw exists, sits under the rocks, and is told the band's own numbers.
-func _test_the_dust_is_a_slab(h, root: Node) -> void:
-	var sol := _sol()
-	var scene := SpacesimSystemScene.from_content(sol)
-	if scene == null or scene.build(root) == null:
-		return
-	var band: SpacesimPopulation = sol.population_by_id("population:ring_b")
-	var view := scene.rings[1]
-	var dust := view.dust()
-	h.check(band.dust_enabled, "the band authors dust")
-	h.check(dust["node"] != null and dust["material"] != null, "and it is drawn")
-	# **One billboarded quad, in the band's own frame** — the same `MODELVIEW_MATRIX` every particle uses, scaled to
-	# the band's outer radius. Nothing about it is re-oriented per frame, so it cannot disagree with the band.
-	var node: MultiMeshInstance3D = dust["node"]
-	h.check(node != null and node.multimesh != null and node.multimesh.instance_count == 1,
-		"as one instance")
-	# **The extent comes from the builder, not from the instance data**: a `MultiMesh` hands out the identity
-	# whatever was written, so reading it back would test nothing.
-	h.check_near(float(dust["extent"]), band.semi_major_axis.y,
-		"scaled to the band's outer radius", 1.0)
-	if dust["material"] == null:
-		return
-	var material: ShaderMaterial = dust["material"]
-	h.check(material.shader == load("res://addons/spacesim/render/shaders/ring_dust.gdshader"),
-		"by the slab shader")
-	# **Under the rocks**: the drawn components sit on top of the fog they are embedded in.
-	h.check(int(dust["priority"]) < SpacesimRingView.RING_PRIORITY,
-		"drawn before the rocks (%d < %d)" % [int(dust["priority"]), SpacesimRingView.RING_PRIORITY])
-	# **And told the band's own numbers**, which is the whole of what it needs to march itself.
-	var observer: Vector3 = view.global_transform * Vector3(1.0e8, 0.0, 2.0e7)
-	view.update(0.00122, 1.0, 0.4, view.global_position, view.global_position + Vector3(1.0, 0.0, 0.0) * 1.4e12, observer)
-	h.check_near(float(material.get_shader_parameter("u_tau")), band.optical_depth,
-		"the band's optical depth, split between nothing", 0.001)
-	h.check_near(float(material.get_shader_parameter("u_thickness")), band.thickness,
-		"its thickness, which is what makes the chord long edge-on", 0.001)
-	h.check_near(float(material.get_shader_parameter("u_inner")), band.semi_major_axis.x,
-		"the band's inner radius (the hole the march skips)", 1.0)
-	h.check_near(float(material.get_shader_parameter("u_outer")), band.semi_major_axis.y,
-		"and its outer one (where the chord stops)", 1.0)
-	var eye_local: Vector3 = material.get_shader_parameter("u_eye_local")
-	h.check_near(eye_local.length(), (observer - view.global_position).length(),
-		"and the eye in the band's own frame", 1.0)
-
-	root.remove_child(scene.container)
-	scene.container.free()
-
-

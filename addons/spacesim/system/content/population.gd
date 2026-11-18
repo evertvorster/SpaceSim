@@ -50,13 +50,6 @@ extends Resource
 ## sample drawn in its place.
 @export var particle_count: int = 0
 
-## **Whether the band draws its dust**, the volumetric slab its content describes.
-##
-## A ring is a slab of optical depth `tau` with a `thickness`, and the dust is that slab drawn as a medium: a chord
-## through it is short face-on and long edge-on, so the band's brightness follows the geometry instead of a sample
-## count. Evert, 2026-11-18: *"Is there any way that we can have it as a volumetric shader, almost like air?"*
-@export var dust_enabled: bool = false
-
 ## **How thick the sheet is**, in metres, full thickness — each particle is placed inside that slab.
 ##
 ## Saturn's main rings are 10 to 100 m thick. It is 10^-8 of a pixel at every distance the band reads as a ring, and

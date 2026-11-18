@@ -128,11 +128,6 @@ const REGISTRY := {
 	# not because it does not draw: the layer's light (`§D6`), multiple decks (`§D9`) and the near regime are still
 	# open. Turn it on to see where the deck's look stands.
 	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
-	# **How much of a ring's dust is drawn, as a fraction of its optical depth.** The slab's geometry is derived —
-	# `tau`, `thickness` and the two angles — so this is a *less dust* knob rather than a dimmer: 0 is off, 1 is the
-	# band's full `tau`, and 0.5 is half the sheet. Reach for it if the band reads milky.
-	"render.ring_dust": {"default": 1.0, "scope": Scope.PLAYER, "min": 0.0, "max": 1.0,
-		"tab": "troubleshooting"},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0), "tab": "hud"
 	},

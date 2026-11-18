@@ -40,31 +40,11 @@ const RING_PRIORITY := 100
 
 
 const SHADER := preload("res://addons/spacesim/render/shaders/ring_splats.gdshader")
-const DUST_SHADER := preload("res://addons/spacesim/render/shaders/ring_dust.gdshader")
-
-## **The dust's own draw**, one per band: a slab of volume around the planet, marched like the air.
-##
-## **A slab, not particles.** A dust built from drawn samples has to stand in for millions of grains, so its
-## brightness depends on how many of them a pixel catches — which made it thousands of times too bright whenever the
-## count was wrong, and there is no count in a slab. Evert, 2026-11-18: *"Is there any way that we can have it as a
-## volumetric shader, almost like air?"* What the slab buys besides correctness: seen edge-on the chord is long and
-## the band brightens, seen face-on it is the thickness and the band dims — which is what a real ring does, and what
-## `thickness` is authored for.
-##
-## **Under the rocks**: `RING_PRIORITY - 1`, so the drawn components sit on top of the fog they are embedded in.
-const DUST_PRIORITY := RING_PRIORITY - 1
 
 var _population: SpacesimPopulation
 var _cloud: SpacesimParticleCloud
 var _multimesh: MultiMesh
 var _materials: Array[ShaderMaterial] = []
-var _dust_material: ShaderMaterial
-var _dust_node: MultiMeshInstance3D
-## The quad's radius in metres — the band's outer one. Kept because an instance transform cannot be read back: a
-## `MultiMesh` hands out the identity whatever was written, so the number is asserted from here.
-var dust_extent := 0.0
-## The body the band encircles, for the slab's geometry and its shadow: the ring's own frame has it at the origin.
-var planet_radius := 0.0
 var _nodes: Array[MultiMeshInstance3D] = []
 ## Which particles a body stands for, so their splats are not drawn. Keyed by particle index; the difference
 ## is written to the instance's custom data only when it changes.
@@ -86,8 +66,7 @@ var shaded_fraction := 0.0
 ## model-space +Y as its pole and an untilted node would put the rings across the poles; once that is done the
 ## plane is `Vector3.UP` in the parent's frame and nothing else has to know.
 static func of(
-	population: SpacesimPopulation, cloud: SpacesimParticleCloud, local_axis := Vector3.ZERO,
-	planet_radius := 0.0
+	population: SpacesimPopulation, cloud: SpacesimParticleCloud, local_axis := Vector3.ZERO
 ) -> SpacesimRingView:
 	var view := SpacesimRingView.new()
 	view.name = "Ring_%s" % (population.id if population != null else "?")
@@ -99,9 +78,6 @@ static func of(
 	if population != null:
 		var axis := local_axis if local_axis.length_squared() > 0.0 else population.ring_axis
 		view.basis = basis_for(axis)
-	view.planet_radius = planet_radius
-	if population.dust_enabled:
-		view._build_dust()
 	if cloud == null or cloud.size() == 0:
 		return view
 	view._build_multimesh()
@@ -212,47 +188,6 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 			],
 		})
 	return list
-
-
-## **The dust slab's DRAWN geometry: ONE billboarded quad, in the band's own frame.**
-##
-## **The slab's shape is not drawn** — the fragment tests it analytically, so the mesh only has to *cover* the pixels
-## the band can appear on. A quad facing the eye, scaled to the band's outer diameter, covers exactly that from any
-## angle — and it is a billboard, made the same way a particle is: the vertex stage takes the instance's origin in
-## view space and offsets it in screen axes. So it needs no per-frame re-orientation, and nothing about it can
-## disagree with the band's own transform. Evert, 2026-11-18: *"We can't just use the position of the rings that are
-## there already?"* — yes: it is `MODELVIEW_MATRIX`, the same one every particle uses.
-func _build_dust() -> void:
-	var multimesh := MultiMesh.new()
-	multimesh.transform_format = MultiMesh.TRANSFORM_3D
-	multimesh.mesh = SpacesimBodyRenderer.point_quad()
-	multimesh.instance_count = 1
-	# The quad's own radius rides in the instance's basis scale, exactly as a particle's does.
-	dust_extent = maxf(_population.semi_major_axis.y, 1.0)
-	multimesh.set_instance_transform(
-		0, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * dust_extent), Vector3.ZERO)
-	)
-	var material := ShaderMaterial.new()
-	material.shader = DUST_SHADER
-	material.render_priority = DUST_PRIORITY
-	var node := MultiMeshInstance3D.new()
-	node.name = "Dust"
-	node.multimesh = multimesh
-	node.material_override = material
-	# A volume is a medium, not an obstacle: it casts nothing.
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(node)
-	_dust_material = material
-	_dust_node = node
-
-
-## The dust, for the tests: its material, and the two numbers the slab is told each frame.
-func dust() -> Dictionary:
-	return {
-		"node": _dust_node, "material": _dust_material, "extent": dust_extent,
-		"tau": _dust_material.get_shader_parameter("u_tau") if _dust_material != null else null,
-		"priority": _dust_material.render_priority if _dust_material != null else 0,
-	}
 
 
 ## **The spots worth NAMING** — `R23`: the next few rocks on the HUD, as a position and a string and nothing else.
@@ -418,7 +353,7 @@ func bake_shadow(
 ## these rocks to make up the entire reflectance, we'll add the dust layer later."*
 func update(
 	pixel_angle: float, illuminance: float, albedo: float, centre: Vector3, star_position: Vector3,
-	observer: Vector3, camera: Camera3D = null
+	observer: Vector3
 ) -> void:
 	if _materials.is_empty() or _cloud == null:
 		return
@@ -432,34 +367,6 @@ func update(
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
 		material.set_shader_parameter("unlit_linear", Color(floor, floor, floor))
 		material.set_shader_parameter("star_position", star_position)
-	if _dust_material != null:
-		# **The slab is told everything it needs to march itself**: where the eye is in the band's frame, where the
-		# star is, the two angles, and the optical depth the setting leaves. **All of it in the BAND's frame**, which
-		# is this node's — the parent is tilted to the planet's pole, so a direction taken in world space would be
-		# wrong by the obliquity.
-		var ring_basis: Basis = (global_transform.basis as Basis).orthonormalized()
-		var to_ring := ring_basis.inverse()
-		_dust_material.set_shader_parameter("u_eye_local", to_ring * (observer - global_position))
-		if camera != null:
-			var camera_basis: Basis = (
-				camera.get_global_transform_interpolated().basis as Basis
-			).orthonormalized()
-			# The fragment turns a VIEW-space ray into the band's frame, so this is the camera's rotation relative to
-			# the band — not the node's own, which the quad below re-orients every frame.
-			_dust_material.set_shader_parameter("u_to_local", to_ring * camera_basis)
-		_dust_material.set_shader_parameter(
-			"u_sun_local", (to_ring * (star_position - centre)).normalized()
-		)
-		_dust_material.set_shader_parameter("u_sun_glow", Color(radiance, radiance, radiance))
-		_dust_material.set_shader_parameter(
-			"u_tau", _population.optical_depth * float(
-				SpacesimSettings.get_value("render.ring_dust")
-			)
-		)
-		_dust_material.set_shader_parameter("u_thickness", maxf(_population.thickness, 1.0))
-		_dust_material.set_shader_parameter("u_inner", _population.semi_major_axis.x)
-		_dust_material.set_shader_parameter("u_outer", _population.semi_major_axis.y)
-		_dust_material.set_shader_parameter("u_planet_radius", planet_radius)
 	_uniforms = {"radiance": radiance}
 
 
