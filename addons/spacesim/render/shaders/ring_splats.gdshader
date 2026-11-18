@@ -70,7 +70,18 @@ void vertex() {
 	// they are one sheet, and they differ in what they stand for.
 	float is_dust = step(0.5, INSTANCE_CUSTOM.b);
 	float half_size = max(radius, mix(1.0, dust_pixels, is_dust) * distance * pixel_angle);
-	float radius_px = max(radius, distance * pixel_angle) / max(distance * pixel_angle, 1.0e-9);
+	// **The number that proves it:** the drawn particles' own optical depth is `SpacesimRingModel.
+	// drawn_optical_depth` — 4.5e-7 for the B ring, against the band's `tau` of 1.2. A rock that covers a whole
+	// pixel at full radiance carries a million times the light it has, and that is what "orders of magnitude too
+	// bright" was, twice.
+	//
+	// **The radius in pixels is the TRUE one, and the floor above is only the quad's size.** This line has now been
+	// got wrong TWICE, and each time it made every rock in the band orders of magnitude too bright: a
+	// floor-and-divide here gives a sub-pixel rock `radius_px = 1`, so `pi * radius_px^2` saturates its coverage
+	// and a rock a thousandth of a pixel wide lights a whole one. The floor exists because a quad narrower than a
+	// pixel rasterises unreliably; **the light must not follow it.** Evert, 2026-11-18: *"Faaaaar to bright, orders
+	// of magnitude too bright... Maybe you made the rocks bright again by accident?"* — he was right.
+	float radius_px = radius / max(distance * pixel_angle, 1.0e-9);
 	// **The particle's share of the pixel it lands on**, and `1` once it covers the pixel outright. This is the
 	// whole of the flux law: a rock smaller than a pixel dims what is behind it by its own area and adds its own
 	// radiance times that area, which is exactly what a small opaque disc does.
