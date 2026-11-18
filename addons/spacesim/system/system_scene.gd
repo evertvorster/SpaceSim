@@ -271,7 +271,7 @@ func _bake_ring_shadows() -> void:
 
 ## **The rings, once a drawn frame**: the eye's angle, the band's own radiance, and the few uniforms the shader
 ## needs. Everything else was baked.
-func update_rings(pixel: float, observer: Vector3) -> void:
+func update_rings(pixel: float, observer: Vector3, camera: Camera3D = null) -> void:
 	if rings.is_empty() or star_light == null:
 		return
 	var star_body := star()
@@ -285,7 +285,7 @@ func update_rings(pixel: float, observer: Vector3) -> void:
 		var centre := parent.node.global_position
 		var albedo := SpacesimSurfaceModel.bond_albedo(_ring_probes[index], _materials())
 		var illuminance := star_light.lux_at((centre - star_position).length())
-		rings[index].update(pixel, illuminance, albedo, centre, star_position, observer)
+		rings[index].update(pixel, illuminance, albedo, centre, star_position, observer, camera)
 
 
 func body_by_id(id: String) -> SpacesimSceneBody:

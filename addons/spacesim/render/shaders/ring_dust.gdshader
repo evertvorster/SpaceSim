@@ -57,6 +57,17 @@ float star_light(vec3 p) {
 }
 
 
+void vertex() {
+	// **A billboard, made the way a particle is**: the instance's origin in view space, offset in screen axes by the
+	// instance's own scale — which is the band's outer radius. No node transform is kept or re-oriented, so the quad
+	// cannot disagree with the band it belongs to.
+	vec4 centre = MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0);
+	float extent = length(MODELVIEW_MATRIX[0].xyz);
+	vec3 offset = vec3(VERTEX.xy * 2.0 * extent, 0.0);
+	POSITION = PROJECTION_MATRIX * vec4(centre.xyz + offset, 1.0);
+}
+
+
 void fragment() {
 	vec3 dir = normalize(u_to_local * normalize(VERTEX));
 	vec3 eye = u_eye_local;

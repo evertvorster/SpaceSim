@@ -736,6 +736,15 @@ func _test_the_dust_is_a_slab(h, root: Node) -> void:
 	var dust := view.dust()
 	h.check(band.dust_enabled, "the band authors dust")
 	h.check(dust["node"] != null and dust["material"] != null, "and it is drawn")
+	# **One billboarded quad, in the band's own frame** — the same `MODELVIEW_MATRIX` every particle uses, scaled to
+	# the band's outer radius. Nothing about it is re-oriented per frame, so it cannot disagree with the band.
+	var node: MultiMeshInstance3D = dust["node"]
+	h.check(node != null and node.multimesh != null and node.multimesh.instance_count == 1,
+		"as one instance")
+	# **The extent comes from the builder, not from the instance data**: a `MultiMesh` hands out the identity
+	# whatever was written, so reading it back would test nothing.
+	h.check_near(float(dust["extent"]), band.semi_major_axis.y,
+		"scaled to the band's outer radius", 1.0)
 	if dust["material"] == null:
 		return
 	var material: ShaderMaterial = dust["material"]

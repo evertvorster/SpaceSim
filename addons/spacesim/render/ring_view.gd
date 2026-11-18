@@ -59,7 +59,10 @@ var _cloud: SpacesimParticleCloud
 var _multimesh: MultiMesh
 var _materials: Array[ShaderMaterial] = []
 var _dust_material: ShaderMaterial
-var _dust_node: MeshInstance3D
+var _dust_node: MultiMeshInstance3D
+## The quad's radius in metres — the band's outer one. Kept because an instance transform cannot be read back: a
+## `MultiMesh` hands out the identity whatever was written, so the number is asserted from here.
+var dust_extent := 0.0
 ## The body the band encircles, for the slab's geometry and its shadow: the ring's own frame has it at the origin.
 var planet_radius := 0.0
 var _nodes: Array[MultiMeshInstance3D] = []
@@ -211,46 +214,30 @@ func pieces(eye: Vector3, pixel_angle: float, count: int) -> Array[Dictionary]:
 	return list
 
 
-## **The dust slab's mesh**: the box that bounds the volume — outer wall, inner wall, top and bottom — so the
-## fragment stage only has to test the hole, never the outside. Built once: the band never changes shape.
+## **The dust slab's DRAWN geometry: ONE billboarded quad, in the band's own frame.**
+##
+## **The slab's shape is not drawn** — the fragment tests it analytically, so the mesh only has to *cover* the pixels
+## the band can appear on. A quad facing the eye, scaled to the band's outer diameter, covers exactly that from any
+## angle — and it is a billboard, made the same way a particle is: the vertex stage takes the instance's origin in
+## view space and offsets it in screen axes. So it needs no per-frame re-orientation, and nothing about it can
+## disagree with the band's own transform. Evert, 2026-11-18: *"We can't just use the position of the rings that are
+## there already?"* — yes: it is `MODELVIEW_MATRIX`, the same one every particle uses.
 func _build_dust() -> void:
-	var segments := 128
-	var inner := _population.semi_major_axis.x
-	var outer := _population.semi_major_axis.y
-	var half := maxf(_population.thickness * 0.5, 1.0)
-	var points := PackedVector3Array()
-	var indices := PackedInt32Array()
-	var rings: Array[PackedVector3Array] = [
-		_ring_points(inner, outer, half, segments),      # 0: top
-		_ring_points(inner, outer, -half, segments),     # 1: bottom
-	]
-	# **The four walls joined to the caps in one strip each**, so the box is watertight and the fragment shader can
-	# start its chord anywhere the camera is — inside the slab, above it, or beyond the outer edge.
-	for cap in rings:
-		for point in cap:
-			points.append(point)
-	var top := 0
-	var bottom := points.size() / 2
-	for index in segments:
-		var next := (index + 1) % segments
-		# top cap: inner and outer pairs
-		_slab_quad(indices, top + index, top + next, top + segments + next, top + segments + index)
-		_slab_quad(
-			indices, bottom + index, bottom + segments + index, bottom + segments + next, bottom + next
-		)
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = points
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = SpacesimBodyRenderer.point_quad()
+	multimesh.instance_count = 1
+	# The quad's own radius rides in the instance's basis scale, exactly as a particle's does.
+	dust_extent = maxf(_population.semi_major_axis.y, 1.0)
+	multimesh.set_instance_transform(
+		0, Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * dust_extent), Vector3.ZERO)
+	)
 	var material := ShaderMaterial.new()
 	material.shader = DUST_SHADER
 	material.render_priority = DUST_PRIORITY
-	var node := MeshInstance3D.new()
+	var node := MultiMeshInstance3D.new()
 	node.name = "Dust"
-	node.mesh = mesh
+	node.multimesh = multimesh
 	node.material_override = material
 	# A volume is a medium, not an obstacle: it casts nothing.
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -259,26 +246,10 @@ func _build_dust() -> void:
 	_dust_node = node
 
 
-## One ring of the slab's cap: `inner` and `outer` at the same height, as pairs, so a quad can be built between them.
-static func _ring_points(inner: float, outer: float, height: float, segments: int) -> PackedVector3Array:
-	var list := PackedVector3Array()
-	list.resize(segments * 2)
-	for index in segments:
-		var angle := TAU * float(index) / float(segments)
-		var direction := Vector3(cos(angle), sin(angle), 0.0)
-		list[index * 2] = direction * inner + Vector3(0.0, 0.0, height)
-		list[index * 2 + 1] = direction * outer + Vector3(0.0, 0.0, height)
-	return list
-
-
-static func _slab_quad(indices: PackedInt32Array, a: int, b: int, c: int, d: int) -> void:
-	indices.append_array([a, b, c, a, c, d])
-
-
 ## The dust, for the tests: its material, and the two numbers the slab is told each frame.
 func dust() -> Dictionary:
 	return {
-		"node": _dust_node, "material": _dust_material,
+		"node": _dust_node, "material": _dust_material, "extent": dust_extent,
 		"tau": _dust_material.get_shader_parameter("u_tau") if _dust_material != null else null,
 		"priority": _dust_material.render_priority if _dust_material != null else 0,
 	}
@@ -447,7 +418,7 @@ func bake_shadow(
 ## these rocks to make up the entire reflectance, we'll add the dust layer later."*
 func update(
 	pixel_angle: float, illuminance: float, albedo: float, centre: Vector3, star_position: Vector3,
-	observer: Vector3
+	observer: Vector3, camera: Camera3D = null
 ) -> void:
 	if _materials.is_empty() or _cloud == null:
 		return
@@ -463,14 +434,21 @@ func update(
 		material.set_shader_parameter("star_position", star_position)
 	if _dust_material != null:
 		# **The slab is told everything it needs to march itself**: where the eye is in the band's frame, where the
-		# star is, the two angles, and the optical depth the setting leaves.
-		var to_local := global_transform.affine_inverse()
-		_dust_material.set_shader_parameter("u_eye_local", to_local * observer)
+		# star is, the two angles, and the optical depth the setting leaves. **All of it in the BAND's frame**, which
+		# is this node's — the parent is tilted to the planet's pole, so a direction taken in world space would be
+		# wrong by the obliquity.
+		var ring_basis: Basis = (global_transform.basis as Basis).orthonormalized()
+		var to_ring := ring_basis.inverse()
+		_dust_material.set_shader_parameter("u_eye_local", to_ring * (observer - global_position))
+		if camera != null:
+			var camera_basis: Basis = (
+				camera.get_global_transform_interpolated().basis as Basis
+			).orthonormalized()
+			# The fragment turns a VIEW-space ray into the band's frame, so this is the camera's rotation relative to
+			# the band — not the node's own, which the quad below re-orients every frame.
+			_dust_material.set_shader_parameter("u_to_local", to_ring * camera_basis)
 		_dust_material.set_shader_parameter(
-			"u_to_local", (to_local.basis as Basis).orthonormalized()
-		)
-		_dust_material.set_shader_parameter(
-			"u_sun_local", (to_local.basis * (star_position - centre)).normalized()
+			"u_sun_local", (to_ring * (star_position - centre)).normalized()
 		)
 		_dust_material.set_shader_parameter("u_sun_glow", Color(radiance, radiance, radiance))
 		_dust_material.set_shader_parameter(
