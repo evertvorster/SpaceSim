@@ -30,6 +30,19 @@ extends Node3D
 const FAR_PRIORITY := -100
 const NEAR_PRIORITY := 100
 
+## **PROBE, 2026-11-18 — set false to restore the cut.** Evert: *"the ONLY thing that changes is that the dots that
+## make up the front ring that overlap where Saturn is drawn disappears"*, with the shadow unchanged and a few
+## metres of camera movement between the two views. With the cut disabled, `split_side = 0` makes BOTH nodes draw
+## EVERY particle: nothing is ever classified out.
+##
+## What each answer means:
+##   the dots appear over Saturn -> the split misclassified them at that pose (the cut is the cause);
+##   they stay missing           -> the cut is innocent and something is drawn after the ring.
+##
+## **Revert this to `false` (or delete it) once the answer is in.** With it on, both halves draw all 300,000
+## particles, so the band looks twice as dense and twice as bright — that is the probe, not a regression.
+const SPLIT_PROBE := true
+
 const SHADER := preload("res://addons/spacesim/render/shaders/ring_splats.gdshader")
 
 var _population: SpacesimPopulation
@@ -105,7 +118,7 @@ func _build_draws() -> void:
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var material := ShaderMaterial.new()
 		material.shader = SHADER
-		material.set_shader_parameter("split_side", side)
+		material.set_shader_parameter("split_side", 0.0 if SPLIT_PROBE else side)
 		material.render_priority = NEAR_PRIORITY if side > 0.0 else FAR_PRIORITY
 		node.material_override = material
 		add_child(node)

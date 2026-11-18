@@ -462,10 +462,14 @@ func _test_the_split_is_two_draws_of_everything(h, root: Node) -> void:
 		var far_priority := (nodes[1].material_override as ShaderMaterial).render_priority
 		h.check(near_priority > far_priority, "the near half draws after the far one (%d > %d)"
 			% [near_priority, far_priority])
+		# **The cut, or the probe that disables it.** `SPLIT_PROBE` draws every particle in both nodes so a flight
+		# can say whether the split is what hides the front half; the assertion follows the flag so the suite is
+		# honest either way.
+		var expected_side: float = 0.0 if SpacesimRingView.SPLIT_PROBE else 1.0
 		h.check_near(float((nodes[0].material_override as ShaderMaterial).get_shader_parameter("split_side")),
-			1.0, "and each knows which side it is", 1.0e-6)
+			expected_side, "and each knows which side it is", 1.0e-6)
 		h.check_near(float((nodes[1].material_override as ShaderMaterial).get_shader_parameter("split_side")),
-			-1.0, "both of them", 1.0e-6)
+			0.0 if SpacesimRingView.SPLIT_PROBE else -1.0, "both of them", 1.0e-6)
 
 	# **The cut follows the eye, not the star.** Move the observer round the planet and the direction the shader
 	# is given changes with it — that is `R12`, and it is why the cut is the camera's business.
