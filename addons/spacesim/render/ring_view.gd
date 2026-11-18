@@ -7,16 +7,22 @@ extends Node3D
 ## in the planet's shadow are baked at build. What changes is the eye — and the shader turns that into the
 ## quad's size, the particle's share of the band's optical depth and the sheet's brightness.
 ##
-## ## Why two draws
+## ## One draw, since 2026-11-18
 ##
-## A planet's air is a transparent shader with the depth test **off**, so a single draw cannot be both in front
-## of that air and behind it. Evert, 2026-11-15: *"Cut the rings exactly on the planet's centre so you split it
-## into a front half that faces the camera and goes in front of the planet, and a back half that goes behind
-## the planet."*
+## **Two draws were cut, and the cut was the bug.** The split existed so that the half of the band *behind* the
+## planet could be drawn before the planet's air (which is transparent with the depth test off) and the half in
+## front of it after. But the planet's own body hides the far half by depth — Evert: *"the far rings are covered
+## by this body"* — so the split was buying only the haze over the far half's outer part, at the limb, and paying
+## for it with every ordering fault this feature ever had: nine flight reports, a tie in the engine's sort, two
+## failed reorderings, and finally a classification that hid the whole front half at some camera positions.
 ##
-## The cut is the plane through the planet's centre at right angles to the **eye**, and both draws hold every
-## particle — each collapses the ones on the other side in its vertex stage. Sorting 300,000 instances on the
-## CPU every frame as the eye moves is the cost this design exists to avoid.
+## A probe settled it: with the cut disabled (`split_side = 0`, so both nodes drew every particle) the front ring
+## appeared over the planet correctly. Evert: *"now the rings actually stay put. So why do we have two overlapping
+## rings again? If we draw both all the time, then we need only 1, right?"* Right. So there is one draw, drawn
+## after everything a planet wears, and the 300,000 quads are halved with it.
+##
+## **What is given up, deliberately:** the far half's arc beyond the planet's limb is no longer veiled by the
+## air's haze; it is drawn over it. That is a thin detail at the limb, and it is the price of not having a cut.
 ##
 ## ## The layer contract
 ##
@@ -27,21 +33,10 @@ extends Node3D
 ## **The two halves sit outside the planet's whole stack**: the air and the decks run `0 … −n` and the sea `−8`,
 ## so −100 is beyond all of them and +100 ahead of all of them. The engine's sort rule is written down at
 ## `SpacesimBodyRenderer.INTERIOR_RENDER_PRIORITY`, and so is the reason the body's own stack is not touched.
-const FAR_PRIORITY := -100
-const NEAR_PRIORITY := 100
-
-## **PROBE, 2026-11-18 — set false to restore the cut.** Evert: *"the ONLY thing that changes is that the dots that
-## make up the front ring that overlap where Saturn is drawn disappears"*, with the shadow unchanged and a few
-## metres of camera movement between the two views. With the cut disabled, `split_side = 0` makes BOTH nodes draw
-## EVERY particle: nothing is ever classified out.
-##
-## What each answer means:
-##   the dots appear over Saturn -> the split misclassified them at that pose (the cut is the cause);
-##   they stay missing           -> the cut is innocent and something is drawn after the ring.
-##
-## **Revert this to `false` (or delete it) once the answer is in.** With it on, both halves draw all 300,000
-## particles, so the band looks twice as dense and twice as bright — that is the probe, not a regression.
-const SPLIT_PROBE := true
+## **After everything a planet wears**, and there is nothing above it: the band is one draw now, so this is the
+## only priority it has. The body's stack runs from −8 (the sea) to 0 (air, decks, interior), see
+## `SpacesimBodyRenderer`.
+const RING_PRIORITY := 100
 
 const SHADER := preload("res://addons/spacesim/render/shaders/ring_splats.gdshader")
 
@@ -109,21 +104,19 @@ func _build_multimesh() -> void:
 
 
 func _build_draws() -> void:
-	for side in [1.0, -1.0]:
-		var node := MultiMeshInstance3D.new()
-		node.name = "SplatsNear" if side > 0.0 else "SplatsFar"
-		node.multimesh = _multimesh
-		# **A ring is a medium, not an obstacle**: it must not cast a shadow of its own, and the planet's shadow
-		# on it is baked rather than rendered.
-		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var material := ShaderMaterial.new()
-		material.shader = SHADER
-		material.set_shader_parameter("split_side", 0.0 if SPLIT_PROBE else side)
-		material.render_priority = NEAR_PRIORITY if side > 0.0 else FAR_PRIORITY
-		node.material_override = material
-		add_child(node)
-		_materials.append(material)
-		_nodes.append(node)
+	var node := MultiMeshInstance3D.new()
+	node.name = "Splats"
+	node.multimesh = _multimesh
+	# **A ring is a medium, not an obstacle**: it must not cast a shadow of its own, and the planet's shadow on
+	# it is baked rather than rendered.
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var material := ShaderMaterial.new()
+	material.shader = SHADER
+	material.render_priority = RING_PRIORITY
+	node.material_override = material
+	add_child(node)
+	_materials.append(material)
+	_nodes.append(node)
 
 
 ## **The particles worth being rocks**, in the shape [SpacesimFragmentBodies] takes — an id, a world position,
@@ -308,15 +301,11 @@ func update(
 	# what is handed over is the light arriving divided by pi times the albedo, which is everything Lambert's law
 	# needs that is the same for the whole band.
 	var radiance := illuminance * albedo / PI
-	var split := observer - centre
-	var direction := split.normalized() if split.length_squared() > 0.0 else Vector3.RIGHT
 	for material in _materials:
 		material.set_shader_parameter("pixel_angle", pixel_angle)
 		material.set_shader_parameter("glow_linear", Color(radiance, radiance, radiance))
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
 		material.set_shader_parameter("unlit_linear", Color(floor, floor, floor))
-		material.set_shader_parameter("planet_origin", centre)
-		material.set_shader_parameter("split_direction", direction)
 		material.set_shader_parameter("star_position", star_position)
 	_uniforms = {"radiance": radiance}
 

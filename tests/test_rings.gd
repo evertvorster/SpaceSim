@@ -27,8 +27,7 @@ func run(h, root: Node) -> void:
 	_test_the_walk_refines_under_the_ship(h, root)
 	_test_every_body_shader_is_told_the_same_sun(h, root)
 	_test_the_shadow_is_the_planets(h, root)
-	_test_the_split_is_two_draws_of_everything(h, root)
-	_test_the_split_agrees_with_the_geometry(h, root)
+	_test_the_band_is_one_draw(h, root)
 	_test_the_layers_cannot_tie(h, root)
 	_test_a_spot_becomes_a_rock_by_one_rule(h, root)
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
@@ -300,6 +299,41 @@ func _test_the_rings_encircle_the_equator(h, root: Node) -> void:
 	scene.container.free()
 
 
+## **The subdivision refines under the ship, on a body that is tilted.** Evert, 2026-11-16: *"The subdivision code
+## for the LOD meshes don't seem to subdivide exactly below my ship anymore."* The walk's eye direction was the last
+## quantity still computed in world space and handed to model-space code, so the detail followed a point an
+## obliquity away from the ship — 23.4 degrees on Earth, 26.7 on Saturn, an eighth of a radius along the surface.
+func _test_the_walk_refines_under_the_ship(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var earth := scene.body_by_id("planet:earth")
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	# Low, and off the pole, so the tilt matters: straight up the axis would hide the fault entirely.
+	var basis: Basis = earth.node.global_transform.basis.orthonormalized()
+	var observer: Vector3 = earth.node.global_position + basis.y * earth.radius + basis.x * 900000.0
+	camera.global_position = observer
+	scene.update_lod(camera, observer)
+
+	var expected := (basis.inverse() * (observer - earth.node.global_position)).normalized()
+	var walked: Vector3 = earth.patch_walk_direction
+	h.check(walked.length() > 0.5, "the walk was asked for (%s)" % str(walked))
+	h.check_near(rad_to_deg(walked.angle_to(expected)), 0.0,
+		"and it refines along the eye's direction IN THE BODY'S FRAME (%.1f deg off)"
+			% rad_to_deg(walked.angle_to(expected)), 0.01)
+	# **And that is not the world direction**, which is the whole point: the two differ by the tilt.
+	h.check(rad_to_deg(expected.angle_to((observer - earth.node.global_position).normalized())) > 10.0,
+		"which is 23.4 degrees away from the world offset, so the two cannot be confused"
+	)
+
+	root.remove_child(camera)
+	camera.free()
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
 ## **Every shader of a body is told the same sun, in the same frame.** Evert, 2026-11-16, over Jupiter: *"there
 ## seems to be two shadows, as if the air shader and the body shader disagree where the light is coming from...
 ## They are off by about 20 ish degrees."*
@@ -338,41 +372,6 @@ func _test_every_body_shader_is_told_the_same_sun(h, root: Node) -> void:
 		h.check_near(rad_to_deg(air_world.angle_to(surface_world)), 0.0,
 			"%s: the air and the surface are told one sun (%.2f deg apart)"
 				% [id, rad_to_deg(air_world.angle_to(surface_world))], 0.01)
-
-	root.remove_child(camera)
-	camera.free()
-	root.remove_child(scene.container)
-	scene.container.free()
-
-
-## **The subdivision refines under the ship, on a body that is tilted.** Evert, 2026-11-16: *"The subdivision code
-## for the LOD meshes don't seem to subdivide exactly below my ship anymore."* The walk's eye direction was the last
-## quantity still computed in world space and handed to model-space code, so the detail followed a point an
-## obliquity away from the ship — 23.4 degrees on Earth, 26.7 on Saturn, an eighth of a radius along the surface.
-func _test_the_walk_refines_under_the_ship(h, root: Node) -> void:
-	var sol := _sol()
-	var scene := SpacesimSystemScene.from_content(sol)
-	if scene == null or scene.build(root) == null:
-		return
-	var earth := scene.body_by_id("planet:earth")
-	var camera := Camera3D.new()
-	root.add_child(camera)
-	# Low, and off the pole, so the tilt matters: straight up the axis would hide the fault entirely.
-	var basis: Basis = earth.node.global_transform.basis.orthonormalized()
-	var observer: Vector3 = earth.node.global_position + basis.y * earth.radius + basis.x * 900000.0
-	camera.global_position = observer
-	scene.update_lod(camera, observer)
-
-	var expected := (basis.inverse() * (observer - earth.node.global_position)).normalized()
-	var walked: Vector3 = earth.patch_walk_direction
-	h.check(walked.length() > 0.5, "the walk was asked for (%s)" % str(walked))
-	h.check_near(rad_to_deg(walked.angle_to(expected)), 0.0,
-		"and it refines along the eye's direction IN THE BODY'S FRAME (%.1f deg off)"
-			% rad_to_deg(walked.angle_to(expected)), 0.01)
-	# **And that is not the world direction**, which is the whole point: the two differ by the tilt.
-	h.check(rad_to_deg(expected.angle_to((observer - earth.node.global_position).normalized())) > 10.0,
-		"which is 23.4 degrees away from the world offset, so the two cannot be confused"
-	)
 
 	root.remove_child(camera)
 	camera.free()
@@ -444,128 +443,60 @@ func _test_the_shadow_is_the_planets(h, root: Node) -> void:
 	scene.container.free()
 
 
-## **`R10`, `R11`, `R12`** — two draws holding every particle, and the cut following the eye.
-func _test_the_split_is_two_draws_of_everything(h, root: Node) -> void:
+## **`R10`–`R12`, as they now stand: ONE draw, above everything a planet wears.**
+##
+## The band was drawn twice, cut on the plane through the planet's centre, so the half behind the planet could go
+## under its air and the half in front over it. The planet's own body hides the far half by depth, so the cut
+## bought only the haze over the far limb — and it cost every ordering fault this feature had, the last of them a
+## classification that hid the whole front half at some camera positions. Evert, 2026-11-18: *"now the rings
+## actually stay put. So why do we have two overlapping rings again? If we draw both all the time, then we need
+## only 1, right?"*
+func _test_the_band_is_one_draw(h, root: Node) -> void:
 	var sol := _sol()
 	var scene := SpacesimSystemScene.from_content(sol)
 	if scene == null or scene.build(root) == null:
 		return
 	var view := scene.rings[1]
 	var nodes := view.draw_nodes()
-	h.check(nodes.size() == 2, "a band is drawn twice (%d)" % nodes.size())
-	if nodes.size() == 2:
-		h.check(nodes[0].multimesh == nodes[1].multimesh,
-			"both draws hold the same instances, so no particle is lost to the cut")
+	h.check(nodes.size() == 1, "a band is drawn once (%d node)" % nodes.size())
+	if nodes.size() == 1:
 		h.check(nodes[0].multimesh.instance_count == view.count(),
-			"and that is every particle (%d)" % view.count())
-		var near_priority := (nodes[0].material_override as ShaderMaterial).render_priority
-		var far_priority := (nodes[1].material_override as ShaderMaterial).render_priority
-		h.check(near_priority > far_priority, "the near half draws after the far one (%d > %d)"
-			% [near_priority, far_priority])
-		# **The cut, or the probe that disables it.** `SPLIT_PROBE` draws every particle in both nodes so a flight
-		# can say whether the split is what hides the front half; the assertion follows the flag so the suite is
-		# honest either way.
-		var expected_side: float = 0.0 if SpacesimRingView.SPLIT_PROBE else 1.0
-		h.check_near(float((nodes[0].material_override as ShaderMaterial).get_shader_parameter("split_side")),
-			expected_side, "and each knows which side it is", 1.0e-6)
-		h.check_near(float((nodes[1].material_override as ShaderMaterial).get_shader_parameter("split_side")),
-			0.0 if SpacesimRingView.SPLIT_PROBE else -1.0, "both of them", 1.0e-6)
+			"holding every particle (%d)" % view.count())
+		var priority := (nodes[0].material_override as ShaderMaterial).render_priority
+		h.check(priority == SpacesimRingView.RING_PRIORITY, "at the ring's one priority (%d)" % priority)
+		# **And nothing else in that material can take a particle away**: no cut, so no per-particle rejection.
+		h.check((nodes[0].material_override as ShaderMaterial).get_shader_parameter("split_side") == null,
+			"and with no cut to classify a particle out of it")
+	# **Above every layer the planet draws**, which is the whole of what the ring needs from the ordering: it is
+	# a sheet in front of a body whose air cannot be depth-tested against.
+	var highest := -129
+	for body in scene.bodies:
+		if body.air_shell != null and body.air_shell.material_override != null:
+			highest = maxi(highest, int((body.air_shell.material_override as ShaderMaterial).render_priority))
+		for deck in body.decks:
+			highest = maxi(highest, int(deck.material.render_priority))
+		if body.ocean != null and body.ocean.material_override != null:
+			highest = maxi(highest, int((body.ocean.material_override as Material).render_priority))
+	h.check(highest > -129, "the planet's own layers are here (%d at the top)" % highest)
+	h.check(SpacesimRingView.RING_PRIORITY > highest,
+		"the band draws after all of them (%d > %d)" % [SpacesimRingView.RING_PRIORITY, highest])
 
-	# **The cut follows the eye, not the star.** Move the observer round the planet and the direction the shader
-	# is given changes with it — that is `R12`, and it is why the cut is the camera's business.
-	var camera := Camera3D.new()
-	root.add_child(camera)
-	var lights: Array = []
-	var centre: Vector3 = scene.body_by_id("planet:saturn").node.global_position
-	for direction in [Vector3(1.0, 0.0, 0.0), Vector3(0.0, 0.0, 1.0), Vector3(-1.0, 0.0, 0.0)]:
-		var observer: Vector3 = centre + (direction as Vector3) * 1.5e8
-		view.update(0.00122, 1.0, 0.4, centre, centre + Vector3(1.0, 0.0, 0.0) * 1.4e12, observer)
-		lights.append((view.shader_parameter("split_direction") as Vector3).normalized())
-	h.check(lights[0].is_equal_approx(Vector3(1.0, 0.0, 0.0)),
-		"the cut's direction is the eye's (%s)" % str(lights[0]))
-	h.check(lights[1].is_equal_approx(Vector3(0.0, 0.0, 1.0)), "and it turns with it (%s)" % str(lights[1]))
-	h.check(lights[2].is_equal_approx(Vector3(-1.0, 0.0, 0.0)), "all the way round (%s)" % str(lights[2]))
-
-	root.remove_child(camera)
-	camera.free()
 	root.remove_child(scene.container)
 	scene.container.free()
 
 
-## **The split's own contract, in the engine's terms.** A particle that is *visibly in front of the planet* must be
-## in the draw that goes over the planet's air, and one that is behind it must be in the other. That is the whole
-## of `R10`–`R12`, and it is a geometric question with an exact answer — so it is asserted against a ray-sphere
-## test rather than argued about.
+## **`R13`–`R15`** — the ring's place in the transparent stack, and nothing more.
 ##
-## The engine's transparent sort is **ascending `render_priority`, then far to near on a tie**
-## (`SortByReverseDepthAndPriority`, `render_forward_clustered.h`, 4.7.2-stable), so the near draw must be the
-## higher priority. `tests/test_rings.gd` checks that too.
-func _test_the_split_agrees_with_the_geometry(h, root: Node) -> void:
-	var sol := _sol()
-	var scene := SpacesimSystemScene.from_content(sol)
-	if scene == null or scene.build(root) == null:
-		return
-	var saturn := scene.body_by_id("planet:saturn")
-	var centre := saturn.node.global_position
-	var radius := saturn.radius
-	var view := scene.rings[1]
-	var band: SpacesimPopulation = sol.population_by_id("population:ring_b")
-	var cloud := SpacesimParticleCloud.of(band)
-
-	# **A grazing view**, because that is the pose in which the ring's near half passes in front of the disc at
-	# all: seen face-on, the sheet through the planet's centre crosses every ray *behind* the near surface, so
-	# nothing of it is in front. Near the ring plane, the near half crosses the disc and the split has real work.
-	var normal := (view.global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
-	var across_bearing := Vector3.UP.cross(normal).normalized()
-	var eye := centre + (across_bearing + normal * 0.12).normalized() * 1.4e8
-	var direction := (eye - centre).normalized()
-	var over_disc := 0
-	var wrong := 0
-	var front := 0
-	var behind := 0
-	for index in range(0, cloud.size(), 97):
-		var world: Vector3 = view.global_transform * cloud.positions[index]
-		var to_particle := world - eye
-		var along := to_particle.dot(-direction)  # distance along the view direction
-		# Where the ray through this particle meets the planet, if it does.
-		var v := to_particle.normalized()
-		var b := (eye - centre).dot(v)
-		var c := (eye - centre).length_squared() - radius * radius
-		var discriminant := b * b - c
-		if discriminant <= 0.0 or along <= 0.0:
-			continue
-		over_disc += 1
-		var t_surface := -b - sqrt(discriminant)
-		var is_front := to_particle.length() < t_surface
-		var in_near_draw := (world - centre).dot(direction) > 0.0
-		if is_front:
-			front += 1
-		else:
-			behind += 1
-		if is_front != in_near_draw:
-			wrong += 1
-	h.check(over_disc > 20, "some particles lie over the planet's disc (%d sampled)" % over_disc)
-	h.check(front > 5 and behind > 5,
-		"with both in front of it and behind it (%d front, %d behind)" % [front, behind])
-	h.check(wrong == 0,
-		"and every one of them is in the draw that matches where it is (%d wrong)" % wrong)
-
-	root.remove_child(scene.container)
-	scene.container.free()
-
-
-## **`R13`–`R15`** — the transparent stack, declared once and asserted here: **every layer a body draws sits in its
-## own band, in order, and no two of them can tie.** A tie is not a slow order, it is no order — the layers are all
-## children of the body's node, so their distances are equal.
+## The band is ONE draw and it sits above every layer a planet wears, because a planet's air is transparent with
+## the depth test off and cannot be depth-tested against. The order *among* the planet's own layers — sea, air,
+## decks, interior — is NOT asserted: it is a settled stack that must not be reordered here. Evert, 2026-11-16:
+## *"We spent a long, long time optimizing air and cloud decks, don't mess up their order."*
 func _test_the_layers_cannot_tie(h, root: Node) -> void:
 	var sol := _sol()
 	var scene := SpacesimSystemScene.from_content(sol)
 	if scene == null or scene.build(root) == null:
 		return
-	# **The interior belongs to a body with no surface** — a giant's visible surface *is* its cloud deck — while
-	# the sea, the decks and the air belong to a body with one. Between them, Earth and Saturn carry every layer.
 	var layers := {}
-	var planet_layers := {}
 	for body in [scene.body_by_id("planet:saturn"), scene.body_by_id("planet:earth")]:
 		if body == null:
 			continue
@@ -577,40 +508,19 @@ func _test_the_layers_cannot_tie(h, root: Node) -> void:
 			layers["air"] = int((body.air_shell.material_override as ShaderMaterial).render_priority)
 		for deck in body.decks:
 			layers["deck_%d_%s" % [deck.index, body.name]] = int(deck.material.render_priority)
+	h.check(layers.has("interior") and layers.has("air") and layers.has("ocean"),
+		"the planet's own layers are here")
+	var highest := -129
 	for name in layers:
-		planet_layers[name] = layers[name]
-	layers["ring_far"] = SpacesimRingView.FAR_PRIORITY
-	layers["ring_near"] = SpacesimRingView.NEAR_PRIORITY
-	h.check(layers.has("interior") and layers.has("air") and layers.has("ocean"),
-		"the planet's own layers are here")
-
-	# **The claim this branch makes, and the only one**: both halves of a ring sit outside everything a planet
-	# draws, and nothing ties with them. The planet's own stack — sea, air, decks — is NOT asserted in order,
-	# because it is a settled thing that must not be reordered here: Evert, 2026-11-16: *"We spent a long, long
-	# time optimizing air and cloud decks, don't mess up their order."* The air and the first deck tie at 0 to
-	# this day, deliberately; see `SpacesimBodyRenderer.INTERIOR_RENDER_PRIORITY`.
-	h.check(layers.has("interior") and layers.has("air") and layers.has("ocean"),
-		"the planet's own layers are here")
-	var highest_planet := -129
-	var lowest_planet := 129
-	for name in planet_layers:
-		var priority := int(planet_layers[name])
-		highest_planet = maxi(highest_planet, priority)
-		lowest_planet = mini(lowest_planet, priority)
+		var priority := int(layers[name])
 		h.check(priority >= -128 and priority <= 128, "%s is inside the engine's range (%d)" % [name, priority])
-	h.check(SpacesimRingView.FAR_PRIORITY < lowest_planet,
-		"the far half of a ring draws before everything the planet wears (%d < %d)"
-			% [SpacesimRingView.FAR_PRIORITY, lowest_planet])
-	h.check(SpacesimRingView.NEAR_PRIORITY > highest_planet,
-		"and the near half after all of it (%d > %d)"
-			% [SpacesimRingView.NEAR_PRIORITY, highest_planet])
-	var tied := ""
-	for name in layers:
-		if String(name).begins_with("ring_"):
-			continue
-		if int(layers[name]) == SpacesimRingView.FAR_PRIORITY or int(layers[name]) == SpacesimRingView.NEAR_PRIORITY:
-			tied = "%s shares a ring's priority (%d)" % [name, int(layers[name])]
-	h.check(tied.is_empty(), "and no planet layer ties with a ring half (%s)" % ("none" if tied.is_empty() else tied))
+		highest = maxi(highest, priority)
+	# **The one relationship the ring depends on**: after everything the planet wears.
+	h.check(SpacesimRingView.RING_PRIORITY > highest,
+		"the band draws after every layer a planet wears (%d > %d)"
+			% [SpacesimRingView.RING_PRIORITY, highest])
+	h.check(SpacesimRingView.RING_PRIORITY >= -128 and SpacesimRingView.RING_PRIORITY <= 128,
+		"and inside the engine's range (%d)" % SpacesimRingView.RING_PRIORITY)
 
 	root.remove_child(scene.container)
 	scene.container.free()
@@ -758,3 +668,11 @@ func _test_a_rock_is_a_body_that_sets_the_unit(h, root: Node) -> void:
 	camera.free()
 	root.remove_child(scene.container)
 	scene.container.free()
+
+
+## The camera's pixel angle, as `update_lod` computes it.
+func _pixel(camera: Camera3D) -> float:
+	var viewport := camera.get_viewport()
+	if viewport == null:
+		return 0.0
+	return SpacesimLod.pixel_angle(camera.fov, float(viewport.size.y))

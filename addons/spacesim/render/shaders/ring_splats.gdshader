@@ -37,13 +37,6 @@ uniform vec3 glow_linear = vec3(1.0);
 uniform vec3 unlit_linear = vec3(0.04);
 // Where the star is, in world space — the other half of the phase angle.
 uniform vec3 star_position = vec3(0.0);
-// **Which half of the ring this draw is.** A planet's air is transparent with the depth test off, so one draw
-// cannot be both in front of it and behind it. Evert, 2026-11-15: *"Cut the rings exactly on the planet's
-// centre so you split it into a front half that faces the camera and goes in front of the planet, and a back
-// half that goes behind the planet."*
-uniform vec3 split_direction = vec3(0.0, 0.0, 1.0);
-uniform float split_side = 0.0;
-uniform vec3 planet_origin = vec3(0.0);
 
 varying float v_coverage;
 varying vec3 v_radiance;
@@ -85,22 +78,16 @@ void vertex() {
 	v_radiance = mix(unlit_linear, glow_linear * lambert, v_shadow);
 
 	vec3 offset = vec3(VERTEX.xy * 2.0 * half_size, 0.0);
-	// **The cut.** A particle on the other side of the planet belongs to the other draw, so this one collapses it
-	// to a point of no area — `return` is not allowed in a vertex stage, and a degenerate quad rasterises
-	// nothing.
+	// **A hidden particle is collapsed to a point of no area**, which is a frame-rate fix rather than a look:
+	// switching a spot off by alpha alone still rasterises a quad the size of the shape it was replaced by.
 	//
-	// **A hidden particle is collapsed too, and that is a frame-rate fix rather than a look.** Switching a spot
-	// off by alpha alone still rasterises a quad the size of the shape it was replaced by, and 300,000 of those
-	// twice a frame is fill the ring cannot afford.
+	// **There is no cut any more.** The band was drawn twice, cut on the plane through the planet's centre, so
+	// that the half behind the planet could go under its air and the half in front over it. The planet's own body
+	// hides the far half by depth, so the cut bought only the haze over the far limb — and it cost every ordering
+	// fault this feature had, ending with a classification that hid the whole front half at some camera
+	// positions. One draw, after everything the planet wears.
 	if (v_coverage <= 0.0) {
 		offset = vec3(0.0);
-	}
-	if (split_side != 0.0) {
-		vec3 world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
-		if (dot(world - planet_origin, split_direction) * split_side < 0.0) {
-			offset = vec3(0.0);
-			v_coverage = 0.0;
-		}
 	}
 	// A view-space offset in x and y is already screen-aligned, which is the whole of billboarding.
 	POSITION = PROJECTION_MATRIX * vec4(centre.xyz + offset, 1.0);
