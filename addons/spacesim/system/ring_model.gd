@@ -120,6 +120,14 @@ static func unlit_radiance(radiance_lit: float) -> float:
 	return radiance_lit * UNLIT
 
 
+## **How much light gets through the sheet**, `exp(-tau/mu)` — the fraction of what is behind it that survives.
+## The dust's alpha decomposition is built on it: `n` samples each carrying `1 - T^(1/n)` accumulate to exactly this.
+static func transmittance(tau: float, eye_cosine: float) -> float:
+	if tau <= 0.0:
+		return 1.0
+	return exp(-tau / maxf(eye_cosine, MIN_COSINE))
+
+
 ## **How much of the band's opacity the DRAWN particles actually are** — `N·pi·<r²>/A`, with `r` the mean
 ## drawn radius and `A` the band's area.
 ##

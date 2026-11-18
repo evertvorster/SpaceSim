@@ -72,16 +72,40 @@ static func of(population: SpacesimPopulation) -> SpacesimParticleCloud:
 	var inner_squared := inner * inner
 	var span := outer * outer - inner_squared
 	var squared := 0.0
+	# **A ring has thickness.** Evert, 2026-11-18: *"surely not all the rocks and dust are on a perfect plane?"* No:
+	# Saturn's main rings are 10 to 100 m thick, and an authored `thickness` puts each particle inside that slab. It
+	# is 10^-8 of a pixel at every distance the band is a ring, and it is the whole of what you see when you fly
+	# through one.
+	var thickness := maxf(population.thickness, 0.0)
 	for index in count:
 		var radius := sqrt(inner_squared + rng.randf() * span)
 		var angle := rng.randf() * TAU
-		cloud.positions[index] = Vector3(radius * cos(angle), radius * sin(angle), 0.0)
+		cloud.positions[index] = Vector3(
+			radius * cos(angle), radius * sin(angle), (rng.randf() - 0.5) * thickness
+		)
 		var diameter := SpacesimRingModel.diameter(
 			rng.randf(), population.size_floor, population.size_ceiling, population.size_index
 		)
 		cloud.radii[index] = diameter * 0.5
 		squared += cloud.radii[index] * cloud.radii[index]
 	cloud._mean_radius = sqrt(squared / float(count))
+	# **And the dust**, appended after the rocks: the same area, the same seeds' stream, a radius that is only a
+	# nominal one — a dust sample is drawn at a screen size and its alpha is a share of the sheet, so its own metres
+	# never reach the screen. `size_floor` is the honest nominal: it is the size below which the band's content calls
+	# the material dust.
+	cloud.dust_start = count
+	cloud.dust_count = maxi(population.dust_count, 0)
+	if cloud.dust_count > 0:
+		var dust_radius := population.size_floor * 0.5
+		cloud.positions.resize(count + cloud.dust_count)
+		cloud.radii.resize(count + cloud.dust_count)
+		for index in cloud.dust_count:
+			var radius := sqrt(inner_squared + rng.randf() * span)
+			var angle := rng.randf() * TAU
+			cloud.positions[count + index] = Vector3(
+				radius * cos(angle), radius * sin(angle), (rng.randf() - 0.5) * thickness
+			)
+			cloud.radii[count + index] = dust_radius
 	cloud._index(inner, outer)
 	return cloud
 
@@ -92,6 +116,12 @@ func mean_radius() -> float:
 	return _mean_radius
 
 
+## **How many instances are dust samples**, and where they start. The rocks come first, so an index below
+## [member dust_start] is a rock.
+var dust_start := 0
+var dust_count := 0
+
+
 func size() -> int:
 	return positions.size()
 
@@ -100,7 +130,9 @@ func size() -> int:
 ##
 ## The one query the game makes: the nearest spot (to promote to a rock), and the next few (to mark on the
 ## HUD). `reach` bounds it in metres; `INF` means the whole band.
-func nearest(where: Vector3, count := 1, reach := INF) -> Array[int]:
+## **`rocks_only` skips the dust samples**, which is what every caller wants: a dust sample is a stand-in for a
+## sheet, not a place you can fly to, so it must never become a body or a marker.
+func nearest(where: Vector3, count := 1, reach := INF, rocks_only := true) -> Array[int]:
 	var result: Array[int] = []
 	if positions.is_empty() or count <= 0:
 		return result
@@ -133,7 +165,7 @@ func nearest(where: Vector3, count := 1, reach := INF) -> Array[int]:
 			var bucket: int = start + int(offset)
 			if bucket < 0 or bucket >= RADIUS_BUCKETS:
 				continue
-			_scan(bucket, where, bearing, best, best_index, count, limit, plane_squared)
+			_scan(bucket, where, bearing, best, best_index, count, limit, plane_squared, rocks_only)
 
 	for index in best_index:
 		result.append(index)
@@ -158,7 +190,7 @@ static func closest_point(where: Vector3, inner: float, outer: float) -> Vector3
 ## both ways; a direction stops as soon as `4·r_min·r0·sin²(d/2)` alone exceeds the worst kept.
 func _scan(
 	bucket: int, where: Vector3, bearing: float, best: Array[float], best_index: Array[int],
-	count: int, limit: float, plane_squared: float
+	count: int, limit: float, plane_squared: float, rocks_only: bool
 ) -> void:
 	var list := _buckets[bucket]
 	var size := list.size()
@@ -172,6 +204,9 @@ func _scan(
 		var at := middle if direction > 0 else middle - 1
 		while at >= 0 and at < size:
 			var index := list[at]
+			if rocks_only and index >= dust_start:
+				at += direction
+				continue
 			var gap := absf(_angles[index] - bearing)
 			if gap > PI:
 				gap = TAU - gap

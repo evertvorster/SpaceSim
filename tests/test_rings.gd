@@ -32,6 +32,7 @@ func run(h, root: Node) -> void:
 	_test_a_spot_becomes_a_rock_by_one_rule(h, root)
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
 	_test_a_rock_body_leaves_nothing_behind(h, root)
+	_test_the_dust_is_a_sample_of_the_sheet(h, root)
 
 
 func _sol() -> SpacesimSolarSystem:
@@ -90,8 +91,8 @@ func _test_three_bands_are_authored(h) -> void:
 func _test_the_cloud_fills_its_band(h) -> void:
 	var band := _sol().population_by_id("population:ring_b")
 	var cloud := SpacesimParticleCloud.of(band)
-	h.check(cloud.size() == band.particle_count,
-		"every authored particle exists (%d)" % cloud.size())
+	h.check(cloud.size() == band.particle_count + band.dust_count,
+		"every authored particle exists (%d rocks + %d dust)" % [band.particle_count, band.dust_count])
 
 	var inner := band.semi_major_axis.x
 	var outer := band.semi_major_axis.y
@@ -99,12 +100,12 @@ func _test_the_cloud_fills_its_band(h) -> void:
 	var largest := 0.0
 	var squared := 0.0
 	var flat := true
-	for index in cloud.size():
+	for index in cloud.dust_start:
 		var local := cloud.positions[index]
 		var radius := sqrt(local.x * local.x + local.y * local.y)
 		inner = minf(inner, radius)
 		outer = maxf(outer, radius)
-		if absf(local.z) > 1.0e-6:
+		if absf(local.z) > band.thickness * 0.5 + 1.0e-6:
 			flat = false
 		smallest = minf(smallest, cloud.radii[index] * 2.0)
 		largest = maxf(largest, cloud.radii[index] * 2.0)
@@ -113,22 +114,22 @@ func _test_the_cloud_fills_its_band(h) -> void:
 	h.check(inner >= band.semi_major_axis.x - 1.0 and outer <= band.semi_major_axis.y + 1.0,
 		"every particle is inside the band (%.0f to %.0f km)"
 			% [inner / 1.0e3, outer / 1.0e3])
-	h.check(flat, "the sheet has no thickness, for every one of %d particles" % cloud.size())
+	h.check(flat, "every particle is inside the slab, %.0f m thick, of %d" % [band.thickness, cloud.size()])
 	h.check(smallest >= 100.0 * 0.999, "none is below the floor (%.1f m)" % smallest)
 	h.check(largest <= 30000.0 * 1.001, "none is above the ceiling (%.0f m)" % largest)
 	h.check_near(
-		cloud.mean_radius(), sqrt(squared / float(cloud.size())),
-		"the mean radius is the area-weighted one", 1.0
+		cloud.mean_radius(), sqrt(squared / float(cloud.dust_start)),
+		"the mean radius is the area-weighted one, over the rocks", 1.0
 	)
 	# **Uniform by AREA, not by radius**: the inner edge must not be crowded. Half the band's area is at
 	# `sqrt((inner² + outer²)/2)`, so half the particles should be inside it.
 	var middle := sqrt((band.semi_major_axis.x * band.semi_major_axis.x
 		+ band.semi_major_axis.y * band.semi_major_axis.y) * 0.5)
 	var inside := 0
-	for index in cloud.size():
+	for index in cloud.dust_start:
 		if Vector2(cloud.positions[index].x, cloud.positions[index].y).length() <= middle:
 			inside += 1
-	h.check_near(float(inside) / float(cloud.size()), 0.5, "the cloud is uniform by area", 0.01)
+	h.check_near(float(inside) / float(cloud.dust_start), 0.5, "the cloud is uniform by area", 0.01)
 
 	# **The same ring every load**, and two bands are two different rings.
 	var again := SpacesimParticleCloud.of(band)
@@ -715,6 +716,56 @@ func _test_a_rock_body_leaves_nothing_behind(h, root: Node) -> void:
 	manager.free()
 	root.remove_child(camera)
 	camera.free()
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
+## **The dust is a sample of the sheet, and only a sheet.** Evert, 2026-11-18: *"a faint fogginess that accumulates
+## over distance, so that when you are up close its almost gone"* — and *"you hinted at a more proper version."*
+##
+## A dust sample stands for a great many real grains, so its alpha is a share of the band's optical depth
+## (`1 - T^(1/n)` over the `n` samples a pixel catches) and its radiance is the sheet's own. This asserts the three
+## properties that make it a sheet rather than more rocks: it exists, it is never mistaken for one, and its share
+## shrinks as the samples spread out.
+func _test_the_dust_is_a_sample_of_the_sheet(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var band: SpacesimPopulation = sol.population_by_id("population:ring_b")
+	var view := scene.rings[1]
+	var cloud := SpacesimParticleCloud.of(band)
+	h.check(band.dust_count > 0, "the band authors dust (%d samples)" % band.dust_count)
+	h.check(cloud.size() == band.particle_count + band.dust_count,
+		"and the cloud holds the rocks and the dust (%d)" % cloud.size())
+	h.check(cloud.dust_start == band.particle_count, "the rocks first, the dust after them")
+
+	# **A dust sample is never a rock**: the search skips it, so it can never become a body or a marker.
+	var middle := (band.semi_major_axis.x + band.semi_major_axis.y) * 0.5
+	var eye: Vector3 = view.global_transform * Vector3(middle, 0.0, 400000.0)
+	for index in cloud.nearest(view.global_transform.affine_inverse() * eye, 24, INF):
+		h.check(index < cloud.dust_start, "every spot offered is a rock, not dust (%d)" % index)
+
+	# **The share is the sheet's, split between the samples.** At Saturn's distance a pixel catches many of them, so
+	# one carries a small share and the whole accumulates to the band's transmittance.
+	var pixel := SpacesimLod.pixel_angle(70.0, 1080.0)
+	var centre := scene.body_by_id("planet:saturn").node.global_position
+	var far: Vector3 = centre + (eye - centre) * 8.0
+	view.update(pixel, 1.0, 0.4, centre, centre + Vector3(1.0, 0.0, 0.0) * 1.4e12, far)
+	var far_dust := view.dust()
+	view.update(pixel, 1.0, 0.4, centre, centre + Vector3(1.0, 0.0, 0.0) * 1.4e12, eye)
+	var near_dust := view.dust()
+	h.check(float(far_dust["alpha"]) > 0.0, "far away the dust carries a share (%.3f)" % float(far_dust["alpha"]))
+	h.check(float(far_dust["radiance"]) > 0.0,
+		"and it hands over the sheet's own radiance (%.4f)" % float(far_dust["radiance"]))
+	h.check(float(near_dust["alpha"]) <= SpacesimRingView.DUST_MAX_ALPHA + 1.0e-6,
+		"up close one sample is capped, so the fog thins to specks (%.3f)" % float(near_dust["alpha"]))
+	# **The cap is what makes it fade with resolution**, and it is reached only near the band.
+	h.check(float(near_dust["alpha"]) >= float(far_dust["alpha"]) - 1.0e-6
+		or float(near_dust["alpha"]) >= SpacesimRingView.DUST_MAX_ALPHA - 1.0e-6,
+		"a sample carries a larger share where fewer of them land (%.3f near, %.3f far)"
+			% [float(near_dust["alpha"]), float(far_dust["alpha"])])
+
 	root.remove_child(scene.container)
 	scene.container.free()
 

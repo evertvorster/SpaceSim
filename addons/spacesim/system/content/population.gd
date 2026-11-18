@@ -50,6 +50,23 @@ extends Resource
 ## sample drawn in its place.
 @export var particle_count: int = 0
 
+## **How thick the sheet is**, in metres, full thickness — each particle is placed inside that slab.
+##
+## Saturn's main rings are 10 to 100 m thick. It is 10^-8 of a pixel at every distance the band reads as a ring, and
+## it is the whole of what you see when you fly through one. Evert, 2026-11-18: *"surely not all the rocks and dust
+## are on a perfect plane?"*
+@export var thickness: float = 0.0
+
+## **How many DUST samples are drawn beside the rocks**, as a sample of the sheet the rocks do not make up.
+##
+## The drawn rocks are the largest embedded objects and their own optical depth is about 10^-7 of the band's: the rest
+## of `optical_depth` is dust, centimetres across and never drawable as an object. So it is drawn as a **sample**:
+## each instance stands for a great many real grains, its alpha is a share of the sheet's optical depth, and its
+## radiance is the sheet's own (`SpacesimRingModel.reflectance`). The accumulation then behaves exactly like a sheet
+## — smooth where the eye cannot resolve it, and fading away as the samples spread out — which is why the band reads
+## as fog at a distance and as rocks up close.
+@export var dust_count: int = 0
+
 ## **How much light the band reflects, as optical depth `tau`** — and the only brightness number a band has.
 ##
 ## The band's own apparent reflectance is `tau/(1 + tau)` of a bright surface before any geometry is
