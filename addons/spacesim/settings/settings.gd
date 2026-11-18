@@ -128,6 +128,14 @@ const REGISTRY := {
 	# not because it does not draw: the layer's light (`§D6`), multiple decks (`§D9`) and the near regime are still
 	# open. Turn it on to see where the deck's look stands.
 	"render.cloud_decks": {"default": false, "scope": Scope.PLAYER, "tab": "troubleshooting"},
+	# **How bright a ring's dust is, as a fraction of a rock's own surface brightness.** The dust exists to fill the
+	# gaps between the drawn rocks at a distance — Evert, 2026-11-18: *"a faint fogginess that accumulates over
+	# distance"* — and its *distribution* is derived (`SpacesimRingView`: a share of the band's transmittance split
+	# between the samples a pixel catches). Its *level* cannot be derived: the drawn rocks are 4.5e-7 of the band's
+	# opacity, so a physically scaled sheet is thousands of times brighter than the speckle it is filling. **0 turns
+	# the dust off**, which is what to reach for if the band looks milky.
+	"render.ring_dust": {"default": 0.02, "scope": Scope.PLAYER, "min": 0.0, "max": 1.0,
+		"tab": "troubleshooting"},
 	"camera.range_atmosphere": {
 		"default": Vector2(0.5, 1.0e7), "scope": Scope.PLAYER, "min": Vector2(0.001, 1.0), "tab": "hud"
 	},

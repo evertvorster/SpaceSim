@@ -194,7 +194,7 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 			% trouble.size()
 	)
 	h.check(
-		trouble.size() == 16,
+		trouble.size() == 17,
 		"and nothing else has been filed there by accident (%d)" % trouble.size()
 	)
 	h.check(
@@ -218,8 +218,8 @@ func _test_the_tabs_group_the_registry(h, root: Node) -> void:
 		"and every setting is on exactly one tab (%d of %d)" % [total, Edit.editable_keys().size()]
 	)
 	h.check(
-		Edit.editable_keys().size() == 39,
-		"there are thirty-nine settings, the sixteen bindings having left (%d)"
+		Edit.editable_keys().size() == 40,
+		"there are forty settings, the sixteen bindings having left (%d)"
 			% Edit.editable_keys().size()
 	)
 

@@ -388,9 +388,17 @@ func update(
 	var plane_normal := (global_transform.basis * Vector3(0.0, 0.0, 1.0)).normalized()
 	var sun_cosine := SpacesimRingModel.cosine(plane_normal, star_position - centre)
 	var eye_cosine := SpacesimRingModel.cosine(plane_normal, observer - centre)
-	var sheet := SpacesimRingModel.radiance(
-		illuminance, albedo, _population.optical_depth, sun_cosine, eye_cosine
-	)
+	# **The dust's LEVEL is a look, and it has to be.** The sample decomposition below says how a sheet is split
+	# between samples, but it says nothing about how bright that sheet should be in *this* picture — and the honest
+	# answer is useless here: the drawn rocks are `drawn_optical_depth` of the band, **4.5e-7 against tau = 1.2**, so
+	# a physically-scaled sheet is two and a half thousand times brighter than the speckle it exists to fill. Evert,
+	# 2026-11-18: *"the rings are still way too bright, no change from what I can see"* — the dust, not the rocks, was
+	# the light.
+	#
+	# So the dust's radiance is a FRACTION OF A ROCK'S OWN, `render.ring_dust`, and the distribution stays physical:
+	# how much of the band a sample covers is `1 - T^(1/n)`, which thickens with distance and thins up close.
+	var gain := float(SpacesimSettings.get_value("render.ring_dust"))
+	var sheet := illuminance * albedo / PI * gain
 	var samples := 1.0
 	if _cloud != null and _cloud.dust_count > 0:
 		var across := maxf((observer - centre).length(), 1.0) * pixel_angle
@@ -398,8 +406,10 @@ func update(
 			SpacesimRingModel.area(_population) * eye_cosine / (across * across), 1.0
 		)
 		samples = maxf(float(_cloud.dust_count) * PI * DUST_PIXELS * DUST_PIXELS / screen_area, 1.0)
+	# **A faint fog, not a sheet**: the sample law gives the transmittance, and the cap keeps one sample from
+	# becoming paint up close. Both scale with `gain` so 0 is off.
 	var transmission := SpacesimRingModel.transmittance(_population.optical_depth, eye_cosine)
-	_dust_alpha = minf(1.0 - pow(transmission, 1.0 / samples), DUST_MAX_ALPHA)
+	_dust_alpha = minf(1.0 - pow(transmission, 1.0 / samples), DUST_MAX_ALPHA) * gain
 	_dust_glow = sheet
 	for material in _materials:
 		material.set_shader_parameter("dust_alpha", _dust_alpha)
