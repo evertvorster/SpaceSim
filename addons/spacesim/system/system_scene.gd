@@ -153,7 +153,11 @@ func discard_body(body: SpacesimSceneBody) -> void:
 		frame_tree.discard(body.orbital)
 		body.orbital = null
 	if body.node != null:
-		body.node.queue_free()
+		# **`free`, not `queue_free`.** A discarded body is one whose spot stopped being offered, and `queue_free`
+		# leaves the node in the tree until the end of the frame — so a body that no longer exists still draws for
+		# the rest of the frame it died in, and a leak test cannot tell a pending free from a leak. Nothing here
+		# runs inside the node's own callback, so freeing it now is safe.
+		body.node.free()
 
 
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set

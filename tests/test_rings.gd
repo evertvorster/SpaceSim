@@ -31,6 +31,7 @@ func run(h, root: Node) -> void:
 	_test_the_layers_cannot_tie(h, root)
 	_test_a_spot_becomes_a_rock_by_one_rule(h, root)
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
+	_test_a_rock_body_leaves_nothing_behind(h, root)
 
 
 func _sol() -> SpacesimSolarSystem:
@@ -666,3 +667,55 @@ func _pixel(camera: Camera3D) -> float:
 	if viewport == null:
 		return 0.0
 	return SpacesimLod.pixel_angle(camera.fov, float(viewport.size.y))
+
+
+## **A rock body leaves nothing behind.** Evert, 2026-11-18, after the churn was fixed: *"the flickering of the
+## cloud deck also improved... and now I can say for certain that it toggles between drawn and not drawn, but only
+## after flying around near the rings for a while. Something might be leaking."*
+##
+## A body carries a node, a mesh, a point of light and an **orbital frame plus its transition rule**. If any of that
+## outlives the body it accumulates, and a state that grows over a flight is exactly what "toggles after a while"
+## looks like. So: build and drop the same rock fifty times and assert every count comes back.
+func _test_a_rock_body_leaves_nothing_behind(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var population: SpacesimPopulation = sol.population_by_id("population:ring_b")
+	var manager := SpacesimFragmentBodies.new(population, scene)
+	root.add_child(manager)
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	var pixel := SpacesimLod.pixel_angle(70.0, 1080.0)
+	var piece := {
+		"id": "%s#1" % population.id, "position": Vector3(1.0e8, 0.0, 0.0), "diameter": 500.0,
+	}
+	var frames_at_start := scene.frame_tree._frames.size()
+	var rules_at_start := scene.frame_tree._rules.size()
+	var children_at_start := scene.system_frame.get_child_count()
+	var bodies_at_start := scene.bodies.size()
+	for _round in 50:
+		manager.update([piece], piece["position"], camera, pixel, false)
+		manager.update([], piece["position"], camera, pixel, false)
+	h.check(manager.count() == 0, "the rock is let go (%d left)" % manager.count())
+	h.check(scene.frame_tree._frames.size() == frames_at_start,
+		"and the frame registry is back where it started (%d -> %d)"
+			% [frames_at_start, scene.frame_tree._frames.size()])
+	h.check(scene.frame_tree._rules.size() == rules_at_start,
+		"and the transition rules with it (%d -> %d)"
+			% [rules_at_start, scene.frame_tree._rules.size()])
+	h.check(scene.bodies.size() == bodies_at_start,
+		"and the body list (%d -> %d)" % [bodies_at_start, scene.bodies.size()])
+	# **The nodes go through `queue_free`**, so they leave on the next frame rather than immediately; what matters
+	# is that fifty rounds do not make the tree grow.
+	h.check(scene.system_frame.get_child_count() == children_at_start,
+		"and the scene tree is back where it started (%d -> %d)"
+			% [children_at_start, scene.system_frame.get_child_count()])
+	root.remove_child(manager)
+	manager.free()
+	root.remove_child(camera)
+	camera.free()
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
