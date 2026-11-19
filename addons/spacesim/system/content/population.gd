@@ -42,6 +42,39 @@ extends Resource
 ## Cumulative size distribution, N(>D) proportional to D^-size_index. Dohnanyi's collisional cascade
 ## gives 2.5, which is what the belt follows below 100 km.
 @export var size_index: float = 2.5
+## **How many particles are drawn, and queried**, for a band that is a sheet rather than a swarm.
+##
+## **A ring needs this and the belt does not.** A belt's fragments are made up around the observer a couple
+## of dozen at a time, so its count is the field's business; a ring is a whole object seen from every angle,
+## so it is generated entire. It is not [member count]: `count` is the physical population, and this is the
+## sample drawn in its place.
+@export var particle_count: int = 0
+
+## **How thick the sheet is**, in metres, full thickness — each particle is placed inside that slab.
+##
+## Saturn's main rings are 10 to 100 m thick. It is 10^-8 of a pixel at every distance the band reads as a ring, and
+## it is the whole of what you see when you fly through one. Evert, 2026-11-18: *"surely not all the rocks and dust
+## are on a perfect plane?"*
+@export var thickness: float = 0.0
+
+## **How much light the band reflects, as optical depth `tau`** — and the only brightness number a band has.
+##
+## The band's own apparent reflectance is `tau/(1 + tau)` of a bright surface before any geometry is
+## applied (`SpacesimRingModel.reflectance`), which puts Saturn's three bands where the measurements put
+## them: C 0.1 gives 9 %, A 0.7 gives 41 %, B 1.2 gives 55 %.
+@export var optical_depth: float = 0.0
+
+## **The ring plane's normal, in the frame of the body it orbits.** A ring lies in its planet's equatorial
+## plane, and which way that faces is a planet's axial tilt and its season.
+##
+## Authored rather than derived, because the engine has no obliquity (a body's node is only ever
+## translated). It matters for one thing above all: **the star's elevation above the plane decides the
+## planet's shadow**, which is a cylinder of the planet's radius along the star's direction and so reaches
+## ring radius `R_planet / sin(elevation)` — 84,000 km at 45 degrees, crossing the C ring and nothing else,
+## against 433,000 km at 8 degrees, crossing the whole system. Real Saturn never exceeds 26.7 degrees and
+## shows the long shadow near equinox, which is the picture an author should choose.
+@export var ring_axis: Vector3 = Vector3(0.0, 0.0, 1.0)
+
 ## The smallest fragment that exists at all. Below it the material is dust: it is part of the
 ## distribution's mass and none of its objects.
 @export var size_floor: float = 10.0

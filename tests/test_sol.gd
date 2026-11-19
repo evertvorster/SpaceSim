@@ -500,7 +500,9 @@ func _test_the_rocks(h, scene: SpacesimSystemScene, root: Node) -> void:
 		if vertex.length() > furthest:
 			furthest = vertex.length()
 			nearest_vertex = vertex
-	var on_the_lump := phobos.node.global_position + nearest_vertex
+	# **Through the body's own transform**, because a body's pole is its orbit's normal tilted by its `axial_tilt`
+	# and a vertex is in ITS frame — a body is no longer assumed to point along the engine's +Y.
+	var on_the_lump: Vector3 = phobos.node.global_transform * nearest_vertex
 	var to_the_mesh := phobos.scale_body.surface_distance_mesh(on_the_lump)
 	var to_the_sphere := phobos.scale_body.surface_distance_to(on_the_lump)
 	h.check(to_the_mesh < 1.0,

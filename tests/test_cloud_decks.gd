@@ -522,7 +522,9 @@ func _test_the_cameras_own_column(h, scene: SpacesimSystemScene) -> void:
 	# metres, whose direction is the camera's own column. **Not an offset from the deck node's position** — that is now
 	# a point on the near ground at the deck's radius, and the offset from it passes through zero exactly at the base
 	# (so its direction would flip sign there, which is what the fog's lookup would then sample).
-	var sub_camera := centre + Vector3.UP * (earth.radius + 2000.0)
+	# **Straight up means the BODY's pole**, which is its orbit's normal tilted by its axial tilt — Earth's is
+	# 23.44 degrees off the engine's +Y, and a test that used +Y would be sampling a different latitude.
+	var sub_camera: Vector3 = centre + earth.node.global_transform.basis.y * (earth.radius + 2000.0)
 	var data := scene.near_deck(earth, sub_camera)
 	h.check(not data.is_empty(), "the deck publishes the fog's lookup")
 	var eye_model: Vector3 = data["eye_model"]

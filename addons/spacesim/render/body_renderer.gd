@@ -439,7 +439,7 @@ static func deck_material(
 	# **Every deck is centred on the same body, so a distance sort cannot separate the stack** — the order has
 	# to be stated. The deepest composites first (lower priority is drawn earlier), leaving the highest deck
 	# over the top of it, which is what a belt *is*: a thin bright deck over a browner one.
-	material.render_priority = -seed_layer
+	material.render_priority = DECK_PRIORITY_BASE - seed_layer
 	return material
 
 
@@ -448,9 +448,39 @@ static func deck_material(
 ## The deck shader's simplest case with no map at all: one colour, lit by the star through the same air and the
 ## same occlusion every other layer uses. **It carries no map and no alpha** — it is the floor, and a floor that
 ## could become transparent would put the stars back.
+## **The transparent draws of a body, and the one thing that is NOT mine to change here.**
+##
+## **The engine's rule**, from the source (`forward_clustered/render_forward_clustered.h`, 4.7.2-stable):
+##
+##     SortByReverseDepthAndPriority: (priority equal) ? depth greater first : priority smaller first
+##
+## so the alpha list is sorted by **ascending `render_priority`**, and a tie is broken by depth — which for two
+## children of one node is equal to the millimetre, and `SortArray` is not stable. A tie is therefore decided by
+## nothing at all.
+##
+## **The sea is the value this file has earned the hard way**, and it is the one recorded lesson: it was 0 while
+## the decks run `0 … −(n−1)`, so on Earth the sea and the single deck tied and the glint composited over the
+## cloud. `OCEAN_RENDER_PRIORITY = −8` fixed it (`b0d7c78`, 2026-11-03).
+##
+## **The air and the decks are a settled stack that must not be reordered.** Their ordering was fought over for
+## weeks — the segmented atmosphere pass, the depth clip, the deck as a segment, the undersides — and Evert,
+## 2026-11-16: *"We spent a long, long time optimizing air and cloud decks, don't mess up their order. You can
+## check mempalace for more details there."* So they keep the values they have: air `0`, decks `−index`.
+##
+## **That leaves a tie between the air and the first deck, and it is deliberately left standing.** Two attempts to
+## break it made a thick atmosphere paint a solid blue shell over the planet's own clouds — worse than the fault.
+## Whoever next opens that stack should read the palace first (`SpaceSim`, key `cloud-decks`, `atmosphere`), and
+## fly it on its own branch.
+const INTERIOR_RENDER_PRIORITY := 0
+const OCEAN_RENDER_PRIORITY := -8
+const AIR_RENDER_PRIORITY := 0
+const DECK_PRIORITY_BASE := 0
+
+
 static func interior_material(body: SpacesimSceneBody, palette: Color) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = INTERIOR_SHADER
+	material.render_priority = INTERIOR_RENDER_PRIORITY
 	material.set_shader_parameter("planet_radius", body.radius)
 	# Linear, because the shader's uniform is a plain `vec3` and asks Godot to convert nothing — the same rule the
 	# deck's `cloud_color` follows.
@@ -612,6 +642,9 @@ static func air_shell_material(
 	# Evert, 2026-11-02, flying Saturn: *"there is something exactly on the sphere"* — this is that.
 	material.set_shader_parameter("u_band_inner", band_inner)
 	material.set_shader_parameter("u_band_outer", band_outer)
+	# **Unchanged from `main`, and it ties with the first deck.** See the table above: this is the picture that
+	# works, and reordering it was tried and reverted.
+	material.render_priority = AIR_RENDER_PRIORITY
 	return material
 
 
@@ -642,8 +675,7 @@ static func ocean_material(liquid: SpacesimSpecies) -> ShaderMaterial:
 	# (`material.cpp:71`: "Condition p_priority < RENDER_PRIORITY_MIN is true") — the material then keeps 0, which is
 	# exactly the tie this line exists to break. Measured 2026-11-03: `-1000` printed that error twice per body and
 	# changed no pixel. Eight is below any deck this engine can have (one per condensed species) and leaves the rest
-	# of the range alone.
-	const OCEAN_RENDER_PRIORITY := -8
+	# of the range alone — see the note at `INTERIOR_RENDER_PRIORITY` for why the air and the decks are not moved.
 	material.render_priority = OCEAN_RENDER_PRIORITY
 	material.set_shader_parameter("ocean_color", SpacesimSurfaceModel.band_color(liquid))
 	var shading := SpacesimSurfaceModel.band_shading(liquid)

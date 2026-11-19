@@ -1221,14 +1221,17 @@ func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -
 	camera.current = true
 	scene.update_lod(camera, 0.016)
 
+	# **In the body's frame**, which is the frame its geometry lives in — and since 2026-11-16 that frame is the
+	# body's real pole, so a world direction has to be taken into it before it is compared.
+	var body_basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
 	var to_star: Vector3 = star_body.position - body.position
 	var sun: Variant = body.mesh_material.get_shader_parameter("body_sun")
 	h.check(sun is Vector3, "the body's surface is told where the star is")
 	if sun is Vector3:
 		# Not the uniform's default, which is what an unpublished body keeps — and which would put every
 		# terminator in the system under a sun that is not there.
-		h.check((sun as Vector3).dot(to_star.normalized()) > 0.999,
-			"and it is the star's own direction in the body's frame (%s)" % [sun])
+		h.check((body_basis * (sun as Vector3)).dot(to_star.normalized()) > 0.999,
+			"and it is the star's own direction, taken into the body's frame (%s)" % [sun])
 	# **The eye, in body radii.** The upward ray needs a position rather than a direction, because the camera is
 	# a few radii away and the viewing angle varies across a disc — and it is what a specular highlight's own
 	# attenuation is computed from. Unpublished it defaults to straight above, which would put every glint's
@@ -1236,7 +1239,9 @@ func _test_the_star_occludes_itself(h, scene: SpacesimSystemScene, root: Node) -
 	var eye: Variant = body.mesh_material.get_shader_parameter("body_eye_local")
 	h.check(eye is Vector3, "and where the eye is, in the body's own frame")
 	if eye is Vector3:
-		var expected := (camera.global_position - body.node.global_position) / body.radius
+		var expected := body_basis.inverse() * (
+			camera.global_position - body.node.global_position
+		) / body.radius
 		h.check_near((eye as Vector3).distance_to(expected), 0.0,
 			"which is the camera's offset in body radii (%.3f)" % (eye as Vector3).length(), 1.0e-3)
 	var angle: Variant = body.mesh_material.get_shader_parameter("star_angle")

@@ -500,7 +500,9 @@ func _test_the_axis_profile(h) -> void:
 func _test_joypad_matching(h) -> void:
 	var pads := Devices.connected()
 	if pads.is_empty():
-		h.check(true, "(no gamepad attached: pad matching is not exercised)")
+		# **A print, not a check.** The suite must not record a pass for a path it did not take: a `check(true)` in
+		# an early return makes the count say "pad matching is verified" when no pad was ever attached.
+		print("    ---   no gamepad attached: pad matching is not exercised")
 		return
 	var device := int(pads[0])
 	var named := Devices.name_of(device)

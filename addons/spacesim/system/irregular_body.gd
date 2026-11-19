@@ -37,8 +37,14 @@ const G := 6.6743e-11
 
 ## **The field's grid, in cells across the body.** 64 is the cost/quality compromise `tests/probe_blob_rock.gd`
 ## measured: 10,444 triangles and 0.8 s a body at build. That is fine for a handful of moons and **too much for a
-## belt** — a population needs the extraction on a worker thread or the GPU, or a small library of shapes reused.
+## population** — Evert, 2026-11-16, on the rings' first build: *"Performance is also pretty terrible."* Half a
+## dozen rocks each costing 0.8 s on the worker pool is seconds of stall for shapes that are two pixels wide.
+##
+## So the grid is **per body** (`SpacesimSceneBody.irregular_resolution`) and a population's rock asks for
+## `ROCK_RESOLUTION`: a third of the cells either way is 1/8 of the work (0.1 s), and a rock is never more than a
+## few dozen pixels across before the eye is close enough to care.
 const RESOLUTION := 64
+const ROCK_RESOLUTION := 32
 
 ## **How big a body has to look before its shape is worth extracting**, in pixels of RADIUS — and it is **half the
 ## point tier** (`SpacesimLod.POINT_TIER_SCREEN_RADIUS` is 4), because the work has to be STARTED before the eye
@@ -153,7 +159,8 @@ static func request(body: SpacesimSceneBody) -> void:
 		return
 	body.irregular_task = WorkerThreadPool.add_task(
 		_extract.bind(
-			body, hash(body.id), body.radius, RESOLUTION, body.removals, body.irregularity
+			body, hash(body.id), body.radius, body.irregular_resolution, body.removals,
+			body.irregularity
 		)
 	)
 

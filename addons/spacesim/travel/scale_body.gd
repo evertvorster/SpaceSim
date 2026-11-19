@@ -24,6 +24,11 @@ var position: Vector3 = Vector3.ZERO
 var velocity: Vector3 = Vector3.ZERO
 ## What it is called in the readout, when [member node] is null.
 var name: String = ""
+## **Whether flying into it stops the ship.** A scale body sets the local travel unit either way — that is what
+## makes a rock slow the ship as it is approached — but not everything is worth colliding with. A population's
+## rock is the case: it sets the unit so the ship can crawl up to one, and there is no physics yet.
+## Evert, 2026-11-15: *"I told you many times we are not doing physics yet, so no collisions."*
+var solid := true
 var radius: float
 ## **A body's own surface, when it has an irregular one** — the vertices of its mesh, binned for a per-tick query.
 ## Null for a body that really is a sphere. See [method surface_distance_mesh].
@@ -63,7 +68,9 @@ func surface_distance_mesh(where: Vector3) -> float:
 	# radius is the honest answer and its relief is tens of metres at most.
 	if node == null:
 		return maxf(0.0, position.distance_to(where) - radius)
-	var local := where - node.global_position
+	# **In the body's own frame**, because that is where its vertices are binned — a tilted body (every body now
+	# has its real pole) would otherwise measure its relief from a direction it is not oriented along.
+	var local := node.global_transform.basis.orthonormalized().inverse() * (where - node.global_position)
 	if surface != null and local.length() <= surface.reach * 1.35:
 		return surface.nearest_distance(local)
 	return maxf(0.0, local.length() - radius)

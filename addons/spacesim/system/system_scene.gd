@@ -153,7 +153,11 @@ func discard_body(body: SpacesimSceneBody) -> void:
 		frame_tree.discard(body.orbital)
 		body.orbital = null
 	if body.node != null:
-		body.node.queue_free()
+		# **`free`, not `queue_free`.** A discarded body is one whose spot stopped being offered, and `queue_free`
+		# leaves the node in the tree until the end of the frame — so a body that no longer exists still draws for
+		# the rest of the frame it died in, and a leak test cannot tell a pending free from a leak. Nothing here
+		# runs inside the node's own callback, so freeing it now is safe.
+		body.node.free()
 
 
 ## Build the solar system's scene under `parent`. The observer is the caller's business: set
@@ -186,6 +190,8 @@ func build(parent: Node) -> SpacesimSystemScene:
 	# `RenderingDevice` alive for the length of a session is both the teardown segfault and the risk
 	# `SpacesimSurfaceDistribution.prepare()` exists to remove.
 	_distributions.close()
+	_build_rings()
+	_bake_ring_shadows()
 	# **Every task added must be awaited before the engine goes away**, or the exit segfaults with no
 	# output at all — the pool has to free what the task allocated. A rebuild is milliseconds, so the join
 	# is one poll long.
@@ -195,6 +201,91 @@ func build(parent: Node) -> SpacesimSystemScene:
 	# own `--quit-after` tears the tree down without going anywhere near `main.gd`'s exit button.
 	container.tree_exiting.connect(close)
 	return self
+
+
+## **A ring is one object seen from every angle, so it is built whole** — its particles are generated in the
+## planet's frame at build and never touched again. That is the opposite of the belt, which is a density and
+## can only be seen where the observer is.
+##
+## Every ring also owns a body manager, so its spots become rocks through the same lifecycle a moon has.
+var rings: Array[SpacesimRingView] = []
+var ring_bodies: Array[SpacesimFragmentBodies] = []
+## **How many spots a ring offers as bodies at once** — Evert, 2026-11-15: *"when the nearest spot on the ring is
+## nearer than any of the other bodies, you can then check for and mark the next 24 rocks on the HUD."* Each one
+## is a rock: a node, a marker, a splat, and a scale body; the ones that resolve become geometry, and the rest
+## stay dots with names until they do.
+const RING_ROCK_CANDIDATES := 24
+var _ring_parents: Array[SpacesimSceneBody] = []
+var _ring_probes: Array[SpacesimSystemBody] = []
+
+
+## **Every band whose content says it is a sheet**: a particle cloud, a view that draws it, and a body manager
+## for the spots that resolve into rocks.
+func _build_rings() -> void:
+	for population in content.populations:
+		if population.particle_count <= 0:
+			continue
+		var parent := body_by_id(population.parent_id)
+		if parent == null or parent.node == null:
+			push_warning("%s orbits '%s', which has no node" % [population.id, population.parent_id])
+			continue
+		# **A ring lies in its planet's equator**, which is now a derived thing: the parent is rotated to its
+		# pole, so the sheet is `UP` in the parent's own frame and a ring needs no axis of its own.
+		var cloud := SpacesimParticleCloud.of(population)
+		var view := SpacesimRingView.of(population, cloud, Vector3.UP)
+		parent.node.add_child(view)
+		rings.append(view)
+		var bodies := SpacesimFragmentBodies.new(population, self)
+		bodies.name = "RingRocks_%s" % population.id.replace(":", "_")
+		parent.node.add_child(bodies)
+		ring_bodies.append(bodies)
+		_ring_parents.append(parent)
+		# **The particles are made of something**, and its bond albedo is what makes a ring of ice brighter than
+		# one of rock. A probe carries the composition to the same derivation a moon's colour takes, so there is
+		# no second palette. It needs a SURFACE and not just a layer: `bond_albedo` reads the coverage, and a body
+		# with none has an albedo of zero — which drew every ring black once.
+		var probe := SpacesimFragmentBodies.content_for(population, "%s/particle" % population.id, 1.0)
+		var surface := SpacesimSurface.new()
+		surface.coverage = population.composition.duplicate()
+		probe.surface = surface
+		_ring_probes.append(probe)
+
+
+## **Bake each band's shadow from its planet**, after the lighting exists so the star has a position. A ring's
+## shadow is static — the particles and the star do not move — so it is computed once with the engine's own
+## two-circle law rather than drawn with a shadow map. Evert, 2026-11-15: *"Saturn itself casts shadows on the
+## rings."*
+func _bake_ring_shadows() -> void:
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	var star_position := star_body.node.global_position
+	for index in rings.size():
+		var parent := _ring_parents[index]
+		if parent == null or parent.node == null:
+			continue
+		rings[index].bake_shadow(
+			star_position, parent.node.global_position, parent.radius, star_body.radius
+		)
+
+
+## **The rings, once a drawn frame**: the eye's angle, the band's own radiance, and the few uniforms the shader
+## needs. Everything else was baked.
+func update_rings(pixel: float, observer: Vector3, camera: Camera3D = null) -> void:
+	if rings.is_empty() or star_light == null:
+		return
+	var star_body := star()
+	if star_body == null or star_body.node == null:
+		return
+	var star_position := star_body.node.global_position
+	for index in rings.size():
+		var parent := _ring_parents[index]
+		if parent == null or parent.node == null:
+			continue
+		var centre := parent.node.global_position
+		var albedo := SpacesimSurfaceModel.bond_albedo(_ring_probes[index], _materials())
+		var illuminance := star_light.lux_at((centre - star_position).length())
+		rings[index].update(pixel, illuminance, albedo, centre, star_position, observer, camera)
 
 
 func body_by_id(id: String) -> SpacesimSceneBody:
@@ -434,7 +525,18 @@ func sky_reach(frame: SpacesimFrame) -> float:
 ## The Coordinate doc's surface frame is "relative to landing zone", so the zone sits wherever
 ## the ship came down rather than at one fixed site — otherwise landing anywhere but that site
 ## would put the ship millions of metres from its frame's origin, which defeats the frame.
-func place_landing_zone(body: SpacesimSceneBody, point: Vector3) -> void:
+## **The SURFACE FRAME's origin, put on the ground under a point** — and nothing else.
+##
+## **There is no landing-zone quad and there has not been one since 2026-10-28.** It was a dark 4 km
+## `PlaneMesh` with five amber boxes round it at a 600 m radius, a scale reference from before the ground
+## subdivided; Evert, flying it: *"there is a box that pops up on the surface of the planet once you are close
+## enough… It has some yellow pillars standing on it, all of that must go."* It went, `SpacesimFraming.pad_size`
+## went with it, and **nothing replaced it** — the subdivision is the instrument now.
+##
+## What this function moves is a `SpacesimFrame` of kind `SURFACE`: the coordinate space that makes "landed on
+## Nix" a frame and gives the last metre of travel its own band. The name says `surface_frame` because the old
+## one said `landing_zone` and misled a reader into hunting for the quad that no longer exists.
+func place_surface_frame(body: SpacesimSceneBody, point: Vector3) -> void:
 	if body.surface == null or body.node == null:
 		return
 	var outward := (point - body.node.global_position).normalized()
@@ -462,7 +564,7 @@ func _aim_zone_under(subject: Node3D, frame: SpacesimFrame) -> void:
 	if body == null:
 		return
 	var keep := subject.global_transform
-	place_landing_zone(body, keep.origin)
+	place_surface_frame(body, keep.origin)
 	subject.global_transform = keep
 	# **And reset the interpolator AGAIN, because the subject's PARENT moved — not the subject.**
 	#
@@ -640,9 +742,21 @@ func _add_orbital_frame(body: SpacesimSceneBody) -> void:
 
 func _build_body(body: SpacesimSceneBody) -> void:
 	body.node = Node3D.new()
-	body.node.name = body.name
+	# **A node with no name is `@Node3D@1201` on the HUD**, because the markers draw the node's own name and the
+	# readout does too. A body always has an id, so that is the fallback — a labelled body names itself.
+	body.node.name = body.name if not body.name.is_empty() else body.id
 	body.node.position = body.position
 	body.node.set_meta("spacesim_body", body.id)
+	# **A body's pole is its orbit's normal tilted by its `axial_tilt`** — the content format's own definition,
+	# read for the first time here. Nothing is "up" in space: a planet's equator is perpendicular to its axis,
+	# and its axis is perpendicular to the orbital plane unless its obliquity says otherwise. So the MESH, whose
+	# model-space +Y is its pole, is rotated to the body's real axis, and everything that hangs off the node —
+	# bands, decks, air, a ring — inherits it. Evert, 2026-11-16: *"I want the planets to have their proper
+	# tilts. If it breaks stuff, we fix the broken stuff. No shortcuts."*
+	body.node.basis = Basis(Quaternion(Vector3.UP, SpacesimKepler.pole(
+		body.content.orbit if body.content != null else null,
+		body.content.axial_tilt if body.content != null else 0.0
+	)))
 	system_frame.add_child(body.node)
 
 	# **A non-planet is not a small planet.** Below the potato radius a body's own gravity never rounded it, and
@@ -810,7 +924,7 @@ func _build_body(body: SpacesimSceneBody) -> void:
 	body.surface.travel_length_max = _framing.surface_band.y
 	body.node.add_child(body.surface)
 	frame_tree.register(body.surface)
-	place_landing_zone(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
+	place_surface_frame(body, body.node.global_position + Vector3(body.radius, 0.0, 0.0))
 
 	frame_tree.add_rule(
 		TransitionRule.new(
@@ -1442,8 +1556,7 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 			continue
 		if body.mesh == null:
 			continue
-		_face_bodies_at_star(body, observer, pixel)
-		_publish_air_shell(body, camera, observer, air_strength)
+		_publish_body_frame(body, camera, observer, pixel, air_strength)
 		_update_decks(body, observer, distance)
 		# **The surface is a PATCH TREE, not a sphere at one level.** Evert, 2026-10-17: *"it suddenly
 		# switches to a higher density of triangles, but once only, and for the whole sphere"* — which is
@@ -1455,7 +1568,15 @@ func update_lod(camera: Camera3D, eye: Variant = null) -> void:
 		# count plus a quantised altitude and direction — which took two faults to get right (a packed int
 		# that collided, then a bucket on `log(d/R)` that went flat near the ground and stopped refining).
 		# A gate on what the law actually depends on cannot go stale in either of those ways.
-		var to_eye := (observer - body.node.global_position).normalized()
+		# **In the body's own frame**, because every patch lives there and the walk measures the eye's direction
+		# against patch directions on the model's sphere. Evert, 2026-11-16: *"The subdivision code for the LOD
+		# meshes don't seem to subdivide exactly below my ship anymore."* It was the last place still subtracting
+		# the body's centre in world space and handing the answer to model-space code — so the refinement followed
+		# the ship round a sphere that is tilted by the body's own obliquity (26.7 degrees on Saturn, 23.4 on
+		# Earth): an edge of detail offset from the ship by an eighth of a radius.
+		var to_eye := (
+			_body_basis(body).inverse() * (observer - body.node.global_position)
+		).normalized()
 		var cover := _cover_angle(body, distance)
 		if SpacesimPatches.walk_is_due(
 			body.patch_walk_distance, body.patch_walk_direction, distance, to_eye,
@@ -1850,73 +1971,81 @@ func _publish_air(body: SpacesimSceneBody) -> void:
 ##
 ## **This is not `_publish_air`'s job.** That one publishes what does not change — the optics, the band's radii
 ## — once, at build. These three change whenever the ship turns.
-func _publish_air_shell(body: SpacesimSceneBody, camera: Camera3D, observer: Vector3, strength: float) -> void:
-	if body.air_shell_material == null:
+## **The frame a body's own geometry is in** — its node's basis, which since the tilts is the body's real pole, not
+## the engine's +Y. Any quantity handed to model-space code (a patch direction, a vertex bin, a shader uniform)
+## goes through here first, and so does anything coming back out.
+func _body_basis(body: SpacesimSceneBody) -> Basis:
+	if body == null or body.node == null:
+		return Basis.IDENTITY
+	return (body.node.global_transform.basis as Basis).orthonormalized()
+
+
+## **ONE sun, ONE frame, ONE writer.**
+##
+## Every shader of a body that reasons about light — the ground, the sea, the inside of a planet, each cloud deck
+## and the air — needs the same three things: **where the star is, how wide it looks, and where the eye is**, all
+## in the body's **model** space, because that is the space their geometry lives in and the space their own
+## occlusion maths measures along.
+##
+## **They used to be computed twice, by two functions, each doing its own inverse.** While every body pointed
+## along the engine's +Y both frames were identical and the duplication was invisible; the moment bodies took
+## their real poles the air was handed the sun in the body's frame and the surface was handed it in the world's,
+## and the two drew their terminators a tilt apart. Evert, 2026-11-16: *"there seems to be two shadows, as if the
+## air shader and the body shader disagree where the light is coming from... They are off by about 20 ish
+## degrees"* — Saturn's axial tilt. And then the right question: *"Why do they get different suns? Would it not
+## be more robust to just have one actual sun?"* Yes: one computation, written to every consumer below.
+##
+## The star's DIRECTION is taken from the star body's position, not from the engine's `DirectionalLight` — the
+## light is a rasteriser input for the BRDF, while these shaders compute shadows analytically against their own
+## geometry and need a number they can multiply. `star_angle` is the same `asin(R_star / d)` the light's own
+## `light_angular_distance` uses, so a penumbra and the light's softness cannot disagree either.
+func _publish_body_frame(
+	body: SpacesimSceneBody, camera: Camera3D, observer: Vector3, pixel_angle: float, air_strength: float
+) -> void:
+	if body.node == null:
 		return
-	var body_basis: Basis = (body.node.global_transform.basis as Basis).orthonormalized()
-	# **The INTERPOLATED camera, or the shell turns one tick behind the frame it is drawn in.** Evert,
-	# 2026-11-03: *"when I rotate my camera, it sometimes flashes slightly darker or lighter."* `global_transform`
-	# is accurate to the most recent physics tick and this runs once per drawn frame, so a rotating camera gave the
-	# shader a basis from the previous tick — and `u_to_local` is what turns the fragment into the ray that decides
-	# both the chord and the sun angle. Stationary, the two agree; rotating, they differ by one tick of rotation,
-	# which is a brightness that flickers. Same trap, same fix, as `main.gd` records for every other transform here.
-	var to_local := body_basis.inverse() * (
+	# **Interpolated**, or the shell turns one tick behind the frame it is drawn in: `u_to_local` is what turns a
+	# fragment into the ray that decides both the chord and the sun angle, and a rotating camera read a tick stale
+	# gave a brightness that flickered. Same trap, same fix, as every other transform in a drawn frame.
+	var body_basis: Basis = _body_basis(body)
+	var camera_basis: Basis = (
 		camera.get_global_transform_interpolated().basis as Basis
-	).orthonormalized()
-	var sun := Vector3.UP
-	var star_body := star()
-	if star_body != null:
-		sun = (star_body.position - body.position).normalized()
-	body.air_shell_material.set_shader_parameter("u_to_local", to_local)
-	body.air_shell_material.set_shader_parameter(
-		"u_eye_local", body_basis.inverse() * (observer - body.node.global_position)
-	)
-	body.air_shell_material.set_shader_parameter("u_sun_local", body_basis.inverse() * sun)
-	body.air_shell_material.set_shader_parameter("u_strength", strength)
-	if not _air_shell_reported:
-		_air_shell_reported = true
-		var eye_local := body_basis.inverse() * (observer - body.node.global_position)
-		SpacesimDebug.say(
-			"AIR SHELL: %s eye_radius=%.0f m band=(%.0f, %.0f) sun_local=(%.2f, %.2f, %.2f) strength=%.2f" % [
-				body.name, eye_local.length(), body.radius, body.radius + body.sky_top,
-				(body_basis.inverse() * sun).x, (body_basis.inverse() * sun).y,
-				(body_basis.inverse() * sun).z, strength
-			]
-		)
-
-
-## **Where the star is, and how wide it looks, for every drawn body** — per frame, and NOT inside `_update_decks`.
-##
-## **The move is the fix for a real trap, and the trap is why the name changed.** The publish used to sit after
-## `_update_decks`' `decks.is_empty()` early return, so a body with no deck — Luna, Mercury, Mars — never got it
-## and kept the uniform's default `Vector3.UP`. That was harmless while the only reader was a deck's shadow, and
-## it is a shading error the moment the surface's own star occlusion reads it: every airless body would have had
-## its terminator computed against a northern sun. Nothing would have reported it.
-##
-## `star_angle` is `asin(R_star / d)` off `SpacesimLod.angular_radius`, the same call the light's own
-## `light_angular_distance` makes, so a body's penumbra and its light's softness are one number.
-func _face_bodies_at_star(body: SpacesimSceneBody, observer: Vector3, pixel_angle: float) -> void:
-	var star_body := star()
+	).orthonormalized() if camera != null else Basis.IDENTITY
+	var to_local := body_basis.inverse()
 	var sun := Vector3.UP
 	var star_angle := 0.0
+	var star_body := star()
 	if star_body != null:
 		var to_star: Vector3 = star_body.position - body.position
 		sun = to_star.normalized()
 		star_angle = SpacesimLod.angular_radius(star_body.radius, to_star.length())
-	var materials := [body.mesh_material]
+	var sun_model := to_local * sun
+	var offset := observer - body.node.global_position
+	var eye_model := to_local * offset
+
+	# The eye in body radii, because the upward ray needs a position and not a direction: the camera is a few
+	# radii away, which is what makes a glint sit under its own cloud rather than over the body's zenith.
+	var eye_radii := eye_model / maxf(body.radius, 1.0)
+	var materials: Array = [body.mesh_material]
 	if body.ocean_material != null:
 		materials.append(body.ocean_material)
 	if body.interior_material != null:
 		materials.append(body.interior_material)
-	# **A deck is lit by the same star**, and its own shader does its own air and occlusion maths, so it needs
-	# the direction and the width as well as the ground does.
 	for deck in body.decks:
 		materials.append(deck.material)
-	# The eye in body radii — the model space every surface direction is measured in, and the same units the
-	# deck's own material is handed as `eye_local`.
-	var eye_local := (observer - body.node.global_position) / maxf(body.radius, 1.0)
 	for material in materials:
-		SpacesimBodyRenderer.face_surface_star(material, sun, star_angle, eye_local, pixel_angle)
+		SpacesimBodyRenderer.face_surface_star(material, sun_model, star_angle, eye_radii, pixel_angle)
+	# **Each deck's eye is divided by ITS OWN radius** — `eye_radius < 1` is the test for being inside that
+	# deck's sphere, and the deck's points sit at `radius + height`, not at the body's radius.
+	for deck in body.decks:
+		SpacesimBodyRenderer.face_deck(
+			deck.material, eye_model / maxf(body.radius + deck.height, 1.0)
+		)
+	if body.air_shell_material != null:
+		body.air_shell_material.set_shader_parameter("u_to_local", to_local * camera_basis)
+		body.air_shell_material.set_shader_parameter("u_eye_local", eye_model)
+		body.air_shell_material.set_shader_parameter("u_sun_local", sun_model)
+		body.air_shell_material.set_shader_parameter("u_strength", air_strength)
 
 
 ## **A deck, per frame, per layer**: the eye in the deck's own frame, and the map it should be sampling.
@@ -1944,13 +2073,14 @@ func _update_decks(
 		return
 	# **No level to pick any more**: the deck's sphere IS the ground's mesh, so it is refined by the same walk that
 	# refines the surface under it, and there is no second tessellation to size (see `_build_decks`).
-	var to_eye := observer - body.node.global_position
+	# **In the BODY's frame**, not the world's: `face_deck` compares this against model-space directions, so a body
+	# that is ever rotated (an axial tilt — see `SpacesimSystemScene._build_rings`) would sample its own map from
+	# the wrong direction and its coverage would land where the planet is not.
 	for deck in body.decks:
 		# **Divided by the radius the deck's OWN points sit at**, because `eye_local` is compared against
 		# `length(p)` where `p` is a direction: `eye_radius < 1` is the test for being inside the deck's sphere. That
 		# radius is now exactly `radius + height` — the walk's own subdivision is under the error budget in pixels,
 		# so there is no sagitta to pad and no `shell_scale` to undo.
-		SpacesimBodyRenderer.face_deck(deck.material, to_eye / maxf(body.radius + deck.height, 1.0))
 		# **The base's light, every frame**, because the star's direction and the sky above the deck are what
 		# it is made of. Six uniform writes, and there is nothing to measure before doing them.
 		# The size law takes the distance to the CENTRE, because it subtracts the radius itself.
@@ -2438,8 +2568,8 @@ func triangles() -> int:
 ## yellow pillars standing on it, all of that must go."* Nothing replaced it: it was a measurement aid from before the
 ## ground subdivided, and the subdivision is now its own instrument.
 ##
-## `SpacesimFraming.pad_size` went with it, and the two `.tres` lines that set it. **What stays is `place_landing_zone`**,
-## which puts the *frame* on the surface — that is coordinate machinery, not scenery.
+## `SpacesimFraming.pad_size` went with it, and the two `.tres` lines that set it. **What stays is
+## `place_surface_frame`**, which puts the *frame* on the surface — coordinate machinery, not scenery.
 
 
 ## How a system frame reads: "landed on Nix", "above Nix". Empty for a frame this system does not
