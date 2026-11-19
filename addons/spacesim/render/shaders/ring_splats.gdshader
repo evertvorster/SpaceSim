@@ -83,7 +83,17 @@ void vertex() {
 	// direction to the star against the direction to the eye. `INV_VIEW_MATRIX[3]` is the camera's own world
 	// position, so nothing has to be handed in twice.
 	vec3 to_world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
-	vec3 to_star = normalize(star_position - to_world);
+	// **PROBE, 2026-11-18 — one character flips the phase.** Evert: *"When I am close enough to see the rocks, their
+	// light and shadow are on the correct sides. Its just in the ring shader... rather than argue with me about it,
+	// reverse one of the most likely culprits, and I'll take a look."*
+	//
+	// The phase is the angle at the particle between the direction to the star and the direction to the eye. Both the
+	// formula and the inputs read correctly — `INV_VIEW_MATRIX` is a per-frame uniform (the camera's own inverse, from
+	// `scene_data`, not per instance), the star's published position is the star's, and Lambert peaks at zero phase —
+	// and the band still comes out lit on the wrong side. So the sign of one of these two vectors is the cheapest
+	// thing to change and the only way to find out: this reverses `to_star`, which turns phase `a` into `pi - a`.
+	// **Put the minus sign back if it is wrong**; it is the whole experiment.
+	vec3 to_star = normalize(to_world - star_position);
 	vec3 to_eye = normalize(INV_VIEW_MATRIX[3].xyz - to_world);
 	float phase = acos(clamp(dot(to_star, to_eye), -1.0, 1.0));
 	float lambert = (sin(phase) + (PI - phase) * cos(phase)) / PI;

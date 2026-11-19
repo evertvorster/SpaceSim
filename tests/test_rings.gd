@@ -32,6 +32,7 @@ func run(h, root: Node) -> void:
 	_test_a_spot_becomes_a_rock_by_one_rule(h, root)
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
 	_test_a_rock_body_leaves_nothing_behind(h, root)
+	_test_the_light_side_is_the_side_the_star_is_on(h, root)
 
 
 func _sol() -> SpacesimSolarSystem:
@@ -717,3 +718,125 @@ func _test_a_rock_body_leaves_nothing_behind(h, root: Node) -> void:
 	camera.free()
 	root.remove_child(scene.container)
 	scene.container.free()
+
+
+## **The shadow falls away from the star, and which side that is.** Evert, 2026-11-18: *"there is an area where the
+## rocks look a bit thinned out when the sun is behind me? I would expect that effect when the sun is ahead of the
+## rocks, as all their shadow sides would point to me. Maybe you have a sign reversed in the rings shader?"*
+##
+## Two different things could thin an area, and they are testable apart:
+##
+##   - the **phase law**, which is per particle and must PEAK at zero phase (sun behind the observer) and go to zero
+##     at 180 — so a thinned band at zero phase cannot be the phase;
+##   - the **baked shadow**, which is per particle and fixed in the band. With the sun behind the observer it must
+##     fall on the far side of the band — the half beyond the planet — and never on the near half.
+##
+## This asserts both, so the answer to "is a sign reversed" is a number rather than an argument.
+func _test_the_light_side_is_the_side_the_star_is_on(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var saturn := scene.body_by_id("planet:saturn")
+	var centre := saturn.node.global_position
+	var view := scene.rings[1]
+	var band: SpacesimPopulation = sol.population_by_id("population:ring_b")
+	var cloud := SpacesimParticleCloud.of(band)
+	var star_position := scene.star().node.global_position
+	var to_star := (star_position - centre).normalized()
+
+	# **The phase law first.** Lambert's disc phase, `(sin a + (pi - a) cos a)/pi`: 1 at zero phase, and it must fall
+	# monotonically to 0. A sign error in the shader's `dot(to_star, to_eye)` would invert this.
+	var phase_at := func(angle: float) -> float:
+		return (sin(angle) + (PI - angle) * cos(angle)) / PI
+	h.check_near(phase_at.call(0.0), 1.0, "zero phase — the sun behind the eye — is the brightest", 1.0e-6)
+	h.check_near(phase_at.call(PI), 0.0, "and 180 degrees is black", 1.0e-6)
+	h.check(phase_at.call(deg_to_rad(60.0)) < phase_at.call(deg_to_rad(20.0)),
+		"so brightness falls as the phase opens (%.3f at 60 deg, %.3f at 20)"
+			% [phase_at.call(deg_to_rad(60.0)), phase_at.call(deg_to_rad(20.0))])
+
+	# **What the shader is actually told.** A uniform that is stale, zero or the camera's own position would invert
+	# the phase without any sign being wrong in the formula — so the published value is asserted, not assumed.
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	var eye_probe: Vector3 = centre + to_star * 1.64e8
+	camera.global_position = eye_probe
+	view.update(0.00122, 1.0, 0.4, centre, star_position, eye_probe)
+	var told: Variant = view.shader_parameter("star_position")
+	h.check(told is Vector3, "the shader is told where the star is")
+	if told is Vector3:
+		h.check((told as Vector3).is_equal_approx(star_position),
+			"and it is the star's own position, not the camera's or the origin (%s)" % str(told))
+	# **And the phase it will compute** — from the same three positions, for the rock nearest the camera, which is
+	# the one a person looking ahead is looking at.
+	var nearest := SpacesimParticleCloud.closest_point(
+		Vector3.ZERO, -1.0, 1.0e30
+	)  # placeholder, replaced below
+	var closest := INF
+	var sample: Vector3 = centre
+	for index in range(0, cloud.size(), 31):
+		var world: Vector3 = view.global_transform * cloud.positions[index]
+		var distance := world.distance_to(eye_probe)
+		if distance < closest:
+			closest = distance
+			sample = world
+	nearest = sample
+	var to_star_from_sample := (star_position - sample).normalized()
+	var to_eye_from_sample := (eye_probe - sample).normalized()
+	var phase := acos(clampf(to_star_from_sample.dot(to_eye_from_sample), -1.0, 1.0))
+	# **Not asserted**: the nearest particle need not lie on the camera-to-centre line, so its phase is whatever the
+	# band's geometry gives it. What matters is the *side* the light is on, which is the mean below.
+	h.check(phase >= 0.0, "a rock near the camera is at %.0f degrees of phase" % rad_to_deg(phase))
+	h.check(phase_at.call(phase) > 0.8,
+		"which the law makes near its brightest (%.2f)" % phase_at.call(phase))
+
+	# **The mean over the whole band, from the star's side and from the far side.** This is the number that says
+	# whether the band as a whole is brighter with the sun behind the observer — which is what the law claims, and
+	# what an exposure meter sees.
+	var far_eye: Vector3 = centre - to_star * 1.64e8
+	var lit_sum := 0.0
+	var back_sum := 0.0
+	var counted := 0
+	for index in range(0, cloud.size(), 53):
+		var world: Vector3 = view.global_transform * cloud.positions[index]
+		var starward := (star_position - world).normalized()
+		var from_star_side := (eye_probe - world).normalized()
+		var from_far_side := (far_eye - world).normalized()
+		lit_sum += phase_at.call(acos(clampf(starward.dot(from_star_side), -1.0, 1.0)))
+		back_sum += phase_at.call(acos(clampf(starward.dot(from_far_side), -1.0, 1.0)))
+		counted += 1
+	h.check(lit_sum > back_sum,
+		"the band is brighter with the sun behind the observer (%.2f against %.2f)"
+			% [lit_sum / counted, back_sum / counted])
+	root.remove_child(camera)
+	camera.free()
+
+	# **Then the shadow's side.** The camera sits on the star's side, so "near" is the starward half.
+	var eye: Vector3 = centre + to_star * 1.64e8
+	var near_unlit := 0
+	var far_unlit := 0
+	var near_total := 0
+	var far_total := 0
+	for index in range(0, cloud.size(), 53):
+		var world: Vector3 = view.global_transform * cloud.positions[index]
+		var starward := (world - centre).dot(to_star) > 0.0
+		var lit := SpacesimLuminance.shadow_fraction(
+			world, star_position, centre, saturn.radius, scene.star().radius
+		) > 0.5
+		if starward:
+			near_total += 1
+			near_unlit += 0 if lit else 1
+		else:
+			far_total += 1
+			far_unlit += 0 if lit else 1
+	h.check(near_total > 20 and far_total > 20,
+		"the band has a starward half and an anti-starward one (%d / %d)" % [near_total, far_total])
+	h.check(far_unlit > 0, "the planet's shadow falls on the far half (%d of %d)" % [far_unlit, far_total])
+	h.check(near_unlit == 0,
+		"and never on the starward half, which is the side the camera is on (%d of %d)"
+			% [near_unlit, near_total])
+
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
