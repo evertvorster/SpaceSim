@@ -33,6 +33,7 @@ func run(h, root: Node) -> void:
 	_test_a_rock_is_a_body_that_sets_the_unit(h, root)
 	_test_a_rock_body_leaves_nothing_behind(h, root)
 	_test_the_light_side_is_the_side_the_star_is_on(h, root)
+	_test_the_shader_is_told_the_two_vectors_it_multiplies(h, root)
 
 
 func _sol() -> SpacesimSolarSystem:
@@ -793,6 +794,50 @@ func _test_the_light_side_is_the_side_the_star_is_on(h, root: Node) -> void:
 	h.check(far_unlit > 0, "the planet's shadow falls on the far half (%d of %d)" % [far_unlit, far_total])
 	h.check(near_unlit == 0,
 		"and never on the starward half (%d of %d)" % [near_unlit, near_total])
+
+	root.remove_child(scene.container)
+	scene.container.free()
+
+
+## **What the ring shader is TOLD**, in the frame it works in — the two uniforms the vertex stage multiplies by.
+##
+## Both were moved out of the shader for cost: the pixel's angular size arrives as its reciprocal so 1.2M vertices a
+## frame multiply instead of divide, and the star arrives as a unit direction in view space so no vertex rebuilds a
+## world position from `INV_VIEW_MATRIX` to subtract two numbers at 1.4e12 m. Neither change may alter the picture,
+## so both are asserted against what the shader used to compute.
+func _test_the_shader_is_told_the_two_vectors_it_multiplies(h, root: Node) -> void:
+	var sol := _sol()
+	var scene := SpacesimSystemScene.from_content(sol)
+	if scene == null or scene.build(root) == null:
+		return
+	var saturn := scene.body_by_id("planet:saturn")
+	var centre := saturn.node.global_position
+	var view := scene.rings[1]
+	var star_position := scene.star().node.global_position
+
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	var pixel_angle := SpacesimLod.pixel_angle(70.0, 1080.0)
+	camera.global_position = centre + Vector3(1.0, 0.3, 0.2).normalized() * 1.64e8
+	camera.look_at(centre, Vector3.UP)
+	view.update(pixel_angle, 1.0, 0.4, centre, star_position, camera.global_position, camera)
+
+	var told: Vector3 = view.view_star()
+	h.check_near(told.length(), 1.0, "the star is a unit direction", 1.0e-5)
+	var expected: Vector3 = (
+		(camera.get_global_transform_interpolated().basis as Basis).orthonormalized().inverse()
+			* (star_position - centre).normalized()
+	)
+	h.check_near(told.dot(expected), 1.0,
+		"and it is the star's own direction in the CAMERA's frame, which is the frame the vertices are in", 1.0e-4)
+
+	# **The reciprocal**: a multiply in the shader where the divide used to be, and the same number.
+	var scale: Variant = view.shader_parameter("pixel_scale")
+	h.check(scale != null, "the pixel scale is handed over")
+	if scale != null:
+		h.check_near(float(scale), 1.0 / pixel_angle, "as the reciprocal of the pixel's angular size", 1.0e-6)
+	root.remove_child(camera)
+	camera.free()
 
 	root.remove_child(scene.container)
 	scene.container.free()

@@ -730,7 +730,7 @@ func _update_view(delta: float) -> void:
 	# **The rings, once a drawn frame**: the eye's angle, the band's own radiance, and the few uniforms its
 	# shader reads. Everything else about a ring was baked when the system was built.
 	var pixel := _pixel_angle()
-	_system.update_rings(pixel, observer)
+	_system.update_rings(pixel, observer, _camera)
 	# **The rocks, advanced with the same rules and in the same frame as the bodies** — `update_lod` is where a
 	# moon's extraction threshold and wireframe are decided, so a rock's belong beside it.
 	_update_rocks(observer, pixel)

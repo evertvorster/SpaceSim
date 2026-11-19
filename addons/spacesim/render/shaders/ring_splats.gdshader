@@ -27,16 +27,23 @@ shader_type spatial;
 // bright everywhere — which is the one thing a ring never is.
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, fog_disabled;
 
-// The pixel's angular size, from the camera's fov and the render target's height: a vertex stage has no
-// derivatives, so it cannot measure its own footprint.
-uniform float pixel_angle = 0.00122;
+// **The reciprocal of the pixel's angular size**, `1 / pixel_angle` — the host divides once instead of the vertex
+// stage dividing 1.2 million times a frame. A vertex stage has no derivatives, so it cannot measure its own
+// footprint; that number comes from the camera's fov and the render target's height.
+uniform float pixel_scale = 819.6721;
 // **The light arriving at the band divided by pi, times the particles' bond albedo** — everything in
 // `disc_luminance` that is the same for every particle. The phase term is per particle, below.
 uniform vec3 glow_linear = vec3(1.0);
 // The floor a shadowed particle keeps: dark, and never absent.
 uniform vec3 unlit_linear = vec3(0.04);
-// Where the star is, in world space — the other half of the phase angle.
-uniform vec3 star_position = vec3(0.0);
+// **The direction to the star, as a unit vector in VIEW space** — the other half of the phase angle.
+//
+// **A direction, not a position, and in view space, not world.** This shader used to rebuild each particle's world
+// position (`INV_VIEW_MATRIX`, a mat4 product per vertex) purely to subtract two world coordinates from it at
+// 1.4e12 m — which the `godot` skill names as the precision trap it is: *"Hand the shader an OFFSET, not a world
+// position."* Both vectors the phase needs are available where the vertex already is, and the star is 1.4e12 m
+// away, so its direction varies across a 1e8 m band by 7e-5 radians and one vector serves the whole band.
+uniform vec3 u_star_view = vec3(0.0, 0.0, -1.0);
 
 varying float v_coverage;
 varying vec3 v_radiance;
@@ -56,7 +63,7 @@ void vertex() {
 	// **One pixel of radius when its own disc is smaller** — a quad narrower than a pixel rasterises
 	// unreliably — while the coverage below keeps the particle's TRUE area, so the floor costs nothing in
 	// light. This is the difference between a bright dot and the light a 100 m rock actually delivers.
-	float half_size = max(radius, distance * pixel_angle);
+	float half_size = max(radius, distance / pixel_scale);
 	// **The number that proves it:** the drawn particles' own optical depth is `SpacesimRingModel.
 	// drawn_optical_depth` — 4.5e-7 for the B ring, against the band's `tau` of 1.2. A rock that covers a whole
 	// pixel at full radiance carries a million times the light it has, and that is what "orders of magnitude too
@@ -68,7 +75,7 @@ void vertex() {
 	// and a rock a thousandth of a pixel wide lights a whole one. The floor exists because a quad narrower than a
 	// pixel rasterises unreliably; **the light must not follow it.** Evert, 2026-11-18: *"Faaaaar to bright, orders
 	// of magnitude too bright... Maybe you made the rocks bright again by accident?"* — he was right.
-	float radius_px = radius / max(distance * pixel_angle, 1.0e-9);
+	float radius_px = radius * pixel_scale / max(distance, 1.0e-9);
 	// **The particle's share of the pixel it lands on**, and `1` once it covers the pixel outright. This is the
 	// whole of the flux law: a rock smaller than a pixel dims what is behind it by its own area and adds its own
 	// radiance times that area, which is exactly what a small opaque disc does.
@@ -79,13 +86,11 @@ void vertex() {
 	v_coverage = min(1.0, PI * radius_px * radius_px) * INSTANCE_CUSTOM.g;
 	v_shadow = INSTANCE_CUSTOM.r;
 
-	// **How much light this particle receives and reflects.** The phase angle is at the particle: the
-	// direction to the star against the direction to the eye. `INV_VIEW_MATRIX[3]` is the camera's own world
-	// position, so nothing has to be handed in twice.
-	vec3 to_world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
-	vec3 to_star = normalize(star_position - to_world);
-	vec3 to_eye = normalize(INV_VIEW_MATRIX[3].xyz - to_world);
-	float phase = acos(clamp(dot(to_star, to_eye), -1.0, 1.0));
+	// **How much light this particle receives and reflects.** The phase angle is at the particle: the direction to
+	// the star against the direction to the eye. **Both in view space**, which is where `centre` already is — the
+	// eye direction is the particle's own position negated, exact to the float, and the star's is one uniform.
+	vec3 to_eye = normalize(-centre.xyz);
+	float phase = acos(clamp(dot(to_eye, u_star_view), -1.0, 1.0));
 	float lambert = (sin(phase) + (PI - phase) * cos(phase)) / PI;
 	v_radiance = mix(unlit_linear, glow_linear * lambert, v_shadow);
 

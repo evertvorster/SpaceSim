@@ -51,6 +51,8 @@ var _nodes: Array[MultiMeshInstance3D] = []
 var _hidden := {}
 ## What the shader is being told, so a test can read it back rather than guess from a picture.
 var _uniforms := {}
+## The star's direction as the shader receives it: a unit vector in view space.
+var _view_star := Vector3(0.0, 0.0, -1.0)
 ## Each particle's baked shadow, so hiding one can rewrite its custom data without losing the shadow it was
 ## given. Only the spots that have bodies are ever touched, so this is a handful of entries.
 var _transmissions := {}
@@ -353,7 +355,7 @@ func bake_shadow(
 ## these rocks to make up the entire reflectance, we'll add the dust layer later."*
 func update(
 	pixel_angle: float, illuminance: float, albedo: float, centre: Vector3, star_position: Vector3,
-	observer: Vector3
+	observer: Vector3, camera: Camera3D = null
 ) -> void:
 	if _materials.is_empty() or _cloud == null:
 		return
@@ -362,12 +364,24 @@ func update(
 	# needs that is the same for the whole band.
 	var radiance := illuminance * albedo / PI
 	for material in _materials:
-		material.set_shader_parameter("pixel_angle", pixel_angle)
+		# **A reciprocal, not an angle**: the vertex stage multiplies instead of dividing, 1.2M times a frame.
+		material.set_shader_parameter("pixel_scale", 1.0 / max(pixel_angle, 1.0e-9))
 		material.set_shader_parameter("glow_linear", Color(radiance, radiance, radiance))
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
 		material.set_shader_parameter("unlit_linear", Color(floor, floor, floor))
-		material.set_shader_parameter("star_position", star_position)
+		# **The star as a unit direction in VIEW space** — computed once per band per frame, in the frame the shader
+		# has its particles in, so nothing has to be reconstructed from world coordinates there.
+		if camera != null:
+			var basis: Basis = camera.get_global_transform_interpolated().basis
+			_view_star = (basis.inverse() * (star_position - centre)).normalized()
+		material.set_shader_parameter("u_star_view", _view_star)
 	_uniforms = {"radiance": radiance}
+
+
+## **The star's direction as the shader receives it** — a unit vector in view space, which is the frame the
+## vertices are in. For the tests.
+func view_star() -> Vector3:
+	return _view_star
 
 
 ## **What the shader is being told** — for the tests, because "it draws nothing" is answered by reading the
