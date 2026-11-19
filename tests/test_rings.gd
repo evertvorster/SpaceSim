@@ -762,11 +762,22 @@ func _test_the_light_side_is_the_side_the_star_is_on(h, root: Node) -> void:
 	var eye_probe: Vector3 = centre + to_star * 1.64e8
 	camera.global_position = eye_probe
 	view.update(0.00122, 1.0, 0.4, centre, star_position, eye_probe)
-	var told: Variant = view.shader_parameter("star_position")
-	h.check(told is Vector3, "the shader is told where the star is")
-	if told is Vector3:
-		h.check((told as Vector3).is_equal_approx(star_position),
-			"and it is the star's own position, not the camera's or the origin (%s)" % str(told))
+	# **The star as the shader receives it.** The shader no longer rebuilds a world position from `INV_VIEW_MATRIX`;
+	# it is told a unit direction in VIEW space, so what the host publishes can be checked exactly.
+	camera.look_at(centre, Vector3.UP)
+	view.update(0.00122, 1.0, 0.4, centre, star_position, eye_probe, camera)
+	var told: Vector3 = view.view_star()
+	h.check_near(told.length(), 1.0, "the shader is told a unit direction to the star", 1.0e-5)
+	var expected: Vector3 = (
+		(camera.get_global_transform_interpolated().basis as Basis).orthonormalized().inverse()
+			* (star_position - centre).normalized()
+	)
+	h.check_near(told.dot(expected), 1.0,
+		"and it is the star's own direction in the camera's frame", 1.0e-4)
+	# **And which way that is in view space**: -Z is forward, so a star BEHIND the observer has a positive z. This is
+	# the assertion that would have caught a star direction pointing the wrong side of the band.
+	h.check(told.z > 0.0,
+		"with the camera between the star and the band, the star is behind it (z = %+.2f)" % told.z)
 	# **And the phase it will compute** — from the same three positions, for the rock nearest the camera, which is
 	# the one a person looking ahead is looking at.
 	var nearest := SpacesimParticleCloud.closest_point(
