@@ -51,8 +51,6 @@ var _nodes: Array[MultiMeshInstance3D] = []
 var _hidden := {}
 ## What the shader is being told, so a test can read it back rather than guess from a picture.
 var _uniforms := {}
-## The star as a unit direction in VIEW space — what the shader is told, and what a test can check.
-var _view_star := Vector3.ZERO
 ## Each particle's baked shadow, so hiding one can rewrite its custom data without losing the shadow it was
 ## given. Only the spots that have bodies are ever touched, so this is a handful of entries.
 var _transmissions := {}
@@ -355,7 +353,7 @@ func bake_shadow(
 ## these rocks to make up the entire reflectance, we'll add the dust layer later."*
 func update(
 	pixel_angle: float, illuminance: float, albedo: float, centre: Vector3, star_position: Vector3,
-	observer: Vector3, camera: Camera3D = null
+	observer: Vector3
 ) -> void:
 	if _materials.is_empty() or _cloud == null:
 		return
@@ -368,24 +366,12 @@ func update(
 		material.set_shader_parameter("glow_linear", Color(radiance, radiance, radiance))
 		var floor := SpacesimRingModel.unlit_radiance(radiance)
 		material.set_shader_parameter("unlit_linear", Color(floor, floor, floor))
-		# **The star as a unit direction in VIEW space**, which is the frame the shader has its particles in. The
-		# camera's own basis is the rotation between them, so this is one multiply on the host and one `dot` in the
-		# shader — and it can be asserted, which the old world-space position could not.
-		var camera_basis := Basis.IDENTITY
-		if camera != null:
-			camera_basis = (camera.get_global_transform_interpolated().basis as Basis).orthonormalized()
-		_view_star = (camera_basis.inverse() * (star_position - centre)).normalized()
-		material.set_shader_parameter("u_star_view", _view_star)
+		material.set_shader_parameter("star_position", star_position)
 	_uniforms = {"radiance": radiance}
 
 
 ## **What the shader is being told** — for the tests, because "it draws nothing" is answered by reading the
 ## numbers rather than by looking at a picture.
-## The star's direction as the shader receives it, for the tests.
-func view_star() -> Vector3:
-	return _view_star
-
-
 func light() -> Dictionary:
 	return _uniforms
 

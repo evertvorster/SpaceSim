@@ -35,9 +35,8 @@ uniform float pixel_angle = 0.00122;
 uniform vec3 glow_linear = vec3(1.0);
 // The floor a shadowed particle keeps: dark, and never absent.
 uniform vec3 unlit_linear = vec3(0.04);
-// **Where the star is, as a unit direction in VIEW space** — published by the host, which is where it can be
-// asserted. See the phase below for why it is not rebuilt here.
-uniform vec3 u_star_view = vec3(0.0, 0.0, -1.0);
+// Where the star is, in world space — the other half of the phase angle.
+uniform vec3 star_position = vec3(0.0);
 
 varying float v_coverage;
 varying vec3 v_radiance;
@@ -80,24 +79,13 @@ void vertex() {
 	v_coverage = min(1.0, PI * radius_px * radius_px) * INSTANCE_CUSTOM.g;
 	v_shadow = INSTANCE_CUSTOM.r;
 
-	// **How much light this particle receives and reflects**, from two directions the HOST hands over, both in view
-	// space where `centre` already is. Evert, 2026-11-18: *"When I am close enough to see the rocks, their light and
-	// shadow are on the correct sides. Its just in the ring shader."*
-	//
-	// This shader used to rebuild both vectors itself: the particle's world position from `INV_VIEW_MATRIX`, the
-	// camera's from `INV_VIEW_MATRIX[3]`, and the star's from a `star_position` uniform. Every one of those read
-	// correctly and the band still came out lit on the wrong side, which means one of them was not what it looked
-	// like. So they are gone:
-	//
-	//   - **to the eye**: `-centre.xyz`, the particle's own view-space position negated — exact, and the one vector a
-	//     vertex stage already has;
-	//   - **to the star**: `u_star_view`, a unit direction the host publishes, computed from the star's position and
-	//     the camera's basis. The star is 1.4e12 m away, so its direction varies across a 10^8 m band by 7e-5 radians
-	//     and one vector for the whole band is exact to seven digits.
-	//
-	// The phase is the angle at the particle between them, and Lambert's disc law peaks at zero — sun behind the eye.
-	vec3 to_eye = normalize(-centre.xyz);
-	float phase = acos(clamp(dot(to_eye, normalize(u_star_view)), -1.0, 1.0));
+	// **How much light this particle receives and reflects.** The phase angle is at the particle: the
+	// direction to the star against the direction to the eye. `INV_VIEW_MATRIX[3]` is the camera's own world
+	// position, so nothing has to be handed in twice.
+	vec3 to_world = (INV_VIEW_MATRIX * vec4(centre.xyz, 1.0)).xyz;
+	vec3 to_star = normalize(star_position - to_world);
+	vec3 to_eye = normalize(INV_VIEW_MATRIX[3].xyz - to_world);
+	float phase = acos(clamp(dot(to_star, to_eye), -1.0, 1.0));
 	float lambert = (sin(phase) + (PI - phase) * cos(phase)) / PI;
 	v_radiance = mix(unlit_linear, glow_linear * lambert, v_shadow);
 
